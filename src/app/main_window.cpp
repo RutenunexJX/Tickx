@@ -2406,7 +2406,8 @@ void MainWindow::createToolBars()
     editBar->addSeparator();
 
     auto* toolGroup = new QActionGroup(editBar);
-    toolGroup->setExclusive(true);
+    toolGroup->setExclusionPolicy(
+        QActionGroup::ExclusionPolicy::ExclusiveOptional);
     selectAction_ = editBar->addAction(
         themedIcon(QStringLiteral("edit-select"), style(), QStyle::SP_FileDialogDetailedView),
         tr("Selection"));
@@ -2425,9 +2426,10 @@ void MainWindow::createToolBars()
     transitionAction_->setToolTip(tr("Move a waveform transition"));
     markerAction_ = editBar->addAction(
         themedIcon(QStringLiteral("flag"), style(), QStyle::SP_DialogYesButton),
-        tr("Marker"));
+        tr("Cursor"));
+    markerAction_->setObjectName(QStringLiteral("CursorToolAction"));
     markerAction_->setCheckable(true);
-    markerAction_->setToolTip(tr("Create a time marker"));
+    markerAction_->setToolTip(tr("Create, measure, lock, move, or remove time cursors"));
     relationAction_ = editBar->addAction(
         themedIcon(QStringLiteral("insert-link"), style(), QStyle::SP_FileLinkIcon),
         tr("Relation"));
@@ -2436,19 +2438,40 @@ void MainWindow::createToolBars()
     for (auto* action : {selectAction_, drawAction_, transitionAction_, markerAction_, relationAction_}) {
         toolGroup->addAction(action);
     }
-    connect(selectAction_, &QAction::triggered, this, [this] {
+    connect(selectAction_, &QAction::triggered, this, [this](const bool checked) {
+        if (!checked) {
+            selectAction_->setChecked(true);
+            return;
+        }
         canvas_->setTool(WaveCanvas::Tool::Selection);
     });
-    connect(drawAction_, &QAction::triggered, this, [this] {
+    connect(drawAction_, &QAction::triggered, this, [this](const bool checked) {
+        if (!checked) {
+            drawAction_->setChecked(true);
+            return;
+        }
         canvas_->setTool(WaveCanvas::Tool::Draw);
     });
-    connect(transitionAction_, &QAction::triggered, this, [this] {
+    connect(transitionAction_, &QAction::triggered, this, [this](const bool checked) {
+        if (!checked) {
+            transitionAction_->setChecked(true);
+            return;
+        }
         canvas_->setTool(WaveCanvas::Tool::Transition);
     });
-    connect(markerAction_, &QAction::triggered, this, [this] {
-        canvas_->setTool(WaveCanvas::Tool::Marker);
+    connect(markerAction_, &QAction::triggered, this, [this](const bool checked) {
+        if (checked) {
+            canvas_->setTool(WaveCanvas::Tool::Marker);
+        } else {
+            selectAction_->setChecked(true);
+            canvas_->setTool(WaveCanvas::Tool::Selection);
+        }
     });
-    connect(relationAction_, &QAction::triggered, this, [this] {
+    connect(relationAction_, &QAction::triggered, this, [this](const bool checked) {
+        if (!checked) {
+            relationAction_->setChecked(true);
+            return;
+        }
         canvas_->setTool(WaveCanvas::Tool::Relation);
     });
     auto* pulseAction = editBar->addAction(

@@ -466,6 +466,41 @@ Offscreen canvas add-signal interaction: visible control, dialog, creation and U
 Offscreen screenshot visual QA: placement, contrast and lane-row alignment passed
 ```
 
+## 持续迭代 7：光标模式增强
+
+状态：完成
+
+已交付：
+
+- 左键创建或移动唯一活动光标，左右方向键按固定网格移动；活动光标时在左侧信号名称区
+  显示各可见信号的采样值。
+- Shift 单击创建会话级临时光标，直接拖动以起点作为临时光标、终点作为活动光标；两种
+  操作均显示“临时 → 活动”的带符号时间差。
+- Ctrl 单击创建持久锁定光标，Ctrl 拖动创建持久锁定区间；锁定对象使用独立颜色并保存
+  为工程 Marker。
+- 单击锁定对象可选中；拖动或方向键移动，Delete/Backspace 删除。移动与删除通过命令栈
+  支持 Undo/Redo，并限制在场景时间范围内。
+- Cursor 工具采用可取消的互斥动作；再次点击时退出光标编辑并清除活动、临时及选中状态，
+  持久锁定对象保留。
+- 新增独立离屏 smoke，覆盖活动/临时光标、正负时间差、Ctrl 锁定、选择、拖动、方向键、
+  删除、锁定区间及二次点击退出；核心测试补充 Marker 修改与删除命令的 Undo/Redo。
+
+验证证据：
+
+```text
+cmake --preset qtcreator-debug
+cmake --build --preset qtcreator-debug
+Result: success
+
+ctest --preset qtcreator-debug --output-on-failure
+18/18 tests passed
+Total Test time: 8.16 sec
+
+Offscreen cursor interaction smoke: all specified mouse and keyboard paths passed
+Offscreen screenshot visual QA: sampled values, cursor colors and signed delta passed
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

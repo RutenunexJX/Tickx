@@ -103,7 +103,16 @@ WaveDrom JSON。桌面应用的 File > Export Artifacts 提供全场景、当前
 - 双击 bus/enum/transaction/event lane：从吸附后的时刻创建一个主刻度宽度的值区间。
 - Pulse：在选定 bit lane 的光标处插入一个时钟周期或主刻度宽度的脉冲。
 - Transition 工具：拖动可见 Event 菱形以移动对应波形边沿，步骤表时间同步更新。
-- Marker 工具：在画布上拖动创建时间点或区间 marker。
+- Cursor 工具：左键单击创建或移动唯一的活动光标；左右方向键按固定网格移动活动光标。
+- 直接拖动以起点作为临时参考、终点作为活动光标；`Shift` + 左键在不移动活动光标的
+  前提下创建临时参考。两者均显示“临时 → 活动”的带符号 `Δ` 时间宽度。
+- `Ctrl` + 左键创建持久锁定光标，`Ctrl` + 拖动创建持久锁定区间；锁定对象使用区别于
+  活动和临时光标的颜色并写入工程 Marker。
+- 单击锁定光标将其选中；拖动或左右方向键移动选中对象，`Delete` / `Backspace` 删除，
+  移动和删除均支持 Undo/Redo。
+- 活动光标存在时，每个可见信号在左侧名称区域显示该时刻的值，包括 clock 覆盖及
+  bit/bus/enum/transaction/event 的区间值。
+- 再次点击 Cursor 工具退出光标编辑，活动、临时和选中状态清除，持久锁定光标保留。
 - Relation 工具：从一个 Event 菱形拖动到另一个 Event 菱形，创建可编辑时序关系。
 - Events 表：直接编辑 time/cycle、action、target、value、expected result、clock domain
   和 description；支持排序、文本过滤、添加、删除及双击定位。
@@ -250,7 +259,7 @@ exports/
 - ZeroSlack signal-list、Private Frame sample、Pinloom entry 和 Wave Workbench URI。
 - 主窗口后台 autosave 生成可由正式加载器读取的恢复快照。
 
-最近一次验证结果：17 个 CTest 入口均通过，其中核心入口包含 23 组细分测试；完整验收
+最近一次验证结果：18 个 CTest 入口均通过，其中核心入口包含 23 组细分测试；完整验收
 记录见 [PLAN.md](PLAN.md)。
 
 ## 当前限制

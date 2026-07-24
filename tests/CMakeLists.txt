@@ -41,6 +41,11 @@ add_test(
     COMMAND wave-workbench --canvas-add-lane-smoke
 )
 add_test(
+    NAME wave-cursor-mode-smoke
+    COMMAND wave-workbench
+            "--cursor-mode-smoke=${CMAKE_BINARY_DIR}/cursor-mode-smoke.png"
+)
+add_test(
     NAME wave-edit-menu-smoke
     COMMAND wave-workbench
             "--edit-menu-screenshot=${CMAKE_BINARY_DIR}/edit-menu-smoke.png"
@@ -104,7 +109,7 @@ if(WIN32 AND EXISTS "C:/Windows/Fonts")
     list(APPEND _wave_test_environment "QT_QPA_FONTDIR=C:/Windows/Fonts")
 endif()
 set_tests_properties(
-    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-edit-menu-smoke wave-condition-compare-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
+    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-edit-menu-smoke wave-condition-compare-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
     wave-bridge-pinloom-smoke
     PROPERTIES
@@ -112,12 +117,12 @@ set_tests_properties(
         "PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
 )
 set_tests_properties(
-    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-edit-menu-smoke wave-condition-compare-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
+    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-edit-menu-smoke wave-condition-compare-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
     wave-bridge-pinloom-smoke
     PROPERTIES
     ENVIRONMENT "${_wave_test_environment}"
 )
-set_tests_properties(wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-edit-menu-smoke wave-condition-compare-smoke wave-uri-smoke PROPERTIES
+set_tests_properties(wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-edit-menu-smoke wave-condition-compare-smoke wave-uri-smoke PROPERTIES
     TIMEOUT 20
 )

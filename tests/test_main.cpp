@@ -904,6 +904,65 @@ void testMarkersRelationsAndValidation()
     expectEqual(scenario.markers.size(), initialMarkerCount, "marker undo did not restore the model");
     expect(stack.redo(), "marker redo failed");
 
+    const auto findTestMarker = [&scenario] {
+        return std::find_if(
+            scenario.markers.begin(),
+            scenario.markers.end(),
+            [](const wave::Marker& marker) {
+                return marker.id == "marker-test";
+            });
+    };
+    auto marker = findTestMarker();
+    expect(marker != scenario.markers.end(), "added marker is missing");
+    auto movedMarker = *marker;
+    movedMarker.start = 90'000;
+    movedMarker.end = 160'000;
+    stack.execute(std::make_unique<wave::ChangeMarkerCommand>(
+        scenario,
+        movedMarker.id,
+        movedMarker));
+    marker = findTestMarker();
+    expect(
+        marker != scenario.markers.end()
+            && marker->start == 90'000
+            && marker->end == 160'000,
+        "marker change command did not move the interval");
+    expect(stack.undo(), "marker change undo failed");
+    marker = findTestMarker();
+    expect(
+        marker != scenario.markers.end()
+            && marker->start == 80'000
+            && marker->end == 150'000,
+        "marker change undo did not restore the interval");
+    expect(stack.redo(), "marker change redo failed");
+    marker = findTestMarker();
+    expect(
+        marker != scenario.markers.end()
+            && marker->start == 90'000
+            && marker->end == 160'000,
+        "marker change redo did not restore the moved interval");
+
+    stack.execute(std::make_unique<wave::RemoveMarkerCommand>(
+        scenario,
+        "marker-test"));
+    expectEqual(
+        scenario.markers.size(),
+        initialMarkerCount,
+        "marker removal command did not remove the marker");
+    expect(stack.undo(), "marker removal undo failed");
+    marker = findTestMarker();
+    expect(
+        marker != scenario.markers.end()
+            && marker->start == 90'000
+            && marker->end == 160'000,
+        "marker removal undo did not restore the marker");
+    expect(stack.redo(), "marker removal redo failed");
+    expectEqual(
+        scenario.markers.size(),
+        initialMarkerCount,
+        "marker removal redo did not remove the marker");
+    expect(stack.undo(), "marker removal final restore failed");
+
     auto issues = wave::validateScenario(project, scenario);
     expect(
         std::any_of(issues.begin(), issues.end(), [](const wave::ValidationIssue& issue) {

@@ -1045,6 +1045,84 @@ std::string AddMarkerCommand::description() const
     return "Add marker";
 }
 
+ChangeMarkerCommand::ChangeMarkerCommand(
+    Scenario& scenario,
+    std::string markerId,
+    Marker replacement)
+    : scenario_(&scenario)
+    , markerId_(std::move(markerId))
+    , replacement_(std::move(replacement))
+{
+    replacement_.id = markerId_;
+}
+
+void ChangeMarkerCommand::redo()
+{
+    snapshotRedo(*scenario_, before_, after_, [this] {
+        const auto marker = std::find_if(
+            scenario_->markers.begin(),
+            scenario_->markers.end(),
+            [this](const Marker& candidate) {
+                return candidate.id == markerId_;
+            });
+        if (marker == scenario_->markers.end()) {
+            throw std::invalid_argument("marker does not exist");
+        }
+        if (replacement_.start < 0
+            || replacement_.end < replacement_.start
+            || replacement_.end > scenario_->duration) {
+            throw std::invalid_argument("marker interval is invalid");
+        }
+        *marker = replacement_;
+    });
+}
+
+void ChangeMarkerCommand::undo()
+{
+    if (!before_) throw std::runtime_error("marker command has not been executed");
+    *scenario_ = *before_;
+}
+
+std::string ChangeMarkerCommand::description() const
+{
+    return "Move marker";
+}
+
+RemoveMarkerCommand::RemoveMarkerCommand(
+    Scenario& scenario,
+    std::string markerId)
+    : scenario_(&scenario)
+    , markerId_(std::move(markerId))
+{
+}
+
+void RemoveMarkerCommand::redo()
+{
+    snapshotRedo(*scenario_, before_, after_, [this] {
+        const auto marker = std::find_if(
+            scenario_->markers.begin(),
+            scenario_->markers.end(),
+            [this](const Marker& candidate) {
+                return candidate.id == markerId_;
+            });
+        if (marker == scenario_->markers.end()) {
+            throw std::invalid_argument("marker does not exist");
+        }
+        scenario_->markers.erase(marker);
+    });
+}
+
+void RemoveMarkerCommand::undo()
+{
+    if (!before_) throw std::runtime_error("marker command has not been executed");
+    *scenario_ = *before_;
+}
+
+std::string RemoveMarkerCommand::description() const
+{
+    return "Remove marker";
+}
+
 AddRelationCommand::AddRelationCommand(Scenario& scenario, Relation relation)
     : scenario_(&scenario)
     , relation_(std::move(relation))

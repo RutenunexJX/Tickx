@@ -159,6 +159,10 @@ Clock segment 数组保持原有语义，因此该能力不要求提升 schema �
   `maximumDelayTick`、`clockDomainId`、`condition`、`severity`、`description`。
 - Marker：`id`、`name`、`startTick`、`endTick`、`kind`、`note`。
 
+Cursor 工具创建的锁定点和锁定区间分别持久化为 `Point` 与 `Interval` Marker；移动和
+删除通过 command 修改场景模型。唯一活动光标与 Shift 临时光标仅属于编辑器会话状态，
+不会序列化到工程文件。
+
 `waveformLinked` 为 true 时，Event 与 `linkedSegmentId` 指向的 Segment 共同属于同一
 Scenario 聚合；任何一侧的编辑必须通过 command 同步另一侧。
 

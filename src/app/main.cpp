@@ -6,14 +6,17 @@
 #include "wave/project_io.h"
 
 #include <QAbstractButton>
+#include <QAction>
 #include <QApplication>
 #include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFileInfo>
 #include <QFont>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMouseEvent>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollBar>
@@ -43,6 +46,8 @@ int main(int argc, char* argv[])
     QString laneDialogScreenshotPath;
     QString editMenuScreenshotPath;
     QString conditionCompareScreenshotPath;
+    QString cursorModeScreenshotPath;
+    bool cursorModeSmoke = false;
     QString uriText;
     QString autosaveSmokePath;
     bool laneRemovalSmoke = false;
@@ -71,6 +76,12 @@ int main(int argc, char* argv[])
             laneReorderSmoke = true;
         } else if (argument == QStringLiteral("--canvas-add-lane-smoke")) {
             canvasAddLaneSmoke = true;
+        } else if (argument.startsWith(QStringLiteral("--cursor-mode-smoke="))) {
+            cursorModeSmoke = true;
+            cursorModeScreenshotPath = argument.mid(
+                QStringLiteral("--cursor-mode-smoke=").size());
+        } else if (argument == QStringLiteral("--cursor-mode-smoke")) {
+            cursorModeSmoke = true;
         } else if (argument.startsWith(QStringLiteral("--uri="))) {
             uriText = argument.mid(QStringLiteral("--uri=").size());
         } else if (argument.startsWith(QStringLiteral("--autosave-smoke="))) {
@@ -390,6 +401,249 @@ int main(int argc, char* argv[])
             window.hide();
             application.exit(0);
         });
+    } else if (cursorModeSmoke) {
+        QTimer::singleShot(
+            0,
+            &window,
+            [&application, &window, cursorModeScreenshotPath] {
+                auto* canvas = window.findChild<wave::WaveCanvas*>();
+                auto* cursorAction = window.findChild<QAction*>(
+                    QStringLiteral("CursorToolAction"));
+                if (!canvas || !cursorAction) {
+                    qCritical().noquote() << "Cursor mode controls are missing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                canvas->fitScenario();
+                cursorAction->trigger();
+                if (!cursorAction->isChecked()
+                    || canvas->tool() != wave::WaveCanvas::Tool::Marker) {
+                    qCritical().noquote() << "Cursor mode did not activate";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                const auto sendMouse = [canvas](
+                                           const QEvent::Type type,
+                                           const QPoint position,
+                                           const Qt::MouseButton button,
+                                           const Qt::MouseButtons buttons,
+                                           const Qt::KeyboardModifiers modifiers) {
+                    const QPointF localPosition(position);
+                    const QPointF globalPosition(
+                        canvas->viewport()->mapToGlobal(position));
+                    QMouseEvent mouseEvent(
+                        type,
+                        localPosition,
+                        globalPosition,
+                        button,
+                        buttons,
+                        modifiers);
+                    QCoreApplication::sendEvent(canvas->viewport(), &mouseEvent);
+                };
+                const auto click = [&sendMouse](
+                                       const QPoint position,
+                                       const Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+                    sendMouse(
+                        QEvent::MouseButtonPress,
+                        position,
+                        Qt::LeftButton,
+                        Qt::LeftButton,
+                        modifiers);
+                    sendMouse(
+                        QEvent::MouseButtonRelease,
+                        position,
+                        Qt::LeftButton,
+                        Qt::NoButton,
+                        modifiers);
+                };
+                const auto drag = [&sendMouse](
+                                      const QPoint start,
+                                      const QPoint end,
+                                      const Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+                    sendMouse(
+                        QEvent::MouseButtonPress,
+                        start,
+                        Qt::LeftButton,
+                        Qt::LeftButton,
+                        modifiers);
+                    sendMouse(
+                        QEvent::MouseMove,
+                        end,
+                        Qt::NoButton,
+                        Qt::LeftButton,
+                        modifiers);
+                    sendMouse(
+                        QEvent::MouseButtonRelease,
+                        end,
+                        Qt::LeftButton,
+                        Qt::NoButton,
+                        modifiers);
+                };
+                const auto sendKey = [canvas](const int key) {
+                    QKeyEvent keyEvent(QEvent::KeyPress, key, Qt::NoModifier);
+                    QCoreApplication::sendEvent(canvas, &keyEvent);
+                };
+
+                const auto viewportWidth = canvas->viewport()->width();
+                const auto waveformLeft = 210;
+                const auto usableWidth = viewportWidth - waveformLeft - 30;
+                if (usableWidth < 320) {
+                    qCritical().noquote() << "Cursor smoke canvas is too narrow";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto pointAt = [=](const double fraction) {
+                    return QPoint(
+                        waveformLeft + static_cast<int>(usableWidth * fraction),
+                        90);
+                };
+                const auto point1 = pointAt(0.18);
+                const auto point2 = pointAt(0.35);
+                const auto point3 = pointAt(0.57);
+                const auto point4 = pointAt(0.82);
+
+                click(point1);
+                if (!canvas->movableCursorTick()
+                    || canvas->temporaryCursorTick()) {
+                    qCritical().noquote() << "Left click did not create one movable cursor";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto beforeArrow = *canvas->movableCursorTick();
+                sendKey(Qt::Key_Right);
+                if (!canvas->movableCursorTick()
+                    || *canvas->movableCursorTick() <= beforeArrow) {
+                    qCritical().noquote() << "Right arrow did not move the cursor";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                const auto movableBeforeShift = *canvas->movableCursorTick();
+                click(point4, Qt::ShiftModifier);
+                if (!canvas->temporaryCursorTick()
+                    || *canvas->movableCursorTick() != movableBeforeShift
+                    || *canvas->temporaryCursorTick() <= *canvas->movableCursorTick()) {
+                    qCritical().noquote() << "Shift click did not create a temporary cursor";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                drag(point4, point3);
+                if (!canvas->movableCursorTick()
+                    || !canvas->temporaryCursorTick()
+                    || *canvas->movableCursorTick() >= *canvas->temporaryCursorTick()) {
+                    qCritical().noquote() << "Direct drag did not create a signed cursor measurement";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                const auto originalMarkerCount =
+                    window.project().scenarios.front().markers.size();
+                click(point3, Qt::ControlModifier);
+                if (window.project().scenarios.front().markers.size()
+                        != originalMarkerCount + 1
+                    || canvas->selectedMarkerId().isEmpty()) {
+                    qCritical().noquote() << "Control click did not create a locked cursor";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto lockedId = canvas->selectedMarkerId().toStdString();
+                const auto markerById = [&window, &lockedId]() -> const wave::Marker* {
+                    const auto& markers = window.project().scenarios.front().markers;
+                    const auto marker = std::find_if(
+                        markers.begin(),
+                        markers.end(),
+                        [&lockedId](const wave::Marker& candidate) {
+                            return candidate.id == lockedId;
+                        });
+                    return marker == markers.end() ? nullptr : &*marker;
+                };
+                const auto* locked = markerById();
+                if (!locked || locked->start != locked->end) {
+                    qCritical().noquote() << "Locked cursor is not a point marker";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto lockedBeforeDrag = locked->start;
+                const auto markerX = [canvas, &window](const wave::Tick tick) {
+                    const auto duration =
+                        window.project().scenarios.front().duration;
+                    return 190 + static_cast<int>(
+                        static_cast<double>(tick) / static_cast<double>(duration)
+                        * static_cast<double>(canvas->viewport()->width() - 190));
+                };
+                drag(QPoint(markerX(lockedBeforeDrag), point3.y()), point4);
+                locked = markerById();
+                if (!locked || locked->start <= lockedBeforeDrag) {
+                    qCritical().noquote() << "Dragging a selected locked cursor did not move it";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto lockedBeforeArrow = locked->start;
+                sendKey(Qt::Key_Left);
+                locked = markerById();
+                if (!locked || locked->start >= lockedBeforeArrow) {
+                    qCritical().noquote() << "Left arrow did not move the selected locked cursor";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_Delete);
+                if (window.project().scenarios.front().markers.size()
+                    != originalMarkerCount) {
+                    qCritical().noquote() << "Delete did not remove the selected locked cursor";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                drag(point1, point2, Qt::ControlModifier);
+                const auto& markersAfterRange =
+                    window.project().scenarios.front().markers;
+                if (markersAfterRange.size() != originalMarkerCount + 1
+                    || markersAfterRange.back().start == markersAfterRange.back().end) {
+                    qCritical().noquote() << "Control drag did not create a locked range";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                drag(point4, point3);
+                QCoreApplication::processEvents();
+                if (!cursorModeScreenshotPath.isEmpty()
+                    && !window.grab().save(cursorModeScreenshotPath)) {
+                    qCritical().noquote() << "Cannot save cursor mode screenshot";
+                    window.hide();
+                    application.exit(3);
+                    return;
+                }
+
+                cursorAction->trigger();
+                if (cursorAction->isChecked()
+                    || canvas->tool() != wave::WaveCanvas::Tool::Selection
+                    || canvas->movableCursorTick()
+                    || canvas->temporaryCursorTick()
+                    || !canvas->selectedMarkerId().isEmpty()) {
+                    qCritical().noquote() << "Second Cursor click did not exit editing mode";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                window.hide();
+                application.exit(0);
+            });
     } else if (!editMenuScreenshotPath.isEmpty()) {
         QTimer::singleShot(0, &window, [&window] {
             window.revealLocation(QStringLiteral("lane-request"), 80'000);

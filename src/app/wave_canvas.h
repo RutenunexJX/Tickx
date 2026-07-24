@@ -13,6 +13,7 @@
 #include <optional>
 #include <vector>
 
+class QKeyEvent;
 class QMouseEvent;
 class QPaintEvent;
 class QResizeEvent;
@@ -44,6 +45,9 @@ public:
     [[nodiscard]] QString selectedLaneId() const;
     [[nodiscard]] QStringList selectedLaneIds() const;
     [[nodiscard]] Tick cursorTick() const noexcept;
+    [[nodiscard]] std::optional<Tick> movableCursorTick() const noexcept;
+    [[nodiscard]] std::optional<Tick> temporaryCursorTick() const noexcept;
+    [[nodiscard]] QString selectedMarkerId() const;
     [[nodiscard]] std::optional<std::pair<Tick, Tick>> selectedTimeRange() const noexcept;
 
 public slots:
@@ -66,6 +70,7 @@ signals:
     void eventSelected(const QString& eventId);
 
 protected:
+    void keyPressEvent(QKeyEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -86,6 +91,13 @@ private:
         QRect rect;
     };
 
+    enum class CursorInteraction {
+        None,
+        MoveActive,
+        CreateLocked,
+        MoveLocked,
+    };
+
     static constexpr int HeaderWidth = 190;
     static constexpr int RulerHeight = 40;
     static constexpr int AddLaneRowHeight = 48;
@@ -103,6 +115,16 @@ private:
     [[nodiscard]] const LaneLayout* layoutAtY(int y) const;
     [[nodiscard]] Lane* laneAtY(int y);
     [[nodiscard]] const Lane* laneAtY(int y) const;
+    [[nodiscard]] Marker* markerById(const std::string& markerId);
+    [[nodiscard]] const Marker* markerById(const std::string& markerId) const;
+    [[nodiscard]] const Marker* markerAtPosition(const QPoint& position) const;
+    [[nodiscard]] std::pair<Tick, Tick> markerDisplayRange(const Marker& marker) const;
+    [[nodiscard]] Tick cursorKeyboardStep() const;
+    [[nodiscard]] QString cursorValue(const Lane& lane) const;
+    [[nodiscard]] QString cursorDeltaText(Tick from, Tick to) const;
+    void ensureCursorVisible(Tick tick);
+    void removeSelectedMarker();
+    void moveSelectedMarkerBy(Tick delta);
     [[nodiscard]] Tick snappedTick(Tick input, const Lane* lane) const;
     [[nodiscard]] Tick majorTickStep() const;
     [[nodiscard]] std::pair<Tick, Tick> visibleTickRange() const;
@@ -143,6 +165,10 @@ private:
         class QPainter& painter,
         Tick visibleStart,
         Tick visibleEnd);
+    void drawCursorOverlays(
+        class QPainter& painter,
+        Tick visibleStart,
+        Tick visibleEnd);
 
     Project* project_{nullptr};
     Scenario* scenario_{nullptr};
@@ -151,6 +177,11 @@ private:
     std::vector<LaneLayout> laneLayout_;
     std::vector<Tick> signalEdgeIndex_;
     std::vector<Tick> markerTickIndex_;
+    std::optional<Tick> movableCursorTick_;
+    std::optional<Tick> temporaryCursorTick_;
+    std::string selectedMarkerId_;
+    CursorInteraction cursorInteraction_{CursorInteraction::None};
+    std::optional<std::pair<Tick, Tick>> lockedMarkerOriginalRange_;
     Tool tool_{Tool::Selection};
     SnapMode snapMode_{SnapMode::FixedGrid};
     double pixelsPerTick_{0.003};

@@ -271,6 +271,40 @@ private:
     std::optional<Scenario> after_;
 };
 
+class ChangeMarkerCommand final : public EditCommand {
+public:
+    ChangeMarkerCommand(
+        Scenario& scenario,
+        std::string markerId,
+        Marker replacement);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::string markerId_;
+    Marker replacement_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class RemoveMarkerCommand final : public EditCommand {
+public:
+    RemoveMarkerCommand(Scenario& scenario, std::string markerId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::string markerId_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
 class AddRelationCommand final : public EditCommand {
 public:
     AddRelationCommand(Scenario& scenario, Relation relation);

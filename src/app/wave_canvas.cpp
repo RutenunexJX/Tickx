@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeyEvent>
 #include <QLineEdit>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -34,6 +35,10 @@ const QColor kTextPrimary(224, 229, 237);
 const QColor kTextSecondary(151, 160, 176);
 const QColor kSelection(68, 138, 255, 62);
 const QColor kUndefined(239, 83, 80);
+const QColor kMovableCursor(79, 195, 247);
+const QColor kTemporaryCursor(186, 104, 200);
+const QColor kLockedCursor(255, 202, 40);
+const QColor kSelectedLockedCursor(102, 187, 106);
 const QString kRangeMimeType = QStringLiteral("application/x-wave-workbench-range+json");
 
 Tick floorToStep(const Tick value, const Tick step)
@@ -110,6 +115,11 @@ void WaveCanvas::setDocument(
     selectedLaneId_.clear();
     selectedLaneIds_.clear();
     selectionRange_.reset();
+    movableCursorTick_.reset();
+    temporaryCursorTick_.reset();
+    selectedMarkerId_.clear();
+    cursorInteraction_ = CursorInteraction::None;
+    lockedMarkerOriginalRange_.reset();
     rebuildLaneLayout();
     fitPending_ = true;
     if (viewport()->width() > HeaderWidth + 40) {
@@ -120,9 +130,17 @@ void WaveCanvas::setDocument(
 
 void WaveCanvas::setTool(const Tool tool)
 {
+    const auto previousTool = tool_;
     tool_ = tool;
     drawing_ = false;
+    cursorInteraction_ = CursorInteraction::None;
+    lockedMarkerOriginalRange_.reset();
     activeEventId_.clear();
+    if (previousTool == Tool::Marker && tool != Tool::Marker) {
+        movableCursorTick_.reset();
+        temporaryCursorTick_.reset();
+        selectedMarkerId_.clear();
+    }
     viewport()->setCursor(
         tool == Tool::Selection ? Qt::ArrowCursor : Qt::CrossCursor);
     viewport()->update();
@@ -160,6 +178,21 @@ QStringList WaveCanvas::selectedLaneIds() const
 Tick WaveCanvas::cursorTick() const noexcept
 {
     return cursorTick_;
+}
+
+std::optional<Tick> WaveCanvas::movableCursorTick() const noexcept
+{
+    return movableCursorTick_;
+}
+
+std::optional<Tick> WaveCanvas::temporaryCursorTick() const noexcept
+{
+    return temporaryCursorTick_;
+}
+
+QString WaveCanvas::selectedMarkerId() const
+{
+    return QString::fromStdString(selectedMarkerId_);
 }
 
 std::optional<std::pair<Tick, Tick>> WaveCanvas::selectedTimeRange() const noexcept
@@ -216,6 +249,9 @@ void WaveCanvas::fitSelection()
 void WaveCanvas::refreshModel()
 {
     rebuildLaneLayout();
+    if (!selectedMarkerId_.empty() && !markerById(selectedMarkerId_)) {
+        selectedMarkerId_.clear();
+    }
     updateScrollBars();
     viewport()->update();
 }
@@ -458,6 +494,59 @@ void WaveCanvas::insertPulse()
     refreshModel();
 }
 
+void WaveCanvas::keyPressEvent(QKeyEvent* event)
+{
+    if (tool_ != Tool::Marker || !scenario_) {
+        QAbstractScrollArea::keyPressEvent(event);
+        return;
+    }
+
+    if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)
+        && !selectedMarkerId_.empty()) {
+        removeSelectedMarker();
+        event->accept();
+        return;
+    }
+
+    if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
+        const auto direction = event->key() == Qt::Key_Left ? Tick{-1} : Tick{1};
+        const auto step = cursorKeyboardStep();
+        if (!selectedMarkerId_.empty()) {
+            moveSelectedMarkerBy(direction * step);
+        } else {
+            if (!movableCursorTick_) {
+                movableCursorTick_ = std::clamp(cursorTick_, Tick{0}, scenario_->duration);
+            }
+            const auto current = *movableCursorTick_;
+            const auto next = direction < 0
+                ? current - std::min(current, step)
+                : current + std::min(scenario_->duration - current, step);
+            movableCursorTick_ = next;
+            cursorTick_ = next;
+            ensureCursorVisible(next);
+            emit statusMessage(
+                tr("Cursor %1").arg(QString::fromStdString(
+                    formatTick(next, project_->timeBase))));
+            viewport()->update();
+        }
+        event->accept();
+        return;
+    }
+
+    if (event->key() == Qt::Key_Escape) {
+        drawing_ = false;
+        cursorInteraction_ = CursorInteraction::None;
+        lockedMarkerOriginalRange_.reset();
+        temporaryCursorTick_.reset();
+        selectedMarkerId_.clear();
+        viewport()->update();
+        event->accept();
+        return;
+    }
+
+    QAbstractScrollArea::keyPressEvent(event);
+}
+
 void WaveCanvas::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event)
@@ -489,15 +578,19 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
     drawScenarioOverlays(painter, visibleStart, visibleEnd);
     drawAddLaneRow(painter);
 
-    if (drawing_ && tool_ == Tool::Marker) {
+    if (drawing_
+        && tool_ == Tool::Marker
+        && cursorInteraction_ == CursorInteraction::CreateLocked) {
         const auto left = xAtTick(std::min(drawStart_, drawCurrent_));
         const auto right = xAtTick(std::max(drawStart_, drawCurrent_));
+        auto fill = kLockedCursor;
+        fill.setAlpha(36);
         painter.fillRect(
             QRect(
                 QPoint(left, RulerHeight),
                 QPoint(std::max(left + 1, right), viewport()->height())),
-            QColor(255, 202, 40, 36));
-        painter.setPen(QPen(QColor(255, 202, 40), 1.0, Qt::DashLine));
+            fill);
+        painter.setPen(QPen(kLockedCursor, 1.5, Qt::DashLine));
         painter.drawLine(left, RulerHeight, left, viewport()->height());
         painter.drawLine(right, RulerHeight, right, viewport()->height());
     } else if (drawing_ && tool_ == Tool::Relation && !activeEventId_.empty()) {
@@ -585,12 +678,54 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
     bypassSnap_ = event->modifiers().testFlag(Qt::AltModifier);
 
     if (tool_ == Tool::Marker) {
+        setFocus(Qt::MouseFocusReason);
+        if (position.x() < HeaderWidth) return;
         drawing_ = true;
         activeEventId_.clear();
         drawLaneId_.clear();
         drawStart_ = snappedTick(tickAtX(position.x()), lane);
         drawCurrent_ = drawStart_;
+        cursorTick_ = drawStart_;
         interactionCurrent_ = position;
+        if (lane) {
+            selectedLaneId_ = lane->id;
+            selectedLaneIds_ = {lane->id};
+            emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+        }
+
+        if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+            drawing_ = false;
+            cursorInteraction_ = CursorInteraction::None;
+            selectedMarkerId_.clear();
+            lockedMarkerOriginalRange_.reset();
+            if (movableCursorTick_) {
+                temporaryCursorTick_ = drawStart_;
+            } else {
+                movableCursorTick_ = drawStart_;
+                temporaryCursorTick_.reset();
+            }
+            viewport()->update();
+            return;
+        }
+
+        if (const auto* marker = markerAtPosition(position)) {
+            selectedMarkerId_ = marker->id;
+            cursorInteraction_ = CursorInteraction::MoveLocked;
+            lockedMarkerOriginalRange_ = std::pair{marker->start, marker->end};
+            temporaryCursorTick_.reset();
+            viewport()->update();
+            return;
+        }
+
+        selectedMarkerId_.clear();
+        lockedMarkerOriginalRange_.reset();
+        temporaryCursorTick_.reset();
+        if (event->modifiers().testFlag(Qt::ControlModifier)) {
+            cursorInteraction_ = CursorInteraction::CreateLocked;
+        } else {
+            cursorInteraction_ = CursorInteraction::MoveActive;
+            movableCursorTick_ = drawStart_;
+        }
         viewport()->update();
         return;
     }
@@ -686,10 +821,6 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
     const auto* lane = laneAtY(position.y());
     const auto rawTick = tickAtX(position.x());
     cursorTick_ = snappedTick(rawTick, lane);
-    emit statusMessage(
-        tr("%1  |  %2")
-            .arg(QString::fromStdString(formatTick(cursorTick_, project_->timeBase)))
-            .arg(lane ? QString::fromStdString(lane->name) : tr("No lane")));
     if (drawing_) {
         const auto* drawLane = drawLaneId_.empty()
             ? lane
@@ -698,7 +829,31 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
             snappedTick(rawTick, drawLane),
             Tick{0},
             scenario_->duration);
+        if (tool_ == Tool::Marker
+            && cursorInteraction_ == CursorInteraction::MoveActive) {
+            movableCursorTick_ = drawCurrent_;
+            if (drawCurrent_ == drawStart_) {
+                temporaryCursorTick_.reset();
+            } else {
+                temporaryCursorTick_ = drawStart_;
+            }
+        }
         viewport()->update();
+    }
+
+    if (tool_ == Tool::Marker) {
+        auto message = tr("Cursor %1").arg(QString::fromStdString(
+            formatTick(cursorTick_, project_->timeBase)));
+        if (movableCursorTick_ && temporaryCursorTick_) {
+            message += QStringLiteral("  |  ")
+                + cursorDeltaText(*temporaryCursorTick_, *movableCursorTick_);
+        }
+        emit statusMessage(message);
+    } else {
+        emit statusMessage(
+            tr("%1  |  %2")
+                .arg(QString::fromStdString(formatTick(cursorTick_, project_->timeBase)))
+                .arg(lane ? QString::fromStdString(lane->name) : tr("No lane")));
     }
 }
 
@@ -1013,6 +1168,180 @@ const Lane* WaveCanvas::laneAtY(const int y) const
     return layout && scenario_ ? &scenario_->lanes.at(layout->laneIndex) : nullptr;
 }
 
+Marker* WaveCanvas::markerById(const std::string& markerId)
+{
+    if (!scenario_) return nullptr;
+    const auto marker = std::find_if(
+        scenario_->markers.begin(),
+        scenario_->markers.end(),
+        [&markerId](const Marker& candidate) {
+            return candidate.id == markerId;
+        });
+    return marker == scenario_->markers.end() ? nullptr : &*marker;
+}
+
+const Marker* WaveCanvas::markerById(const std::string& markerId) const
+{
+    if (!scenario_) return nullptr;
+    const auto marker = std::find_if(
+        scenario_->markers.begin(),
+        scenario_->markers.end(),
+        [&markerId](const Marker& candidate) {
+            return candidate.id == markerId;
+        });
+    return marker == scenario_->markers.end() ? nullptr : &*marker;
+}
+
+const Marker* WaveCanvas::markerAtPosition(const QPoint& position) const
+{
+    if (!scenario_
+        || position.x() < HeaderWidth
+        || position.y() < RulerHeight) {
+        return nullptr;
+    }
+
+    constexpr int HitRadius = 7;
+    for (auto marker = scenario_->markers.rbegin();
+         marker != scenario_->markers.rend();
+         ++marker) {
+        const auto [start, end] = markerDisplayRange(*marker);
+        const auto left = xAtTick(start);
+        const auto right = xAtTick(end);
+        if (std::abs(position.x() - left) <= HitRadius
+            || (start != end && std::abs(position.x() - right) <= HitRadius)
+            || (start != end
+                && position.y() <= RulerHeight + 24
+                && position.x() >= std::min(left, right)
+                && position.x() <= std::max(left, right))) {
+            return &*marker;
+        }
+    }
+    return nullptr;
+}
+
+std::pair<Tick, Tick> WaveCanvas::markerDisplayRange(const Marker& marker) const
+{
+    if (cursorInteraction_ != CursorInteraction::MoveLocked
+        || marker.id != selectedMarkerId_
+        || !lockedMarkerOriginalRange_
+        || !scenario_) {
+        return {marker.start, marker.end};
+    }
+    const auto [originalStart, originalEnd] = *lockedMarkerOriginalRange_;
+    const auto requested = drawCurrent_ - drawStart_;
+    const auto offset = std::clamp(
+        requested,
+        -originalStart,
+        scenario_->duration - originalEnd);
+    return {originalStart + offset, originalEnd + offset};
+}
+
+Tick WaveCanvas::cursorKeyboardStep() const
+{
+    if (!project_) return 1;
+    return std::max<Tick>(
+        1,
+        toTicks(10, TimeUnit::Nanosecond, project_->timeBase).value_or(1));
+}
+
+QString WaveCanvas::cursorValue(const Lane& lane) const
+{
+    if (!project_ || !movableCursorTick_ || lane.kind == LaneKind::Group) {
+        return {};
+    }
+    const auto tick = *movableCursorTick_;
+    if (lane.kind == LaneKind::Clock) {
+        const auto* clock = findClock(*project_, lane.clockDomainId);
+        return clock && clock->isValid()
+            ? QString(QChar::fromLatin1(clockValueAt(*clock, lane, tick)))
+            : QStringLiteral("X");
+    }
+
+    const auto segment = std::upper_bound(
+        lane.segments.begin(),
+        lane.segments.end(),
+        tick,
+        [](const Tick value, const Segment& candidate) {
+            return value < candidate.start;
+        });
+    if (segment == lane.segments.begin()) return QStringLiteral("?");
+    const auto& candidate = *std::prev(segment);
+    return candidate.start <= tick && tick < candidate.end
+        ? QString::fromStdString(candidate.value)
+        : QStringLiteral("?");
+}
+
+QString WaveCanvas::cursorDeltaText(const Tick from, const Tick to) const
+{
+    const auto delta = to - from;
+    auto text = project_
+        ? QString::fromStdString(formatTick(delta, project_->timeBase))
+        : QString::number(delta) + tr(" ticks");
+    if (delta > 0) text.prepend(QLatin1Char('+'));
+    return QStringLiteral("\u0394 %1").arg(text);
+}
+
+void WaveCanvas::ensureCursorVisible(const Tick tick)
+{
+    const auto x = xAtTick(tick);
+    if (x >= HeaderWidth + 24 && x <= viewport()->width() - 24) return;
+    const auto desired = static_cast<double>(tick) * pixelsPerTick_
+        - waveViewportWidth() / 2.0;
+    horizontalScrollBar()->setValue(static_cast<int>(std::clamp(
+        std::llround(desired),
+        0LL,
+        static_cast<long long>(horizontalScrollBar()->maximum()))));
+}
+
+void WaveCanvas::removeSelectedMarker()
+{
+    if (!scenario_ || !commandStack_ || selectedMarkerId_.empty()) return;
+    try {
+        commandStack_->execute(std::make_unique<RemoveMarkerCommand>(
+            *scenario_,
+            selectedMarkerId_));
+    } catch (const std::exception& exception) {
+        emit statusMessage(QString::fromUtf8(exception.what()));
+        return;
+    }
+    selectedMarkerId_.clear();
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    refreshModel();
+}
+
+void WaveCanvas::moveSelectedMarkerBy(const Tick delta)
+{
+    if (!scenario_ || !commandStack_ || selectedMarkerId_.empty()) return;
+    const auto* marker = markerById(selectedMarkerId_);
+    if (!marker) {
+        selectedMarkerId_.clear();
+        return;
+    }
+    const auto offset = std::clamp(
+        delta,
+        -marker->start,
+        scenario_->duration - marker->end);
+    if (offset == 0) return;
+    auto replacement = *marker;
+    replacement.start += offset;
+    replacement.end += offset;
+    try {
+        commandStack_->execute(std::make_unique<ChangeMarkerCommand>(
+            *scenario_,
+            selectedMarkerId_,
+            replacement));
+    } catch (const std::exception& exception) {
+        emit statusMessage(QString::fromUtf8(exception.what()));
+        return;
+    }
+    cursorTick_ = replacement.start;
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    refreshModel();
+    ensureCursorVisible(cursorTick_);
+}
+
 Tick WaveCanvas::snappedTick(const Tick input, const Lane* lane) const
 {
     if (!project_) return input;
@@ -1176,16 +1505,87 @@ void WaveCanvas::commitDraw(const QPoint& releasePosition)
 
 void WaveCanvas::commitMarker(const QPoint& releasePosition)
 {
-    drawing_ = false;
-    if (!scenario_ || !commandStack_) return;
+    if (!scenario_ || !commandStack_) {
+        drawing_ = false;
+        cursorInteraction_ = CursorInteraction::None;
+        lockedMarkerOriginalRange_.reset();
+        return;
+    }
     drawCurrent_ = snappedTick(
         tickAtX(releasePosition.x()),
         laneAtY(releasePosition.y()));
+    const auto interaction = cursorInteraction_;
+    drawing_ = false;
+    cursorInteraction_ = CursorInteraction::None;
+
+    if (interaction == CursorInteraction::MoveActive) {
+        movableCursorTick_ = drawCurrent_;
+        cursorTick_ = drawCurrent_;
+        if (drawCurrent_ == drawStart_) {
+            temporaryCursorTick_.reset();
+        } else {
+            temporaryCursorTick_ = drawStart_;
+        }
+        lockedMarkerOriginalRange_.reset();
+        viewport()->update();
+        return;
+    }
+
+    if (interaction == CursorInteraction::MoveLocked) {
+        const auto* marker = markerById(selectedMarkerId_);
+        if (!marker || !lockedMarkerOriginalRange_) {
+            selectedMarkerId_.clear();
+            lockedMarkerOriginalRange_.reset();
+            viewport()->update();
+            return;
+        }
+        const auto [originalStart, originalEnd] = *lockedMarkerOriginalRange_;
+        const auto requested = drawCurrent_ - drawStart_;
+        const auto offset = std::clamp(
+            requested,
+            -originalStart,
+            scenario_->duration - originalEnd);
+        if (offset != 0) {
+            auto replacement = *marker;
+            replacement.start = originalStart + offset;
+            replacement.end = originalEnd + offset;
+            try {
+                commandStack_->execute(std::make_unique<ChangeMarkerCommand>(
+                    *scenario_,
+                    selectedMarkerId_,
+                    replacement));
+            } catch (const std::exception& exception) {
+                QToolTip::showText(
+                    viewport()->mapToGlobal(releasePosition),
+                    QString::fromUtf8(exception.what()),
+                    viewport());
+                lockedMarkerOriginalRange_.reset();
+                viewport()->update();
+                return;
+            }
+            cursorTick_ = replacement.start;
+            emit modelEdited();
+            emit commandAvailabilityChanged();
+            refreshModel();
+        }
+        lockedMarkerOriginalRange_.reset();
+        viewport()->update();
+        return;
+    }
+
+    lockedMarkerOriginalRange_.reset();
+    if (interaction != CursorInteraction::CreateLocked) {
+        viewport()->update();
+        return;
+    }
+
     const auto start = std::min(drawStart_, drawCurrent_);
     const auto end = std::max(drawStart_, drawCurrent_);
     Marker marker;
     marker.id = makeStableId("marker");
-    marker.name = "Marker " + std::to_string(scenario_->markers.size() + 1);
+    marker.name = start == end
+        ? "Locked cursor " + std::to_string(scenario_->markers.size() + 1)
+        : "Locked range " + std::to_string(scenario_->markers.size() + 1);
     marker.start = start;
     marker.end = end;
     marker.kind = start == end ? MarkerKind::Point : MarkerKind::Interval;
@@ -1199,9 +1599,11 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
         viewport()->update();
         return;
     }
+    selectedMarkerId_ = marker.id;
+    cursorTick_ = drawCurrent_;
     emit modelEdited();
     emit commandAvailabilityChanged();
-    viewport()->update();
+    refreshModel();
 }
 
 void WaveCanvas::commitRelation(const QPoint& releasePosition)
@@ -1374,10 +1776,39 @@ void WaveCanvas::drawLane(
     QFont nameFont = painter.font();
     nameFont.setBold(selected);
     painter.setFont(nameFont);
+    const auto sampledValue = tool_ == Tool::Marker
+        ? cursorValue(lane)
+        : QString{};
+    const auto valueWidth = sampledValue.isEmpty() ? 0 : 78;
+    const QRect nameRect(
+        14,
+        y + 4,
+        HeaderWidth - 28 - valueWidth,
+        layout.height / 2);
     painter.drawText(
-        QRect(14, y + 4, HeaderWidth - 28, layout.height / 2),
+        nameRect,
         Qt::AlignLeft | Qt::AlignVCenter,
-        QString::fromStdString(lane.name));
+        painter.fontMetrics().elidedText(
+            QString::fromStdString(lane.name),
+            Qt::ElideRight,
+            nameRect.width()));
+    if (!sampledValue.isEmpty()) {
+        painter.setPen(kMovableCursor);
+        nameFont.setBold(true);
+        painter.setFont(nameFont);
+        const QRect valueRect(
+            HeaderWidth - 88,
+            y + 4,
+            74,
+            layout.height / 2);
+        painter.drawText(
+            valueRect,
+            Qt::AlignRight | Qt::AlignVCenter,
+            painter.fontMetrics().elidedText(
+                sampledValue,
+                Qt::ElideLeft,
+                valueRect.width()));
+    }
     QFont detailFont = painter.font();
     detailFont.setBold(false);
     detailFont.setPointSizeF(std::max(7.0, detailFont.pointSizeF() - 1.5));
@@ -1641,34 +2072,55 @@ void WaveCanvas::drawScenarioOverlays(
     painter.setClipRect(QRect(HeaderWidth, RulerHeight, waveViewportWidth(), viewport()->height() - RulerHeight));
 
     for (const auto& marker : scenario_->markers) {
-        if (marker.end < visibleStart || marker.start > visibleEnd) continue;
-        const auto left = xAtTick(marker.start);
-        const auto right = xAtTick(marker.end);
-        QColor color = marker.kind == MarkerKind::Error
+        const auto [start, end] = markerDisplayRange(marker);
+        if (end < visibleStart || start > visibleEnd) continue;
+        const auto left = xAtTick(start);
+        const auto right = xAtTick(end);
+        const auto selected = tool_ == Tool::Marker
+            && marker.id == selectedMarkerId_;
+        QColor color = selected
+            ? kSelectedLockedCursor
+            : marker.kind == MarkerKind::Error
             ? QColor(239, 83, 80)
-            : QColor(255, 202, 40);
-        if (marker.start != marker.end) {
+            : kLockedCursor;
+        if (start != end) {
             auto fill = color;
-            fill.setAlpha(24);
+            fill.setAlpha(selected ? 42 : 24);
             painter.fillRect(
                 QRect(
                     QPoint(left, RulerHeight),
                     QPoint(std::max(left + 1, right), viewport()->height())),
                 fill);
         }
-        painter.setPen(QPen(color, marker.kind == MarkerKind::Error ? 2.0 : 1.0, Qt::DashLine));
+        painter.setPen(QPen(
+            color,
+            selected || marker.kind == MarkerKind::Error ? 2.0 : 1.25,
+            selected ? Qt::SolidLine : Qt::DashLine));
         painter.drawLine(left, RulerHeight, left, viewport()->height());
-        if (marker.start != marker.end) {
+        if (start != end) {
             painter.drawLine(right, RulerHeight, right, viewport()->height());
         }
+        if (selected) {
+            painter.setBrush(color);
+            painter.drawPolygon(QPolygon{
+                QPoint(left - 5, RulerHeight),
+                QPoint(left + 5, RulerHeight),
+                QPoint(left, RulerHeight + 7),
+            });
+        }
         painter.setPen(color);
+        auto label = QString::fromStdString(marker.name);
+        if (start != end) {
+            label += QStringLiteral("  ") + cursorDeltaText(start, end);
+        }
         painter.drawText(
-            QRect(left + 4, RulerHeight + 2, 140, 18),
+            QRect(left + 5, RulerHeight + 2, 190, 18),
             Qt::AlignLeft | Qt::AlignVCenter,
-            QString::fromStdString(marker.name));
+            label);
     }
 
     painter.setRenderHint(QPainter::Antialiasing, true);
+
     for (const auto& relation : scenario_->relations) {
         const auto* source = findEvent(*scenario_, relation.sourceEventId);
         const auto* target = findEvent(*scenario_, relation.targetEventId);
@@ -1724,6 +2176,106 @@ void WaveCanvas::drawScenarioOverlays(
             event.id,
             marker.boundingRect().adjusted(-2, -2, 2, 2),
         });
+    }
+    drawCursorOverlays(painter, visibleStart, visibleEnd);
+
+    painter.restore();
+}
+
+void WaveCanvas::drawCursorOverlays(
+    QPainter& painter,
+    const Tick visibleStart,
+    const Tick visibleEnd)
+{
+    if (tool_ != Tool::Marker || !movableCursorTick_) return;
+
+    painter.save();
+    const auto activeTick = *movableCursorTick_;
+    const auto activeX = xAtTick(activeTick);
+    const auto drawTag = [&](const int anchorX,
+                             const int top,
+                             const QString& text,
+                             const QColor& color,
+                             const bool centered) {
+        const auto width = std::clamp(
+            painter.fontMetrics().horizontalAdvance(text) + 14,
+            52,
+            190);
+        const auto proposedLeft = centered
+            ? anchorX - width / 2
+            : anchorX + 6;
+        const auto left = std::clamp(
+            proposedLeft,
+            HeaderWidth + 3,
+            std::max(HeaderWidth + 3, viewport()->width() - width - 3));
+        const QRect rect(left, top, width, 20);
+        painter.setPen(QPen(color, 1.0));
+        painter.setBrush(QColor(18, 22, 29, 232));
+        painter.drawRoundedRect(rect, 4, 4);
+        painter.drawText(
+            rect.adjusted(6, 0, -6, 0),
+            Qt::AlignCenter,
+            painter.fontMetrics().elidedText(
+                text,
+                Qt::ElideRight,
+                rect.width() - 12));
+    };
+
+    if (temporaryCursorTick_) {
+        const auto temporaryTick = *temporaryCursorTick_;
+        const auto temporaryX = xAtTick(temporaryTick);
+        const auto left = std::min(activeX, temporaryX);
+        const auto right = std::max(activeX, temporaryX);
+        auto fill = kTemporaryCursor;
+        fill.setAlpha(22);
+        painter.fillRect(
+            QRect(
+                QPoint(left, RulerHeight),
+                QPoint(std::max(left + 1, right), viewport()->height())),
+            fill);
+
+        painter.setPen(QPen(kTemporaryCursor, 1.5, Qt::DashLine));
+        painter.drawLine(
+            temporaryX,
+            RulerHeight,
+            temporaryX,
+            viewport()->height());
+        painter.setBrush(kTemporaryCursor);
+        painter.drawPolygon(QPolygon{
+            QPoint(temporaryX - 5, RulerHeight),
+            QPoint(temporaryX + 5, RulerHeight),
+            QPoint(temporaryX, RulerHeight + 7),
+        });
+
+        const auto measureY = RulerHeight + 28;
+        painter.setPen(QPen(kTemporaryCursor, 1.25));
+        painter.drawLine(temporaryX, measureY, activeX, measureY);
+        painter.drawLine(temporaryX, measureY - 4, temporaryX, measureY + 4);
+        painter.drawLine(activeX, measureY - 4, activeX, measureY + 4);
+        drawTag(
+            (temporaryX + activeX) / 2,
+            RulerHeight + 34,
+            cursorDeltaText(temporaryTick, activeTick),
+            kTemporaryCursor,
+            true);
+    }
+
+    if (activeTick >= visibleStart && activeTick <= visibleEnd) {
+        painter.setPen(QPen(kMovableCursor, 2.0, Qt::SolidLine));
+        painter.drawLine(activeX, RulerHeight, activeX, viewport()->height());
+        painter.setBrush(kMovableCursor);
+        painter.drawPolygon(QPolygon{
+            QPoint(activeX - 6, RulerHeight),
+            QPoint(activeX + 6, RulerHeight),
+            QPoint(activeX, RulerHeight + 8),
+        });
+        drawTag(
+            activeX,
+            RulerHeight + 3,
+            tr("Cursor %1").arg(QString::fromStdString(
+                formatTick(activeTick, project_->timeBase))),
+            kMovableCursor,
+            false);
     }
     painter.restore();
 }
