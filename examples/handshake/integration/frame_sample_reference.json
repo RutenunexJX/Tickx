@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "frameProjectId": "frame-demo",
+  "frameId": "frame-write",
+  "sampleId": "sample-35",
+  "encodedBytes": "35A7",
+  "contentHash": "sha256:5dc7b3b9883bf905ef864fab4978014a65b58f219745ecd984d5a6b75f7409a4",
+  "summary": "WRITE payload 0x35, CRC 0xA7",
+  "sourcePath": "integration/frame_sample_reference.json",
+  "scenarioId": "scenario-handshake",
+  "laneId": "lane-transaction",
+  "segmentId": "segment-transaction-write"
+}

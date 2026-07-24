@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "sourceProjectId": "zeroslack-handshake-rtl",
+  "signals": [
+    {
+      "stableId": "lane-request",
+      "name": "req",
+      "kind": "bit",
+      "width": 1,
+      "signed": false,
+      "clockDomainId": "clock-main"
+    },
+    {
+      "stableId": "zeroslack-ready",
+      "name": "ready",
+      "kind": "bit",
+      "width": 1,
+      "signed": false,
+      "clockDomainId": "clock-main"
+    }
+  ]
+}

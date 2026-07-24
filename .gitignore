@@ -1,0 +1,12 @@
+/build*/
+/.cache/
+/.qt/
+/tmp/
+/xsim.dir/
+/xvlog.log
+/xvlog.pb
+__pycache__/
+*.user
+CMakeUserPresets.json
+*.autosave
+.wave-workbench/

@@ -1,0 +1,66 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "qtcreator-debug",
+      "displayName": "Qt Creator - Debug",
+      "description": "Debug build for a Qt 6.5+ desktop kit. The selected Qt Creator kit supplies Qt, the compiler, debugger, CMake, and Ninja.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/qtcreator-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "WAVEWORKBENCH_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "qtcreator-release",
+      "displayName": "Qt Creator - Release",
+      "description": "Optimized build for a Qt 6.5+ desktop kit.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/qtcreator-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "WAVEWORKBENCH_BUILD_TESTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "qtcreator-debug",
+      "displayName": "Build Qt Creator Debug",
+      "configurePreset": "qtcreator-debug",
+      "jobs": 4
+    },
+    {
+      "name": "qtcreator-release",
+      "displayName": "Build Qt Creator Release",
+      "configurePreset": "qtcreator-release",
+      "jobs": 4
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "qtcreator-debug",
+      "displayName": "Test Qt Creator Debug",
+      "configurePreset": "qtcreator-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "qtcreator-release",
+      "displayName": "Test Qt Creator Release",
+      "configurePreset": "qtcreator-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

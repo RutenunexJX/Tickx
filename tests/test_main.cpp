@@ -1,0 +1,1852 @@
+#include "wave/commands.h"
+#include "wave/compare.h"
+#include "wave/export.h"
+#include "wave/generation.h"
+#include "wave/integration.h"
+#include "wave/model.h"
+#include "wave/project_io.h"
+#include "wave/time.h"
+#include "wave/trace.h"
+#include "wave/validation.h"
+
+#include <QDir>
+#include <QColor>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QImage>
+#include <QGuiApplication>
+#include <QTemporaryDir>
+#include <QUrlQuery>
+
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace {
+
+class TestFailure final : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+void expect(const bool condition, const std::string& message)
+{
+    if (!condition) throw TestFailure(message);
+}
+
+template<typename Left, typename Right>
+void expectEqual(const Left& left, const Right& right, const std::string& message)
+{
+    if (!(left == right)) throw TestFailure(message);
+}
+
+void testTimeConversions()
+{
+    const wave::TimeBase timeBase{1};
+    expectEqual(
+        wave::toTicks(125, wave::TimeUnit::Nanosecond, timeBase),
+        std::optional<wave::Tick>{125'000},
+        "125 ns must convert to 125000 ps ticks");
+    expectEqual(
+        wave::fromTicks(125'000, wave::TimeUnit::Nanosecond, timeBase),
+        std::optional<std::int64_t>{125},
+        "tick conversion must round-trip");
+
+    const wave::TimeBase coarse{10};
+    expect(
+        !wave::toTicks(1, wave::TimeUnit::Picosecond, coarse).has_value(),
+        "inexact conversion must be rejected");
+    expect(
+        !wave::toTicks(
+             std::numeric_limits<std::int64_t>::max(),
+             wave::TimeUnit::Millisecond,
+             timeBase)
+             .has_value(),
+        "overflowing conversion must be rejected");
+
+    const auto large = wave::toTicks(
+        8'000'000'000,
+        wave::TimeUnit::Nanosecond,
+        timeBase);
+    expect(large.has_value(), "large exact time must remain representable");
+    expectEqual(
+        wave::fromTicks(*large, wave::TimeUnit::Nanosecond, timeBase),
+        std::optional<std::int64_t>{8'000'000'000},
+        "large time must not lose precision");
+}
+
+void testClocksAndSnapping()
+{
+    const wave::ClockDomain clock{
+        "clock-a",
+        "clk_a",
+        10'000,
+        2'000,
+        {1, 2},
+        wave::ClockEdge::Rising,
+        {},
+        {},
+    };
+    const wave::ClockDomain clockB{
+        "clock-b",
+        "clk_b",
+        7'500,
+        500,
+        {2, 5},
+        wave::ClockEdge::Falling,
+        {},
+        {},
+    };
+    expect(clock.isValid() && clockB.isValid(), "multiple clock domains must validate");
+    expectEqual(
+        wave::tickAtCycle(clock, 3, wave::ClockEdge::Rising),
+        std::optional<wave::Tick>{32'000},
+        "rising cycle tick is incorrect");
+    expectEqual(
+        wave::tickAtCycle(clock, 3, wave::ClockEdge::Falling),
+        std::optional<wave::Tick>{37'000},
+        "falling cycle tick is incorrect");
+
+    const wave::SnapContext gridContext{1'000, 10'000, nullptr, {}, {}};
+    expectEqual(
+        wave::snapTick(1'499, wave::SnapMode::FixedGrid, gridContext),
+        wave::Tick{1'000},
+        "fixed-grid snap is incorrect");
+    expectEqual(
+        wave::snapTick(1'500, wave::SnapMode::FixedGrid, gridContext),
+        wave::Tick{1'000},
+        "snap ties must resolve to the lower tick");
+
+    const wave::SnapContext clockContext{1, 1, &clock, {}, {}};
+    expectEqual(
+        wave::snapTick(31'100, wave::SnapMode::ClockRising, clockContext),
+        wave::Tick{32'000},
+        "clock-edge snap is incorrect");
+
+    const std::vector<wave::Tick> edges{100, 250, 900};
+    const wave::SnapContext edgeContext{1, 1, nullptr, edges, {}};
+    expectEqual(
+        wave::snapTick(240, wave::SnapMode::SignalEdge, edgeContext),
+        wave::Tick{250},
+        "signal-edge snap is incorrect");
+}
+
+void testClockOverridesAndRetiming()
+{
+    auto project = wave::makeDemonstrationProject();
+    project.scenarios.reserve(2);
+    auto& scenario = project.scenarios.front();
+    auto* clockLane = wave::findLane(scenario, "lane-clk");
+    expect(clockLane != nullptr, "clock lane is missing");
+    wave::setSegmentRange(
+        *clockLane,
+        160'000,
+        180'000,
+        "gate",
+        "clock-gated");
+    wave::setSegmentRange(
+        *clockLane,
+        190'000,
+        200'000,
+        "disable",
+        "clock-disabled");
+    expectEqual(
+        clockLane->segments.front().value,
+        std::string{"gated"},
+        "clock gate alias was not normalized");
+    expectEqual(
+        wave::clockValueAt(project.clockDomains.front(), *clockLane, 165'000),
+        '0',
+        "gated clock did not hold low");
+    expectEqual(
+        wave::clockValueAt(project.clockDomains.front(), *clockLane, 195'000),
+        'X',
+        "disabled clock did not become unknown");
+    expectEqual(
+        wave::clockValueAt(project.clockDomains.front(), *clockLane, 152'000),
+        '1',
+        "parameterized clock value outside overrides is incorrect");
+
+    wave::CommandStack clearStack;
+    clearStack.execute(std::make_unique<wave::ClearLaneRangeCommand>(
+        scenario,
+        clockLane->id,
+        160'000,
+        180'000));
+    expect(
+        !wave::clockOverrideAt(*clockLane, 165'000),
+        "clear clock override command did not restore running mode");
+    expect(clearStack.undo(), "clock override clear undo failed");
+    expectEqual(
+        wave::clockOverrideAt(*clockLane, 165'000),
+        std::optional<wave::ClockOverrideMode>{wave::ClockOverrideMode::Gated},
+        "clock override clear undo did not restore the gate");
+
+    const auto requestEvent = std::find_if(
+        scenario.events.begin(),
+        scenario.events.end(),
+        [](const wave::Event& event) {
+            return event.linkedSegmentId == "segment-req-high";
+        });
+    expect(requestEvent != scenario.events.end(), "request event is missing");
+    requestEvent->cycle = 8;
+    requestEvent->clockDomainId = "clock-main";
+    const auto requestEventId = requestEvent->id;
+    const auto requestLowEvent = std::find_if(
+        scenario.events.begin(),
+        scenario.events.end(),
+        [](const wave::Event& event) {
+            return event.linkedSegmentId == "segment-req-low-b";
+        });
+    expect(requestLowEvent != scenario.events.end(), "request-low event is missing");
+    requestLowEvent->cycle = 13;
+    requestLowEvent->clockDomainId = "clock-main";
+    const auto requestLowEventId = requestLowEvent->id;
+    scenario.duration = 300'000;
+    for (auto& lane : scenario.lanes) {
+        for (auto& segment : lane.segments) {
+            if (segment.end == 220'000) segment.end = scenario.duration;
+        }
+    }
+    wave::Scenario secondaryScenario;
+    secondaryScenario.id = "scenario-secondary";
+    secondaryScenario.name = "Secondary clock consumer";
+    secondaryScenario.duration = 300'000;
+    wave::Lane secondaryLane;
+    secondaryLane.id = "lane-secondary";
+    secondaryLane.name = "secondary";
+    secondaryLane.kind = wave::LaneKind::Bit;
+    secondaryLane.clockDomainId = "clock-main";
+    secondaryScenario.lanes.push_back(std::move(secondaryLane));
+    wave::Event secondaryEvent;
+    secondaryEvent.id = "event-secondary-cycle";
+    secondaryEvent.laneId = "lane-secondary";
+    secondaryEvent.tick = 50'000;
+    secondaryEvent.action = wave::EventAction::Drive;
+    secondaryEvent.value = "0";
+    secondaryEvent.clockDomainId = "clock-main";
+    secondaryEvent.cycle = 5;
+    secondaryScenario.events.push_back(std::move(secondaryEvent));
+    project.scenarios.push_back(std::move(secondaryScenario));
+
+    auto replacement = project.clockDomains.front();
+    replacement.period = 18'000;
+    wave::CommandStack clockStack;
+    clockStack.execute(std::make_unique<wave::ChangeClockCommand>(
+        project,
+        scenario,
+        replacement.id,
+        replacement));
+    expectEqual(
+        project.clockDomains.front().period,
+        wave::Tick{18'000},
+        "clock command did not update the period");
+    expectEqual(
+        wave::findEvent(scenario, requestEventId)->tick,
+        wave::Tick{144'000},
+        "cycle-based event did not retain its logical cycle");
+    expectEqual(
+        wave::findEvent(scenario, requestLowEventId)->tick,
+        wave::Tick{234'000},
+        "second cycle-based event did not retain its logical cycle");
+    expectEqual(
+        wave::findEvent(project.scenarios.at(1), "event-secondary-cycle")->tick,
+        wave::Tick{90'000},
+        "clock change did not retime a cycle event in another scenario");
+    const auto* requestLane = wave::findLane(scenario, "lane-request");
+    const auto movedSegment = std::find_if(
+        requestLane->segments.begin(),
+        requestLane->segments.end(),
+        [](const wave::Segment& segment) {
+            return segment.id == "segment-req-high";
+        });
+    expect(
+        movedSegment != requestLane->segments.end()
+            && movedSegment->start == 144'000,
+        "retimed cycle event did not move its linked waveform boundary");
+    expect(clockStack.undo(), "clock change undo failed");
+    expectEqual(
+        wave::findEvent(scenario, requestEventId)->tick,
+        wave::Tick{80'000},
+        "clock change undo did not restore the event tick");
+    expectEqual(
+        wave::findEvent(project.scenarios.at(1), "event-secondary-cycle")->tick,
+        wave::Tick{50'000},
+        "clock change undo did not restore another scenario");
+    expect(clockStack.redo(), "clock change redo failed");
+
+    scenario.relations.front().minimumDelay = 18'000;
+    scenario.relations.front().maximumDelay = 72'000;
+    const auto serialized = wave::serializeProject(project);
+    const auto loaded = wave::deserializeProject(serialized);
+    expect(loaded.ok(), "project with clock overrides failed to reload");
+    expectEqual(
+        *loaded.project,
+        project,
+        "clock overrides changed during serialization round-trip");
+
+    const auto planResult = wave::buildGenerationPlan(project, scenario);
+    expect(planResult.ok(), "clock override generation plan contains errors");
+    const auto systemVerilog = wave::generateSystemVerilog(*planResult.plan);
+    expect(systemVerilog.ok(), "clock override SystemVerilog contains errors");
+    expect(
+        systemVerilog.text.find("assign clk = __ww_clock_clock_main_disabled")
+            != std::string::npos,
+        "SystemVerilog clock override mux is missing");
+    expect(
+        systemVerilog.text.find("clock_overrides_clock_main")
+            != std::string::npos,
+        "SystemVerilog clock override schedule is missing");
+    expect(
+        systemVerilog.text.find("#234000;") != std::string::npos,
+        "cycle event after a clock override was not scheduled at its model tick");
+    expect(
+        std::any_of(
+            systemVerilog.diagnostics.begin(),
+            systemVerilog.diagnostics.end(),
+            [](const wave::GenerationDiagnostic& diagnostic) {
+                return diagnostic.code
+                    == wave::GenerationDiagnosticCode::SvaClockOverrideOverlap;
+            }),
+        "clock override overlapping an SVA window did not produce a diagnostic");
+    const auto assertions = wave::generateSystemVerilogAssertions(*planResult.plan);
+    expect(assertions.ok(), "standalone SystemVerilog assertions contain errors");
+    expect(
+        assertions.text.find("module wave_workbench_assertions_scenario_handshake")
+            != std::string::npos,
+        "standalone SystemVerilog assertions are not wrapped in a module");
+
+    const auto cocotb = wave::generateCocotb(*planResult.plan);
+    expect(cocotb.ok(), "clock override cocotb contains errors");
+    expect(
+        cocotb.text.find("clock_overrides_clock_main")
+            != std::string::npos,
+        "cocotb clock override coroutine is missing");
+    expect(
+        cocotb.text.find("dut.clk.value = \"X\"")
+            != std::string::npos,
+        "cocotb disabled clock value is missing");
+    expect(
+        cocotb.text.find("await Timer(234000, unit=\"ps\")")
+            != std::string::npos,
+        "cocotb cycle event after a clock override was not scheduled at its model tick");
+
+    wave::ExportOptions options;
+    options.start = 150'000;
+    options.end = 205'000;
+    options.width = 900;
+    QString error;
+    const auto waveDrom = wave::generateWaveDromJson(
+        project,
+        scenario,
+        options,
+        &error);
+    expect(!waveDrom.isEmpty(), error.toStdString());
+    const auto signalValues = QJsonDocument::fromJson(waveDrom)
+                                  .object()
+                                  .value(QStringLiteral("signal"))
+                                  .toArray();
+    const auto clockSignal = std::find_if(
+        signalValues.begin(),
+        signalValues.end(),
+        [](const QJsonValue& value) {
+            return value.toObject().value(QStringLiteral("name")).toString()
+                == QStringLiteral("clk");
+        });
+    expect(clockSignal != signalValues.end(), "WaveDrom clock signal is missing");
+    expect(
+        clockSignal->toObject()
+            .value(QStringLiteral("wave"))
+            .toString()
+            .contains(QLatin1Char('x')),
+        "WaveDrom did not preserve the disabled clock interval");
+}
+
+void testLaneAndGroupPropertyEditing()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto& scenario = project.scenarios.front();
+    wave::Lane group;
+    group.id = "group-property-test";
+    group.name = "Handshake";
+    group.kind = wave::LaneKind::Group;
+    group.visible = false;
+
+    wave::CommandStack stack;
+    stack.execute(std::make_unique<wave::AddLaneCommand>(scenario, group));
+    expect(
+        wave::findLane(scenario, group.id) != nullptr,
+        "group lane was not added");
+
+    const auto* request = wave::findLane(scenario, "lane-request");
+    expect(request != nullptr, "request lane is missing");
+    const auto originalRequestGroup = request->groupId;
+    auto requestReplacement = *request;
+    requestReplacement.name = "request_valid";
+    requestReplacement.groupId = group.id;
+    requestReplacement.color = "#42A5F5";
+    requestReplacement.height = 72;
+    requestReplacement.visible = false;
+    stack.execute(std::make_unique<wave::ChangeLaneCommand>(
+        project,
+        scenario,
+        request->id,
+        requestReplacement));
+    expectEqual(
+        wave::findLane(scenario, "lane-request")->groupId,
+        group.id,
+        "lane group membership was not updated");
+    expectEqual(
+        wave::findLane(scenario, "lane-request")->height,
+        72,
+        "lane display height was not updated");
+    expect(stack.undo(), "lane property undo failed");
+    expectEqual(
+        wave::findLane(scenario, "lane-request")->groupId,
+        originalRequestGroup,
+        "lane property undo did not restore group membership");
+    expect(stack.redo(), "lane property redo failed");
+
+    const auto* groupLane = wave::findLane(scenario, group.id);
+    expect(groupLane != nullptr, "group lane disappeared");
+    auto groupReplacement = *groupLane;
+    groupReplacement.name = "Handshake signals";
+    stack.execute(std::make_unique<wave::ChangeLaneCommand>(
+        project,
+        scenario,
+        group.id,
+        groupReplacement));
+    expectEqual(
+        wave::findLane(scenario, group.id)->name,
+        std::string{"Handshake signals"},
+        "group rename failed");
+    expectEqual(
+        wave::findLane(scenario, "lane-request")->groupId,
+        group.id,
+        "group rename changed stable membership references");
+
+    const auto* data = wave::findLane(scenario, "lane-data");
+    expect(data != nullptr, "data lane is missing");
+    auto octalData = *data;
+    octalData.radix = wave::Radix::Octal;
+    stack.execute(std::make_unique<wave::ChangeLaneCommand>(
+        project,
+        scenario,
+        data->id,
+        octalData));
+    expectEqual(
+        wave::findLane(scenario, "lane-data")->radix,
+        wave::Radix::Octal,
+        "lane octal radix was not updated");
+
+    auto narrowData = *wave::findLane(scenario, "lane-data");
+    narrowData.width = 4;
+    bool rejectedInvalidWidth = false;
+    try {
+        [[maybe_unused]] wave::ChangeLaneCommand invalid(
+            project,
+            scenario,
+            data->id,
+            narrowData);
+    } catch (const std::invalid_argument&) {
+        rejectedInvalidWidth = true;
+    }
+    expect(
+        rejectedInvalidWidth,
+        "lane width change that invalidates values was not rejected");
+
+    auto nonGroup = *wave::findLane(scenario, group.id);
+    nonGroup.kind = wave::LaneKind::Bit;
+    bool rejectedReferencedGroupConversion = false;
+    try {
+        [[maybe_unused]] wave::ChangeLaneCommand invalid(
+            project,
+            scenario,
+            group.id,
+            nonGroup);
+    } catch (const std::invalid_argument&) {
+        rejectedReferencedGroupConversion = true;
+    }
+    expect(
+        rejectedReferencedGroupConversion,
+        "referenced group conversion was not rejected");
+
+    const auto roundTrip = wave::deserializeProject(wave::serializeProject(project));
+    expect(roundTrip.ok(), "lane/group property project failed to reload");
+    expectEqual(*roundTrip.project, project, "lane/group properties changed on reload");
+}
+
+void testLaneAndGroupRemoval()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto& scenario = project.scenarios.front();
+    project.importedTraces.push_back({
+        "trace-removal-test",
+        "trace.vcd",
+        "vcd",
+        0,
+        {
+            {"lane-request", "tb.req"},
+            {"lane-data", "tb.data"},
+        },
+        {},
+    });
+    const auto original = project;
+
+    wave::CommandStack stack;
+    stack.execute(std::make_unique<wave::RemoveLaneCommand>(
+        project,
+        scenario,
+        "lane-request"));
+    expect(
+        wave::findLane(scenario, "lane-request") == nullptr,
+        "removed lane remains in the scenario");
+    expect(
+        std::none_of(
+            scenario.events.begin(),
+            scenario.events.end(),
+            [](const wave::Event& event) {
+                return event.laneId == "lane-request";
+            }),
+        "events owned by a removed lane were retained");
+    expect(
+        std::none_of(
+            scenario.relations.begin(),
+            scenario.relations.end(),
+            [](const wave::Relation& relation) {
+                return relation.id == "relation-req-ack";
+            }),
+        "relations referencing removed lane events were retained");
+    expect(
+        !project.importedTraces.front().signalMapping.contains("lane-request"),
+        "trace mapping for a removed lane was retained");
+    expect(
+        project.importedTraces.front().signalMapping.contains("lane-data"),
+        "unrelated trace mapping was removed");
+
+    project.importedTraces.push_back({
+        "trace-added-after-removal",
+        "new-trace.vcd",
+        "vcd",
+        0,
+        {{"lane-data", "tb.new_data"}},
+        {},
+    });
+    expect(stack.undo(), "lane removal undo failed");
+    expectEqual(
+        project.importedTraces.size(),
+        std::size_t{2},
+        "lane removal undo discarded a subsequently imported trace");
+    project.importedTraces.pop_back();
+    expectEqual(project, original, "lane removal undo did not restore the project");
+    expect(stack.redo(), "lane removal redo failed");
+    expect(
+        wave::findLane(scenario, "lane-request") == nullptr,
+        "lane removal redo failed");
+    expect(stack.undo(), "second lane removal undo failed");
+
+    const auto eventsBeforeGroupRemoval = scenario.events;
+    const auto relationsBeforeGroupRemoval = scenario.relations;
+    stack.execute(std::make_unique<wave::RemoveLaneCommand>(
+        project,
+        scenario,
+        "group-handshake"));
+    expect(
+        wave::findLane(scenario, "group-handshake") == nullptr,
+        "removed group remains in the scenario");
+    expect(
+        std::all_of(
+            scenario.lanes.begin(),
+            scenario.lanes.end(),
+            [](const wave::Lane& lane) {
+                return lane.groupId != "group-handshake";
+            }),
+        "group members were not ungrouped");
+    expectEqual(
+        scenario.events,
+        eventsBeforeGroupRemoval,
+        "group removal changed member events");
+    expectEqual(
+        scenario.relations,
+        relationsBeforeGroupRemoval,
+        "group removal changed member relations");
+    expect(stack.undo(), "group removal undo failed");
+    expectEqual(project, original, "group removal undo did not restore memberships");
+}
+
+void testLaneReordering()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto& scenario = project.scenarios.front();
+    const auto original = scenario;
+    const auto originalPlan = wave::buildGenerationPlan(project, scenario);
+    expect(originalPlan.ok(), "original generation plan is invalid");
+
+    wave::CommandStack stack;
+    stack.execute(std::make_unique<wave::MoveLaneCommand>(
+        scenario,
+        "lane-request",
+        0));
+    expectEqual(
+        scenario.lanes.front().id,
+        std::string{"lane-request"},
+        "lane did not move to the requested display index");
+    expectEqual(
+        scenario.events,
+        original.events,
+        "lane reordering changed scenario events");
+    expectEqual(
+        scenario.relations,
+        original.relations,
+        "lane reordering changed scenario relations");
+
+    const auto reorderedPlan = wave::buildGenerationPlan(project, scenario);
+    expect(reorderedPlan.ok(), "reordered generation plan is invalid");
+    const auto originalSystemVerilog = wave::generateSystemVerilog(*originalPlan.plan);
+    const auto reorderedSystemVerilog = wave::generateSystemVerilog(*reorderedPlan.plan);
+    const auto originalCocotb = wave::generateCocotb(*originalPlan.plan);
+    const auto reorderedCocotb = wave::generateCocotb(*reorderedPlan.plan);
+    expectEqual(
+        reorderedSystemVerilog.text,
+        originalSystemVerilog.text,
+        "lane display order changed SystemVerilog behavior");
+    expectEqual(
+        reorderedCocotb.text,
+        originalCocotb.text,
+        "lane display order changed cocotb behavior");
+    const auto roundTrip = wave::deserializeProject(wave::serializeProject(project));
+    expect(roundTrip.ok(), "reordered project failed to reload");
+    expectEqual(
+        roundTrip.project->scenarios.front().lanes.front().id,
+        std::string{"lane-request"},
+        "lane display order did not survive serialization");
+
+    expect(stack.undo(), "lane reorder undo failed");
+    expectEqual(scenario, original, "lane reorder undo did not restore exact order");
+    expect(stack.redo(), "lane reorder redo failed");
+    expectEqual(
+        scenario.lanes.front().id,
+        std::string{"lane-request"},
+        "lane reorder redo failed");
+
+    bool rejectedSameIndex = false;
+    try {
+        [[maybe_unused]] wave::MoveLaneCommand invalid(
+            scenario,
+            "lane-request",
+            0);
+    } catch (const std::invalid_argument&) {
+        rejectedSameIndex = true;
+    }
+    expect(rejectedSameIndex, "no-op lane reorder was accepted");
+
+    bool rejectedOutside = false;
+    try {
+        [[maybe_unused]] wave::MoveLaneCommand invalid(
+            scenario,
+            "lane-request",
+            scenario.lanes.size());
+    } catch (const std::invalid_argument&) {
+        rejectedOutside = true;
+    }
+    expect(rejectedOutside, "out-of-range lane reorder was accepted");
+}
+
+void testLaneValuesAndSegments()
+{
+    wave::Lane bit;
+    bit.id = "bit";
+    bit.name = "valid";
+    bit.kind = wave::LaneKind::Bit;
+    for (const auto* value : {"0", "1", "X", "Z", "x", "z"}) {
+        expect(wave::validateLaneValue(bit, value).valid, "valid 4-state bit was rejected");
+    }
+    expect(!wave::validateLaneValue(bit, "2").valid, "invalid bit value was accepted");
+
+    wave::setSegmentRange(bit, 0, 10, "0", "s0");
+    wave::setSegmentRange(bit, 10, 20, "0", "s1");
+    expectEqual(bit.segments.size(), std::size_t{1}, "adjacent equal segments must merge");
+    expectEqual(bit.segments.front().end, wave::Tick{20}, "merged interval is incorrect");
+    wave::setSegmentRange(bit, 5, 15, "1", "s2");
+    expectEqual(bit.segments.size(), std::size_t{3}, "overlay must split the original interval");
+    expectEqual(bit.segments.at(0).end, wave::Tick{5}, "left split is incorrect");
+    expectEqual(bit.segments.at(1).value, std::string{"1"}, "overlay value is incorrect");
+    expectEqual(bit.segments.at(2).start, wave::Tick{15}, "right split is incorrect");
+    wave::clearSegmentRange(bit, 7, 17);
+    expectEqual(bit.segments.size(), std::size_t{3}, "clear must retain all outside fragments");
+    expectEqual(bit.segments.at(1).end, wave::Tick{7}, "clear left boundary is incorrect");
+    expectEqual(bit.segments.at(2).start, wave::Tick{17}, "clear right boundary is incorrect");
+
+    wave::Lane bus;
+    bus.id = "bus";
+    bus.name = "data";
+    bus.kind = wave::LaneKind::Bus;
+    bus.width = 8;
+    expect(wave::validateLaneValue(bus, "0xff").valid, "in-range bus value was rejected");
+    expect(!wave::validateLaneValue(bus, "0x1ff").valid, "overflowing bus value was accepted");
+    expect(wave::validateLaneValue(bus, "0o377").valid, "in-range octal bus value was rejected");
+    expect(!wave::validateLaneValue(bus, "0o400").valid, "overflowing octal bus value was accepted");
+    expect(wave::validateLaneValue(bus, "0b10xz").valid, "X/Z bus pattern was rejected");
+    expect(!wave::validateLaneValue(bus, "-1").valid, "negative unsigned value was accepted");
+    bus.width = 10;
+    expect(wave::validateLaneValue(bus, "0x3ff").valid, "10-bit hexadecimal maximum was rejected");
+    expect(!wave::validateLaneValue(bus, "0x400").valid, "10-bit hexadecimal overflow was accepted");
+    expect(wave::validateLaneValue(bus, "0xXff").valid, "partial high X digit was rejected");
+    bus.width = 8;
+    bus.isSigned = true;
+    expect(wave::validateLaneValue(bus, "-128").valid, "minimum signed value was rejected");
+    expect(!wave::validateLaneValue(bus, "-129").valid, "signed underflow was accepted");
+    expectEqual(
+        wave::laneValueBits(bus, "+1"),
+        std::optional<std::string>{"00000001"},
+        "explicit positive sign was not normalized");
+
+    wave::Lane enumeration = bus;
+    enumeration.kind = wave::LaneKind::Enum;
+    enumeration.width = 2;
+    enumeration.enumMap = {{"IDLE", "0"}, {"BUSY", "1"}, {"WAIT_ACK", "1"}};
+    expect(wave::validateLaneValue(enumeration, "BUSY").valid, "enum symbol was rejected");
+    expectEqual(
+        wave::laneValueBits(enumeration, "WAIT_ACK"),
+        std::optional<std::string>{"01"},
+        "enum symbol underscore was treated as a numeric separator");
+    expect(!wave::validateLaneValue(enumeration, "MISSING").valid, "unknown enum was accepted");
+}
+
+void testUndoRedo()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto& scenario = project.scenarios.front();
+    auto* lane = wave::findLane(scenario, "lane-request");
+    expect(lane != nullptr, "demonstration request lane is missing");
+    const auto before = lane->segments;
+
+    wave::CommandStack stack;
+    stack.execute(std::make_unique<wave::SetLaneRangeCommand>(
+        scenario,
+        lane->id,
+        10'000,
+        20'000,
+        "1"));
+    expect(stack.canUndo(), "executed command must be undoable");
+    expect(lane->segments != before, "command did not change the model");
+    const auto after = lane->segments;
+    expect(stack.undo(), "undo failed");
+    expectEqual(lane->segments, before, "undo did not restore the exact model");
+    expect(stack.redo(), "redo failed");
+    expectEqual(lane->segments, after, "redo did not restore the exact edit");
+    expectEqual(stack.size(), std::size_t{1}, "one drag-style command must make one history entry");
+}
+
+void testMultiLanePasteCommand()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto& scenario = project.scenarios.front();
+    const auto before = scenario;
+    wave::Segment requestSegment;
+    requestSegment.start = 0;
+    requestSegment.end = 50'000;
+    requestSegment.value = "1";
+    wave::Segment dataSegment;
+    dataSegment.start = 0;
+    dataSegment.end = 50'000;
+    dataSegment.value = "0x35";
+    dataSegment.extensions["clipboardMetadata"] = R"("preserved")";
+    std::vector<wave::CopiedLaneRange> copied{
+        {"lane-request", {requestSegment}},
+        {"lane-data", {dataSegment}},
+    };
+    wave::CommandStack stack;
+    stack.execute(std::make_unique<wave::PasteRangeCommand>(
+        scenario,
+        copied,
+        150'000,
+        50'000));
+    expectEqual(stack.size(), std::size_t{1}, "multi-lane paste must create one undo command");
+    const auto* request = wave::findLane(scenario, "lane-request");
+    const auto* data = wave::findLane(scenario, "lane-data");
+    expect(request != nullptr && data != nullptr, "paste target lane is missing");
+    const auto requestValue = std::find_if(
+        request->segments.begin(),
+        request->segments.end(),
+        [](const wave::Segment& segment) {
+            return segment.start <= 160'000 && 160'000 < segment.end;
+        });
+    const auto dataValue = std::find_if(
+        data->segments.begin(),
+        data->segments.end(),
+        [](const wave::Segment& segment) {
+            return segment.start <= 160'000 && 160'000 < segment.end;
+        });
+    expect(
+        requestValue != request->segments.end() && requestValue->value == "1",
+        "pasted bit value is incorrect");
+    expect(
+        dataValue != data->segments.end() && dataValue->value == "0x35",
+        "pasted bus value is incorrect");
+    expect(
+        dataValue->extensions.contains("clipboardMetadata"),
+        "pasted segment extensions were not preserved");
+    const auto after = scenario;
+    expect(stack.undo(), "paste undo failed");
+    expectEqual(scenario, before, "paste undo did not restore the complete scenario");
+    expect(stack.redo(), "paste redo failed");
+    expectEqual(scenario, after, "paste redo did not restore the complete pasted range");
+}
+
+void testEventSegmentSynchronization()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto& scenario = project.scenarios.front();
+    auto* requestLane = wave::findLane(scenario, "lane-request");
+    expect(requestLane != nullptr, "request lane is missing");
+    auto eventIterator = std::find_if(
+        scenario.events.begin(),
+        scenario.events.end(),
+        [](const wave::Event& event) {
+            return event.linkedSegmentId == "segment-req-high";
+        });
+    expect(eventIterator != scenario.events.end(), "waveform segment event was not synchronized");
+    const auto eventId = eventIterator->id;
+
+    auto replacement = *eventIterator;
+    replacement.tick = 90'000;
+    replacement.value = "X";
+    wave::CommandStack stack;
+    stack.execute(std::make_unique<wave::ChangeEventCommand>(
+        scenario,
+        eventId,
+        replacement));
+    const auto* changedEvent = wave::findEvent(scenario, eventId);
+    expect(changedEvent != nullptr, "changed linked event lost its stable ID");
+    expectEqual(changedEvent->tick, wave::Tick{90'000}, "event time was not updated");
+    expectEqual(changedEvent->value, std::string{"X"}, "event value was not updated");
+    const auto* changedSegment = std::find_if(
+        requestLane->segments.begin(),
+        requestLane->segments.end(),
+        [&changedEvent](const wave::Segment& segment) {
+            return segment.id == changedEvent->linkedSegmentId;
+        }) != requestLane->segments.end()
+        ? &*std::find_if(
+            requestLane->segments.begin(),
+            requestLane->segments.end(),
+            [&changedEvent](const wave::Segment& segment) {
+                return segment.id == changedEvent->linkedSegmentId;
+            })
+        : nullptr;
+    expect(changedSegment != nullptr, "linked segment is missing after event edit");
+    expectEqual(changedSegment->start, wave::Tick{90'000}, "event time did not move the waveform edge");
+    expectEqual(changedSegment->value, std::string{"X"}, "event value did not update the segment");
+    expect(stack.undo(), "event edit undo failed");
+    expectEqual(
+        wave::findEvent(scenario, eventId)->tick,
+        wave::Tick{80'000},
+        "event undo did not restore the original tick");
+
+    const auto eventsBeforeCanvasEdit = scenario.events;
+    requestLane = wave::findLane(scenario, "lane-request");
+    stack.execute(std::make_unique<wave::SetLaneRangeCommand>(
+        scenario,
+        requestLane->id,
+        20'000,
+        30'000,
+        "1"));
+    const auto synchronized = std::find_if(
+        scenario.events.begin(),
+        scenario.events.end(),
+        [](const wave::Event& event) {
+            return event.waveformLinked && event.tick == 20'000 && event.value == "1";
+        });
+    expect(
+        synchronized != scenario.events.end(),
+        "canvas-style range edit did not update the shared event model");
+    expect(stack.undo(), "canvas range undo failed");
+    expectEqual(
+        scenario.events,
+        eventsBeforeCanvasEdit,
+        "canvas range undo did not restore the event table model");
+}
+
+void testMarkersRelationsAndValidation()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto& scenario = project.scenarios.front();
+    const auto initialMarkerCount = scenario.markers.size();
+    wave::CommandStack stack;
+    stack.execute(std::make_unique<wave::AddMarkerCommand>(
+        scenario,
+        wave::Marker{
+            "marker-test",
+            "Transfer window",
+            80'000,
+            150'000,
+            wave::MarkerKind::Phase,
+            "test",
+            {},
+        }));
+    expectEqual(
+        scenario.markers.size(),
+        initialMarkerCount + 1,
+        "marker command did not add a marker");
+    expect(stack.undo(), "marker undo failed");
+    expectEqual(scenario.markers.size(), initialMarkerCount, "marker undo did not restore the model");
+    expect(stack.redo(), "marker redo failed");
+
+    auto issues = wave::validateScenario(project, scenario);
+    expect(
+        std::any_of(issues.begin(), issues.end(), [](const wave::ValidationIssue& issue) {
+            return issue.code == wave::ValidationCode::RelationSatisfied;
+        }),
+        "satisfied relation was not reported");
+
+    auto violated = scenario;
+    violated.relations.front().maximumDelay = 20'000;
+    issues = wave::validateScenario(project, violated);
+    expect(
+        std::any_of(issues.begin(), issues.end(), [](const wave::ValidationIssue& issue) {
+            return issue.code == wave::ValidationCode::RelationViolated;
+        }),
+        "relation max-delay violation was not reported");
+
+    auto missing = scenario;
+    missing.relations.front().targetEventId = "missing-event";
+    issues = wave::validateScenario(project, missing);
+    expect(
+        std::any_of(issues.begin(), issues.end(), [](const wave::ValidationIssue& issue) {
+            return issue.code == wave::ValidationCode::MissingTargetEvent;
+        }),
+        "missing relation target was not reported");
+
+    auto undefined = scenario;
+    auto* request = wave::findLane(undefined, "lane-request");
+    wave::clearSegmentRange(*request, 10'000, 20'000);
+    issues = wave::validateScenario(project, undefined);
+    expect(
+        std::any_of(issues.begin(), issues.end(), [](const wave::ValidationIssue& issue) {
+            return issue.code == wave::ValidationCode::UndefinedRegion
+                && issue.laneId == "lane-request";
+        }),
+        "undefined waveform interval was not reported");
+}
+
+void testCodeGeneration()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto& scenario = project.scenarios.front();
+    const auto requestEvent = std::find_if(
+        scenario.events.begin(),
+        scenario.events.end(),
+        [](const wave::Event& event) {
+            return event.linkedSegmentId == "segment-req-high";
+        });
+    expect(requestEvent != scenario.events.end(), "request event is missing");
+    requestEvent->cycle = 8;
+    requestEvent->clockDomainId = "clock-main";
+    const auto acknowledgeEvent = std::find_if(
+        scenario.events.begin(),
+        scenario.events.end(),
+        [](const wave::Event& event) {
+            return event.linkedSegmentId == "segment-ack-high";
+        });
+    expect(acknowledgeEvent != scenario.events.end(), "acknowledge event is missing");
+    acknowledgeEvent->action = wave::EventAction::Expect;
+
+    const auto planResult = wave::buildGenerationPlan(project, scenario);
+    expect(planResult.ok(), "generation plan contains errors");
+    const auto& plan = *planResult.plan;
+    const auto systemVerilog = wave::generateSystemVerilog(plan);
+    expect(systemVerilog.ok(), "SystemVerilog generation contains errors");
+    expect(
+        systemVerilog.text.find("timeunit 1ps") != std::string::npos,
+        "SystemVerilog time unit is missing");
+    expect(
+        systemVerilog.text.find("repeat (9) @(posedge clk)") != std::string::npos,
+        "cycle-based event did not use its clock domain");
+    expect(
+        systemVerilog.text.find("if (ack !== 1'b1)") != std::string::npos,
+        "expected-value check is missing");
+    expect(
+        systemVerilog.text.find("$rose(req) |-> ##[1:4] $rose(ack)") != std::string::npos,
+        "lossless relation SVA is missing");
+    expect(
+        systemVerilog.text.find("|| $isunknown(clk)") != std::string::npos,
+        "disabled clock intervals were not included in SVA disable semantics");
+    expect(
+        systemVerilog.text.find("timeout_guard") != std::string::npos,
+        "SystemVerilog timeout protection is missing");
+
+    const auto cocotb = wave::generateCocotb(plan);
+    expect(cocotb.ok(), "cocotb generation contains errors");
+    expect(
+        cocotb.text.find("await ClockCycles(dut.clk, 9, rising=True)") != std::string::npos,
+        "cocotb cycle event did not use ClockCycles");
+    expect(
+        cocotb.text.find("with_timeout(Combine(*tasks)") != std::string::npos,
+        "cocotb timeout is missing");
+    expect(
+        cocotb.text.find("assert int(dut.ack.value) == 1") != std::string::npos,
+        "cocotb expected check is missing");
+    expect(
+        cocotb.text.find("dut.data.value = 0x35") != std::string::npos,
+        "hexadecimal cocotb drive was emitted as an X/Z string or wrong HDL identifier");
+
+    auto reordered = scenario;
+    std::reverse(reordered.lanes.begin(), reordered.lanes.end());
+    std::reverse(reordered.events.begin(), reordered.events.end());
+    const auto reorderedPlan = wave::buildGenerationPlan(project, reordered);
+    expect(reorderedPlan.ok(), "reordered generation plan contains errors");
+    expectEqual(
+        wave::generateSystemVerilog(*reorderedPlan.plan).text,
+        systemVerilog.text,
+        "generated behavior depends on UI lane/event order");
+
+    auto conditionedPlan = plan;
+    conditionedPlan.relations.front().condition = "enable";
+    const auto conditionedAssertions = wave::generateSystemVerilogAssertions(conditionedPlan);
+    expect(
+        conditionedAssertions.text.find("property p_") == std::string::npos,
+        "runtime relation condition produced approximate SVA");
+    expect(
+        std::any_of(
+            conditionedAssertions.diagnostics.begin(),
+            conditionedAssertions.diagnostics.end(),
+            [](const wave::GenerationDiagnostic& diagnostic) {
+                return diagnostic.code
+                    == wave::GenerationDiagnosticCode::SvaUnsupportedCondition;
+            }),
+        "unsupported SVA condition did not produce a diagnostic");
+}
+
+void testWaveformExports()
+{
+    const auto project = wave::makeDemonstrationProject();
+    const auto& scenario = project.scenarios.front();
+    wave::ExportOptions options;
+    options.start = 80'000;
+    options.end = 150'000;
+    options.width = 1000;
+    options.pngDpi = 144;
+    options.pdfPageSpanTicks = 30'000;
+
+    QString error;
+    const auto svg = wave::renderWaveformSvg(project, scenario, options, &error);
+    expect(!svg.isEmpty(), error.toStdString());
+    expect(svg.contains("<svg"), "SVG export is not an SVG document");
+    expect(svg.contains("data[7:0]"), "SVG export cropped or omitted a signal name");
+
+    const auto png = wave::renderWaveformPng(project, scenario, options, &error);
+    expect(!png.isEmpty(), error.toStdString());
+    expect(png.startsWith("\x89PNG\r\n\x1a\n"), "PNG signature is invalid");
+    const auto image = QImage::fromData(png, "PNG");
+    expect(!image.isNull(), "PNG cannot be decoded");
+    expect(image.width() > options.width, "high-DPI PNG did not scale pixel dimensions");
+    expect(
+        image.pixelColor(image.width() / 2, image.height() / 2) != QColor(198, 40, 40),
+        "relation brush leaked into the document background");
+
+    const auto pdf = wave::renderWaveformPdf(project, scenario, options, &error);
+    expect(!pdf.isEmpty(), error.toStdString());
+    expect(pdf.startsWith("%PDF-"), "PDF signature is invalid");
+
+    const auto waveDrom = wave::generateWaveDromJson(project, scenario, options, &error);
+    expect(!waveDrom.isEmpty(), error.toStdString());
+    const auto waveDromDocument = QJsonDocument::fromJson(waveDrom);
+    expect(waveDromDocument.isObject(), "WaveDrom JSON is invalid");
+    expectEqual(
+        waveDromDocument.object()
+            .value(QStringLiteral("waveWorkbench"))
+            .toObject()
+            .value(QStringLiteral("startTick"))
+            .toString(),
+        QStringLiteral("80000"),
+        "WaveDrom export range is incorrect");
+
+    const auto bundle = wave::generateArtifactBundle(project, scenario, options);
+    expect(bundle.ok(), bundle.error.toStdString());
+    QTemporaryDir directory;
+    expect(directory.isValid(), "artifact output directory creation failed");
+    expect(
+        wave::writeArtifactBundleAtomic(
+            *bundle.artifacts,
+            directory.path(),
+            QStringLiteral("handshake"),
+            &error),
+        error.toStdString());
+    for (const auto& file : {
+             QStringLiteral("handshake_tb.sv"),
+             QStringLiteral("handshake_assertions.sv"),
+             QStringLiteral("test_handshake.py"),
+             QStringLiteral("handshake.svg"),
+             QStringLiteral("handshake.png"),
+             QStringLiteral("handshake.pdf"),
+             QStringLiteral("handshake.wavedrom.json"),
+         }) {
+        expect(
+            QFileInfo::exists(QDir(directory.path()).filePath(file)),
+            ("artifact file is missing: " + file).toStdString());
+    }
+}
+
+void testSerializationRoundTrip()
+{
+    auto project = wave::makeDemonstrationProject();
+    project.extensions.emplace("futureRoot", R"({"enabled":true,"level":3})");
+    project.scenarios.front().lanes.front().extensions.emplace("futureLane", R"(["a",2])");
+    project.clockDomains.front().extensions.emplace("futureClock", R"("preserved")");
+    project.exportSettings.emplace("dpi", "300");
+
+    const auto encoded = wave::serializeProject(project);
+    const auto result = wave::deserializeProject(encoded);
+    expect(result.ok(), "serialized project failed to load");
+    expectEqual(*result.project, project, "serialization round-trip changed the model");
+
+    const auto encodedAgain = wave::serializeProject(*result.project);
+    const auto json = QJsonDocument::fromJson(encodedAgain).object();
+    expect(json.contains(QStringLiteral("futureRoot")), "unknown root field was discarded");
+    const auto lane = json.value(QStringLiteral("scenarios"))
+                          .toArray()
+                          .first()
+                          .toObject()
+                          .value(QStringLiteral("lanes"))
+                          .toArray()
+                          .first()
+                          .toObject();
+    expect(lane.contains(QStringLiteral("futureLane")), "unknown lane field was discarded");
+}
+
+void testSchemaMigration()
+{
+    const auto legacy = QByteArrayLiteral(R"JSON(
+{
+  "schemaVersion": 0,
+  "id": "legacy-project",
+  "name": "Legacy",
+  "timebase": { "baseUnitPs": "1" },
+  "scenarios": [{
+    "name": "Legacy scenario",
+    "duration": "100",
+    "lanes": [{
+      "displayName": "ready",
+      "kind": "bit",
+      "segments": [{"start": "0", "end": "100", "value": "1"}]
+    }]
+  }]
+}
+)JSON");
+    const auto result = wave::deserializeProject(legacy);
+    expect(result.ok(), "schema 0 migration failed");
+    expect(result.migrated, "migration flag was not reported");
+    expectEqual(result.project->schemaVersion, 1, "schema version was not upgraded");
+    expect(!result.project->scenarios.front().id.empty(), "scenario ID was not generated");
+    expect(!result.project->scenarios.front().lanes.front().id.empty(), "lane ID was not generated");
+    expect(
+        !result.project->scenarios.front().lanes.front().segments.front().id.empty(),
+        "segment ID was not generated");
+}
+
+void testProjectDirectoryMove()
+{
+    QTemporaryDir temporary;
+    expect(temporary.isValid(), "temporary directory creation failed");
+    const auto source = QDir(temporary.path()).filePath(QStringLiteral("source"));
+    const auto destination = QDir(temporary.path()).filePath(QStringLiteral("moved"));
+    auto project = wave::makeDemonstrationProject();
+    project.linkedResources.push_back({
+        "frame-sample",
+        "traces/reference.vcd",
+        "sample-1",
+        "sha256:abc",
+        "relative resource",
+        {},
+    });
+    QString error;
+    expect(wave::saveProjectDirectory(project, source, &error), error.toStdString());
+    expect(QDir(temporary.path()).rename(QStringLiteral("source"), QStringLiteral("moved")), "directory move failed");
+    const auto result = wave::loadProjectDirectory(destination);
+    expect(result.ok(), result.error.toStdString());
+    expectEqual(
+        result.project->linkedResources.front().path,
+        std::string{"traces/reference.vcd"},
+        "relative resource path changed after moving the project");
+}
+
+void testVcdImportAndIndex()
+{
+    std::istringstream input(R"VCD(
+$date 2026-07-24 $end
+$version Wave Workbench import test $end
+$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! clk $end
+$var wire 1 " req $end
+$var wire 8 # data [7:0] $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+0!
+0"
+b00000000 #
+$end
+#5
+1!
+1"
+#10
+b00110101 #
+#20
+0"
+)VCD");
+    wave::TraceParseOptions options;
+    options.projectTimeBase = {1};
+    options.identity = {"project", "trace", 7};
+    options.offset = 100;
+    const auto result = wave::parseVcd(input, options);
+    expect(result.ok(), result.errorSummary());
+    expectEqual(result.index->identity, options.identity, "trace identity changed during parsing");
+    expectEqual(result.index->traceSignals.size(), std::size_t{3}, "VCD signal count is incorrect");
+    expectEqual(result.index->transitionCount, std::uint64_t{7}, "VCD transition count is incorrect");
+    const auto* request = result.index->findSignal("top.req");
+    expect(request != nullptr, "hierarchical VCD signal ID is missing");
+    expectEqual(request->transitions.front().tick, wave::Tick{100}, "VCD offset was not applied");
+    expectEqual(request->transitions.at(1).tick, wave::Tick{5'100}, "VCD time conversion is incorrect");
+    expectEqual(request->valueAt(6'000)->value, std::string{"1"}, "indexed value lookup is incorrect");
+    const auto visible = request->visibleTransitions(6'000, 21'000);
+    expectEqual(visible.size(), std::size_t{2}, "visible range must include the preceding held value");
+    expectEqual(visible.front().tick, wave::Tick{5'100}, "visible range preceding transition is incorrect");
+
+    auto project = wave::makeDemonstrationProject();
+    const auto mapping = wave::suggestSignalMapping(project.scenarios.front(), *result.index);
+    expectEqual(mapping.at("lane-request"), std::string{"top.req"}, "exact signal mapping failed");
+
+    std::istringstream inexact(R"VCD(
+$timescale 1 fs $end
+$scope module top $end
+$var wire 1 ! clk $end
+$upscope $end
+$enddefinitions $end
+#1
+1!
+)VCD");
+    options.offset = 0;
+    const auto inexactResult = wave::parseVcd(inexact, options);
+    expect(!inexactResult.ok(), "inexact femtosecond timestamp must be rejected");
+    expect(
+        inexactResult.errorSummary().find("exactly") != std::string::npos,
+        "inexact timestamp diagnostic is missing");
+}
+
+void testCsvImportAndCancellation()
+{
+    std::istringstream input(
+        "time[ns],req,\"data[7:0]\"\n"
+        "0,0,0x00\n"
+        "5,1,0x35\n"
+        "10,1,0x35\n"
+        "20,0,0x00\n");
+    wave::TraceParseOptions options;
+    options.projectTimeBase = {1};
+    options.identity = {"project", "csv-trace", 9};
+    const auto result = wave::parseCsv(input, options);
+    expect(result.ok(), result.errorSummary());
+    expectEqual(result.index->traceSignals.size(), std::size_t{2}, "CSV signal count is incorrect");
+    expectEqual(result.index->transitionCount, std::uint64_t{6}, "redundant CSV values were not compacted");
+    const auto* data = result.index->findSignal("data[7:0]");
+    expect(data != nullptr, "CSV bus signal is missing");
+    expectEqual(data->width, std::uint32_t{8}, "CSV hexadecimal bus width inference is incorrect");
+    expectEqual(data->transitions.at(1).tick, wave::Tick{5'000}, "CSV unit conversion is incorrect");
+
+    std::ostringstream large;
+    large << "time,value\n";
+    for (int index = 0; index < 5'000; ++index) {
+        large << index << ',' << (index & 1) << '\n';
+    }
+    std::istringstream cancellable(large.str());
+    options.csvTimeUnit = wave::CsvTimeUnit::ProjectTick;
+    options.isCancelled = [] { return true; };
+    const auto cancelled = wave::parseCsv(cancellable, options);
+    expect(cancelled.cancelled, "CSV parser did not honor cancellation");
+    expect(!cancelled.index.has_value(), "cancelled parse returned a partial index");
+}
+
+void testTraceExampleAndLargeIndex()
+{
+    wave::TraceParseOptions options;
+    options.projectTimeBase = {1};
+    options.identity = {"project-wave-workbench-demo", "trace-handshake-actual", 1};
+    const auto examplePath = std::filesystem::path(WAVE_SOURCE_DIR)
+        / "examples"
+        / "handshake"
+        / "traces"
+        / "handshake_actual.vcd";
+    auto parsed = wave::parseVcdFile(examplePath, options);
+    expect(parsed.ok(), parsed.errorSummary());
+    expectEqual(parsed.index->traceSignals.size(), std::size_t{6}, "example VCD signal count is incorrect");
+    expectEqual(parsed.index->transitionCount, std::uint64_t{54}, "example VCD transition count is incorrect");
+    expect(parsed.index->shift(250), "trace alignment shift failed");
+    expectEqual(parsed.index->startTick, wave::Tick{250}, "trace alignment did not shift the start");
+    expectEqual(parsed.index->endTick, wave::Tick{220'250}, "trace alignment did not shift the end");
+
+    wave::TraceIndex large;
+    large.projectTimeBase = {1};
+    large.traceSignals.reserve(1'000);
+    for (int lane = 0; lane < 1'000; ++lane) {
+        wave::TraceSignal signal;
+        signal.id = "signal-" + std::to_string(lane);
+        signal.fullName = signal.id;
+        signal.transitions.reserve(1'000);
+        for (int transition = 0; transition < 1'000; ++transition) {
+            signal.transitions.push_back({
+                static_cast<wave::Tick>(transition) * 1'000,
+                (transition & 1) == 0 ? "0" : "1",
+            });
+        }
+        large.traceSignals.push_back(std::move(signal));
+    }
+    large.transitionCount = 1'000'000;
+    large.startTick = 0;
+    large.endTick = 999'000;
+    const auto started = std::chrono::steady_clock::now();
+    std::uint64_t visibleCount = 0;
+    for (int pass = 0; pass < 100; ++pass) {
+        const auto start = static_cast<wave::Tick>(pass) * 5'000;
+        for (const auto& signal : large.traceSignals) {
+            const auto range = signal.visibleRange(start, start + 20'000);
+            visibleCount += range.second - range.first;
+        }
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    expect(visibleCount > 2'000'000, "large trace visible-range query returned too few transitions");
+    expect(
+        elapsed < std::chrono::seconds(3),
+        "1000-lane / one-million-transition indexed queries exceeded 3 seconds");
+    std::cout << "[METRIC] 1000 lanes / 1000000 transitions / 100000 queries: "
+              << elapsed.count() << " ms\n";
+}
+
+wave::TraceIndex loadHandshakeTrace()
+{
+    wave::TraceParseOptions options;
+    options.projectTimeBase = {1};
+    options.identity = {"project-wave-workbench-demo", "trace-handshake-actual", 1};
+    const auto path = std::filesystem::path(WAVE_SOURCE_DIR)
+        / "examples"
+        / "handshake"
+        / "traces"
+        / "handshake_actual.vcd";
+    auto parsed = wave::parseVcdFile(path, options);
+    if (!parsed.ok()) throw TestFailure(parsed.errorSummary());
+    return std::move(*parsed.index);
+}
+
+wave::ImportedTrace handshakeReference()
+{
+    wave::ImportedTrace reference;
+    reference.id = "trace-handshake-actual";
+    reference.format = "vcd";
+    reference.signalMapping = {
+        {"lane-clk", "tb.dut.clk"},
+        {"lane-reset", "tb.dut.reset_n"},
+        {"lane-request", "tb.dut.req"},
+        {"lane-ack", "tb.dut.ack"},
+        {"lane-data", "tb.dut.data[7:0]"},
+        {"lane-state", "tb.dut.state[1:0]"},
+    };
+    return reference;
+}
+
+void testRelationConditions()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto& scenario = project.scenarios.front();
+    const std::map<std::string, std::string> sampledValues{
+        {"lane-reset", "1"},
+        {"lane-request", "1"},
+        {"lane-data", "0x35"},
+        {"lane-state", "WAIT_ACK"},
+    };
+    const wave::RelationConditionPredicate predicate =
+        [&](const wave::Lane& lane, const std::string_view literal, std::string& error)
+        -> std::optional<bool> {
+        const auto sample = sampledValues.find(lane.id);
+        if (sample == sampledValues.end()) {
+            error = "test sample is unavailable";
+            return std::nullopt;
+        }
+        return sample->second == literal;
+    };
+
+    const auto precedence = wave::evaluateRelationCondition(
+        scenario,
+        "false || reset_n && data[7:0] == 0x35",
+        predicate);
+    expect(precedence.ok() && *precedence.value, "condition precedence is incorrect");
+    const auto strictOperators = wave::evaluateRelationCondition(
+        scenario,
+        "!(lane-reset !== 1) && (state === WAIT_ACK)",
+        predicate);
+    expect(
+        strictOperators.ok() && *strictOperators.value,
+        "strict condition operators or stable-ID lookup failed");
+
+    auto quotedScenario = scenario;
+    wave::findLane(quotedScenario, "lane-data")->name = "payload data";
+    const auto quotedLane = wave::evaluateRelationCondition(
+        quotedScenario,
+        "`payload data` == '0x35'",
+        predicate);
+    expect(quotedLane.ok() && *quotedLane.value, "quoted lane or value parsing failed");
+
+    const auto bareBus = wave::evaluateRelationCondition(
+        scenario,
+        "data[7:0]",
+        predicate);
+    expect(!bareBus.ok(), "bare multi-bit lane condition was accepted");
+    const auto malformed = wave::evaluateRelationCondition(
+        scenario,
+        "(reset_n && true",
+        predicate);
+    expect(!malformed.ok(), "unclosed condition parenthesis was accepted");
+    const auto noShortCircuit = wave::evaluateRelationCondition(
+        scenario,
+        "false && missing_lane == 1",
+        predicate);
+    expect(
+        !noShortCircuit.ok() && noShortCircuit.errorOffset == 9,
+        "condition error was hidden by boolean short-circuiting");
+
+    auto ambiguousScenario = scenario;
+    auto duplicate = *wave::findLane(ambiguousScenario, "lane-reset");
+    duplicate.id = "lane-reset-duplicate";
+    ambiguousScenario.lanes.push_back(std::move(duplicate));
+    const auto ambiguous = wave::evaluateRelationCondition(
+        ambiguousScenario,
+        "reset_n == 1",
+        predicate);
+    expect(!ambiguous.ok(), "ambiguous display-name condition was accepted");
+
+    scenario.relations.front().condition =
+        "reset_n && data[7:0] == 0x35 && state == WAIT_ACK";
+    auto issues = wave::validateScenario(project, scenario);
+    expect(
+        std::any_of(issues.begin(), issues.end(), [](const wave::ValidationIssue& issue) {
+            return issue.code == wave::ValidationCode::RelationSatisfied;
+        }),
+        "true relation condition did not reach delay validation");
+
+    auto guardedProject = project;
+    auto& guardedRelation = guardedProject.scenarios.front().relations.front();
+    guardedRelation.condition = "reset_n == 0";
+    guardedRelation.targetEventId = "missing-target";
+    issues = wave::validateScenario(
+        guardedProject,
+        guardedProject.scenarios.front());
+    expect(
+        std::any_of(issues.begin(), issues.end(), [](const wave::ValidationIssue& issue) {
+            return issue.code == wave::ValidationCode::RelationNotApplicable;
+        }),
+        "false relation condition was not reported as not applicable");
+    expect(
+        std::none_of(issues.begin(), issues.end(), [](const wave::ValidationIssue& issue) {
+            return issue.code == wave::ValidationCode::MissingTargetEvent;
+        }),
+        "false relation condition did not guard target validation");
+
+    auto invalidProject = project;
+    invalidProject.scenarios.front().relations.front().condition =
+        "data[7:0] == 0x1ff";
+    issues = wave::validateScenario(
+        invalidProject,
+        invalidProject.scenarios.front());
+    expect(
+        std::any_of(issues.begin(), issues.end(), [](const wave::ValidationIssue& issue) {
+            return issue.code == wave::ValidationCode::InvalidRelationCondition
+                && issue.laneId == "lane-data";
+        }),
+        "invalid relation condition literal was not localized");
+
+    auto trace = loadHandshakeTrace();
+    auto reference = handshakeReference();
+    wave::CompareOptions relationOnly;
+    relationOnly.relationOnly = true;
+
+    const auto actualPass = wave::compareScenario(
+        project,
+        scenario,
+        trace,
+        reference,
+        relationOnly);
+    expect(
+        actualPass.matches() && actualPass.diagnostics.empty(),
+        "true actual relation condition rejected a valid delay");
+
+    auto falseProject = project;
+    auto& falseRelation = falseProject.scenarios.front().relations.front();
+    falseRelation.condition = "reset_n == 0";
+    falseRelation.targetEventId = "missing-target";
+    const auto actualGuarded = wave::compareScenario(
+        falseProject,
+        falseProject.scenarios.front(),
+        trace,
+        reference,
+        relationOnly);
+    expect(
+        actualGuarded.matches() && actualGuarded.diagnostics.size() == 1,
+        "false actual relation condition did not guard the target");
+    const auto guardedJson = QJsonDocument::fromJson(
+        QByteArray::fromStdString(wave::compareResultJson(actualGuarded)));
+    expectEqual(
+        guardedJson.object().value(QStringLiteral("diagnostics")).toArray().size(),
+        1,
+        "compare JSON omitted relation diagnostics");
+    expect(
+        wave::compareResultCsv(actualGuarded).find(",diagnostic,") != std::string::npos,
+        "compare CSV omitted relation diagnostics");
+    const auto guardedHtml = wave::compareResultHtml(
+        actualGuarded,
+        falseProject,
+        falseProject.scenarios.front());
+    expect(
+        guardedHtml.find("<h3>Diagnostics</h3>") != std::string::npos,
+        "compare HTML omitted relation diagnostics");
+
+    auto conditionErrorProject = project;
+    conditionErrorProject.scenarios.front().relations.front().condition =
+        "missing_lane == 1";
+    const auto actualConditionError = wave::compareScenario(
+        conditionErrorProject,
+        conditionErrorProject.scenarios.front(),
+        trace,
+        reference,
+        relationOnly);
+    expectEqual(
+        actualConditionError.differences.size(),
+        std::size_t{1},
+        "condition evaluation error did not fail relation-only compare");
+    expectEqual(
+        actualConditionError.differences.front().kind,
+        wave::CompareDifferenceKind::ConditionEvaluationError,
+        "condition evaluation difference kind is incorrect");
+    expect(
+        wave::compareResultJson(actualConditionError).find(
+            "\"kind\":\"condition-evaluation-error\"") != std::string::npos,
+        "condition evaluation error was omitted from JSON");
+
+    auto missingMapping = reference;
+    missingMapping.signalMapping.erase("lane-data");
+    const auto mappingError = wave::compareScenario(
+        project,
+        scenario,
+        trace,
+        missingMapping,
+        relationOnly);
+    expect(
+        !mappingError.matches()
+            && mappingError.differences.front().kind
+                == wave::CompareDifferenceKind::ConditionEvaluationError
+            && mappingError.differences.front().laneId == "lane-data",
+        "missing condition signal mapping was not localized");
+}
+
+void testExpectedActualCompareRules()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto trace = loadHandshakeTrace();
+    const auto reference = handshakeReference();
+    const auto& scenario = project.scenarios.front();
+    const auto exact = wave::compareScenario(project, scenario, trace, reference);
+    expectEqual(exact.firstMismatch, std::optional<wave::Tick>{110'000}, "first mismatch is incorrect");
+    expectEqual(exact.differences.size(), std::size_t{4}, "exact compare difference count is incorrect");
+
+    wave::CompareOptions tolerance;
+    tolerance.defaultRule.edgeTolerance = 5'000;
+    const auto tolerant = wave::compareScenario(project, scenario, trace, reference, tolerance);
+    expect(tolerant.matches(), "edge tolerance did not accept bounded edge skew");
+    expectEqual(tolerant.toleratedEdgeCount, std::uint64_t{4}, "tolerated edge count is incorrect");
+
+    auto maskedProject = project;
+    auto* data = wave::findLane(maskedProject.scenarios.front(), "lane-data");
+    expect(data != nullptr, "data lane is missing");
+    data->segments.at(1).value = "0x34";
+    wave::CompareOptions dataWindow;
+    dataWindow.start = 80'000;
+    dataWindow.end = 100'000;
+    const auto unmasked = wave::compareScenario(
+        maskedProject,
+        maskedProject.scenarios.front(),
+        trace,
+        reference,
+        dataWindow);
+    expect(!unmasked.matches(), "unmasked bus mismatch was not detected");
+    dataWindow.defaultRule.busMask = "0xfe";
+    const auto masked = wave::compareScenario(
+        maskedProject,
+        maskedProject.scenarios.front(),
+        trace,
+        reference,
+        dataWindow);
+    expect(masked.matches(), "bus mask did not suppress the masked bit");
+
+    auto wildcardProject = project;
+    auto* request = wave::findLane(wildcardProject.scenarios.front(), "lane-request");
+    expect(request != nullptr, "request lane is missing");
+    request->segments.at(1).value = "X";
+    wave::CompareOptions wildcardWindow;
+    wildcardWindow.start = 80'000;
+    wildcardWindow.end = 100'000;
+    const auto exactX = wave::compareScenario(
+        wildcardProject,
+        wildcardProject.scenarios.front(),
+        trace,
+        reference,
+        wildcardWindow);
+    expect(!exactX.matches(), "exact X compare incorrectly treated X as a wildcard");
+    wildcardWindow.defaultRule.xHandling = wave::XHandling::ExpectedXWildcard;
+    const auto wildcard = wave::compareScenario(
+        wildcardProject,
+        wildcardProject.scenarios.front(),
+        trace,
+        reference,
+        wildcardWindow);
+    expect(wildcard.matches(), "expected X wildcard did not match actual 1");
+    wildcardWindow.defaultRule.xHandling = wave::XHandling::IgnoreAnyX;
+    const auto ignoreX = wave::compareScenario(
+        wildcardProject,
+        wildcardProject.scenarios.front(),
+        trace,
+        reference,
+        wildcardWindow);
+    expect(ignoreX.matches(), "ignore-X rule did not ignore expected X");
+
+    auto enumProject = project;
+    auto* state = wave::findLane(enumProject.scenarios.front(), "lane-state");
+    expect(state != nullptr, "state lane is missing");
+    state->segments.at(1).value = "WAIT";
+    wave::CompareOptions enumWindow;
+    enumWindow.start = 80'000;
+    enumWindow.end = 100'000;
+    enumWindow.defaultRule.enumEquivalence["WAIT"] = "01";
+    const auto equivalent = wave::compareScenario(
+        enumProject,
+        enumProject.scenarios.front(),
+        trace,
+        reference,
+        enumWindow);
+    expect(equivalent.matches(), "enum equivalence did not match the configured actual value");
+}
+
+void testCompareDiagnosticsRelationsAndReports()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto trace = loadHandshakeTrace();
+    const auto reference = handshakeReference();
+    wave::CompareOptions relationOnly;
+    relationOnly.relationOnly = true;
+    const auto relationPass = wave::compareScenario(
+        project,
+        project.scenarios.front(),
+        trace,
+        reference,
+        relationOnly);
+    expect(relationPass.matches(), "relation-only compare rejected a valid actual delay");
+
+    project.scenarios.front().relations.front().maximumDelay = 30'000;
+    const auto relationFail = wave::compareScenario(
+        project,
+        project.scenarios.front(),
+        trace,
+        reference,
+        relationOnly);
+    expectEqual(relationFail.differences.size(), std::size_t{1}, "relation violation was not reported");
+    expectEqual(
+        relationFail.differences.front().kind,
+        wave::CompareDifferenceKind::RelationViolation,
+        "relation difference kind is incorrect");
+
+    auto missingReference = reference;
+    missingReference.signalMapping.erase("lane-request");
+    auto* actualData = trace.findSignal("tb.dut.data[7:0]");
+    expect(actualData != nullptr, "actual data signal is missing");
+    actualData->width = 7;
+    const auto diagnostics = wave::compareScenario(
+        project,
+        project.scenarios.front(),
+        trace,
+        missingReference);
+    expect(
+        std::any_of(
+            diagnostics.differences.begin(),
+            diagnostics.differences.end(),
+            [](const wave::CompareDifference& difference) {
+                return difference.kind == wave::CompareDifferenceKind::MissingSignal;
+            }),
+        "missing signal was not reported");
+    expect(
+        std::any_of(
+            diagnostics.differences.begin(),
+            diagnostics.differences.end(),
+            [](const wave::CompareDifference& difference) {
+                return difference.kind == wave::CompareDifferenceKind::WidthMismatch;
+            }),
+        "width mismatch was not reported");
+
+    const auto json = wave::compareResultJson(diagnostics);
+    expect(
+        QJsonDocument::fromJson(QByteArray::fromStdString(json)).isObject(),
+        "compare JSON report is invalid");
+    const auto csv = wave::compareResultCsv(diagnostics);
+    expect(csv.starts_with("id,kind"), "compare CSV report header is invalid");
+    const auto html = wave::compareResultHtml(
+        diagnostics,
+        project,
+        project.scenarios.front());
+    expect(html.find("<!doctype html>") != std::string::npos, "compare HTML report is invalid");
+}
+
+void testCrossApplicationContracts()
+{
+    const auto exampleRoot = std::filesystem::path(WAVE_SOURCE_DIR)
+        / "examples"
+        / "handshake";
+    QFile signalFile(QString::fromStdWString(
+        (exampleRoot / "integration" / "zeroslack_signals.json").wstring()));
+    expect(signalFile.open(QIODevice::ReadOnly), "cannot open ZeroSlack signal-list example");
+    const auto signalList = wave::parseZeroSlackSignalList(signalFile.readAll());
+    expect(signalList.ok(), signalList.error.toStdString());
+    auto project = wave::makeDemonstrationProject();
+    const auto imported = wave::applyZeroSlackSignalList(
+        project,
+        project.scenarios.front(),
+        *signalList.signalList);
+    expectEqual(imported.added, std::size_t{1}, "ZeroSlack added count is incorrect");
+    expectEqual(imported.existing, std::size_t{1}, "ZeroSlack existing count is incorrect");
+    expect(
+        wave::findLane(project.scenarios.front(), "zeroslack-ready") != nullptr,
+        "ZeroSlack signal definition was not added");
+    expect(
+        std::any_of(
+            project.linkedResources.begin(),
+            project.linkedResources.end(),
+            [](const wave::LinkedResource& resource) {
+                return resource.kind == "zeroslack-signal-list";
+            }),
+        "ZeroSlack source reference was not retained");
+
+    QFile frameFile(QString::fromStdWString(
+        (exampleRoot / "integration" / "frame_sample_reference.json").wstring()));
+    expect(frameFile.open(QIODevice::ReadOnly), "cannot open frame-reference example");
+    const auto frameDocument = frameFile.readAll();
+    const auto frameReference = wave::parseFrameSampleReference(frameDocument);
+    expect(frameReference.ok(), frameReference.error.toStdString());
+    const auto loadedExample = wave::loadProjectFile(
+        QString::fromStdWString((exampleRoot / "project.wave.json").wstring()));
+    expect(loadedExample.ok(), loadedExample.error.toStdString());
+    auto frameProject = *loadedExample.project;
+    const auto linked = wave::linkFrameSample(frameProject, *frameReference.reference);
+    expect(linked.updated, "existing frame sample reference was not updated by stable ID");
+    expect(linked.diagnostics.isEmpty(), "resolved transaction target was reported unresolved");
+    const auto* transactionLane = wave::findLane(
+        frameProject.scenarios.front(),
+        "lane-transaction");
+    expect(transactionLane != nullptr, "transaction lane is missing");
+    expect(
+        transactionLane->segments.front().extensions.contains("linkedResourceStableId"),
+        "transaction segment does not retain the frame sample stable ID");
+    auto invalidFrame = QJsonDocument::fromJson(frameDocument).object();
+    invalidFrame.insert(QStringLiteral("encodedBytes"), QStringLiteral("123"));
+    expect(
+        !wave::parseFrameSampleReference(QJsonDocument(invalidFrame).toJson()).ok(),
+        "odd-length encoded bytes were accepted");
+
+    const auto manifest = QJsonDocument::fromJson(
+        wave::makeWorkspaceManifest(frameProject, QStringLiteral("project.wave.json")));
+    expect(manifest.isObject(), "workspace manifest JSON is invalid");
+    expectEqual(
+        manifest.object().value(QStringLiteral("schemaVersion")).toInt(),
+        1,
+        "workspace manifest schema is incorrect");
+
+    QTemporaryDir artifacts;
+    expect(artifacts.isValid(), "temporary artifact directory creation failed");
+    QFile artifact(QDir(artifacts.path()).filePath(QStringLiteral("diagram.svg")));
+    expect(artifact.open(QIODevice::WriteOnly), "temporary artifact creation failed");
+    artifact.write("<svg/>");
+    artifact.close();
+    const auto entry = wave::makePinloomEntry(
+        frameProject,
+        frameProject.scenarios.front(),
+        QStringLiteral("project.wave.json"),
+        artifacts.path(),
+        QDir(artifacts.path()).filePath(QStringLiteral("entry.json")));
+    expect(QJsonDocument::fromJson(entry.document).isObject(), "Pinloom entry JSON is invalid");
+    expectEqual(entry.archiveUri.scheme(), QStringLiteral("pinloom"), "Pinloom URI scheme is incorrect");
+
+    QUrl uri(QStringLiteral("waveworkbench://compare"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("project"), QStringLiteral("C:/Project Folder/project.wave.json"));
+    query.addQueryItem(QStringLiteral("lane"), QStringLiteral("lane-request"));
+    query.addQueryItem(QStringLiteral("tick"), QStringLiteral("80000"));
+    uri.setQuery(query);
+    const auto launch = wave::parseWaveWorkbenchUri(uri);
+    expect(launch.ok(), launch.error.toStdString());
+    expect(launch.request->compareMode, "compare URI did not select Compare mode");
+    expectEqual(launch.request->tick, std::optional<wave::Tick>{80'000}, "URI tick is incorrect");
+    expectEqual(launch.request->laneId, QStringLiteral("lane-request"), "URI lane ID is incorrect");
+}
+
+} // namespace
+
+int main(int argc, char* argv[])
+{
+    QGuiApplication application(argc, argv);
+    const std::vector<std::pair<std::string, std::function<void()>>> tests{
+        {"time conversions and precision", testTimeConversions},
+        {"clock domains and snapping", testClocksAndSnapping},
+        {"clock overrides and cycle retiming", testClockOverridesAndRetiming},
+        {"lane and group property editing", testLaneAndGroupPropertyEditing},
+        {"lane and group removal", testLaneAndGroupRemoval},
+        {"lane display reordering", testLaneReordering},
+        {"lane values and segment merge/split", testLaneValuesAndSegments},
+        {"undo and redo", testUndoRedo},
+        {"multi-lane copy/paste command", testMultiLanePasteCommand},
+        {"event and segment synchronization", testEventSegmentSynchronization},
+        {"markers, relations, and validation", testMarkersRelationsAndValidation},
+        {"SystemVerilog, SVA, and cocotb generation", testCodeGeneration},
+        {"SVG, PNG, PDF, and WaveDrom exports", testWaveformExports},
+        {"serialization round-trip", testSerializationRoundTrip},
+        {"schema migration", testSchemaMigration},
+        {"project directory move", testProjectDirectoryMove},
+        {"VCD import and indexed lookup", testVcdImportAndIndex},
+        {"CSV import and cancellation", testCsvImportAndCancellation},
+        {"trace example and million-transition index", testTraceExampleAndLargeIndex},
+        {"relation condition parsing and evaluation", testRelationConditions},
+        {"Expected/Actual compare rules", testExpectedActualCompareRules},
+        {"compare diagnostics, relations, and reports", testCompareDiagnosticsRelationsAndReports},
+        {"cross-application file and URI contracts", testCrossApplicationContracts},
+    };
+
+    int failures = 0;
+    for (const auto& [name, test] : tests) {
+        try {
+            test();
+            std::cout << "[PASS] " << name << '\n';
+        } catch (const std::exception& exception) {
+            ++failures;
+            std::cerr << "[FAIL] " << name << ": " << exception.what() << '\n';
+        }
+    }
+    std::cout << tests.size() - static_cast<std::size_t>(failures)
+              << "/" << tests.size() << " tests passed\n";
+    return failures == 0 ? 0 : 1;
+}

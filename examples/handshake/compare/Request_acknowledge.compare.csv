@@ -1,0 +1,5 @@
+id,kind,lane_id,trace_signal_id,start_tick,end_tick,expected,actual,message
+difference-1,value-mismatch,lane-ack,tb.dut.ack,110000,115000,1,0,Expected and actual values differ.
+difference-2,value-mismatch,lane-ack,tb.dut.ack,150000,155000,0,1,Expected and actual values differ.
+difference-3,value-mismatch,lane-data,tb.dut.data[7:0],150000,155000,0x00,00110101,Expected and actual values differ.
+difference-4,value-mismatch,lane-state,tb.dut.state[1:0],150000,155000,DONE,01,Expected and actual values differ.

@@ -1,0 +1,248 @@
+{
+    "schemaVersion": 1,
+    "projectId": "project-wave-workbench-demo",
+    "name": "Handshake timing",
+    "timebase": {
+        "picosecondsPerTick": "1"
+    },
+    "clockDomains": [
+        {
+            "id": "clock-main",
+            "name": "clk",
+            "periodTick": "10000",
+            "phaseTick": "0",
+            "dutyNumerator": "1",
+            "dutyDenominator": "2",
+            "activeEdge": "rising",
+            "resetRelation": "reset_n == 0"
+        }
+    ],
+    "scenarios": [
+        {
+            "id": "scenario-handshake",
+            "name": "Request / acknowledge",
+            "durationTick": "220000",
+            "lanes": [
+                {
+                    "id": "lane-clk",
+                    "name": "clk",
+                    "kind": "clock",
+                    "width": 1,
+                    "signed": false,
+                    "radix": "hexadecimal",
+                    "enumMap": {},
+                    "clockDomainId": "clock-main",
+                    "color": "#80cbc4",
+                    "height": 56,
+                    "visible": true,
+                    "groupId": "",
+                    "segments": [
+                        {"id": "segment-clk-gated", "startTick": "170000", "endTick": "190000", "value": "gated"},
+                        {"id": "segment-clk-disabled", "startTick": "200000", "endTick": "210000", "value": "disabled"}
+                    ]
+                },
+                {
+                    "id": "lane-reset",
+                    "name": "reset_n",
+                    "kind": "bit",
+                    "width": 1,
+                    "signed": false,
+                    "radix": "hexadecimal",
+                    "enumMap": {},
+                    "clockDomainId": "",
+                    "color": "#ffb74d",
+                    "height": 56,
+                    "visible": true,
+                    "groupId": "",
+                    "segments": [
+                        {"id": "segment-reset-low", "startTick": "0", "endTick": "40000", "value": "0"},
+                        {"id": "segment-reset-high", "startTick": "40000", "endTick": "220000", "value": "1"}
+                    ]
+                },
+                {
+                    "id": "group-handshake",
+                    "name": "Handshake signals",
+                    "kind": "group",
+                    "width": 1,
+                    "signed": false,
+                    "radix": "hexadecimal",
+                    "enumMap": {},
+                    "clockDomainId": "",
+                    "color": "#90a4ae",
+                    "height": 40,
+                    "visible": false,
+                    "groupId": "",
+                    "segments": []
+                },
+                {
+                    "id": "lane-request",
+                    "name": "req",
+                    "kind": "bit",
+                    "width": 1,
+                    "signed": false,
+                    "radix": "hexadecimal",
+                    "enumMap": {},
+                    "clockDomainId": "clock-main",
+                    "color": "#64b5f6",
+                    "height": 56,
+                    "visible": true,
+                    "groupId": "group-handshake",
+                    "segments": [
+                        {"id": "segment-req-low-a", "startTick": "0", "endTick": "80000", "value": "0"},
+                        {"id": "segment-req-high", "startTick": "80000", "endTick": "130000", "value": "1"},
+                        {"id": "segment-req-low-b", "startTick": "130000", "endTick": "220000", "value": "0"}
+                    ]
+                },
+                {
+                    "id": "lane-ack",
+                    "name": "ack",
+                    "kind": "bit",
+                    "width": 1,
+                    "signed": false,
+                    "radix": "hexadecimal",
+                    "enumMap": {},
+                    "clockDomainId": "clock-main",
+                    "color": "#81c784",
+                    "height": 56,
+                    "visible": true,
+                    "groupId": "group-handshake",
+                    "segments": [
+                        {"id": "segment-ack-low-a", "startTick": "0", "endTick": "110000", "value": "0"},
+                        {"id": "segment-ack-high", "startTick": "110000", "endTick": "150000", "value": "1"},
+                        {"id": "segment-ack-low-b", "startTick": "150000", "endTick": "220000", "value": "0"}
+                    ]
+                },
+                {
+                    "id": "lane-data",
+                    "name": "data[7:0]",
+                    "kind": "bus",
+                    "width": 8,
+                    "signed": false,
+                    "radix": "hexadecimal",
+                    "enumMap": {},
+                    "clockDomainId": "clock-main",
+                    "color": "#ce93d8",
+                    "height": 56,
+                    "visible": true,
+                    "groupId": "group-handshake",
+                    "segments": [
+                        {"id": "segment-data-idle-a", "startTick": "0", "endTick": "80000", "value": "0x00"},
+                        {"id": "segment-data-payload", "startTick": "80000", "endTick": "150000", "value": "0x35"},
+                        {"id": "segment-data-idle-b", "startTick": "150000", "endTick": "220000", "value": "0x00"}
+                    ]
+                },
+                {
+                    "id": "lane-state",
+                    "name": "state",
+                    "kind": "enum",
+                    "width": 2,
+                    "signed": false,
+                    "radix": "hexadecimal",
+                    "enumMap": {"IDLE": "0", "WAIT_ACK": "1", "DONE": "2"},
+                    "clockDomainId": "clock-main",
+                    "color": "#ef9a9a",
+                    "height": 56,
+                    "visible": true,
+                    "groupId": "group-handshake",
+                    "segments": [
+                        {"id": "segment-state-idle-a", "startTick": "0", "endTick": "80000", "value": "IDLE"},
+                        {"id": "segment-state-wait", "startTick": "80000", "endTick": "150000", "value": "WAIT_ACK"},
+                        {"id": "segment-state-done", "startTick": "150000", "endTick": "220000", "value": "DONE"}
+                    ]
+                },
+                {
+                    "id": "lane-transaction",
+                    "name": "transfer",
+                    "kind": "transaction",
+                    "width": 1,
+                    "signed": false,
+                    "radix": "hexadecimal",
+                    "enumMap": {},
+                    "clockDomainId": "clock-main",
+                    "color": "#b39ddb",
+                    "height": 56,
+                    "visible": true,
+                    "groupId": "group-handshake",
+                    "segments": [
+                        {
+                            "id": "segment-transaction-write",
+                            "startTick": "80000",
+                            "endTick": "155000",
+                            "value": "WRITE 0x35 · CRC 0xA7",
+                            "linkedResourceStableId": "frame-demo/frame-write/sample-35"
+                        }
+                    ]
+                }
+            ],
+            "events": [
+                {"id": "event-reset-low", "laneId": "lane-reset", "timeTick": "0", "action": "drive", "value": "0", "expectedResult": "", "clockDomainId": "clock-main", "description": "Assert reset", "linkedSegmentId": "segment-reset-low", "waveformLinked": true},
+                {"id": "event-req-low-a", "laneId": "lane-request", "timeTick": "0", "action": "drive", "value": "0", "expectedResult": "", "clockDomainId": "clock-main", "description": "Initial request", "linkedSegmentId": "segment-req-low-a", "waveformLinked": true},
+                {"id": "event-ack-low-a", "laneId": "lane-ack", "timeTick": "0", "action": "expect", "value": "0", "expectedResult": "ack is idle", "clockDomainId": "clock-main", "description": "Initial acknowledge", "linkedSegmentId": "segment-ack-low-a", "waveformLinked": true},
+                {"id": "event-data-idle-a", "laneId": "lane-data", "timeTick": "0", "action": "drive", "value": "0x00", "expectedResult": "", "clockDomainId": "clock-main", "description": "Initial data", "linkedSegmentId": "segment-data-idle-a", "waveformLinked": true},
+                {"id": "event-state-idle-a", "laneId": "lane-state", "timeTick": "0", "action": "expect", "value": "IDLE", "expectedResult": "state is IDLE", "clockDomainId": "clock-main", "description": "Initial state", "linkedSegmentId": "segment-state-idle-a", "waveformLinked": true},
+                {"id": "event-reset-high", "laneId": "lane-reset", "timeTick": "40000", "action": "drive", "value": "1", "expectedResult": "", "clockDomainId": "clock-main", "description": "Release reset", "linkedSegmentId": "segment-reset-high", "waveformLinked": true},
+                {"id": "event-req-high", "laneId": "lane-request", "timeTick": "80000", "action": "drive", "value": "1", "expectedResult": "", "clockDomainId": "clock-main", "description": "Raise request", "linkedSegmentId": "segment-req-high", "waveformLinked": true},
+                {"id": "event-data-payload", "laneId": "lane-data", "timeTick": "80000", "action": "drive", "value": "0x35", "expectedResult": "", "clockDomainId": "clock-main", "description": "Drive payload", "linkedSegmentId": "segment-data-payload", "waveformLinked": true},
+                {"id": "event-state-wait", "laneId": "lane-state", "timeTick": "80000", "action": "expect", "value": "WAIT_ACK", "expectedResult": "state waits for ack", "clockDomainId": "clock-main", "description": "Wait state", "linkedSegmentId": "segment-state-wait", "waveformLinked": true},
+                {"id": "event-ack-high", "laneId": "lane-ack", "timeTick": "110000", "action": "expect", "value": "1", "expectedResult": "ack rises", "clockDomainId": "clock-main", "description": "Acknowledge request", "linkedSegmentId": "segment-ack-high", "waveformLinked": true},
+                {"id": "event-req-low-b", "laneId": "lane-request", "timeTick": "130000", "action": "drive", "value": "0", "expectedResult": "", "clockDomainId": "clock-main", "description": "Drop request", "linkedSegmentId": "segment-req-low-b", "waveformLinked": true},
+                {"id": "event-ack-low-b", "laneId": "lane-ack", "timeTick": "150000", "action": "expect", "value": "0", "expectedResult": "ack clears", "clockDomainId": "clock-main", "description": "Complete acknowledge", "linkedSegmentId": "segment-ack-low-b", "waveformLinked": true},
+                {"id": "event-data-idle-b", "laneId": "lane-data", "timeTick": "150000", "action": "drive", "value": "0x00", "expectedResult": "", "clockDomainId": "clock-main", "description": "Clear payload", "linkedSegmentId": "segment-data-idle-b", "waveformLinked": true},
+                {"id": "event-state-done", "laneId": "lane-state", "timeTick": "150000", "action": "expect", "value": "DONE", "expectedResult": "transaction is complete", "clockDomainId": "clock-main", "description": "Done state", "linkedSegmentId": "segment-state-done", "waveformLinked": true}
+            ],
+            "relations": [
+                {
+                    "id": "relation-req-ack",
+                    "sourceEventId": "event-req-high",
+                    "targetEventId": "event-ack-high",
+                    "minimumDelayTick": "10000",
+                    "maximumDelayTick": "40000",
+                    "clockDomainId": "clock-main",
+                    "condition": "",
+                    "severity": "error",
+                    "description": "ack must rise within 1..4 cycles after req"
+                }
+            ],
+            "markers": [
+                {
+                    "id": "marker-transfer",
+                    "name": "Transfer",
+                    "startTick": "80000",
+                    "endTick": "150000",
+                    "kind": "phase",
+                    "note": "Request/acknowledge window"
+                }
+            ]
+        }
+    ],
+    "importedTraces": [
+        {
+            "id": "trace-handshake-actual",
+            "path": "traces/handshake_actual.vcd",
+            "format": "vcd",
+            "offsetTick": "0",
+            "signalMapping": {
+                "lane-clk": "tb.dut.clk",
+                "lane-reset": "tb.dut.reset_n",
+                "lane-request": "tb.dut.req",
+                "lane-ack": "tb.dut.ack",
+                "lane-data": "tb.dut.data[7:0]",
+                "lane-state": "tb.dut.state[1:0]"
+            }
+        }
+    ],
+    "linkedResources": [
+        {
+            "kind": "private-frame-sample",
+            "path": "integration/frame_sample_reference.json",
+            "stableId": "frame-demo/frame-write/sample-35",
+            "contentHash": "sha256:5dc7b3b9883bf905ef864fab4978014a65b58f219745ecd984d5a6b75f7409a4",
+            "summary": "WRITE payload 0x35, CRC 0xA7",
+            "frameProjectId": "frame-demo",
+            "frameId": "frame-write",
+            "sampleId": "sample-35",
+            "encodedBytes": "35A7"
+        }
+    ],
+    "exportSettings": {}
+}

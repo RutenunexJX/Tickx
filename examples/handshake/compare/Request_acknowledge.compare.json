@@ -1,0 +1,18 @@
+{
+  "projectId": "project-wave-workbench-demo",
+  "scenarioId": "scenario-handshake",
+  "traceId": "trace-handshake-actual",
+  "startTick": "0",
+  "endTick": "220000",
+  "traceOffsetTick": "0",
+  "firstMismatchTick": "110000",
+  "toleratedEdgeCount": 0,
+  "truncated": false,
+  "diagnostics": [],
+  "differences": [
+    {"id":"difference-1","kind":"value-mismatch","laneId":"lane-ack","traceSignalId":"tb.dut.ack","startTick":"110000","endTick":"115000","expected":"1","actual":"0","message":"Expected and actual values differ."},
+    {"id":"difference-2","kind":"value-mismatch","laneId":"lane-ack","traceSignalId":"tb.dut.ack","startTick":"150000","endTick":"155000","expected":"0","actual":"1","message":"Expected and actual values differ."},
+    {"id":"difference-3","kind":"value-mismatch","laneId":"lane-data","traceSignalId":"tb.dut.data[7:0]","startTick":"150000","endTick":"155000","expected":"0x00","actual":"00110101","message":"Expected and actual values differ."},
+    {"id":"difference-4","kind":"value-mismatch","laneId":"lane-state","traceSignalId":"tb.dut.state[1:0]","startTick":"150000","endTick":"155000","expected":"DONE","actual":"01","message":"Expected and actual values differ."}
+  ]
+}
