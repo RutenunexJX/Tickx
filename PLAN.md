@@ -1,6 +1,6 @@
 # Wave Workbench 实施计划
 
-更新时间：2026-07-24
+更新时间：2026-07-26
 
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
@@ -50,7 +50,7 @@ Total Test time: 0.36 sec
 - waveform-linked Event 与 Segment 使用稳定 ID 关联。
 - 画布区间编辑同步 Event；步骤表 time/value 修改同步 Segment；删除 Event 清除关联区间。
 - 步骤表排序、文本过滤、添加、删除和双击定位。
-- Transition 工具拖动 Event 并移动对应波形边沿。
+- Wave Edit 拖动 Bit Event 菱形并移动对应波形边沿，步骤表与 Segment 同步更新。
 - Marker 点/区间绘制。
 - 从 Event 到 Event 的 Relation 拖动创建、表格编辑和删除。
 - Relation source/target/min/max/clock/condition/severity/description 展示。
@@ -212,7 +212,7 @@ wave-bridge-pinloom-smoke: passed
 已交付：
 
 - 多 lane 矩形选择、`Ctrl` 增减选择、稳定 ID/相对 tick 复制粘贴、单命令撤销/重做。
-- Pulse 工具、`Alt` 临时绕过 snapping、transaction/event lane 区间编辑。
+- Pulse 工具、transaction/event lane 区间编辑；该阶段的 snapping/`Alt` 桌面交互已在持续迭代 11 移除。
 - 信号边沿和 marker 排序索引；鼠标吸附由全量扫描改为二分查找。
 - Groups 页签显示实际稳定 ID 分组及 unresolved 引用。
 - 1.5 秒防抖的 Qt Concurrent autosave；复制 Project 快照但不复制外部 trace 数据，
@@ -466,6 +466,8 @@ Offscreen canvas add-signal interaction: visible control, dialog, creation and U
 Offscreen screenshot visual QA: placement, contrast and lane-row alignment passed
 ```
 
+后续状态：该单一入口已在持续迭代 9 中替换为三个即时类型按钮。
+
 ## 持续迭代 7：光标模式增强
 
 状态：完成
@@ -501,6 +503,278 @@ Offscreen screenshot visual QA: sampled values, cursor colors and signed delta p
 Desktop interaction: none
 ```
 
+## 持续迭代 8：Wave Edit 直接波形编辑
+
+状态：完成
+
+已交付：
+
+- 初始版本新增独立 Wave Edit 工具动作；持续迭代 13 将其收敛为默认 Edit 工作状态，Cursor
+  退出后直接返回 Edit，不再恢复或暴露 Selection/Draw 等分散模式。
+- 单击非 Bit Segment 进行选择，以独立高亮和左右边界手柄显示当前对象；拖动任一边界时
+  实时预览，释放后以单个命令提交，同时保持相邻连续 Segment 的边界一致。
+- 双击 Clock、Bus、Enum、Transaction 或 Event 的现有 Segment 编辑其当前值；输入框以
+  原值初始化，非法值或会造成重叠的边界修改整体拒绝。
+- Bit lane 悬浮时高亮当前拍；单击始终只翻转该拍，不选中规范化后合并的同电平 Segment，
+  连续点击同一拍也不会扩大操作范围。拖动覆盖范围后批量翻转多拍；存在有效 clock domain
+  时按活动沿周期定义拍，否则使用 10 ns 固定网格。持续迭代 13 增加 Edit 中的 0/1/X/Z
+  键盘与波形右键输入，不再依赖 Draw 工具。
+- 新增 `EditSegmentCommand` 与 `ToggleBitRangeCommand`，完整支持 Undo/Redo，并同步维护
+  Bit、Bus、Enum lane 的 Event 表示。
+- 新增独立离屏 smoke，覆盖工具进入/退出、Segment 选择、左右边界拖动、双击修改现有值、
+  Bit 悬浮拍、同一拍连续点击及多拍翻转；核心测试覆盖命令原子性、稳定 ID、相邻边界及
+  Undo/Redo。
+
+验证证据：
+
+```text
+cmake --preset qtcreator-debug
+cmake --build --preset qtcreator-debug
+Result: success
+
+ctest --preset qtcreator-debug --output-on-failure
+19/19 tests passed
+Total Test time: 10.48 sec
+
+Core test suite: 24/24 passed
+Offscreen Wave Edit smoke: all specified mouse paths passed
+Offscreen screenshot visual QA: single-beat hover, selection handles, edited values and layout passed
+Desktop interaction: none
+```
+
+## 持续迭代 9：画布信号管理与工具收敛
+
+状态：完成
+
+已交付：
+
+- 画布末尾改为 `+ CLK`、`+ BIT`、`+ BUS` 三个即时创建按钮；名称自动唯一，颜色从可读
+  调色板随机选择并优先避开场景已有颜色。CLK 通过扩展的 `AddLaneCommand` 在同一撤销项中
+  创建并关联默认 clock domain；完整 Add lane 对话框的初始颜色也采用相同随机策略。
+- 左侧信号名支持拖动重排及插入线反馈，释放后只提交一个 `MoveLaneCommand`；双击使用短输入框
+  和 `ChangeLaneCommand` 重命名；单击后 Delete/Backspace 复用确认与依赖清理路径。
+- 右键信号名提供轻量参数编辑：Clock 支持 period/frequency，Bit 支持颜色、高度和 clock
+  domain，Bus 额外支持 width、signedness 和 radix，均通过现有命令栈提交。
+- 删除独立 Transition 工具，将 Bit Event 菱形拖动合并到 Wave Edit。拖动时不修改模型，以
+  虚线绘制边沿移动后的实时波形；释放后通过一个 `ChangeEventCommand` 同步 Event 与 Segment。
+- Waveform 工具栏不再显示 Undo/Redo，Edit 菜单、`Ctrl+Z`、`Ctrl+Y` 和命令栈保持有效。
+- 扩展全离屏 smoke，覆盖三个按钮、随机颜色、默认时钟域、双击重命名、右键参数、标题拖动、
+  Delete、快捷键、工具栏收敛、边沿非破坏预览、释放提交和撤销/重做；未操作桌面。
+
+验证证据：
+
+```text
+cmake --build build --parallel 4
+Result: success
+
+Core test suite: 24/24 passed
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+19/19 tests passed
+Total Test time: 8.05 sec
+
+Offscreen signal-management smoke: quick add, random colors, rename, parameters, reorder and delete passed
+Offscreen Wave Edit smoke: dashed transition preview, commit, Undo/Redo and mode exit passed
+Offscreen screenshot visual QA: three buttons, insertion line and transition preview passed
+Desktop interaction: none
+```
+
+## 持续迭代 10：纯波形工作区与局部边沿预览
+
+状态：完成
+
+已交付：
+
+- 主窗口中央组件直接使用 `WaveCanvas`，运行时不再创建 Project、Inspector、Scenario
+  `QDockWidget`；同步移除 Modes 工具栏及依赖旧面板的桌面 Trace/Pinloom 入口。工程保存、
+  波形编辑与导出继续保留，trace、compare 和跨应用能力仍由既有 CLI 与领域模块提供。
+- 撤销、重做、选中、工程重载和 Event 选择路径不再刷新或访问已删除面板；compare URI 的
+  兼容启动不会重新显示旧界面，仍可按 lane/tick 定位波形。
+- Bit Event 菱形拖动预览增加显式局部范围：从原/新边沿中较早位置开始，到该 Event 关联的
+  后继 Segment 结束。画笔以该范围裁剪虚线预览，前方未受影响波形不再被整条重绘为虚线。
+- 用 `wave-waveform-only-smoke` 替换旧面板截图 smoke，断言中央组件、零 Dock、无 Modes
+  工具栏及 Waveform 工具栏可见；Wave Edit smoke 同时断言局部预览范围和预览期间模型不变。
+
+验证证据：
+
+```text
+Qt Creator Debug build: success
+Core test suite: 24/24 passed
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+19/19 tests passed
+Total Test time: 6.30 sec
+
+Offscreen targeted smoke: 6/6 passed
+Offscreen screenshot visual QA: single WaveCanvas layout and localized Bit edge preview passed
+Desktop interaction: none
+```
+
+## 持续迭代 11：移除桌面吸附控件
+
+状态：完成
+
+已交付：
+
+- Waveform 工具栏删除 Snap 下拉框，不再显示 No snap、固定网格、主刻度、时钟边沿、
+  信号边沿或 Marker 等吸附选项。
+- 该迭代先将 WaveCanvas 固定为无吸附的直接整数 tick；持续迭代 12 在不恢复设置控件的前提下，
+  将其收敛为自动近距离轻吸附。领域层 snapping 算法继续作为独立时间库能力保留。
+- `wave-waveform-only-smoke` 断言工具栏无 `QComboBox` 且画布为无吸附模式；Wave Edit smoke
+  改为按像素实际映射 tick 验证 Segment 边界与 Bit 边沿拖动，移除对旧固定网格的隐含依赖。
+
+验证证据：
+
+```text
+Qt Creator Debug build: success
+Core test suite: 24/24 passed
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+19/19 tests passed
+Total Test time: 6.53 sec
+
+Offscreen targeted smoke: Wave Edit and waveform-only 2/2 passed
+Desktop interaction: none
+```
+
+## 持续迭代 12：轻吸附、画布层次与 Bus 快捷值
+
+状态：完成
+
+已交付：
+
+- 桌面端不恢复 Snap 下拉框；点击、拖动和光标移动在可见标尺刻度、Clock 边沿或任一信号
+  Segment 边沿 7 像素内自动选择最近候选，超出半径保持原始整数 tick，同距离时优先边沿。
+- 画布背景、标尺、标题区、网格和快速添加按钮调整为更浅的中性深色层次；选中 lane 的
+  waveform 背景改为低透明度叠加，既有纵向刻度和网格线继续可见。
+- Bus 未赋值区间统一按四态 `X` 绘制：使用居中红色虚线、淡红底和 `X` 标签；新建 Bus
+  因而立即具有明确的未定义显示，光标采样空白区也返回 `X`。
+- 单击 Bus 显示邻近浮动快捷框，提供 `Reserved`、`Don't care`、`X`、`Z` 和 `Value…`。
+  预设既可单击也可拖放，自定义值可直接输入；插入后以当前 clock domain 周期或默认 10 ns
+  创建一拍 Segment 并选中。快捷语义保存于 Segment 扩展，整个操作只产生一个可 Undo/Redo
+  的 `SetLaneRangeCommand`。
+- 核心测试覆盖快捷语义扩展的提交、撤销、重做及相邻同值 Segment 隔离；offscreen 快速添加
+  smoke 覆盖隐式 X、完整浮层、按钮单击、Don't care 拖放、波形右键值操作、Undo/Redo、
+  刻度轻吸附与边沿轻吸附。
+
+验证证据：
+
+```text
+Qt Creator Debug build: success
+Core test suite: 24/24 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+19/19 tests passed
+Total Test time: 6.38 sec
+
+Offscreen targeted smoke: core and canvas add-lane passed
+Offscreen screenshot visual QA: lighter canvas, visible grid through selection, Bus X line and four-button palette passed
+Desktop interaction: none
+```
+
+## 持续迭代 13：基础操作闭环与默认编辑模式
+
+状态：完成
+
+已交付：
+
+- 无参数启动时进入 200 ns 空白工程；`File > New…` / `Ctrl+N` 提供工程名、时长和时间基准，
+  创建一个可立即添加信号的空白 Scenario。
+- 波形工具栏收敛为 Edit 与 Cursor 两个主模式，Edit 默认激活且承担选择、输入、移动、缩放、
+  删除和范围操作；Cursor 再次点击后返回 Edit。
+- 非 Bit Segment 可拖动主体整体移动，按 Delete/Backspace 清除，右键直接编辑常用值；每次
+  移动或删除只提交一个命令并支持 Undo/Redo。
+- 新 Bit 空白区按隐式 0 显示；在 Edit 中按 `0`、`1`、`X`、`Z` 写入当前拍。Shift 拖动改为
+  跨 lane 时间范围选择，既保留 Bit 单拍/多拍翻转，也不再依赖旧 Select/Draw 模式。
+- Bus 浮层的四个预设支持单击和拖放，并增加 `Value…`；波形右键可直接设置 Bit、Bus、Clock
+  常用值、编辑完整 Segment 或清除为隐式状态。
+- 增加中键拖动与空格加左键拖动平移；Edit 时间光标支持方向键。自动吸附在画布上显示时间
+  提示，按住 Alt 可临时绕过。
+- 新增/扩展 offscreen smoke，覆盖新建空项目、默认 Edit、Segment 整体移动与删除撤销、Bit
+  四态键盘输入、Shift 跨 lane 框选、中键平移、Bus 按钮点击与波形右键菜单。
+
+验证证据：
+
+```text
+Qt/MinGW incremental build: success
+Core test suite: 24/24 passed
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+20/20 tests passed
+Total Test time: 7.76 sec
+
+Offscreen targeted smoke: canvas management, Wave Edit and new project 3/3 passed
+Offscreen screenshot visual QA: grid visibility, implicit Bus X, quick-value palette and localized edge preview passed
+Desktop interaction: none
+```
+## 持续迭代 14：任务闭环、直接编辑与双视角验收
+
+状态：完成
+
+已交付：
+
+- 空工程改为中央任务引导和三个直接入口。`+ CLK`、`+ BIT`、`+ BUS` 创建后在目标 lane 内
+  就地补齐名称、period 或 width；Enter 提交、Esc 取消。Clock domain 创建、自动/就地时钟
+  关联以及用户补齐的属性通过 `CommandStack::replaceLast` 合并为一个历史项，取消通过
+  `discardLast` 回滚，不产生幽灵 Undo。
+- `File > New` / `Ctrl+N` 改为立即创建 1 ps/tick、200 ns 的空白波形，不再弹出工程配置页。
+  标尺右上角增加 `End` 直接输入；合法时长由 `ChangeScenarioDurationCommand` 提交，缩短到
+  现有 Segment/Event/Marker 之前会原处报错，Esc 仅取消输入。
+- 状态栏增加常驻保存状态：`Not saved`、`Unsaved changes`、`Saved`、
+  `Recovery loaded · Save required`。恢复快照与正式保存不再混淆，首次保存 Untitled 工程从
+  文件名推断项目名。
+- 删除显式 Edit 按钮，波形编辑成为无模式默认行为；Cursor 收敛并更名为临时 `Measure`，
+  再次点击或 Esc 返回直接编辑。工具栏只保留 Measure、Zoom in/out、Fit scenario；Export
+  移至 File 菜单，Fit selection 不再占据主工具栏。
+- Bus 浮层改为“上下文 + 直接值输入 + 0/X/Z/Don't care”。非法输入保留浮层、焦点与错误提示，
+  正确输入按 Enter 即提交；旧 `Reserved` 扩展继续兼容为零值。Bit 悬浮拍显示翻转目标，Bit、
+  Bus、Segment 与边沿提交后均显示时间范围、结果和 Ctrl+Z 提示。
+- 保持此前 7 像素轻吸附、透明选中背景、Bus 隐式 X、Bit 单拍/多拍翻转、Segment 主体/边界
+  编辑和局部虚线边沿预览；所有 GUI 自动化继续使用 `QT_QPA_PLATFORM=offscreen`，未操作桌面。
+- 新增独立 `wave-user-journey-smoke`：从真实空白工程完成 CLK/Bit/Bus 内联创建、Bit 单拍编辑、
+  Bus 非法值纠错与直接赋值、时间轴非法缩短与合法延长、Measure 拖动与 Esc 退出、Save As、
+  文件回读及 1440×900 截图。该测试与开发回归分开执行。
+
+开发视角验收：
+
+```text
+cmake --build build --parallel 4
+Result: success
+
+cmake --build build/qtcreator-debug --parallel 4
+Result: success; wave-workbench/wave-tests and all CLI targets available
+
+Core test executable: 25/25 passed
+Million-transition metric: 26 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure -j 4
+21/21 tests passed
+Total Test time: 2.98 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure -j 4
+21/21 tests passed
+Total Test time: 2.72 sec
+
+git diff --check
+Result: clean
+Desktop interaction: none
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R ^wave-user-journey-smoke$ --output-on-failure
+1/1 passed
+Total Test time: 0.36 sec
+
+Saved project: build/qtcreator-debug/user-journey.wave.json
+Screenshot: build/qtcreator-debug/user-journey-smoke.png (1440×900)
+Visual QA: direct toolbar, three created lanes, transparent grid, Bus X baseline,
+           500 ns End control, edit cursor and Saved state are legible
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

@@ -483,6 +483,49 @@ void testLaneAndGroupPropertyEditing()
         rejectedReferencedGroupConversion,
         "referenced group conversion was not rejected");
 
+    wave::Project quickProject;
+    quickProject.id = "project-quick-clock";
+    quickProject.name = "Quick clock";
+    quickProject.timeBase = {1};
+    quickProject.scenarios.push_back({
+        "scenario-quick-clock",
+        "Quick clock",
+        100'000,
+        {},
+        {},
+        {},
+        {},
+        {},
+    });
+    auto& quickScenario = quickProject.scenarios.front();
+    wave::Lane quickClockLane;
+    quickClockLane.id = "lane-quick-clock";
+    quickClockLane.name = "clk";
+    quickClockLane.kind = wave::LaneKind::Clock;
+    quickClockLane.clockDomainId = "clock-quick";
+    wave::ClockDomain quickClock{
+        "clock-quick",
+        "clk",
+        10'000,
+        0,
+        {1, 2},
+        wave::ClockEdge::Rising,
+        {},
+        {},
+    };
+    wave::CommandStack quickStack;
+    quickStack.execute(std::make_unique<wave::AddLaneCommand>(
+        quickProject,
+        quickScenario,
+        quickClockLane,
+        quickClock));
+    expect(wave::findLane(quickScenario, quickClockLane.id), "quick clock lane was not added");
+    expect(wave::findClock(quickProject, quickClock.id), "quick clock domain was not added");
+    expect(quickStack.undo(), "quick clock add undo failed");
+    expect(!wave::findLane(quickScenario, quickClockLane.id), "quick clock lane survived undo");
+    expect(!wave::findClock(quickProject, quickClock.id), "quick clock domain survived undo");
+    expect(quickStack.redo(), "quick clock add redo failed");
+
     const auto roundTrip = wave::deserializeProject(wave::serializeProject(project));
     expect(roundTrip.ok(), "lane/group property project failed to reload");
     expectEqual(*roundTrip.project, project, "lane/group properties changed on reload");
@@ -748,12 +791,292 @@ void testUndoRedo()
     expect(stack.redo(), "redo failed");
     expectEqual(lane->segments, after, "redo did not restore the exact edit");
     expectEqual(stack.size(), std::size_t{1}, "one drag-style command must make one history entry");
+
+    auto* bus = wave::findLane(scenario, "lane-data");
+    expect(bus != nullptr, "demonstration bus lane is missing");
+    const auto busBefore = bus->segments;
+    wave::JsonExtensions presetExtensions{{
+        "waveWorkbench.busPreset",
+        "\"dont-care\"",
+    }};
+    wave::CommandStack presetStack;
+    presetStack.execute(std::make_unique<wave::SetLaneRangeCommand>(
+        scenario,
+        bus->id,
+        60'000,
+        70'000,
+        "0BXXXXXXXX",
+        presetExtensions));
+    const auto presetSegment = std::find_if(
+        bus->segments.begin(),
+        bus->segments.end(),
+        [](const wave::Segment& segment) {
+            return segment.start == 60'000
+                && segment.end == 70'000
+                && segment.value == "0bxxxxxxxx";
+        });
+    expect(presetSegment != bus->segments.end(), "preset range did not create an exact segment");
+    expectEqual(
+        presetSegment->extensions,
+        presetExtensions,
+        "preset range did not persist its semantic label");
+    const auto busAfter = bus->segments;
+    expect(presetStack.undo(), "preset range undo failed");
+    expectEqual(bus->segments, busBefore, "preset range undo did not restore the bus");
+    expect(presetStack.redo(), "preset range redo failed");
+    expectEqual(bus->segments, busAfter, "preset range redo lost the semantic label");
+
+    wave::Scenario adjacentScenario;
+    adjacentScenario.id = "scenario-adjacent-preset";
+    adjacentScenario.name = "Adjacent preset";
+    adjacentScenario.duration = 30;
+    wave::Lane adjacentBus;
+    adjacentBus.id = "bus-adjacent";
+    adjacentBus.name = "bus_adjacent";
+    adjacentBus.kind = wave::LaneKind::Bus;
+    adjacentBus.width = 8;
+    adjacentBus.segments = {
+        {"left", 0, 10, "0b00000000", {}},
+        {"right", 20, 30, "0b00000000", {}},
+    };
+    adjacentScenario.lanes.push_back(adjacentBus);
+    const wave::JsonExtensions reservedExtensions{{
+        "waveWorkbench.busPreset",
+        "\"reserved\"",
+    }};
+    wave::CommandStack adjacentStack;
+    adjacentStack.execute(std::make_unique<wave::SetLaneRangeCommand>(
+        adjacentScenario,
+        adjacentBus.id,
+        10,
+        20,
+        "0b00000000",
+        reservedExtensions));
+    const auto* editedBus = wave::findLane(adjacentScenario, adjacentBus.id);
+    expect(editedBus != nullptr, "adjacent preset bus was removed");
+    expectEqual(
+        editedBus->segments.size(),
+        std::size_t{3},
+        "preset semantics merged into adjacent ordinary bus values");
+    expectEqual(
+        editedBus->segments.at(1).extensions,
+        reservedExtensions,
+        "one-beat preset semantics were not limited to the inserted range");
+    expect(
+        editedBus->segments.front().extensions.empty()
+            && editedBus->segments.back().extensions.empty(),
+        "preset semantics leaked into adjacent bus values");
+}
+
+void testCommandStackReplacementAndDuration()
+{
+    wave::Scenario scenario;
+    scenario.id = "scenario-command-replacement";
+    scenario.name = "Command replacement";
+    scenario.duration = 100;
+
+    wave::Lane provisional;
+    provisional.id = "lane-new";
+    provisional.name = "bit";
+    provisional.kind = wave::LaneKind::Bit;
+    wave::CommandStack stack;
+    stack.execute(std::make_unique<wave::AddLaneCommand>(scenario, provisional));
+    auto completed = provisional;
+    completed.name = "valid";
+    stack.replaceLast(std::make_unique<wave::AddLaneCommand>(scenario, completed));
+    expectEqual(stack.size(), std::size_t{1}, "inline completion created two history entries");
+    expect(
+        wave::findLane(scenario, provisional.id)
+            && wave::findLane(scenario, provisional.id)->name == "valid",
+        "replacement command did not apply completed lane details");
+    expect(stack.undo(), "completed quick lane undo failed");
+    expect(!wave::findLane(scenario, provisional.id), "one undo did not remove the quick lane");
+    expect(stack.redo(), "completed quick lane redo failed");
+    expect(
+        wave::findLane(scenario, provisional.id)
+            && wave::findLane(scenario, provisional.id)->name == "valid",
+        "quick lane redo lost completed details");
+    expect(stack.discardLast(), "discarding the pending quick lane failed");
+    expect(!wave::findLane(scenario, provisional.id), "discard did not undo the pending lane");
+    expectEqual(stack.size(), std::size_t{0}, "discard retained a history entry");
+
+    wave::Project project;
+    project.id = "project-command-replacement";
+    project.name = "Clock replacement";
+    project.timeBase = {1};
+    project.scenarios.push_back({
+        "scenario-clock-replacement",
+        "Clock replacement",
+        100'000,
+        {},
+        {},
+        {},
+        {},
+        {},
+    });
+    auto& clockScenario = project.scenarios.front();
+    wave::Lane clockLane;
+    clockLane.id = "lane-clock-new";
+    clockLane.name = "clk";
+    clockLane.kind = wave::LaneKind::Clock;
+    clockLane.clockDomainId = "clock-new";
+    wave::ClockDomain clock{
+        "clock-new",
+        "clk",
+        10'000,
+        0,
+        {1, 2},
+        wave::ClockEdge::Rising,
+        {},
+        {},
+    };
+    wave::CommandStack clockStack;
+    clockStack.execute(std::make_unique<wave::AddLaneCommand>(
+        project,
+        clockScenario,
+        clockLane,
+        clock));
+    auto completedClockLane = clockLane;
+    completedClockLane.name = "sys_clk";
+    auto completedClock = clock;
+    completedClock.name = "sys_clk";
+    completedClock.period = 20'000;
+    clockStack.replaceLast(std::make_unique<wave::AddLaneCommand>(
+        project,
+        clockScenario,
+        completedClockLane,
+        completedClock));
+    expectEqual(clockStack.size(), std::size_t{1}, "clock completion created two history entries");
+    expect(
+        wave::findClock(project, clock.id)
+            && wave::findClock(project, clock.id)->period == 20'000,
+        "clock replacement did not apply the inline period");
+    expect(clockStack.undo(), "completed clock undo failed");
+    expect(
+        !wave::findLane(clockScenario, clockLane.id)
+            && !wave::findClock(project, clock.id),
+        "completed clock was not removed atomically");
+    expect(clockStack.redo(), "completed clock redo failed");
+    expect(
+        wave::findLane(clockScenario, clockLane.id)
+            && wave::findClock(project, clock.id),
+        "completed clock was not restored atomically");
+
+    wave::CommandStack durationStack;
+    durationStack.execute(std::make_unique<wave::ChangeScenarioDurationCommand>(
+        clockScenario,
+        500'000));
+    expectEqual(clockScenario.duration, wave::Tick{500'000}, "duration command did not apply");
+    expect(durationStack.undo(), "duration undo failed");
+    expectEqual(clockScenario.duration, wave::Tick{100'000}, "duration undo lost the original end");
+    expect(durationStack.redo(), "duration redo failed");
+    expectEqual(clockScenario.duration, wave::Tick{500'000}, "duration redo lost the new end");
+
+    bool rejectedInvalidDuration = false;
+    try {
+        [[maybe_unused]] wave::ChangeScenarioDurationCommand invalid(clockScenario, 0);
+    } catch (const std::invalid_argument&) {
+        rejectedInvalidDuration = true;
+    }
+    expect(rejectedInvalidDuration, "non-positive scenario duration was accepted");
+}
+void testDirectSegmentEditingCommands()
+{
+    wave::Scenario scenario;
+    scenario.id = "scenario-direct-edit";
+    scenario.name = "Direct edit";
+    scenario.duration = 100;
+
+    wave::Lane bit;
+    bit.id = "bit";
+    bit.name = "bit";
+    bit.kind = wave::LaneKind::Bit;
+    bit.segments = {
+        {"s0", 0, 20, "0", {}},
+        {"s1", 20, 40, "1", {}},
+        {"s2", 40, 60, "0", {}},
+    };
+    wave::Lane bus;
+    bus.id = "bus";
+    bus.name = "bus";
+    bus.kind = wave::LaneKind::Bus;
+    bus.width = 8;
+    bus.segments = {{"b0", 0, 60, "0x01", {}}};
+    scenario.lanes = {bit, bus};
+    const auto original = scenario;
+
+    wave::CommandStack stack;
+    stack.execute(std::make_unique<wave::EditSegmentCommand>(
+        scenario,
+        "bit",
+        "s1",
+        15,
+        45,
+        "1"));
+    auto* editedBit = wave::findLane(scenario, "bit");
+    expect(editedBit != nullptr, "edited bit lane is missing");
+    expectEqual(editedBit->segments.at(0).end, wave::Tick{15},
+                "left boundary edit did not resize the previous segment");
+    expectEqual(editedBit->segments.at(1).start, wave::Tick{15},
+                "left boundary edit did not move the selected segment");
+    expectEqual(editedBit->segments.at(1).end, wave::Tick{45},
+                "right boundary edit did not move the selected segment");
+    expectEqual(editedBit->segments.at(2).start, wave::Tick{45},
+                "right boundary edit did not resize the next segment");
+    expectEqual(stack.size(), std::size_t{1},
+                "one boundary drag must create one history entry");
+    expect(stack.undo(), "segment boundary undo failed");
+    expectEqual(scenario, original, "segment boundary undo did not restore the scenario");
+    expect(stack.redo(), "segment boundary redo failed");
+
+    stack.execute(std::make_unique<wave::EditSegmentCommand>(
+        scenario,
+        "bus",
+        "b0",
+        0,
+        60,
+        "0x2a"));
+    const auto* editedBus = wave::findLane(scenario, "bus");
+    expect(editedBus != nullptr && editedBus->segments.size() == 1,
+           "bus value edit changed the segment structure");
+    expectEqual(editedBus->segments.front().id, std::string{"b0"},
+                "bus value edit did not preserve the segment ID");
+    expectEqual(editedBus->segments.front().value, std::string{"0x2a"},
+                "bus value edit did not normalize the replacement value");
+    expect(stack.undo(), "segment value undo failed");
+
+    stack.clear();
+    scenario = original;
+    stack.execute(std::make_unique<wave::ToggleBitRangeCommand>(
+        scenario,
+        "bit",
+        std::vector<std::pair<wave::Tick, wave::Tick>>{{0, 10}, {20, 30}}));
+    editedBit = wave::findLane(scenario, "bit");
+    expect(editedBit != nullptr, "toggled bit lane is missing");
+    const auto valueAt = [editedBit](const wave::Tick tick) {
+        const auto iterator = std::find_if(
+            editedBit->segments.begin(),
+            editedBit->segments.end(),
+            [tick](const wave::Segment& segment) {
+                return segment.start <= tick && tick < segment.end;
+            });
+        return iterator == editedBit->segments.end() ? std::string{} : iterator->value;
+    };
+    expectEqual(valueAt(5), std::string{"1"}, "first selected beat was not toggled");
+    expectEqual(valueAt(15), std::string{"0"}, "unselected beat was modified");
+    expectEqual(valueAt(25), std::string{"0"}, "second selected beat was not toggled");
+    expectEqual(stack.size(), std::size_t{1},
+                "multi-beat toggle must create one history entry");
+    expect(stack.undo(), "multi-beat toggle undo failed");
+    expectEqual(scenario, original, "multi-beat toggle undo did not restore the scenario");
+    expect(stack.redo(), "multi-beat toggle redo failed");
 }
 
 void testMultiLanePasteCommand()
 {
     auto project = wave::makeDemonstrationProject();
     auto& scenario = project.scenarios.front();
+
     const auto before = scenario;
     wave::Segment requestSegment;
     requestSegment.start = 0;
@@ -1878,6 +2201,8 @@ int main(int argc, char* argv[])
         {"lane display reordering", testLaneReordering},
         {"lane values and segment merge/split", testLaneValuesAndSegments},
         {"undo and redo", testUndoRedo},
+        {"command replacement, cancel, and duration", testCommandStackReplacementAndDuration},
+        {"direct segment editing commands", testDirectSegmentEditingCommands},
         {"multi-lane copy/paste command", testMultiLanePasteCommand},
         {"event and segment synchronization", testEventSegmentSynchronization},
         {"markers, relations, and validation", testMarkersRelationsAndValidation},

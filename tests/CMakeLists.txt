@@ -38,7 +38,8 @@ add_test(
 )
 add_test(
     NAME wave-canvas-add-lane-smoke
-    COMMAND wave-workbench --canvas-add-lane-smoke
+    COMMAND wave-workbench
+            "--canvas-add-lane-smoke=${CMAKE_BINARY_DIR}/canvas-signal-management-smoke.png"
 )
 add_test(
     NAME wave-cursor-mode-smoke
@@ -46,15 +47,28 @@ add_test(
             "--cursor-mode-smoke=${CMAKE_BINARY_DIR}/cursor-mode-smoke.png"
 )
 add_test(
+    NAME wave-wave-edit-smoke
+    COMMAND wave-workbench
+            "--wave-edit-smoke=${CMAKE_BINARY_DIR}/wave-edit-smoke.png"
+)
+add_test(
+    NAME wave-new-project-smoke
+    COMMAND wave-workbench --new-project-smoke
+)
+add_test(
+    NAME wave-user-journey-smoke
+    COMMAND wave-workbench
+            "--user-journey-smoke=${CMAKE_BINARY_DIR}/user-journey.wave.json"
+)
+add_test(
     NAME wave-edit-menu-smoke
     COMMAND wave-workbench
             "--edit-menu-screenshot=${CMAKE_BINARY_DIR}/edit-menu-smoke.png"
 )
 add_test(
-    NAME wave-condition-compare-smoke
+    NAME wave-waveform-only-smoke
     COMMAND wave-workbench
-            "--condition-compare-screenshot=${CMAKE_BINARY_DIR}/condition-compare-smoke.png"
-            "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
+            "--waveform-only-smoke=${CMAKE_BINARY_DIR}/waveform-only-smoke.png"
 )
 add_test(
     NAME wave-uri-smoke
@@ -109,7 +123,7 @@ if(WIN32 AND EXISTS "C:/Windows/Fonts")
     list(APPEND _wave_test_environment "QT_QPA_FONTDIR=C:/Windows/Fonts")
 endif()
 set_tests_properties(
-    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-edit-menu-smoke wave-condition-compare-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
+    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
     wave-bridge-pinloom-smoke
     PROPERTIES
@@ -117,12 +131,12 @@ set_tests_properties(
         "PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
 )
 set_tests_properties(
-    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-edit-menu-smoke wave-condition-compare-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
+    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
     wave-bridge-pinloom-smoke
     PROPERTIES
     ENVIRONMENT "${_wave_test_environment}"
 )
-set_tests_properties(wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-edit-menu-smoke wave-condition-compare-smoke wave-uri-smoke PROPERTIES
+set_tests_properties(wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke PROPERTIES
     TIMEOUT 20
 )

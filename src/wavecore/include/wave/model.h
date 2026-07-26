@@ -228,7 +228,8 @@ void setSegmentRange(
     Tick start,
     Tick end,
     std::string value,
-    std::string stableId = {});
+    std::string stableId = {},
+    JsonExtensions extensions = {});
 void clearSegmentRange(Lane& lane, Tick start, Tick end);
 void synchronizeLaneEventsFromSegments(
     Scenario& scenario,

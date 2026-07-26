@@ -544,7 +544,8 @@ void normalizeSegments(Lane& lane)
         }
         if (!normalized.empty()
             && segment.start == normalized.back().end
-            && segment.value == normalized.back().value) {
+            && segment.value == normalized.back().value
+            && segment.extensions == normalized.back().extensions) {
             normalized.back().end = segment.end;
             continue;
         }
@@ -558,7 +559,8 @@ void setSegmentRange(
     const Tick start,
     const Tick end,
     std::string value,
-    std::string stableId)
+    std::string stableId,
+    JsonExtensions extensions)
 {
     if (start < 0 || end <= start) {
         throw std::invalid_argument("segment interval is invalid");
@@ -595,7 +597,7 @@ void setSegmentRange(
         start,
         end,
         std::move(value),
-        {},
+        std::move(extensions),
     });
     lane.segments = std::move(result);
     normalizeSegments(lane);

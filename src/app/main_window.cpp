@@ -9,7 +9,6 @@
 #include "wave_canvas.h"
 
 #include <QAction>
-#include <QActionGroup>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCheckBox>
@@ -31,6 +30,7 @@
 #include <QInputDialog>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSignalBlocker>
@@ -51,11 +51,13 @@
 #include <algorithm>
 #include <atomic>
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <limits>
 #include <map>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 namespace wave {
@@ -71,6 +73,68 @@ QString laneKindText(const LaneKind kind)
 {
     const auto text = toString(kind);
     return QString::fromLatin1(text.data(), static_cast<qsizetype>(text.size()));
+}
+
+std::string uniqueLaneName(const Scenario& scenario, const std::string_view base)
+{
+    const auto available = [&scenario](const std::string& candidate) {
+        return std::none_of(
+            scenario.lanes.begin(),
+            scenario.lanes.end(),
+            [&candidate](const Lane& lane) {
+                return QString::compare(
+                           QString::fromStdString(lane.name),
+                           QString::fromStdString(candidate),
+                           Qt::CaseInsensitive)
+                    == 0;
+            });
+    };
+    auto candidate = std::string(base);
+    if (available(candidate)) return candidate;
+    for (std::size_t suffix = 2;; ++suffix) {
+        candidate = std::string(base) + "_" + std::to_string(suffix);
+        if (available(candidate)) return candidate;
+    }
+}
+
+std::string randomReadableLaneColor(const Scenario& scenario)
+{
+    static constexpr std::array<std::string_view, 12> palette{
+        "#4fc3f7",
+        "#81c784",
+        "#ffb74d",
+        "#ba68c8",
+        "#e57373",
+        "#64b5f6",
+        "#ffd54f",
+        "#4db6ac",
+        "#f06292",
+        "#a1887f",
+        "#90a4ae",
+        "#7986cb",
+    };
+    std::vector<std::size_t> unused;
+    for (std::size_t index = 0; index < palette.size(); ++index) {
+        const auto color = QString::fromLatin1(
+            palette.at(index).data(),
+            static_cast<qsizetype>(palette.at(index).size()));
+        const auto used = std::any_of(
+            scenario.lanes.begin(),
+            scenario.lanes.end(),
+            [&color](const Lane& lane) {
+                return QString::compare(
+                           QString::fromStdString(lane.color),
+                           color,
+                           Qt::CaseInsensitive)
+                    == 0;
+            });
+        if (!used) unused.push_back(index);
+    }
+    const auto paletteIndex = unused.empty()
+        ? QRandomGenerator::global()->bounded(static_cast<int>(palette.size()))
+        : static_cast<int>(unused.at(static_cast<std::size_t>(
+              QRandomGenerator::global()->bounded(static_cast<int>(unused.size())))));
+    return std::string(palette.at(static_cast<std::size_t>(paletteIndex)));
 }
 
 QString actionText(const EventAction action)
@@ -609,6 +673,7 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     const auto recoveredSnapshot = projectFile_.endsWith(
         QStringLiteral(".autosave"),
         Qt::CaseInsensitive);
+    recoveryLoaded_ = recoveredSnapshot;
     if (recoveredSnapshot) {
         projectFile_ = projectPathForLoadedFile(projectFile_);
         dirty_ = true;
@@ -616,20 +681,42 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     setObjectName(QStringLiteral("WaveWorkbenchMainWindow"));
     setMinimumSize(960, 620);
     resize(1440, 900);
-    setDockOptions(AllowNestedDocks | AllowTabbedDocks | AnimatedDocks);
 
-    auto* waveformSplitter = new QSplitter(Qt::Vertical, this);
-    canvas_ = new WaveCanvas(waveformSplitter);
-    compareTraceCanvas_ = new TraceCanvas(waveformSplitter);
-    compareTraceCanvas_->setVisible(false);
-    waveformSplitter->addWidget(canvas_);
-    waveformSplitter->addWidget(compareTraceCanvas_);
-    waveformSplitter->setStretchFactor(0, 1);
-    waveformSplitter->setStretchFactor(1, 1);
-    waveformSplitter->setSizes({620, 300});
-    setCentralWidget(waveformSplitter);
+    canvas_ = new WaveCanvas(this);
+    setCentralWidget(canvas_);
+    compareTraceCanvas_ = new TraceCanvas(this);
+    compareTraceCanvas_->hide();
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
-    connect(canvas_, &WaveCanvas::addLaneRequested, this, &MainWindow::addLane);
+    connect(canvas_, &WaveCanvas::addLaneRequested, this, [this](const LaneKind kind) {
+        addQuickLane(kind);
+    });
+    connect(
+        canvas_,
+        &WaveCanvas::quickLaneSetupAccepted,
+        this,
+        &MainWindow::completeQuickLaneSetup);
+    connect(
+        canvas_,
+        &WaveCanvas::quickLaneSetupCanceled,
+        this,
+        &MainWindow::cancelQuickLaneSetup);
+    connect(
+        canvas_,
+        &WaveCanvas::durationEditRequested,
+        this,
+        &MainWindow::changeScenarioDuration);
+    connect(canvas_, &WaveCanvas::measureModeExitRequested, this, [this] {
+        if (markerAction_) markerAction_->setChecked(false);
+        canvas_->setTool(WaveCanvas::Tool::WaveEdit);
+        statusBar()->showMessage(tr("Direct waveform editing active"), 3'000);
+    });
+    connect(canvas_, &WaveCanvas::renameLaneRequested, this, &MainWindow::renameLaneById);
+    connect(canvas_, &WaveCanvas::removeLaneRequested, this, &MainWindow::removeLaneById);
+    connect(
+        canvas_,
+        &WaveCanvas::editLaneParametersRequested,
+        this,
+        &MainWindow::showLaneContextMenu);
     connect(canvas_, &WaveCanvas::selectionChanged, this, &MainWindow::updateSelection);
     connect(canvas_, &WaveCanvas::modelEdited, this, &MainWindow::markEdited);
     connect(canvas_, &WaveCanvas::commandAvailabilityChanged, this, &MainWindow::updateCommandActions);
@@ -650,7 +737,6 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
 
     createActions();
     createToolBars();
-    createDocks();
     traceWatcher_ = new QFutureWatcher<std::shared_ptr<TraceParseResult>>(this);
     connect(
         traceWatcher_,
@@ -667,17 +753,17 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
         &QFutureWatcher<QPair<quint64, QString>>::finished,
         this,
         &MainWindow::finishAutosave);
-    populateSignalTree();
-    populateClockTree();
-    populateLinkedResources();
-    populateBottomTables();
+    saveStateLabel_ = new QLabel(this);
+    saveStateLabel_->setObjectName(QStringLiteral("SaveStateLabel"));
+    saveStateLabel_->setMinimumWidth(118);
+    saveStateLabel_->setAlignment(Qt::AlignCenter);
+    statusBar()->addPermanentWidget(saveStateLabel_);
     updateCommandActions();
     updateWindowTitle();
     statusBar()->showMessage(
         recoveredSnapshot
             ? tr("Recovery snapshot loaded; save to commit it to %1").arg(projectFile_)
             : tr("Ready"));
-    loadFirstTraceReference();
 }
 
 const Project& MainWindow::project() const noexcept
@@ -687,11 +773,9 @@ const Project& MainWindow::project() const noexcept
 
 void MainWindow::requestCompareMode()
 {
-    compareModeRequested_ = true;
-    if (compareModeAction_) compareModeAction_->setChecked(true);
-    compareTraceCanvas_->setVisible(true);
-    if (bottomTabs_ && comparePanel_) bottomTabs_->setCurrentWidget(comparePanel_);
-    if (traceIndex_) runCompare();
+    compareModeRequested_ = false;
+    if (compareTraceCanvas_) compareTraceCanvas_->hide();
+    statusBar()->showMessage(tr("Waveform-only workspace active"), 3'000);
 }
 
 void MainWindow::revealLocation(const QString& laneId, const Tick tick)
@@ -710,7 +794,7 @@ void MainWindow::revealLocation(const QString& laneId, const Tick tick)
         canvas_->setFocus(Qt::OtherFocusReason);
     }
     if (traceIndex_) {
-        traceCanvas_->revealTick(tick);
+        if (traceCanvas_) traceCanvas_->revealTick(tick);
         compareTraceCanvas_->revealTick(tick);
     }
 }
@@ -729,6 +813,7 @@ void MainWindow::openEditMenuPreview()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (confirmDiscardChanges()) {
         if (traceCancelFlag_) traceCancelFlag_->store(true);
         event->accept();
@@ -739,6 +824,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 void MainWindow::openProject()
 {
+    if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (!confirmDiscardChanges()) return;
     const auto path = QFileDialog::getOpenFileName(
         this,
@@ -750,6 +836,10 @@ void MainWindow::openProject()
 
 void MainWindow::saveProject()
 {
+    if (!pendingQuickLaneId_.isEmpty()) {
+        canvas_->showQuickLaneSetupError(tr("Press Enter to finish this signal before saving."));
+        return;
+    }
     if (projectFile_.isEmpty()) {
         saveProjectAs();
         return;
@@ -759,6 +849,10 @@ void MainWindow::saveProject()
 
 void MainWindow::saveProjectAs()
 {
+    if (!pendingQuickLaneId_.isEmpty()) {
+        canvas_->showQuickLaneSetupError(tr("Press Enter to finish this signal before saving."));
+        return;
+    }
     const auto suggested = projectFile_.isEmpty()
         ? QStringLiteral("project.wave.json")
         : projectFile_;
@@ -772,14 +866,15 @@ void MainWindow::saveProjectAs()
 
 void MainWindow::undo()
 {
+    if (!pendingQuickLaneId_.isEmpty()) {
+        cancelQuickLaneSetup(pendingQuickLaneId_);
+        return;
+    }
     if (commandStack_.undo()) {
         invalidateCompareResult();
         dirty_ = true;
         scheduleAutosave();
         canvas_->refreshModel();
-        populateSignalTree();
-        populateClockTree();
-        populateBottomTables();
         updateCommandActions();
         updateWindowTitle();
     }
@@ -787,14 +882,15 @@ void MainWindow::undo()
 
 void MainWindow::redo()
 {
+    if (!pendingQuickLaneId_.isEmpty()) {
+        canvas_->showQuickLaneSetupError(tr("Finish or cancel the current signal first."));
+        return;
+    }
     if (commandStack_.redo()) {
         invalidateCompareResult();
         dirty_ = true;
         scheduleAutosave();
         canvas_->refreshModel();
-        populateSignalTree();
-        populateClockTree();
-        populateBottomTables();
         updateCommandActions();
         updateWindowTitle();
     }
@@ -805,43 +901,14 @@ void MainWindow::markEdited()
     invalidateCompareResult();
     dirty_ = true;
     scheduleAutosave();
-    populateSignalTree();
-    populateClockTree();
-    populateBottomTables();
     updateCommandActions();
     updateWindowTitle();
 }
 
 void MainWindow::updateSelection(const QString& laneId, const qint64 tick)
 {
-    inspectorTree_->clear();
-    const auto* scenario = activeScenario();
-    const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
-    if (!lane) {
-        updateLaneOrderActions();
-        return;
-    }
-
-    const auto radixName = toString(lane->radix);
-    const std::array<std::pair<QString, QString>, 13> rows{{
-        {tr("Stable ID"), QString::fromStdString(lane->id)},
-        {tr("Name"), QString::fromStdString(lane->name)},
-        {tr("Kind"), laneKindText(lane->kind)},
-        {tr("Width"), QString::number(lane->width)},
-        {tr("Signed"), lane->isSigned ? tr("yes") : tr("no")},
-        {tr("Radix"), QString::fromLatin1(radixName.data(), static_cast<qsizetype>(radixName.size()))},
-        {tr("Clock domain"), QString::fromStdString(lane->clockDomainId)},
-        {tr("Group"), QString::fromStdString(lane->groupId)},
-        {tr("Color"), QString::fromStdString(lane->color)},
-        {tr("Height"), QString::number(lane->height)},
-        {tr("Visible"), lane->visible ? tr("yes") : tr("no")},
-        {tr("Segments"), QString::number(lane->segments.size())},
-        {tr("Cursor"), QString::fromStdString(formatTick(tick, project_.timeBase))},
-    }};
-    for (const auto& [name, value] : rows) {
-        inspectorTree_->addTopLevelItem(new QTreeWidgetItem({name, value}));
-    }
-    inspectorTree_->resizeColumnToContents(0);
+    Q_UNUSED(laneId)
+    Q_UNUSED(tick)
     updateLaneOrderActions();
 }
 
@@ -860,6 +927,43 @@ void MainWindow::updateCommandActions()
     updateLaneOrderActions();
 }
 
+void MainWindow::newProject()
+{
+    if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
+    if (!confirmDiscardChanges()) return;
+
+    Project replacement;
+    replacement.id = makeStableId("project");
+    replacement.name = "Untitled";
+    replacement.timeBase.picosecondsPerTick = 1;
+    Scenario scenario;
+    scenario.id = makeStableId("scenario");
+    scenario.name = "Waveform";
+    scenario.duration = toTicks(200, TimeUnit::Nanosecond, replacement.timeBase)
+                            .value_or(Tick{200'000});
+    replacement.scenarios.push_back(std::move(scenario));
+
+    if (autosaveTimer_) autosaveTimer_->stop();
+    ++autosaveGeneration_;
+    autosavePending_ = false;
+    traceIndex_.reset();
+    activeTraceId_.clear();
+    traceVisibleSignalIds_.clear();
+    project_ = std::move(replacement);
+    projectFile_.clear();
+    recoveryLoaded_ = false;
+    commandStack_.clear();
+    dirty_ = false;
+    canvas_->setDocument(&project_, activeScenario(), &commandStack_);
+    canvas_->setTool(WaveCanvas::Tool::WaveEdit);
+    if (markerAction_) markerAction_->setChecked(false);
+    updateCommandActions();
+    updateWindowTitle();
+    invalidateCompareResult();
+    statusBar()->showMessage(
+        tr("Blank 200 ns waveform ready · add CLK, BIT or BUS"),
+        5'000);
+}
 void MainWindow::addLane()
 {
     auto* scenario = activeScenario();
@@ -868,7 +972,7 @@ void MainWindow::addLane()
     lane.id = makeStableId("lane");
     lane.name = "signal";
     lane.kind = LaneKind::Bit;
-    lane.color = "#4fc3f7";
+    lane.color = randomReadableLaneColor(*scenario);
     const auto replacement = promptLaneProperties(
         this,
         project_,
@@ -904,6 +1008,316 @@ void MainWindow::addLane()
     selectLaneItem(groupTree_, QString::fromStdString(replacement->id));
 }
 
+void MainWindow::addQuickLane(const LaneKind kind)
+{
+    auto* scenario = activeScenario();
+    if (!scenario
+        || (kind != LaneKind::Clock
+            && kind != LaneKind::Bit
+            && kind != LaneKind::Bus)) {
+        return;
+    }
+    if (!pendingQuickLaneId_.isEmpty()) {
+        canvas_->showQuickLaneSetupError(tr("Press Enter or Esc before adding another signal."));
+        return;
+    }
+
+    const auto baseName = kind == LaneKind::Clock
+        ? std::string_view{"clk"}
+        : kind == LaneKind::Bit
+            ? std::string_view{"bit"}
+            : std::string_view{"bus"};
+    Lane lane;
+    lane.id = makeStableId("lane");
+    lane.name = uniqueLaneName(*scenario, baseName);
+    lane.kind = kind;
+    lane.width = kind == LaneKind::Bus ? 8U : 1U;
+    lane.radix = kind == LaneKind::Bit ? Radix::Binary : Radix::Hexadecimal;
+    lane.color = randomReadableLaneColor(*scenario);
+    lane.height = 56;
+    if (kind != LaneKind::Clock && project_.clockDomains.size() == 1) {
+        lane.clockDomainId = project_.clockDomains.front().id;
+    }
+
+    try {
+        if (kind == LaneKind::Clock) {
+            ClockDomain clock;
+            clock.id = makeStableId("clock");
+            clock.name = lane.name;
+            clock.period = std::max<Tick>(
+                1,
+                static_cast<Tick>(std::llround(
+                    10'000.0
+                    / static_cast<double>(std::max<std::int64_t>(
+                        1, project_.timeBase.picosecondsPerTick)))));
+            clock.phase = 0;
+            clock.dutyCycle = {1, 2};
+            clock.activeEdge = ClockEdge::Rising;
+            lane.clockDomainId = clock.id;
+            commandStack_.execute(std::make_unique<AddLaneCommand>(
+                project_,
+                *scenario,
+                lane,
+                std::move(clock)));
+        } else {
+            commandStack_.execute(std::make_unique<AddLaneCommand>(*scenario, lane));
+        }
+    } catch (const std::exception& exception) {
+        QMessageBox::warning(
+            this,
+            tr("Cannot add lane"),
+            QString::fromUtf8(exception.what()));
+        return;
+    }
+
+    quickLaneDirtyBefore_ = dirty_;
+    pendingQuickLaneId_ = QString::fromStdString(lane.id);
+    pendingQuickCommandSize_ = commandStack_.size();
+    if (autosaveTimer_) autosaveTimer_->stop();
+    ++autosaveGeneration_;
+    if (autosaveWatcher_ && autosaveWatcher_->isRunning()) {
+        autosavePending_ = quickLaneDirtyBefore_ && !projectFile_.isEmpty();
+    }
+    canvas_->refreshModel();
+    updateCommandActions();
+    canvas_->revealLocation(pendingQuickLaneId_, canvas_->cursorTick());
+
+    QStringList clockLabels;
+    QStringList clockIds;
+    if (kind != LaneKind::Clock) {
+        for (const auto& clock : project_.clockDomains) {
+            clockLabels.push_back(QString::fromStdString(clock.name));
+            clockIds.push_back(QString::fromStdString(clock.id));
+        }
+    }
+    QString parameter;
+    if (kind == LaneKind::Clock) {
+        if (const auto* clock = findClock(project_, lane.clockDomainId)) {
+            parameter = QString::fromStdString(formatTick(clock->period, project_.timeBase));
+        }
+    } else if (kind == LaneKind::Bus) {
+        parameter = QString::number(lane.width);
+    }
+    canvas_->beginQuickLaneSetup(
+        pendingQuickLaneId_,
+        kind,
+        QString::fromStdString(lane.name),
+        parameter,
+        clockLabels,
+        clockIds,
+        QString::fromStdString(lane.clockDomainId));
+    statusBar()->showMessage(
+        tr("Name the new signal, then press Enter · Esc cancels"),
+        6'000);
+}
+
+void MainWindow::completeQuickLaneSetup(
+    const QString& laneId,
+    const QString& name,
+    const QString& parameter,
+    const QString& clockId)
+{
+    auto* scenario = activeScenario();
+    if (!scenario || laneId != pendingQuickLaneId_) return;
+    if (commandStack_.size() != pendingQuickCommandSize_ || !commandStack_.canUndo()) {
+        canvas_->showQuickLaneSetupError(
+            tr("Another edit interrupted signal creation; undo it before continuing."));
+        return;
+    }
+    auto* lane = findLane(*scenario, laneId.toStdString());
+    if (!lane) {
+        cancelQuickLaneSetup(laneId);
+        return;
+    }
+    if (name.trimmed().isEmpty()) {
+        canvas_->showQuickLaneSetupError(tr("Signal name cannot be empty."));
+        return;
+    }
+    const auto duplicateName = std::any_of(
+        scenario->lanes.begin(),
+        scenario->lanes.end(),
+        [&laneId, &name](const Lane& candidate) {
+            return QString::fromStdString(candidate.id) != laneId
+                && QString::compare(
+                       QString::fromStdString(candidate.name),
+                       name.trimmed(),
+                       Qt::CaseInsensitive)
+                    == 0;
+        });
+    if (duplicateName) {
+        canvas_->showQuickLaneSetupError(tr("A signal with this name already exists."));
+        return;
+    }
+
+    auto replacement = *lane;
+    replacement.name = name.trimmed().toStdString();
+    try {
+        if (replacement.kind == LaneKind::Clock) {
+            QString error;
+            std::optional<std::int64_t> unusedCycle;
+            const auto period = parseTimeText(
+                parameter,
+                project_.timeBase,
+                nullptr,
+                unusedCycle,
+                error);
+            if (!period || *period <= 0) {
+                canvas_->showQuickLaneSetupError(
+                    error.isEmpty() ? tr("Clock period must be greater than zero.") : error,
+                    true);
+                return;
+            }
+            const auto* currentClock = findClock(project_, replacement.clockDomainId);
+            if (!currentClock) {
+                canvas_->showQuickLaneSetupError(tr("The new clock domain is unavailable."));
+                return;
+            }
+            auto updatedClock = *currentClock;
+            updatedClock.name = replacement.name;
+            updatedClock.period = *period;
+            commandStack_.replaceLast(std::make_unique<AddLaneCommand>(
+                project_,
+                *scenario,
+                replacement,
+                std::move(updatedClock)));
+        } else {
+            if (replacement.kind == LaneKind::Bus) {
+                bool validWidth = false;
+                const auto width = parameter.toUInt(&validWidth);
+                if (!validWidth || width == 0 || width > 64) {
+                    canvas_->showQuickLaneSetupError(tr("Bus width must be from 1 to 64."), true);
+                    return;
+                }
+                replacement.width = width;
+            }
+            auto selectedClockId = clockId.toStdString();
+            if (selectedClockId.empty() && project_.clockDomains.size() == 1) {
+                selectedClockId = project_.clockDomains.front().id;
+            }
+            if (!selectedClockId.empty() && !findClock(project_, selectedClockId)) {
+                canvas_->showQuickLaneSetupError(tr("Select an available clock."));
+                return;
+            }
+            replacement.clockDomainId = std::move(selectedClockId);
+            commandStack_.replaceLast(std::make_unique<AddLaneCommand>(
+                *scenario,
+                replacement));
+        }
+    } catch (const std::exception& exception) {
+        canvas_->showQuickLaneSetupError(QString::fromUtf8(exception.what()));
+        return;
+    }
+
+    pendingQuickLaneId_.clear();
+    pendingQuickCommandSize_ = 0;
+    quickLaneDirtyBefore_ = false;
+    canvas_->finishQuickLaneSetup();
+    canvas_->refreshModel();
+    markEdited();
+    canvas_->revealLocation(laneId, canvas_->cursorTick());
+    statusBar()->showMessage(
+        tr("Added %1 · Ctrl+Z to undo").arg(name.trimmed()),
+        5'000);
+}
+
+void MainWindow::cancelQuickLaneSetup(const QString& laneId)
+{
+    if (laneId.isEmpty() || laneId != pendingQuickLaneId_) return;
+    if (commandStack_.size() != pendingQuickCommandSize_ || !commandStack_.canUndo()) {
+        canvas_->showQuickLaneSetupError(
+            tr("Another edit interrupted signal creation; undo it before canceling."));
+        return;
+    }
+    try {
+        if (!commandStack_.discardLast()) {
+            canvas_->showQuickLaneSetupError(tr("The pending signal cannot be canceled."));
+            return;
+        }
+    } catch (const std::exception& exception) {
+        canvas_->showQuickLaneSetupError(QString::fromUtf8(exception.what()));
+        return;
+    }
+    const auto restoreDirty = quickLaneDirtyBefore_;
+    pendingQuickLaneId_.clear();
+    pendingQuickCommandSize_ = 0;
+    quickLaneDirtyBefore_ = false;
+    dirty_ = restoreDirty;
+    canvas_->finishQuickLaneSetup();
+    canvas_->refreshModel();
+    updateCommandActions();
+    updateWindowTitle();
+    if (dirty_) scheduleAutosave();
+    statusBar()->showMessage(tr("Signal creation canceled"), 3'000);
+}
+
+Tick MainWindow::latestContentTick(const Scenario& scenario) const noexcept
+{
+    Tick latest = 0;
+    for (const auto& lane : scenario.lanes) {
+        for (const auto& segment : lane.segments) {
+            latest = std::max(latest, segment.end);
+        }
+    }
+    for (const auto& event : scenario.events) {
+        latest = std::max(
+            latest,
+            event.tick == std::numeric_limits<Tick>::max()
+                ? event.tick
+                : event.tick + 1);
+    }
+    for (const auto& marker : scenario.markers) {
+        latest = std::max(latest, std::max(marker.start, marker.end));
+    }
+    return latest;
+}
+
+void MainWindow::changeScenarioDuration(const QString& value)
+{
+    auto* scenario = activeScenario();
+    if (!scenario) return;
+    QString error;
+    std::optional<std::int64_t> unusedCycle;
+    const auto duration = parseTimeText(
+        value,
+        project_.timeBase,
+        nullptr,
+        unusedCycle,
+        error);
+    if (!duration || *duration <= 0) {
+        canvas_->showDurationEditError(
+            error.isEmpty() ? tr("Timeline end must be greater than zero.") : error);
+        return;
+    }
+    const auto required = latestContentTick(*scenario);
+    if (*duration < required) {
+        canvas_->showDurationEditError(
+            tr("Timeline cannot end before existing content at %1.")
+                .arg(QString::fromStdString(formatTick(required, project_.timeBase))));
+        return;
+    }
+    if (*duration == scenario->duration) {
+        canvas_->setFocus(Qt::OtherFocusReason);
+        canvas_->refreshModel();
+        statusBar()->showMessage(tr("Timeline end is unchanged"), 2'000);
+        return;
+    }
+    try {
+        commandStack_.execute(std::make_unique<ChangeScenarioDurationCommand>(
+            *scenario,
+            *duration));
+    } catch (const std::exception& exception) {
+        canvas_->showDurationEditError(QString::fromUtf8(exception.what()));
+        return;
+    }
+    canvas_->setFocus(Qt::OtherFocusReason);
+    canvas_->refreshModel();
+    canvas_->fitScenario();
+    markEdited();
+    statusBar()->showMessage(
+        tr("Timeline end changed to %1 · Ctrl+Z to undo")
+            .arg(QString::fromStdString(formatTick(*duration, project_.timeBase))),
+        5'000);
+}
 void MainWindow::addGroup()
 {
     auto* scenario = activeScenario();
@@ -946,6 +1360,61 @@ void MainWindow::editSelectedLane()
     editLaneById(selectedLaneIdForEditing());
 }
 
+void MainWindow::renameLaneById(const QString& laneId)
+{
+    auto* scenario = activeScenario();
+    auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
+    if (!lane || lane->kind == LaneKind::Group) return;
+
+    QInputDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("RenameLaneDialog"));
+    dialog.setWindowTitle(tr("Rename signal"));
+    dialog.setLabelText(tr("Signal name"));
+    dialog.setInputMode(QInputDialog::TextInput);
+    dialog.setTextValue(QString::fromStdString(lane->name));
+    dialog.setOkButtonText(tr("Rename"));
+    dialog.resize(360, dialog.sizeHint().height());
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const auto name = dialog.textValue().trimmed();
+    if (name.isEmpty()) {
+        QMessageBox::warning(this, tr("Invalid name"), tr("Signal name cannot be empty."));
+        return;
+    }
+    const auto duplicate = std::any_of(
+        scenario->lanes.begin(),
+        scenario->lanes.end(),
+        [&laneId, &name](const Lane& candidate) {
+            return candidate.id != laneId.toStdString()
+                && QString::compare(
+                       QString::fromStdString(candidate.name),
+                       name,
+                       Qt::CaseInsensitive)
+                    == 0;
+        });
+    if (duplicate) {
+        QMessageBox::warning(
+            this,
+            tr("Invalid name"),
+            tr("Another signal already uses this name."));
+        return;
+    }
+    if (name == QString::fromStdString(lane->name)) return;
+
+    auto replacement = *lane;
+    replacement.name = name.toStdString();
+    try {
+        commandStack_.execute(std::make_unique<ChangeLaneCommand>(
+            project_, *scenario, lane->id, std::move(replacement)));
+    } catch (const std::exception& exception) {
+        QMessageBox::warning(this, tr("Cannot rename signal"), QString::fromUtf8(exception.what()));
+        return;
+    }
+    canvas_->refreshModel();
+    markEdited();
+    canvas_->revealLocation(laneId, canvas_->cursorTick());
+}
+
 QString MainWindow::selectedLaneIdForEditing() const
 {
     const auto itemLaneId = [](const QTreeWidgetItem* item) {
@@ -972,8 +1441,12 @@ QString MainWindow::selectedLaneIdForEditing() const
 
 void MainWindow::removeSelectedLane()
 {
+    removeLaneById(selectedLaneIdForEditing());
+}
+
+void MainWindow::removeLaneById(const QString& laneId)
+{
     auto* scenario = activeScenario();
-    const auto laneId = selectedLaneIdForEditing();
     const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
     if (!lane) return;
 
@@ -1006,6 +1479,198 @@ void MainWindow::removeSelectedLane()
     canvas_->refreshModel();
     updateSelection(QString{}, canvas_->cursorTick());
     markEdited();
+}
+
+void MainWindow::showLaneContextMenu(
+    const QString& laneId,
+    const QPoint& globalPosition)
+{
+    const auto* scenario = activeScenario();
+    const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
+    if (!lane || lane->kind == LaneKind::Group) return;
+
+    QMenu menu(this);
+    menu.setObjectName(QStringLiteral("LaneHeaderContextMenu"));
+    const auto label = lane->kind == LaneKind::Clock
+        ? tr("Clock frequency / period...")
+        : lane->kind == LaneKind::Bus
+            ? tr("Bus display parameters...")
+            : lane->kind == LaneKind::Bit
+                ? tr("Bit display parameters...")
+                : tr("Signal display parameters...");
+    auto* parameters = menu.addAction(label);
+    parameters->setObjectName(QStringLiteral("QuickLaneParametersAction"));
+    connect(parameters, &QAction::triggered, this, [this, laneId] {
+        editLaneKeyParameters(laneId);
+    });
+    menu.exec(globalPosition);
+}
+
+void MainWindow::editLaneKeyParameters(const QString& laneId)
+{
+    auto* scenario = activeScenario();
+    auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
+    if (!lane || lane->kind == LaneKind::Group) return;
+
+    if (lane->kind == LaneKind::Clock) {
+        const auto* original = findClock(project_, lane->clockDomainId);
+        if (!original) {
+            QMessageBox::warning(
+                this,
+                tr("Cannot edit clock"),
+                tr("The clock lane does not reference a valid clock domain."));
+            return;
+        }
+        QDialog dialog(this);
+        dialog.setObjectName(QStringLiteral("QuickClockParametersDialog"));
+        dialog.setWindowTitle(tr("Clock frequency / period"));
+        auto* layout = new QFormLayout(&dialog);
+        auto* mode = new QComboBox;
+        mode->setObjectName(QStringLiteral("ClockRateMode"));
+        mode->addItem(tr("Period"), QStringLiteral("period"));
+        mode->addItem(tr("Frequency (Hz)"), QStringLiteral("frequency"));
+        auto* value = new QLineEdit(
+            QString::fromStdString(formatTick(original->period, project_.timeBase)));
+        value->setObjectName(QStringLiteral("ClockRateValue"));
+        layout->addRow(tr("Edit as"), mode);
+        layout->addRow(tr("Value"), value);
+        auto* buttons = new QDialogButtonBox(
+            QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        layout->addRow(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        const auto ticksPerSecond = 1.0e12
+            / static_cast<double>(std::max<std::int64_t>(
+                1, project_.timeBase.picosecondsPerTick));
+        connect(mode, &QComboBox::currentIndexChanged, &dialog, [this, mode, value, original, ticksPerSecond](int) {
+            value->setText(mode->currentData().toString() == QStringLiteral("frequency")
+                ? QString::number(ticksPerSecond / static_cast<double>(original->period), 'g', 12)
+                : QString::fromStdString(formatTick(original->period, project_.timeBase)));
+        });
+        if (dialog.exec() != QDialog::Accepted) return;
+
+        std::optional<Tick> period;
+        QString parseError;
+        if (mode->currentData().toString() == QStringLiteral("frequency")) {
+            bool valid = false;
+            const auto frequency = value->text().trimmed().toDouble(&valid);
+            const auto computed = valid && std::isfinite(frequency) && frequency > 0.0
+                ? ticksPerSecond / frequency
+                : 0.0;
+            if (computed >= 1.0
+                && computed <= static_cast<double>(std::numeric_limits<Tick>::max())) {
+                period = static_cast<Tick>(std::llround(computed));
+            }
+        } else {
+            std::optional<std::int64_t> unusedCycle;
+            period = parseTimeText(
+                value->text(),
+                project_.timeBase,
+                nullptr,
+                unusedCycle,
+                parseError);
+        }
+        if (!period || *period <= 0) {
+            QMessageBox::warning(
+                this,
+                tr("Invalid clock rate"),
+                parseError.isEmpty()
+                    ? tr("Enter a positive period or a frequency that maps to at least one tick.")
+                    : parseError);
+            return;
+        }
+        auto replacement = *original;
+        replacement.period = *period;
+        try {
+            commandStack_.execute(std::make_unique<ChangeClockCommand>(
+                project_, *scenario, original->id, std::move(replacement)));
+        } catch (const std::exception& exception) {
+            QMessageBox::warning(this, tr("Cannot change clock"), QString::fromUtf8(exception.what()));
+            return;
+        }
+    } else {
+        QDialog dialog(this);
+        dialog.setObjectName(QStringLiteral("QuickLaneParametersDialog"));
+        dialog.setWindowTitle(
+            lane->kind == LaneKind::Bus ? tr("Bus parameters") : tr("Bit parameters"));
+        auto* layout = new QFormLayout(&dialog);
+        auto* color = new QLineEdit(QString::fromStdString(lane->color));
+        color->setObjectName(QStringLiteral("LaneColorEdit"));
+        auto* height = new QSpinBox;
+        height->setObjectName(QStringLiteral("LaneHeightSpin"));
+        height->setRange(30, 240);
+        height->setValue(lane->height);
+        auto* clock = new QComboBox;
+        clock->setObjectName(QStringLiteral("LaneClockDomainCombo"));
+        clock->addItem(tr("None"), QString{});
+        for (const auto& domain : project_.clockDomains) {
+            clock->addItem(
+                QString::fromStdString(domain.name),
+                QString::fromStdString(domain.id));
+        }
+        const auto clockIndex = clock->findData(QString::fromStdString(lane->clockDomainId));
+        clock->setCurrentIndex(std::max(0, clockIndex));
+        layout->addRow(tr("Color"), color);
+        layout->addRow(tr("Height"), height);
+        layout->addRow(tr("Clock domain"), clock);
+
+        QSpinBox* width = nullptr;
+        QCheckBox* signedValue = nullptr;
+        QComboBox* radix = nullptr;
+        if (lane->kind == LaneKind::Bus) {
+            width = new QSpinBox;
+            width->setObjectName(QStringLiteral("BusWidthSpin"));
+            width->setRange(1, 65'536);
+            width->setValue(static_cast<int>(std::min<std::uint32_t>(lane->width, 65'536)));
+            signedValue = new QCheckBox(tr("Signed values"));
+            signedValue->setObjectName(QStringLiteral("BusSignedCheck"));
+            signedValue->setChecked(lane->isSigned);
+            radix = new QComboBox;
+            radix->setObjectName(QStringLiteral("BusRadixCombo"));
+            for (const auto value : {Radix::Binary, Radix::Octal, Radix::Decimal, Radix::Hexadecimal}) {
+                const auto label = toString(value);
+                radix->addItem(
+                    QString::fromLatin1(label.data(), static_cast<qsizetype>(label.size())),
+                    static_cast<int>(value));
+            }
+            radix->setCurrentIndex(std::max(0, radix->findData(static_cast<int>(lane->radix))));
+            layout->addRow(tr("Width"), width);
+            layout->addRow(signedValue);
+            layout->addRow(tr("Radix"), radix);
+        }
+        auto* buttons = new QDialogButtonBox(
+            QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        layout->addRow(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        if (dialog.exec() != QDialog::Accepted) return;
+
+        const QColor parsedColor(color->text().trimmed());
+        if (!parsedColor.isValid()) {
+            QMessageBox::warning(this, tr("Invalid color"), tr("Enter a valid HTML color, such as #4fc3f7."));
+            return;
+        }
+        auto replacement = *lane;
+        replacement.color = parsedColor.name(QColor::HexRgb).toStdString();
+        replacement.height = height->value();
+        replacement.clockDomainId = clock->currentData().toString().toStdString();
+        if (lane->kind == LaneKind::Bus) {
+            replacement.width = static_cast<std::uint32_t>(width->value());
+            replacement.isSigned = signedValue->isChecked();
+            replacement.radix = static_cast<Radix>(radix->currentData().toInt());
+        }
+        try {
+            commandStack_.execute(std::make_unique<ChangeLaneCommand>(
+                project_, *scenario, lane->id, std::move(replacement)));
+        } catch (const std::exception& exception) {
+            QMessageBox::warning(this, tr("Cannot change lane"), QString::fromUtf8(exception.what()));
+            return;
+        }
+    }
+
+    canvas_->refreshModel();
+    markEdited();
+    canvas_->revealLocation(laneId, canvas_->cursorTick());
 }
 
 void MainWindow::moveSelectedLaneUp()
@@ -1406,6 +2071,7 @@ void MainWindow::revealSelectedEvent()
 
 void MainWindow::selectEventRow(const QString& eventId)
 {
+    if (!eventTable_) return;
     for (int row = 0; row < eventTable_->rowCount(); ++row) {
         const auto* item = eventTable_->item(row, 0);
         if (item && item->data(Qt::UserRole).toString() == eventId) {
@@ -1419,7 +2085,7 @@ void MainWindow::selectEventRow(const QString& eventId)
 void MainWindow::revealValidationIssue(const int row, const int column)
 {
     Q_UNUSED(column)
-    if (row < 0 || !validationTable_->item(row, 0)) return;
+    if (!validationTable_ || row < 0 || !validationTable_->item(row, 0)) return;
     const auto* item = validationTable_->item(row, 0);
     const auto laneId = item->data(Qt::UserRole).toString();
     const auto tick = item->data(Qt::UserRole + 1).toLongLong();
@@ -2217,6 +2883,10 @@ void MainWindow::exportPinloomEntry()
 void MainWindow::scheduleAutosave()
 {
     ++autosaveGeneration_;
+    if (!pendingQuickLaneId_.isEmpty()) {
+        autosavePending_ = dirty_ && !projectFile_.isEmpty();
+        return;
+    }
     if (!dirty_ || projectFile_.isEmpty() || !autosaveTimer_) return;
     if (autosaveWatcher_ && autosaveWatcher_->isRunning()) {
         autosavePending_ = true;
@@ -2227,6 +2897,10 @@ void MainWindow::scheduleAutosave()
 
 void MainWindow::startAutosave()
 {
+    if (!pendingQuickLaneId_.isEmpty()) {
+        autosavePending_ = dirty_ && !projectFile_.isEmpty();
+        return;
+    }
     if (!dirty_ || projectFile_.isEmpty() || !autosaveWatcher_) return;
     if (autosaveWatcher_->isRunning()) {
         autosavePending_ = true;
@@ -2259,6 +2933,10 @@ void MainWindow::finishAutosave()
         statusBar()->showMessage(tr("Autosaved recovery snapshot"), 3'000);
     }
     if (autosavePending_ || stale) {
+        if (!pendingQuickLaneId_.isEmpty()) {
+            autosavePending_ = dirty_ && !projectFile_.isEmpty();
+            return;
+        }
         autosavePending_ = false;
         if (dirty_ && !projectFile_.isEmpty()) autosaveTimer_->start(0);
     }
@@ -2267,6 +2945,14 @@ void MainWindow::finishAutosave()
 void MainWindow::createActions()
 {
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
+    auto* newAction = fileMenu->addAction(
+        themedIcon(QStringLiteral("document-new"), style(), QStyle::SP_FileIcon),
+        tr("&New"),
+        QKeySequence::New,
+        this,
+        &MainWindow::newProject);
+    newAction->setObjectName(QStringLiteral("NewProjectAction"));
+    newAction->setToolTip(tr("Create a blank waveform project"));
     auto* openAction = fileMenu->addAction(
         themedIcon(QStringLiteral("document-open"), style(), QStyle::SP_DialogOpenButton),
         tr("&Open…"),
@@ -2282,19 +2968,12 @@ void MainWindow::createActions()
         &MainWindow::saveProject);
     saveAction->setToolTip(tr("Safely save the current project"));
     fileMenu->addAction(tr("Save &As…"), QKeySequence::SaveAs, this, &MainWindow::saveProjectAs);
-    fileMenu->addSeparator();
-    importTraceAction_ = fileMenu->addAction(
-        themedIcon(QStringLiteral("document-import"), style(), QStyle::SP_DialogOpenButton),
-        tr("&Import VCD/CSV Trace…"),
+    exportAction_ = fileMenu->addAction(
+        themedIcon(QStringLiteral("document-export"), style(), QStyle::SP_DialogSaveButton),
+        tr("&Export…"),
         this,
-        &MainWindow::importTrace);
-    importTraceAction_->setToolTip(tr("Parse a standard VCD or timestamped CSV trace in the background"));
-    pinloomAction_ = fileMenu->addAction(
-        themedIcon(QStringLiteral("document-export"), style(), QStyle::SP_DirLinkIcon),
-        tr("Export and Open in &Pinloom…"),
-        this,
-        &MainWindow::exportPinloomEntry);
-    pinloomAction_->setToolTip(tr("Create a file-based Pinloom archive entry, then open its URI"));
+        &MainWindow::exportArtifacts);
+    exportAction_->setToolTip(tr("Generate verification code and document waveform artifacts"));
     fileMenu->addSeparator();
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
@@ -2305,6 +2984,7 @@ void MainWindow::createActions()
         QKeySequence::Undo,
         this,
         &MainWindow::undo);
+    undoAction_->setObjectName(QStringLiteral("UndoAction"));
     undoAction_->setToolTip(tr("Undo the last edit"));
     redoAction_ = editMenu_->addAction(
         themedIcon(QStringLiteral("edit-redo"), style(), QStyle::SP_ArrowForward),
@@ -2312,6 +2992,7 @@ void MainWindow::createActions()
         QKeySequence::Redo,
         this,
         &MainWindow::redo);
+    redoAction_->setObjectName(QStringLiteral("RedoAction"));
     redoAction_->setToolTip(tr("Redo the last reverted edit"));
     editMenu_->addSeparator();
     auto* copyAction = editMenu_->addAction(tr("&Copy range"));
@@ -2364,143 +3045,27 @@ void MainWindow::createActions()
 
 void MainWindow::createToolBars()
 {
-    auto* modeBar = addToolBar(tr("Modes"));
-    modeBar->setObjectName(QStringLiteral("ModeToolbar"));
-    modeBar->setMovable(false);
-    modeBar->setStyleSheet(QStringLiteral(
-        "QToolButton{padding:5px 10px;border:1px solid transparent;border-radius:4px;}"
-        "QToolButton:checked{background:#245f9e;color:white;border-color:#1b4b7d;}"));
-    auto* modeGroup = new QActionGroup(modeBar);
-    modeGroup->setExclusive(true);
-    const std::array<std::pair<QString, QString>, 4> modes{{
-        {tr("Draw"), QStringLiteral("draw")},
-        {tr("Scenario"), QStringLiteral("scenario")},
-        {tr("Compare"), QStringLiteral("compare")},
-        {tr("Export"), QStringLiteral("export")},
-    }};
-    for (const auto& [label, mode] : modes) {
-        auto* action = modeBar->addAction(label);
-        action->setCheckable(true);
-        action->setData(mode);
-        modeGroup->addAction(action);
-        if (mode == QStringLiteral("compare")) compareModeAction_ = action;
-        connect(action, &QAction::triggered, this, [this, mode](const bool checked) {
-            if (!checked) return;
-            const auto compareMode = mode == QStringLiteral("compare");
-            compareModeRequested_ = compareMode;
-            compareTraceCanvas_->setVisible(compareMode);
-            if (compareMode) {
-                if (bottomTabs_ && comparePanel_) bottomTabs_->setCurrentWidget(comparePanel_);
-                if (traceIndex_) runCompare();
-            }
-        });
-    }
-    modeGroup->actions().front()->setChecked(true);
-    modeBar->addSeparator();
-
     auto* editBar = addToolBar(tr("Waveform tools"));
     editBar->setObjectName(QStringLiteral("WaveformToolbar"));
-    editBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    editBar->addAction(undoAction_);
-    editBar->addAction(redoAction_);
-    editBar->addSeparator();
+    editBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
 
-    auto* toolGroup = new QActionGroup(editBar);
-    toolGroup->setExclusionPolicy(
-        QActionGroup::ExclusionPolicy::ExclusiveOptional);
-    selectAction_ = editBar->addAction(
-        themedIcon(QStringLiteral("edit-select"), style(), QStyle::SP_FileDialogDetailedView),
-        tr("Selection"));
-    selectAction_->setCheckable(true);
-    selectAction_->setChecked(true);
-    selectAction_->setToolTip(tr("Select lanes and waveform positions"));
-    drawAction_ = editBar->addAction(
-        themedIcon(QStringLiteral("draw-freehand"), style(), QStyle::SP_DialogApplyButton),
-        tr("Draw"));
-    drawAction_->setCheckable(true);
-    drawAction_->setToolTip(tr("Draw a clock override or bit/bus/transaction value range"));
-    transitionAction_ = editBar->addAction(
-        themedIcon(QStringLiteral("transform-move"), style(), QStyle::SP_ArrowRight),
-        tr("Transition"));
-    transitionAction_->setCheckable(true);
-    transitionAction_->setToolTip(tr("Move a waveform transition"));
     markerAction_ = editBar->addAction(
         themedIcon(QStringLiteral("flag"), style(), QStyle::SP_DialogYesButton),
-        tr("Cursor"));
-    markerAction_->setObjectName(QStringLiteral("CursorToolAction"));
+        tr("Measure"));
+    markerAction_->setObjectName(QStringLiteral("MeasureToolAction"));
     markerAction_->setCheckable(true);
-    markerAction_->setToolTip(tr("Create, measure, lock, move, or remove time cursors"));
-    relationAction_ = editBar->addAction(
-        themedIcon(QStringLiteral("insert-link"), style(), QStyle::SP_FileLinkIcon),
-        tr("Relation"));
-    relationAction_->setCheckable(true);
-    relationAction_->setToolTip(tr("Create a timing relation"));
-    for (auto* action : {selectAction_, drawAction_, transitionAction_, markerAction_, relationAction_}) {
-        toolGroup->addAction(action);
-    }
-    connect(selectAction_, &QAction::triggered, this, [this](const bool checked) {
-        if (!checked) {
-            selectAction_->setChecked(true);
-            return;
-        }
-        canvas_->setTool(WaveCanvas::Tool::Selection);
+    markerAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_M));
+    markerAction_->setToolTip(
+        tr("Temporarily measure time and signal values; Ctrl+M toggles, Esc exits"));
+    connect(markerAction_, &QAction::toggled, this, [this](const bool checked) {
+        canvas_->setTool(checked ? WaveCanvas::Tool::Marker : WaveCanvas::Tool::WaveEdit);
+        statusBar()->showMessage(
+            checked
+                ? tr("Measure: click or drag · Ctrl locks · Shift compares · Esc exits")
+                : tr("Direct waveform editing active"),
+            5'000);
     });
-    connect(drawAction_, &QAction::triggered, this, [this](const bool checked) {
-        if (!checked) {
-            drawAction_->setChecked(true);
-            return;
-        }
-        canvas_->setTool(WaveCanvas::Tool::Draw);
-    });
-    connect(transitionAction_, &QAction::triggered, this, [this](const bool checked) {
-        if (!checked) {
-            transitionAction_->setChecked(true);
-            return;
-        }
-        canvas_->setTool(WaveCanvas::Tool::Transition);
-    });
-    connect(markerAction_, &QAction::triggered, this, [this](const bool checked) {
-        if (checked) {
-            canvas_->setTool(WaveCanvas::Tool::Marker);
-        } else {
-            selectAction_->setChecked(true);
-            canvas_->setTool(WaveCanvas::Tool::Selection);
-        }
-    });
-    connect(relationAction_, &QAction::triggered, this, [this](const bool checked) {
-        if (!checked) {
-            relationAction_->setChecked(true);
-            return;
-        }
-        canvas_->setTool(WaveCanvas::Tool::Relation);
-    });
-    auto* pulseAction = editBar->addAction(
-        themedIcon(QStringLiteral("insert-object"), style(), QStyle::SP_MediaSeekForward),
-        tr("Pulse"),
-        canvas_,
-        &WaveCanvas::insertPulse);
-    pulseAction->setToolTip(tr("Insert a one-clock pulse on the selected bit lane"));
 
-    editBar->addSeparator();
-    snapCombo_ = new QComboBox(editBar);
-    snapCombo_->setToolTip(tr("Choose waveform snapping mode"));
-    const std::array<std::pair<QString, SnapMode>, 7> snapModes{{
-        {tr("No snap"), SnapMode::None},
-        {tr("Fixed grid"), SnapMode::FixedGrid},
-        {tr("Major tick"), SnapMode::MajorTick},
-        {tr("Clock rising"), SnapMode::ClockRising},
-        {tr("Clock falling"), SnapMode::ClockFalling},
-        {tr("Signal edge"), SnapMode::SignalEdge},
-        {tr("Marker"), SnapMode::Marker},
-    }};
-    for (const auto& [label, mode] : snapModes) {
-        snapCombo_->addItem(label, static_cast<int>(mode));
-    }
-    snapCombo_->setCurrentIndex(1);
-    connect(snapCombo_, &QComboBox::currentIndexChanged, this, [this](const int index) {
-        canvas_->setSnapMode(static_cast<SnapMode>(snapCombo_->itemData(index).toInt()));
-    });
-    editBar->addWidget(snapCombo_);
     editBar->addSeparator();
     auto* zoomInAction = editBar->addAction(
         themedIcon(QStringLiteral("zoom-in"), style(), QStyle::SP_ArrowUp),
@@ -2519,21 +3084,9 @@ void MainWindow::createToolBars()
         tr("Fit scenario"),
         canvas_,
         &WaveCanvas::fitScenario);
+    fitAction->setObjectName(QStringLiteral("FitScenarioAction"));
     fitAction->setToolTip(tr("Fit the complete scenario"));
-    auto* fitSelectionAction = editBar->addAction(
-        themedIcon(QStringLiteral("zoom-fit-width"), style(), QStyle::SP_TitleBarMaxButton),
-        tr("Fit selection"),
-        canvas_,
-        &WaveCanvas::fitSelection);
-    fitSelectionAction->setToolTip(tr("Fit the selected time range, or the complete scenario when empty"));
-    exportAction_ = editBar->addAction(
-        themedIcon(QStringLiteral("document-export"), style(), QStyle::SP_DialogSaveButton),
-        tr("Export"),
-        this,
-        &MainWindow::exportArtifacts);
-    exportAction_->setToolTip(tr("Generate verification code and document waveform artifacts"));
 }
-
 void MainWindow::createDocks()
 {
     auto* navigatorTabs = new QTabWidget;
@@ -3258,6 +3811,30 @@ void MainWindow::updateWindowTitle()
         tr("%1%2 — Wave Workbench")
             .arg(name)
             .arg(dirty_ ? QStringLiteral(" *") : QString{}));
+    if (!saveStateLabel_) return;
+
+    QString state;
+    QString color;
+    if (recoveryLoaded_) {
+        state = tr("Recovery loaded · Save required");
+        color = QStringLiteral("#ffca65");
+    } else if (projectFile_.isEmpty()) {
+        state = dirty_ ? tr("Not saved · changes") : tr("Not saved");
+        color = QStringLiteral("#c4cfdd");
+    } else if (dirty_) {
+        state = tr("Unsaved changes");
+        color = QStringLiteral("#ffca65");
+    } else {
+        state = tr("Saved");
+        color = QStringLiteral("#8dd69a");
+    }
+    saveStateLabel_->setText(state);
+    saveStateLabel_->setStyleSheet(
+        QStringLiteral("QLabel { color: %1; padding: 2px 8px; }").arg(color));
+    saveStateLabel_->setToolTip(
+        projectFile_.isEmpty()
+            ? tr("This waveform has not been saved to a file.")
+            : projectFile_);
 }
 
 bool MainWindow::loadFromPath(const QString& path)
@@ -3283,15 +3860,11 @@ bool MainWindow::loadFromPath(const QString& path)
     const auto recoveredSnapshot = path.endsWith(
         QStringLiteral(".autosave"),
         Qt::CaseInsensitive);
+    recoveryLoaded_ = recoveredSnapshot;
     projectFile_ = projectPathForLoadedFile(path);
     commandStack_.clear();
     dirty_ = result.migrated || recoveredSnapshot;
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
-    populateSignalTree();
-    populateClockTree();
-    populateLinkedResources();
-    populateBottomTables();
-    inspectorTree_->clear();
     updateCommandActions();
     updateWindowTitle();
     if (recoveredSnapshot) {
@@ -3301,28 +3874,41 @@ bool MainWindow::loadFromPath(const QString& path)
     } else if (!result.warnings.isEmpty()) {
         statusBar()->showMessage(result.warnings.join(QStringLiteral("; ")), 10'000);
     }
-    populateTraceMappingTable();
-    traceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
-    compareTraceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
+    if (traceCanvas_) traceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
+    if (compareTraceCanvas_) {
+        compareTraceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
+        compareTraceCanvas_->hide();
+    }
     invalidateCompareResult();
-    if (!importRunning) loadFirstTraceReference();
     if (dirty_) scheduleAutosave();
     return true;
 }
 
 bool MainWindow::writeToPath(const QString& path)
 {
+    const auto beforeName = project_.name;
+    if (project_.name.empty() || project_.name == "Untitled") {
+        auto inferred = QFileInfo(path).fileName();
+        if (inferred.endsWith(QStringLiteral(".wave.json"), Qt::CaseInsensitive)) {
+            inferred.chop(QStringLiteral(".wave.json").size());
+        } else {
+            inferred = QFileInfo(path).completeBaseName();
+        }
+        if (!inferred.trimmed().isEmpty()) project_.name = inferred.trimmed().toStdString();
+    }
+
     QString error;
     if (!saveProjectFileAtomic(project_, path, &error)) {
+        project_.name = beforeName;
         QMessageBox::critical(this, tr("Save failed"), error);
         return false;
     }
     projectFile_ = path;
+    recoveryLoaded_ = false;
     dirty_ = false;
     if (autosaveTimer_) autosaveTimer_->stop();
     ++autosaveGeneration_;
     autosavePending_ = false;
-    populateLinkedResources();
     updateWindowTitle();
     statusBar()->showMessage(tr("Saved %1").arg(path), 5'000);
     return true;

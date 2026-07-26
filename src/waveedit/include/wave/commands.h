@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wave {
@@ -22,6 +23,8 @@ public:
 class CommandStack {
 public:
     void execute(std::unique_ptr<EditCommand> command);
+    void replaceLast(std::unique_ptr<EditCommand> command);
+    bool discardLast();
     bool undo();
     bool redo();
     void clear() noexcept;
@@ -37,6 +40,20 @@ private:
     std::size_t cursor_{0};
 };
 
+class ChangeScenarioDurationCommand final : public EditCommand {
+public:
+    ChangeScenarioDurationCommand(Scenario& scenario, Tick duration);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    Tick before_;
+    Tick after_;
+};
+
 class SetLaneRangeCommand final : public EditCommand {
 public:
     SetLaneRangeCommand(
@@ -44,7 +61,8 @@ public:
         std::string laneId,
         Tick start,
         Tick end,
-        std::string value);
+        std::string value,
+        JsonExtensions extensions = {});
 
     void redo() override;
     void undo() override;
@@ -56,6 +74,7 @@ private:
     Tick start_;
     Tick end_;
     std::string value_;
+    JsonExtensions extensions_;
     std::vector<Segment> before_;
     std::vector<Segment> after_;
     std::vector<Event> eventsBefore_;
@@ -87,9 +106,15 @@ private:
     bool initialized_{false};
 };
 
-class AddLaneCommand final : public EditCommand {
+class EditSegmentCommand final : public EditCommand {
 public:
-    AddLaneCommand(Scenario& scenario, Lane lane);
+    EditSegmentCommand(
+        Scenario& scenario,
+        std::string laneId,
+        std::string segmentId,
+        Tick start,
+        Tick end,
+        std::string value);
 
     void redo() override;
     void undo() override;
@@ -97,7 +122,52 @@ public:
 
 private:
     Scenario* scenario_;
+    std::string laneId_;
+    std::string segmentId_;
+    Tick start_;
+    Tick end_;
+    std::string value_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class ToggleBitRangeCommand final : public EditCommand {
+public:
+    ToggleBitRangeCommand(
+        Scenario& scenario,
+        std::string laneId,
+        std::vector<std::pair<Tick, Tick>> beatRanges);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::string laneId_;
+    std::vector<std::pair<Tick, Tick>> beatRanges_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class AddLaneCommand final : public EditCommand {
+public:
+    AddLaneCommand(Scenario& scenario, Lane lane);
+    AddLaneCommand(
+        Project& project,
+        Scenario& scenario,
+        Lane lane,
+        ClockDomain clockDomain);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Project* project_{nullptr};
+    Scenario* scenario_;
     Lane lane_;
+    std::optional<ClockDomain> clockDomain_;
     std::size_t insertionIndex_{0};
 };
 

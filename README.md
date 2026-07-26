@@ -4,15 +4,15 @@ Wave Workbench 是用于 FPGA 数字时序设计与验证场景编排的独立�
 `Project`、`Scenario`、`Lane`、`Segment`、`Event`、`Relation` 是唯一事实源；画布、
 步骤表和后续生成文件均为该模型的视图或派生产物。
 
-当前版本已完成阶段 1 至阶段 6 及最终加固。它提供可运行的 Qt 6 桌面工作台、整数 tick
+当前版本已完成阶段 1 至阶段 6 及后续交互迭代。桌面端现收敛为单一波形画布，不再创建
+Project、Inspector、Scenario Dock 或模式切换栏。它提供整数 tick
 时间模型、clock/bit/bus/enum/transaction/event/group lane、自绘可滚动画布、光标锚定
-缩放、索引化吸附、多 lane 框选、区间绘制、时钟局部门控/禁用、时钟参数编辑与周期
+缩放、多 lane 框选、区间绘制、时钟局部门控/禁用、时钟参数编辑与周期
 事件重定时、Lane/Group 创建、属性编辑、显示重排与事务化删除、复制/粘贴、撤销/重做、
-Event 步骤表双向同步、Marker、Relation、
-带确定性条件求值的 Validation、版本化 JSON 工程安全保存与迁移、后台恢复快照，
+Event/Segment 双向同步、Marker、Relation、版本化 JSON 工程安全保存与迁移、后台恢复快照，
 以及由共享行为语义生成的 SystemVerilog、SVA、cocotb、SVG、PNG、PDF 和 WaveDrom
-JSON。应用可在后台导入标准 VCD/CSV、显示 Actual Trace、按可配置规则比较
-Expected/Actual，并通过版本化 JSON、CLI 和 URI 与其他应用协作。验收证据见
+JSON。VCD/CSV 导入、Expected/Actual 比较、报告生成及跨应用桥接能力保留在独立 CLI 和
+领域模块中，不再占用桌面编辑界面。验收证据见
 [PLAN.md](PLAN.md)。
 
 ## 构建
@@ -66,7 +66,7 @@ E:\QT6\Tools\CMake_64\bin\ctest.exe --test-dir build --output-on-failure
 ```
 
 该命令生成 testbench、可可靠转换的 SVA include、cocotb test，以及 SVG、PNG、PDF、
-WaveDrom JSON。桌面应用的 File > Export Artifacts 提供全场景、当前选择或指定时间范围
+WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或指定时间范围
 导出，并可设置 PNG DPI、PDF 每页时间跨度和附加层。
 
 无界面执行 Expected/Actual 对比：
@@ -92,78 +92,51 @@ WaveDrom JSON。桌面应用的 File > Export Artifacts 提供全场景、当前
 
 ## 当前交互
 
-- 波形画布的 lane 列表末尾提供 `+ Add signal` 行，点击后直接创建信号 lane。
-- `Ctrl` + 鼠标滚轮：以鼠标所在时间点为锚缩放。
-- `Shift` + 鼠标滚轮：水平滚动。
-- 拖动期间按住 `Alt`：临时绕过当前 snapping，不修改永久设置。
-- Draw 工具：在 bit lane 上拖动绘制 0/1 区间；纵向位置决定逻辑电平。
-- Draw 工具：在 clock lane 上拖动并选择 Gated、Disabled 或 Run；三者分别表示保持低电平、
-  驱动 X 或清除局部覆盖。
-- Draw 工具：在 bus/enum/transaction/event lane 上拖动并输入值。
-- 双击 bus/enum/transaction/event lane：从吸附后的时刻创建一个主刻度宽度的值区间。
-- Pulse：在选定 bit lane 的光标处插入一个时钟周期或主刻度宽度的脉冲。
-- Transition 工具：拖动可见 Event 菱形以移动对应波形边沿，步骤表时间同步更新。
-- Cursor 工具：左键单击创建或移动唯一的活动光标；左右方向键按固定网格移动活动光标。
-- 直接拖动以起点作为临时参考、终点作为活动光标；`Shift` + 左键在不移动活动光标的
-  前提下创建临时参考。两者均显示“临时 → 活动”的带符号 `Δ` 时间宽度。
-- `Ctrl` + 左键创建持久锁定光标，`Ctrl` + 拖动创建持久锁定区间；锁定对象使用区别于
-  活动和临时光标的颜色并写入工程 Marker。
-- 单击锁定光标将其选中；拖动或左右方向键移动选中对象，`Delete` / `Backspace` 删除，
-  移动和删除均支持 Undo/Redo。
-- 活动光标存在时，每个可见信号在左侧名称区域显示该时刻的值，包括 clock 覆盖及
-  bit/bus/enum/transaction/event 的区间值。
-- 再次点击 Cursor 工具退出光标编辑，活动、临时和选中状态清除，持久锁定光标保留。
-- Relation 工具：从一个 Event 菱形拖动到另一个 Event 菱形，创建可编辑时序关系。
-- Events 表：直接编辑 time/cycle、action、target、value、expected result、clock domain
-  和 description；支持排序、文本过滤、添加、删除及双击定位。
-- Relations 表：编辑 min/max delay、clock domain、condition、severity 和 description；
-  condition 支持稳定 lane ID、唯一显示名、布尔运算和四态精确比较。
-- Validation 表：显示关系满足/违反、不适用、条件错误、缺失或多目标、clock domain、
-  非法值和未定义区间；双击结果定位到 lane 和 tick。
-- Undo/Redo：每次完整拖动只产生一个编辑命令。
-- Snap 下拉框：选择无吸附、固定网格、主刻度、时钟上/下沿、信号边沿或 marker。
-- 信号边沿和 marker 在模型刷新时建立排序索引，鼠标吸附只执行二分查找。
-- 在 Select 工具中跨 lane 拖动建立矩形选择；`Ctrl` 单击增减 lane 选择。
-- Edit > Copy/Paste range：按稳定 lane ID 和相对整数 tick 复制多 lane 范围；粘贴为一个
-  可完整撤销/重做的命令。
-- Fit scenario 显示完整场景；Fit selection 定位选定时间范围。
-- File 菜单：打开或使用原子替换方式保存 `project.wave.json`，也可打开 `.autosave`
-  恢复快照并保存回原工程路径。
-- 修改后 1.5 秒启动 Qt Concurrent 后台快照；generation 校验阻止旧结果成为最新状态，
-  快照仅序列化工程模型及 trace 引用，不复制外部 trace 数据。
-- File > Export Artifacts：导出 SystemVerilog/SVA/cocotb 和文档图。
-- File > Import VCD/CSV Trace：后台解析外部 trace；可取消，旧 generation 结果不会发布。
-- Imported Trace：勾选需要显示的实际信号，编辑 Expected lane 名称映射，或使用 Auto-map。
-- Align：支持手动 offset、marker start 对齐及 clock edge/cycle 对齐；结果始终为整数 tick。
-- Actual Trace：`Ctrl` + 滚轮缩放，`Shift` + 滚轮水平滚动，Fit 显示完整 trace。
-- Compare 模式：Expected 在上、Actual 在下；配置 exact/ignore X/X wildcard、
-  edge tolerance、bus mask、选择时间窗或 relation-only。relation condition 在实际 source
-  transition 的整数 tick 采样。
-- Compare Result：显示差异数、first mismatch、offset、缺失信号、宽度冲突、条件错误及
-  false 守卫诊断；双击结构化差异可定位。
-- Export report：以安全替换方式输出 JSON、CSV 和独立 HTML 报告。
-- Resources：显示 Private Frame 等链接资源的 stable ID、hash、summary 和
-  Resolved/Unresolved 状态。
-- Groups：按 group stable ID 显示实际分组和成员；失效 group 引用显示为 unresolved。
-- Edit > Add lane / Add group：创建具有稳定 ID 的 lane 或 group。双击 Signals 或 Groups
-  条目可编辑名称、类型、位宽、符号性、进制、枚举映射、clock domain、所属 group、
-  颜色、高度和可见性。
-- Lane/Group 属性变更保留 stable ID 及现有波形数据，并作为单个命令撤销/重做；会使
-  既有 Segment/Event 非法的位宽或类型变更、失效引用及含成员 group 的类型转换会整体
-  拒绝，不产生部分修改。
-- Edit > Remove selected lane / group：删除普通 lane 时同步删除其 Event、相关 Relation
-  和不再有效的 trace 映射；删除 group 时保留成员 lane 并解除分组。删除与依赖清理可由
-  单个 Undo 完整恢复。
-- Edit > Move selected lane up/down：以 `Alt+Up` / `Alt+Down` 调整 Lane 或 Group 在
-  `Scenario::lanes` 中的显示顺序；画布、Signals/Groups 和图形导出同步更新，HDL/Python
-  生成仍按 stable ID 确定化，不受界面排列影响。
-- Clocks：双击条目编辑名称、period、phase、有理数 duty、active edge 和 reset/disable
-  condition。命令会按逻辑 cycle 一次性重定位项目内引用该时钟的事件及关联波形边界；
-  若结果越出场景或反转区间则拒绝整项变更。
-- File > Export and Open in Pinloom：先写入 JSON 归档条目，仅在用户确认后打开 URI。
-- `waveworkbench://open` / `waveworkbench://compare`：按 Project/Scenario/Lane 稳定 ID
-  和整数 tick 打开或定位。
-
+- 主窗口中央组件直接为 WaveCanvas；不创建 Project、Inspector、Scenario Dock 或独立 Modes
+  工具栏。波形始终可直接编辑，工具栏只保留临时 `Measure`、缩放和 `Fit scenario`；Export
+  位于 File 菜单。
+- 无命令行工程参数时直接进入 200 ns 空白波形；中央首先显示 `+ CLK`、`+ BIT`、`+ BUS` 和
+  简短操作提示。`File > New` / `Ctrl+N` 立即恢复同一空白默认值，不再要求先配置工程。
+- `+ CLK`、`+ BIT`、`+ BUS` 点击后在末行显示就地输入条。用户只需补齐名称以及 Clock
+  period 或 Bus width，按 Enter 提交、Esc 取消；名称自动唯一、颜色随机分配。CLK 自动创建
+  clock domain，只有一个时钟时 Bit/Bus 自动关联，多个时钟时就地选择。创建与补齐始终是
+  一个撤销项。新 Bit 空白区按 `0` 显示，新 Bus 空白区按居中红色虚线和 `X` 显示。
+- 标尺右上角 `End` 输入框直接修改时间轴终点，例如 `500 ns`。缩短到现有内容之前会在原处
+  报错并保留输入，合法修改进入命令栈并可撤销。
+- 左侧信号名区域支持单击选择、拖动重排、双击重命名、`Delete` / `Backspace` 删除；右键打开
+  轻量参数入口。Clock 可直接修改频率或周期，Bit 可修改颜色、高度和 clock domain，Bus 还可
+  修改位宽、符号性和进制。所有提交均进入命令栈。
+- 单击非 Bit Segment 进行选择；拖动主体整体移动，拖动左右手柄修改边界，双击修改现有值，
+  `Delete` / `Backspace` 清除为该信号的隐式值。右键波形可设置常用值、插入一拍 Pulse、编辑
+  完整 Segment 或清除 Segment。提交后状态栏显示信号、时间范围、结果和 `Ctrl+Z` 提示。
+- Bit lane 悬浮时高亮当前拍并显示将变为 `0` 或 `1`；单击只翻转这一拍，横向拖动逐拍翻转
+  覆盖范围。选中 Bit 后可直接按 `0`、`1`、`X`、`Z` 写入当前拍，也可从右键菜单选择四态值。
+- `Shift` + 拖动在一个或多个 lane 上建立时间范围；Edit 菜单的 Copy/Paste range 按稳定 lane ID
+  和相对整数 tick 复制，粘贴作为一个可撤销命令。左右方向键移动直接编辑时间光标。
+- Bit Event 菱形无需切换模式即可直接拖动。预览期间模型不变，虚线只覆盖原/新边沿中较早位置
+  到后继 Segment 结束的局部范围；释放后以一个命令同步更新 Segment 与 Event。
+- 单击 Bus 波形会在附近显示上下文、直接值输入框以及 `0`、`X`、`Z`、`Don't care`。预设可
+  单击或拖放，直接值按 Enter 提交；非法值保持浮层与焦点并解释原因。默认宽度是一拍，插入后
+  可拖动边界修改宽度；旧工程的 `Reserved` 语义继续按零值兼容读取。
+- 时间交互采用无设置项的轻吸附：距离可见刻度、Clock 边沿或信号边沿 7 像素以内自动对齐，
+  并显示吸附时间提示；超出范围使用原始整数 tick，按住 `Alt` 可临时绕过吸附。
+- `Ctrl` + 鼠标滚轮以指针所在时间为锚缩放，`Shift` + 滚轮水平滚动；中键拖动或按住空格再左键
+  拖动可平移时间轴。`Fit scenario` 显示完整场景。
+- `Measure` 是临时状态：左键创建或移动唯一活动光标；直接拖动以起点作为临时参考、终点作为
+  活动光标，`Shift` + 左键创建临时参考。两者显示带符号的 `Δ` 时间宽度。
+- `Ctrl` + 左键创建持久锁定光标，`Ctrl` + 拖动创建持久锁定区间。锁定对象使用独立颜色并写入
+  工程 Marker；单击后可拖动或用方向键移动，`Delete` / `Backspace` 删除，均支持 Undo/Redo。
+- 活动光标存在时，每个可见信号在左侧名称区域显示该时刻的采样值。再次点击 `Measure` 或按
+  Esc 返回直接波形编辑，活动、临时和选中状态清除，持久锁定光标保留。
+- Undo/Redo 位于 Edit 菜单，并保留 `Ctrl+Z` / `Ctrl+Y`；工具栏不重复显示按钮。
+- 状态栏常驻显示 `Not saved`、`Unsaved changes`、`Saved` 或 `Recovery loaded · Save required`；
+  自动恢复快照不会被误报为正式保存。File 菜单使用原子替换方式保存 `project.wave.json`，首次
+  保存 Untitled 工程时从文件名推断项目名。修改后 1.5 秒启动 Qt Concurrent 后台恢复快照。
+- File > Export 导出 SystemVerilog/SVA/cocotb 和文档图。VCD/CSV 导入、Expected/Actual 对比、报告和
+  跨应用桥接由 `wave-compare`、`wave-bridge` 等 CLI 提供，不占用桌面工作区。
+- 特殊 lane 或 group 仍可从 Edit 菜单创建并编辑完整结构属性；属性变更、依赖感知删除和显示顺序
+  调整均保留 stable ID，并以单个命令撤销/重做。
+- `waveworkbench://open` 按 Project/Scenario/Lane 稳定 ID 和整数 tick 打开或定位。
 所有时间均以整数 tick 持久化。画布中的浮点数只用于时间到像素的视图变换，不作为工程
 时间事实。
 
@@ -232,7 +205,7 @@ exports/
 - 二进制、八进制、十进制和十六进制 bus 值；非整字宽的最高有效数字溢出检测。
 - bit 的 0/1/X/Z、bus width/signedness、enum。
 - segment 覆盖、合并、拆分和清除。
-- 单命令撤销/重做。
+- 单命令撤销/重做，以及快速创建命令的原子替换、取消和场景时长 Undo/Redo。
 - 多 lane 范围复制/粘贴及完整撤销/重做。
 - Event 时间和值与关联 Segment 的双向同步。
 - 画布式区间编辑到步骤表 Event 的同步。
@@ -243,6 +216,17 @@ exports/
 - 整个工程目录移动后的相对路径恢复。
 - Qt 桌面应用及磁盘示例工程的离屏启动；Lane 属性对话框截图及确认删除/Undo
   交互通过离屏回归。
+- 画布快速添加 CLK/Bit/Bus、唯一命名、随机颜色、默认时钟域、信号名拖动重排、双击重命名、
+  右键轻量参数、Delete 删除以及菜单快捷键均通过离屏回归。
+- 无模式直接编辑的 Segment 选择、整体移动、边界缩放、双击改值、Delete 清除与 Undo，Bit
+  单拍/多拍翻转、0/1/X/Z 键盘输入、Shift 跨 lane 框选和中键平移均通过离屏回归。
+- Event 菱形局部虚线预览期间模型不变，释放、Undo 与 Redo 后 Event/Segment 保持同步。
+- Bus 浮层覆盖直接值、非法值纠错、0/X/Z/Don't care 单击与拖放以及波形右键；无配置空白
+  工程、End 直接输入、保存状态和 Measure 退出具有独立离屏回归。
+- Waveform 工具栏离屏检查确认仅有一个临时 Measure 动作，不存在 Edit、Transition、Export 与
+  Undo/Redo 按钮，菜单快捷键仍存在。
+- 独立用户旅程从空白工程完成三类信号创建、波形编辑、纠错、时间轴延长、测量、Save As、
+  文件回读和 1440×900 截图，全程 offscreen。
 - 共享生成计划、确定性 SystemVerilog/cocotb 输出、时钟覆盖调度和严格 SVA 转换；
   独立 assertion 模块及 testbench 均通过 SystemVerilog 语法检查。
 - SVG、PNG、PDF、WaveDrom JSON 的范围、尺寸、页跨度及背景回归。
@@ -259,8 +243,8 @@ exports/
 - ZeroSlack signal-list、Private Frame sample、Pinloom entry 和 Wave Workbench URI。
 - 主窗口后台 autosave 生成可由正式加载器读取的恢复快照。
 
-最近一次验证结果：18 个 CTest 入口均通过，其中核心入口包含 23 组细分测试；完整验收
-记录见 [PLAN.md](PLAN.md)。
+最近一次验证结果：21 个 CTest 入口均通过，其中核心入口包含 25 组细分测试；常规构建和
+Qt Creator Debug 构建均已验证。完整验收记录见 [PLAN.md](PLAN.md)。
 
 ## 当前限制
 

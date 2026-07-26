@@ -9,11 +9,21 @@
 #include <QString>
 #include <QStringList>
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <vector>
 
+class QContextMenuEvent;
+class QComboBox;
+class QDragEnterEvent;
+class QDragMoveEvent;
+class QDropEvent;
+class QEvent;
+class QFrame;
 class QKeyEvent;
+class QLabel;
+class QLineEdit;
 class QMouseEvent;
 class QPaintEvent;
 class QResizeEvent;
@@ -29,7 +39,7 @@ public:
     enum class Tool {
         Selection,
         Draw,
-        Transition,
+        WaveEdit,
         Marker,
         Relation,
     };
@@ -38,10 +48,8 @@ public:
 
     void setDocument(Project* project, Scenario* scenario, CommandStack* commandStack);
     void setTool(Tool tool);
-    void setSnapMode(SnapMode mode);
 
     [[nodiscard]] Tool tool() const noexcept;
-    [[nodiscard]] SnapMode snapMode() const noexcept;
     [[nodiscard]] QString selectedLaneId() const;
     [[nodiscard]] QStringList selectedLaneIds() const;
     [[nodiscard]] Tick cursorTick() const noexcept;
@@ -49,6 +57,27 @@ public:
     [[nodiscard]] std::optional<Tick> temporaryCursorTick() const noexcept;
     [[nodiscard]] QString selectedMarkerId() const;
     [[nodiscard]] std::optional<std::pair<Tick, Tick>> selectedTimeRange() const noexcept;
+    [[nodiscard]] QString selectedSegmentLaneId() const;
+    [[nodiscard]] QString selectedSegmentId() const;
+    [[nodiscard]] QString hoveredBitBeatLaneId() const;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>> hoveredBitBeatRange() const noexcept;
+    [[nodiscard]] std::optional<std::size_t> laneDropDestinationIndex() const noexcept;
+    [[nodiscard]] std::optional<Tick> waveEditTransitionPreviewTick() const noexcept;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    waveEditTransitionPreviewRange() const noexcept;
+    [[nodiscard]] bool hasQuickLaneSetup() const noexcept;
+
+    void beginQuickLaneSetup(
+        const QString& laneId,
+        LaneKind kind,
+        const QString& name,
+        const QString& parameter,
+        const QStringList& clockLabels = {},
+        const QStringList& clockIds = {},
+        const QString& selectedClockId = {});
+    void finishQuickLaneSetup();
+    void showQuickLaneSetupError(const QString& message, bool focusParameter = false);
+    void showDurationEditError(const QString& message);
 
 public slots:
     void zoomIn();
@@ -62,15 +91,30 @@ public slots:
     void insertPulse();
 
 signals:
-    void addLaneRequested();
+    void addLaneRequested(LaneKind kind);
+    void renameLaneRequested(const QString& laneId);
+    void removeLaneRequested(const QString& laneId);
+    void editLaneParametersRequested(const QString& laneId, const QPoint& globalPosition);
     void selectionChanged(const QString& laneId, qint64 tick);
     void modelEdited();
     void commandAvailabilityChanged();
     void statusMessage(const QString& message);
     void eventSelected(const QString& eventId);
+    void quickLaneSetupAccepted(
+        const QString& laneId,
+        const QString& name,
+        const QString& parameter,
+        const QString& clockId);
+    void quickLaneSetupCanceled(const QString& laneId);
+    void durationEditRequested(const QString& value);
+    void measureModeExitRequested();
 
 protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    bool viewportEvent(QEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -78,6 +122,9 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     struct LaneLayout {
@@ -97,6 +144,27 @@ private:
         CreateLocked,
         MoveLocked,
     };
+    enum class SegmentBoundary {
+        None,
+        Start,
+        End,
+    };
+
+    struct SegmentHit {
+        const Segment* segment{nullptr};
+        SegmentBoundary boundary{SegmentBoundary::None};
+    };
+
+    enum class WaveEditInteraction {
+        None,
+        MoveTransition,
+        MoveSegment,
+        ToggleBitRange,
+        ResizeStart,
+        ResizeEnd,
+        SelectRange,
+    };
+
 
     static constexpr int HeaderWidth = 190;
     static constexpr int RulerHeight = 40;
@@ -106,6 +174,26 @@ private:
     void rebuildSnapIndex();
     void updateScrollBars();
     void updateAddLaneButtonGeometry();
+    void positionQuickLaneSetup();
+    void positionDurationEditor();
+    void submitQuickLaneSetup();
+    void cancelQuickLaneSetup();
+    void submitBusValue();
+    void syncDurationEditor();
+    void positionBusPresetPalette();
+    void showBusPresetPalette(const Lane& lane, const QPoint& anchor);
+    void hideBusPresetPalette();
+    void applyBusPreset(const std::string& laneId, const std::string& presetId, Tick tick);
+    void promptBusValueAt(const std::string& laneId, Tick tick);
+    bool setLaneRangeValue(
+        const std::string& laneId,
+        Tick start,
+        Tick end,
+        std::string value,
+        JsonExtensions extensions = {});
+    void clearSelectedSegment();
+    void updateLaneDropTarget(int y);
+    void commitLaneReorder();
     void setScale(double scale, int anchorX);
     [[nodiscard]] double contentWidth() const;
     [[nodiscard]] int waveViewportWidth() const;
@@ -122,6 +210,26 @@ private:
     [[nodiscard]] Tick cursorKeyboardStep() const;
     [[nodiscard]] QString cursorValue(const Lane& lane) const;
     [[nodiscard]] QString cursorDeltaText(Tick from, Tick to) const;
+    [[nodiscard]] Segment* segmentById(
+        const std::string& laneId,
+        const std::string& segmentId);
+    [[nodiscard]] const Segment* segmentById(
+        const std::string& laneId,
+        const std::string& segmentId) const;
+    [[nodiscard]] const Segment* segmentAtTick(const Lane& lane, Tick tick) const;
+    [[nodiscard]] SegmentHit segmentHitAtPosition(
+        const Lane& lane,
+        const QPoint& position) const;
+    [[nodiscard]] std::pair<Tick, Tick> beatRangeAt(Tick tick, const Lane& lane) const;
+    [[nodiscard]] std::vector<std::pair<Tick, Tick>> beatRangesBetween(
+        Tick first,
+        Tick second,
+        const Lane& lane) const;
+    void clearWaveEditState();
+    void commitWaveEdit(const QPoint& releasePosition);
+    [[nodiscard]] Tick constrainedTransitionTick(const Event& event, Tick requested) const;
+    void commitBitToggle(const std::vector<std::pair<Tick, Tick>>& beats, const QPoint& position);
+    void editSegmentAt(const QPoint& position);
     void ensureCursorVisible(Tick tick);
     void removeSelectedMarker();
     void moveSelectedMarkerBy(Tick delta);
@@ -169,23 +277,57 @@ private:
         class QPainter& painter,
         Tick visibleStart,
         Tick visibleEnd);
+    void drawWaveEditOverlay(class QPainter& painter);
+    void drawEditGuide(class QPainter& painter);
+    void drawWaveEditTransitionPreview(class QPainter& painter);
+    void drawLaneReorderOverlay(class QPainter& painter);
 
     Project* project_{nullptr};
     Scenario* scenario_{nullptr};
     CommandStack* commandStack_{nullptr};
-    QToolButton* addLaneButton_{nullptr};
+    std::array<QToolButton*, 3> addLaneButtons_{};
+    QFrame* quickLaneSetupPanel_{nullptr};
+    QLineEdit* quickLaneNameEdit_{nullptr};
+    QLineEdit* quickLaneParameterEdit_{nullptr};
+    QComboBox* quickLaneClockCombo_{nullptr};
+    QLabel* quickLaneErrorLabel_{nullptr};
+    QString quickLaneSetupLaneId_;
+    LaneKind quickLaneSetupKind_{LaneKind::Bit};
+    QLabel* durationLabel_{nullptr};
+    QLineEdit* durationEdit_{nullptr};
+    QFrame* busPresetPalette_{nullptr};
+    QLabel* busPresetContextLabel_{nullptr};
+    QLineEdit* busValueEdit_{nullptr};
+    std::optional<Tick> busPresetAnchorTick_;
+    std::string busPresetLaneId_;
     std::vector<LaneLayout> laneLayout_;
     std::vector<Tick> signalEdgeIndex_;
-    std::vector<Tick> markerTickIndex_;
     std::optional<Tick> movableCursorTick_;
     std::optional<Tick> temporaryCursorTick_;
     std::string selectedMarkerId_;
     CursorInteraction cursorInteraction_{CursorInteraction::None};
     std::optional<std::pair<Tick, Tick>> lockedMarkerOriginalRange_;
-    Tool tool_{Tool::Selection};
-    SnapMode snapMode_{SnapMode::FixedGrid};
+    Tool tool_{Tool::WaveEdit};
     double pixelsPerTick_{0.003};
     std::string selectedLaneId_;
+    std::string selectedSegmentLaneId_;
+    std::string selectedSegmentId_;
+    WaveEditInteraction waveEditInteraction_{WaveEditInteraction::None};
+    std::optional<std::pair<Tick, Tick>> waveEditOriginalRange_;
+    std::optional<std::pair<Tick, Tick>> waveEditPreviewRange_;
+    std::string waveEditHoverLaneId_;
+    std::optional<std::pair<Tick, Tick>> waveEditHoverRange_;
+    QPoint waveEditPressPosition_;
+    Tick waveEditGrabOffset_{0};
+    bool laneHeaderPressed_{false};
+    bool laneHeaderDragging_{false};
+    bool laneHeaderSelectionActive_{false};
+    QPoint laneHeaderPressPosition_;
+    std::string laneDragId_;
+    std::optional<std::size_t> laneDropDestinationIndex_;
+    std::optional<int> laneDropIndicatorY_;
+
+
     std::vector<std::string> selectedLaneIds_;
     Tick cursorTick_{0};
     bool drawing_{false};
@@ -200,6 +342,12 @@ private:
     std::optional<std::pair<Tick, Tick>> selectionRange_;
     int selectionStartY_{0};
     bool bypassSnap_{false};
+    std::optional<Tick> snapGuideTick_;
+    bool panning_{false};
+    bool spaceHeld_{false};
+    QPoint panPressPosition_;
+    int panStartHorizontal_{0};
+    int panStartVertical_{0};
 };
 
 } // namespace wave

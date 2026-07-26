@@ -2,13 +2,23 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QComboBox>
+#include <QContextMenuEvent>
+#include <QDrag>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QEvent>
+#include <QFrame>
+#include <QHBoxLayout>
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMimeData>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -22,17 +32,18 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <tuple>
 
 namespace wave {
 namespace {
 
-const QColor kBackground(18, 22, 29);
-const QColor kHeaderBackground(27, 34, 45);
-const QColor kRulerBackground(23, 29, 39);
-const QColor kGridMajor(61, 72, 89);
-const QColor kGridMinor(39, 47, 60);
-const QColor kTextPrimary(224, 229, 237);
-const QColor kTextSecondary(151, 160, 176);
+const QColor kBackground(32, 39, 49);
+const QColor kHeaderBackground(42, 51, 65);
+const QColor kRulerBackground(37, 45, 57);
+const QColor kGridMajor(91, 105, 124);
+const QColor kGridMinor(57, 68, 84);
+const QColor kTextPrimary(235, 239, 245);
+const QColor kTextSecondary(177, 187, 202);
 const QColor kSelection(68, 138, 255, 62);
 const QColor kUndefined(239, 83, 80);
 const QColor kMovableCursor(79, 195, 247);
@@ -40,6 +51,86 @@ const QColor kTemporaryCursor(186, 104, 200);
 const QColor kLockedCursor(255, 202, 40);
 const QColor kSelectedLockedCursor(102, 187, 106);
 const QString kRangeMimeType = QStringLiteral("application/x-wave-workbench-range+json");
+const QString kBusPresetMimeType = QStringLiteral("application/x-wave-workbench-bus-preset");
+constexpr std::string_view kBusPresetExtension = "waveWorkbench.busPreset";
+constexpr int kSoftSnapRadiusPixels = 7;
+
+class BusPresetButton final : public QToolButton {
+public:
+    BusPresetButton(QString presetId, const QString& label, QWidget* parent)
+        : QToolButton(parent)
+        , presetId_(std::move(presetId))
+    {
+        setText(label);
+        setCursor(Qt::OpenHandCursor);
+        setToolTip(QObject::tr("Click %1 to insert at the current position, or drag it into a bus lane").arg(label));
+        setAutoRaise(true);
+    }
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if (event->button() == Qt::LeftButton) dragStart_ = event->position().toPoint();
+        QToolButton::mousePressEvent(event);
+    }
+
+    void mouseMoveEvent(QMouseEvent* event) override
+    {
+        if (!event->buttons().testFlag(Qt::LeftButton)
+            || (event->position().toPoint() - dragStart_).manhattanLength()
+                < QApplication::startDragDistance()) {
+            QToolButton::mouseMoveEvent(event);
+            return;
+        }
+        auto* mime = new QMimeData;
+        mime->setData(kBusPresetMimeType, presetId_.toUtf8());
+        mime->setText(text());
+        QDrag drag(this);
+        drag.setMimeData(mime);
+        setDown(false);
+        drag.exec(Qt::CopyAction);
+    }
+
+private:
+    QString presetId_;
+    QPoint dragStart_;
+};
+
+std::string busPresetValue(const std::string_view presetId, const std::uint32_t width)
+{
+    const auto count = static_cast<std::size_t>(std::max<std::uint32_t>(1, width));
+    if (presetId == "zero" || presetId == "reserved") return "0b" + std::string(count, '0');
+    if (presetId == "dont-care") return "0B" + std::string(count, 'X');
+    if (presetId == "x") return "0b" + std::string(count, 'x');
+    if (presetId == "z") return "0b" + std::string(count, 'z');
+    return {};
+}
+
+QString busPresetDisplayLabel(const std::string_view presetId)
+{
+    if (presetId == "zero" || presetId == "reserved") return QStringLiteral("0");
+    if (presetId == "dont-care") return QStringLiteral("DON'T CARE");
+    if (presetId == "x") return QStringLiteral("X");
+    if (presetId == "z") return QStringLiteral("Z");
+    return QStringLiteral("BUS VALUE");
+}
+
+std::string busPresetId(const Segment& segment)
+{
+    const auto preset = segment.extensions.find(std::string(kBusPresetExtension));
+    if (preset == segment.extensions.end()) return {};
+    auto value = preset->second;
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+        value = value.substr(1, value.size() - 2);
+    }
+    return value;
+}
+
+QString busPresetLabel(const Segment& segment)
+{
+    const auto preset = busPresetId(segment);
+    return preset.empty() ? QString{} : busPresetDisplayLabel(preset);
+}
 
 Tick floorToStep(const Tick value, const Tick step)
 {
@@ -67,41 +158,352 @@ WaveCanvas::WaveCanvas(QWidget* parent)
 {
     setFrameShape(QFrame::NoFrame);
     setMouseTracking(true);
+    viewport()->setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
+    setAcceptDrops(true);
+    viewport()->setAcceptDrops(true);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     viewport()->setAutoFillBackground(false);
-    addLaneButton_ = new QToolButton(viewport());
-    addLaneButton_->setObjectName(QStringLiteral("CanvasAddSignalButton"));
-    addLaneButton_->setText(tr("+  Add signal"));
-    addLaneButton_->setToolTip(tr("Add a signal lane"));
-    addLaneButton_->setAccessibleName(tr("Add signal"));
-    addLaneButton_->setAutoRaise(true);
-    addLaneButton_->setCursor(Qt::PointingHandCursor);
-    addLaneButton_->setStyleSheet(QStringLiteral(
-        "QToolButton {"
-        " color: #e0e5ed;"
-        " background: #222b39;"
-        " border: 1px solid #3d4859;"
-        " border-radius: 5px;"
-        " padding-left: 12px;"
-        " text-align: left;"
-        " font-weight: 600;"
+    const std::array<LaneKind, 3> quickKinds{
+        LaneKind::Clock,
+        LaneKind::Bit,
+        LaneKind::Bus,
+    };
+    const std::array<QString, 3> quickLabels{
+        tr("+ CLK"),
+        tr("+ BIT"),
+        tr("+ BUS"),
+    };
+    const std::array<QString, 3> quickObjectNames{
+        QStringLiteral("CanvasAddClockButton"),
+        QStringLiteral("CanvasAddBitButton"),
+        QStringLiteral("CanvasAddBusButton"),
+    };
+    for (std::size_t index = 0; index < addLaneButtons_.size(); ++index) {
+        auto* button = new QToolButton(viewport());
+        button->setObjectName(quickObjectNames.at(index));
+        button->setText(quickLabels.at(index));
+        button->setToolTip(tr("Add a %1 lane immediately").arg(
+            laneKindLabel(quickKinds.at(index))));
+        button->setAccessibleName(quickLabels.at(index));
+        button->setAutoRaise(true);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setStyleSheet(QStringLiteral(
+            "QToolButton {"
+            " color: #edf1f7; background: #344052;"
+            " border: 1px solid #59677c; border-radius: 5px;"
+            " font-weight: 600;"
+            "}"
+            "QToolButton:hover, QToolButton:focus {"
+            " background: #43536a; border-color: #7eb5ff;"
+            "}"
+            "QToolButton:pressed { background: #315f91; }"));
+        button->hide();
+        addLaneButtons_.at(index) = button;
+        connect(button, &QToolButton::clicked, this, [this, kind = quickKinds.at(index)] {
+            emit addLaneRequested(kind);
+        });
+    }
+
+    quickLaneSetupPanel_ = new QFrame(viewport());
+    quickLaneSetupPanel_->setObjectName(QStringLiteral("QuickLaneSetupPanel"));
+    quickLaneSetupPanel_->setAttribute(Qt::WA_StyledBackground, true);
+    quickLaneSetupPanel_->setStyleSheet(QStringLiteral(
+        "QFrame#QuickLaneSetupPanel {"
+        " background: rgba(45, 56, 72, 248);"
+        " border: 1px solid #7eb5ff; border-radius: 6px;"
         "}"
-        "QToolButton:hover, QToolButton:focus {"
-        " background: #2e3c51;"
-        " border-color: #6fa8ff;"
+        "QFrame#QuickLaneSetupPanel QLabel { color: #e9eff7; }"
+        "QFrame#QuickLaneSetupPanel QLineEdit,"
+        "QFrame#QuickLaneSetupPanel QComboBox {"
+        " color: #f4f7fb; background: #222b38;"
+        " border: 1px solid #65768e; border-radius: 4px; padding: 3px 6px;"
         "}"
-        "QToolButton:pressed {"
-        " background: #244f80;"
+        "QFrame#QuickLaneSetupPanel QLineEdit:focus,"
+        "QFrame#QuickLaneSetupPanel QComboBox:focus { border-color: #8fc3ff; }"));
+    auto* quickLayout = new QHBoxLayout(quickLaneSetupPanel_);
+    quickLayout->setContentsMargins(8, 5, 8, 5);
+    quickLayout->setSpacing(6);
+    auto* quickPrompt = new QLabel(tr("New signal"), quickLaneSetupPanel_);
+    quickPrompt->setObjectName(QStringLiteral("QuickLaneSetupPrompt"));
+    quickLayout->addWidget(quickPrompt);
+    quickLaneNameEdit_ = new QLineEdit(quickLaneSetupPanel_);
+    quickLaneNameEdit_->setObjectName(QStringLiteral("QuickLaneNameEdit"));
+    quickLaneNameEdit_->setPlaceholderText(tr("Signal name"));
+    quickLaneNameEdit_->setMinimumWidth(130);
+    quickLayout->addWidget(quickLaneNameEdit_, 1);
+    quickLaneParameterEdit_ = new QLineEdit(quickLaneSetupPanel_);
+    quickLaneParameterEdit_->setObjectName(QStringLiteral("QuickLaneParameterEdit"));
+    quickLaneParameterEdit_->setMaximumWidth(120);
+    quickLayout->addWidget(quickLaneParameterEdit_);
+    quickLaneClockCombo_ = new QComboBox(quickLaneSetupPanel_);
+    quickLaneClockCombo_->setObjectName(QStringLiteral("QuickLaneClockCombo"));
+    quickLaneClockCombo_->setMinimumWidth(120);
+    quickLayout->addWidget(quickLaneClockCombo_);
+    quickLaneErrorLabel_ = new QLabel(quickLaneSetupPanel_);
+    quickLaneErrorLabel_->setObjectName(QStringLiteral("QuickLaneSetupError"));
+    quickLaneErrorLabel_->setStyleSheet(QStringLiteral("color: #ff9b98;"));
+    quickLaneErrorLabel_->setMaximumWidth(230);
+    quickLayout->addWidget(quickLaneErrorLabel_);
+    auto* quickHint = new QLabel(tr("Enter to apply · Esc to cancel"), quickLaneSetupPanel_);
+    quickHint->setObjectName(QStringLiteral("QuickLaneSetupHint"));
+    quickHint->setStyleSheet(QStringLiteral("color: #aebbd0;"));
+    quickLayout->addWidget(quickHint);
+    for (auto* editor : {quickLaneNameEdit_, quickLaneParameterEdit_}) {
+        editor->installEventFilter(this);
+    }
+    quickLaneClockCombo_->installEventFilter(this);
+    quickLaneSetupPanel_->hide();
+
+    durationLabel_ = new QLabel(tr("End"), viewport());
+    durationLabel_->setObjectName(QStringLiteral("TimelineDurationLabel"));
+    durationLabel_->setStyleSheet(QStringLiteral("color: #b9c6d8; background: transparent;"));
+    durationEdit_ = new QLineEdit(viewport());
+    durationEdit_->setObjectName(QStringLiteral("TimelineDurationEdit"));
+    durationEdit_->setAccessibleName(tr("Timeline end"));
+    durationEdit_->setToolTip(tr("Edit the timeline end, for example 500 ns, then press Enter"));
+    durationEdit_->setAlignment(Qt::AlignCenter);
+    durationEdit_->setStyleSheet(QStringLiteral(
+        "QLineEdit { color: #edf2f8; background: #2d3949;"
+        " border: 1px solid #65758b; border-radius: 4px; padding: 2px 5px; }"
+        "QLineEdit:focus { border-color: #8fc3ff; }"));
+    durationEdit_->installEventFilter(this);
+    connect(durationEdit_, &QLineEdit::editingFinished, this, [this] {
+        if (!durationEdit_->isModified()) return;
+        durationEdit_->setModified(false);
+        emit durationEditRequested(durationEdit_->text());
+    });
+
+    busPresetPalette_ = new QFrame(viewport());
+    busPresetPalette_->setObjectName(QStringLiteral("BusPresetPalette"));
+    busPresetPalette_->setFrameShape(QFrame::StyledPanel);
+    busPresetPalette_->setAttribute(Qt::WA_StyledBackground, true);
+    busPresetPalette_->setStyleSheet(QStringLiteral(
+        "QFrame#BusPresetPalette {"
+        " background: rgba(58, 69, 85, 246);"
+        " border: 1px solid #7d8da5; border-radius: 7px;"
+        "}"
+        "QFrame#BusPresetPalette QLabel { color: #dce4ef; font-weight: 600; }"
+        "QFrame#BusPresetPalette QLineEdit {"
+        " color: #f3f6fa; background: #263241;"
+        " border: 1px solid #7588a2; border-radius: 4px; padding: 3px 6px;"
+        "}"
+        "QFrame#BusPresetPalette QLineEdit:focus { border-color: #8dc0ff; }"
+        "QFrame#BusPresetPalette QToolButton {"
+        " color: #f3f6fa; background: #46566c;"
+        " border: 1px solid #6f8099; border-radius: 4px; padding: 3px 7px;"
+        "}"
+        "QFrame#BusPresetPalette QToolButton:hover {"
+        " background: #56708f; border-color: #8dc0ff;"
         "}"));
-    addLaneButton_->hide();
-    connect(addLaneButton_, &QToolButton::clicked, this, &WaveCanvas::addLaneRequested);
-    connect(horizontalScrollBar(), &QScrollBar::valueChanged, viewport(), qOverload<>(&QWidget::update));
-    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
-        updateAddLaneButtonGeometry();
+    auto* presetLayout = new QHBoxLayout(busPresetPalette_);
+    presetLayout->setContentsMargins(7, 5, 7, 5);
+    presetLayout->setSpacing(5);
+    busPresetContextLabel_ = new QLabel(tr("Bus · 1 beat"), busPresetPalette_);
+    busPresetContextLabel_->setObjectName(QStringLiteral("BusPresetContextLabel"));
+    presetLayout->addWidget(busPresetContextLabel_);
+    busValueEdit_ = new QLineEdit(busPresetPalette_);
+    busValueEdit_->setObjectName(QStringLiteral("BusPresetValueEdit"));
+    busValueEdit_->setPlaceholderText(tr("Value + Enter"));
+    busValueEdit_->setAccessibleName(tr("Bus value"));
+    busValueEdit_->setMinimumWidth(105);
+    busValueEdit_->setMaximumWidth(140);
+    busValueEdit_->installEventFilter(this);
+    presetLayout->addWidget(busValueEdit_);
+    const std::array<std::tuple<QString, QString, QString>, 4> presets{{
+        {QStringLiteral("zero"), QStringLiteral("0"), QStringLiteral("BusPresetZeroButton")},
+        {QStringLiteral("x"), QStringLiteral("X"), QStringLiteral("BusPresetXButton")},
+        {QStringLiteral("z"), QStringLiteral("Z"), QStringLiteral("BusPresetZButton")},
+        {QStringLiteral("dont-care"), tr("Don't care"), QStringLiteral("BusPresetDontCareButton")},
+    }};
+    for (const auto& [presetId, label, objectName] : presets) {
+        auto* button = new BusPresetButton(presetId, label, busPresetPalette_);
+        button->setObjectName(objectName);
+        presetLayout->addWidget(button);
+        connect(button, &QToolButton::clicked, this, [this, presetId] {
+            if (!busPresetLaneId_.empty() && busPresetAnchorTick_) {
+                applyBusPreset(busPresetLaneId_, presetId.toStdString(), *busPresetAnchorTick_);
+            }
+        });
+    }
+    busPresetPalette_->adjustSize();
+    busPresetPalette_->hide();
+
+    connect(horizontalScrollBar(), &QScrollBar::valueChanged, this, [this] {
+        positionBusPresetPalette();
         viewport()->update();
     });
+    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
+        updateAddLaneButtonGeometry();
+        positionQuickLaneSetup();
+        positionBusPresetPalette();
+        viewport()->update();
+    });
+    positionDurationEditor();
+}
+
+bool WaveCanvas::hasQuickLaneSetup() const noexcept
+{
+    return quickLaneSetupPanel_ && quickLaneSetupPanel_->isVisible();
+}
+
+void WaveCanvas::beginQuickLaneSetup(
+    const QString& laneId,
+    const LaneKind kind,
+    const QString& name,
+    const QString& parameter,
+    const QStringList& clockLabels,
+    const QStringList& clockIds,
+    const QString& selectedClockId)
+{
+    if (!quickLaneSetupPanel_ || laneId.isEmpty()) return;
+    quickLaneSetupLaneId_ = laneId;
+    quickLaneSetupKind_ = kind;
+    quickLaneNameEdit_->setText(name);
+    quickLaneNameEdit_->setModified(false);
+    quickLaneParameterEdit_->setText(parameter);
+    quickLaneParameterEdit_->setModified(false);
+    quickLaneErrorLabel_->clear();
+    quickLaneClockCombo_->clear();
+    const auto count = std::min(clockLabels.size(), clockIds.size());
+    for (qsizetype index = 0; index < count; ++index) {
+        quickLaneClockCombo_->addItem(clockLabels.at(index), clockIds.at(index));
+    }
+    const auto selectedIndex = quickLaneClockCombo_->findData(selectedClockId);
+    if (selectedIndex >= 0) quickLaneClockCombo_->setCurrentIndex(selectedIndex);
+    quickLaneClockCombo_->setVisible(kind != LaneKind::Clock && count > 1);
+    quickLaneParameterEdit_->setVisible(kind == LaneKind::Clock || kind == LaneKind::Bus);
+    quickLaneParameterEdit_->setPlaceholderText(
+        kind == LaneKind::Clock ? tr("Period, e.g. 10 ns") : tr("Width, e.g. 8"));
+    if (auto* prompt = quickLaneSetupPanel_->findChild<QLabel*>(
+            QStringLiteral("QuickLaneSetupPrompt"))) {
+        prompt->setText(
+            kind == LaneKind::Clock ? tr("New clock")
+            : kind == LaneKind::Bus ? tr("New bus")
+                                    : tr("New bit"));
+    }
+    quickLaneSetupPanel_->show();
+    quickLaneSetupPanel_->raise();
+    positionQuickLaneSetup();
+    quickLaneNameEdit_->setFocus(Qt::OtherFocusReason);
+    quickLaneNameEdit_->selectAll();
+}
+
+void WaveCanvas::finishQuickLaneSetup()
+{
+    if (!quickLaneSetupPanel_) return;
+    quickLaneSetupPanel_->hide();
+    quickLaneSetupLaneId_.clear();
+    quickLaneErrorLabel_->clear();
+    viewport()->setFocus(Qt::OtherFocusReason);
+    viewport()->update();
+}
+
+void WaveCanvas::showQuickLaneSetupError(
+    const QString& message,
+    const bool focusParameter)
+{
+    if (!hasQuickLaneSetup()) return;
+    quickLaneErrorLabel_->setText(message);
+    quickLaneErrorLabel_->setToolTip(message);
+    positionQuickLaneSetup();
+    auto* target = focusParameter && quickLaneParameterEdit_->isVisible()
+        ? quickLaneParameterEdit_
+        : quickLaneNameEdit_;
+    target->setFocus(Qt::OtherFocusReason);
+    target->selectAll();
+}
+
+void WaveCanvas::showDurationEditError(const QString& message)
+{
+    if (!durationEdit_) return;
+    durationEdit_->setStyleSheet(QStringLiteral(
+        "QLineEdit { color: #fff2f2; background: #452d34;"
+        " border: 1px solid #ef7773; border-radius: 4px; padding: 2px 5px; }"));
+    durationEdit_->setToolTip(message);
+    durationEdit_->setFocus(Qt::OtherFocusReason);
+    durationEdit_->selectAll();
+    emit statusMessage(message);
+}
+
+bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() == QEvent::KeyPress) {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        const auto acceptKey = keyEvent->key() == Qt::Key_Return
+            || keyEvent->key() == Qt::Key_Enter;
+        const auto quickEditor = watched == quickLaneNameEdit_
+            || watched == quickLaneParameterEdit_
+            || watched == quickLaneClockCombo_;
+        if (quickEditor && acceptKey) {
+            submitQuickLaneSetup();
+            return true;
+        }
+        if (quickEditor && keyEvent->key() == Qt::Key_Escape) {
+            cancelQuickLaneSetup();
+            return true;
+        }
+        if (watched == durationEdit_ && acceptKey) {
+            durationEdit_->setModified(false);
+            emit durationEditRequested(durationEdit_->text());
+            return true;
+        }
+        if (watched == durationEdit_ && keyEvent->key() == Qt::Key_Escape) {
+            durationEdit_->setModified(false);
+            durationEdit_->clearFocus();
+            syncDurationEditor();
+            return true;
+        }
+        if (watched == busValueEdit_ && acceptKey) {
+            submitBusValue();
+            return true;
+        }
+        if (watched == busValueEdit_ && keyEvent->key() == Qt::Key_Escape) {
+            hideBusPresetPalette();
+            viewport()->setFocus(Qt::OtherFocusReason);
+            return true;
+        }
+    }
+    return QAbstractScrollArea::eventFilter(watched, event);
+}
+
+void WaveCanvas::submitQuickLaneSetup()
+{
+    if (!hasQuickLaneSetup()) return;
+    emit quickLaneSetupAccepted(
+        quickLaneSetupLaneId_,
+        quickLaneNameEdit_->text().trimmed(),
+        quickLaneParameterEdit_->isVisible()
+            ? quickLaneParameterEdit_->text().trimmed()
+            : QString{},
+        quickLaneClockCombo_->isVisible()
+            ? quickLaneClockCombo_->currentData().toString()
+            : QString{});
+}
+
+void WaveCanvas::cancelQuickLaneSetup()
+{
+    if (!hasQuickLaneSetup()) return;
+    emit quickLaneSetupCanceled(quickLaneSetupLaneId_);
+}
+
+void WaveCanvas::syncDurationEditor()
+{
+    if (!durationEdit_ || !durationLabel_) return;
+    const auto available = project_ && scenario_;
+    durationEdit_->setVisible(available);
+    durationLabel_->setVisible(available);
+    if (!available || durationEdit_->hasFocus()) return;
+    durationEdit_->setText(QString::fromStdString(
+        formatTick(scenario_->duration, project_->timeBase)));
+    durationEdit_->setModified(false);
+    durationEdit_->setToolTip(
+        tr("Edit the timeline end, for example 500 ns, then press Enter"));
+    durationEdit_->setStyleSheet(QStringLiteral(
+        "QLineEdit { color: #edf2f8; background: #2d3949;"
+        " border: 1px solid #65758b; border-radius: 4px; padding: 2px 5px; }"
+        "QLineEdit:focus { border-color: #8fc3ff; }"));
 }
 
 void WaveCanvas::setDocument(
@@ -109,6 +511,8 @@ void WaveCanvas::setDocument(
     Scenario* scenario,
     CommandStack* commandStack)
 {
+    if (quickLaneSetupPanel_) quickLaneSetupPanel_->hide();
+    quickLaneSetupLaneId_.clear();
     project_ = project;
     scenario_ = scenario;
     commandStack_ = commandStack;
@@ -116,11 +520,21 @@ void WaveCanvas::setDocument(
     selectedLaneIds_.clear();
     selectionRange_.reset();
     movableCursorTick_.reset();
+    clearWaveEditState();
     temporaryCursorTick_.reset();
     selectedMarkerId_.clear();
     cursorInteraction_ = CursorInteraction::None;
+    laneHeaderPressed_ = false;
+    laneHeaderDragging_ = false;
+    laneHeaderSelectionActive_ = false;
+    laneDragId_.clear();
+    laneDropDestinationIndex_.reset();
+    laneDropIndicatorY_.reset();
     lockedMarkerOriginalRange_.reset();
+    hideBusPresetPalette();
     rebuildLaneLayout();
+    syncDurationEditor();
+    positionDurationEditor();
     fitPending_ = true;
     if (viewport()->width() > HeaderWidth + 40) {
         fitPending_ = false;
@@ -135,30 +549,31 @@ void WaveCanvas::setTool(const Tool tool)
     drawing_ = false;
     cursorInteraction_ = CursorInteraction::None;
     lockedMarkerOriginalRange_.reset();
+    laneHeaderPressed_ = false;
+    laneHeaderDragging_ = false;
+    laneDragId_.clear();
+    laneDropDestinationIndex_.reset();
+    laneDropIndicatorY_.reset();
     activeEventId_.clear();
     if (previousTool == Tool::Marker && tool != Tool::Marker) {
         movableCursorTick_.reset();
         temporaryCursorTick_.reset();
         selectedMarkerId_.clear();
     }
-    viewport()->setCursor(
-        tool == Tool::Selection ? Qt::ArrowCursor : Qt::CrossCursor);
+    if (previousTool == Tool::WaveEdit && tool != Tool::WaveEdit) {
+        clearWaveEditState();
+    }
+    viewport()->setCursor([tool] {
+        if (tool == Tool::Selection) return QCursor(Qt::ArrowCursor);
+        if (tool == Tool::WaveEdit) return QCursor(Qt::PointingHandCursor);
+        return QCursor(Qt::CrossCursor);
+    }());
     viewport()->update();
-}
-
-void WaveCanvas::setSnapMode(const SnapMode mode)
-{
-    snapMode_ = mode;
 }
 
 WaveCanvas::Tool WaveCanvas::tool() const noexcept
 {
     return tool_;
-}
-
-SnapMode WaveCanvas::snapMode() const noexcept
-{
-    return snapMode_;
 }
 
 QString WaveCanvas::selectedLaneId() const
@@ -199,6 +614,63 @@ std::optional<std::pair<Tick, Tick>> WaveCanvas::selectedTimeRange() const noexc
 {
     return selectionRange_;
 }
+QString WaveCanvas::selectedSegmentLaneId() const
+{
+    return QString::fromStdString(selectedSegmentLaneId_);
+}
+
+QString WaveCanvas::selectedSegmentId() const
+{
+    return QString::fromStdString(selectedSegmentId_);
+}
+
+QString WaveCanvas::hoveredBitBeatLaneId() const
+{
+    return QString::fromStdString(waveEditHoverLaneId_);
+}
+
+std::optional<std::pair<Tick, Tick>> WaveCanvas::hoveredBitBeatRange() const noexcept
+{
+    return waveEditHoverRange_;
+}
+
+std::optional<std::size_t> WaveCanvas::laneDropDestinationIndex() const noexcept
+{
+    return laneDropDestinationIndex_;
+}
+
+std::optional<Tick> WaveCanvas::waveEditTransitionPreviewTick() const noexcept
+{
+    return waveEditInteraction_ == WaveEditInteraction::MoveTransition && drawing_
+        ? std::optional<Tick>{drawCurrent_}
+        : std::nullopt;
+}
+
+std::optional<std::pair<Tick, Tick>>
+WaveCanvas::waveEditTransitionPreviewRange() const noexcept
+{
+    if (!scenario_
+        || !drawing_
+        || waveEditInteraction_ != WaveEditInteraction::MoveTransition
+        || activeEventId_.empty()) {
+        return std::nullopt;
+    }
+    const auto* event = findEvent(*scenario_, activeEventId_);
+    const auto* lane = event ? findLane(*scenario_, event->laneId) : nullptr;
+    if (!event || !lane || lane->kind != LaneKind::Bit) return std::nullopt;
+    const auto segment = std::find_if(
+        lane->segments.begin(),
+        lane->segments.end(),
+        [event](const Segment& candidate) {
+            return candidate.id == event->linkedSegmentId;
+        });
+    if (segment == lane->segments.end()) return std::nullopt;
+    const auto start = std::min(event->tick, drawCurrent_);
+    return segment->end > start
+        ? std::optional<std::pair<Tick, Tick>>{{start, segment->end}}
+        : std::nullopt;
+}
+
 
 void WaveCanvas::zoomIn()
 {
@@ -252,7 +724,20 @@ void WaveCanvas::refreshModel()
     if (!selectedMarkerId_.empty() && !markerById(selectedMarkerId_)) {
         selectedMarkerId_.clear();
     }
+    if (!selectedSegmentId_.empty()
+        && !segmentById(selectedSegmentLaneId_, selectedSegmentId_)) {
+        clearWaveEditState();
+    }
     updateScrollBars();
+    syncDurationEditor();
+    positionQuickLaneSetup();
+    positionDurationEditor();
+    if (!busPresetLaneId_.empty()
+        && (!scenario_ || !findLane(*scenario_, busPresetLaneId_))) {
+        hideBusPresetPalette();
+    } else {
+        positionBusPresetPalette();
+    }
     viewport()->update();
 }
 
@@ -494,8 +979,238 @@ void WaveCanvas::insertPulse()
     refreshModel();
 }
 
+bool WaveCanvas::viewportEvent(QEvent* event)
+{
+    if (event && event->type() == QEvent::Leave) {
+        const auto changed = waveEditHoverRange_.has_value()
+            || !waveEditHoverLaneId_.empty()
+            || snapGuideTick_.has_value();
+        waveEditHoverLaneId_.clear();
+        waveEditHoverRange_.reset();
+        snapGuideTick_.reset();
+        if (changed) viewport()->update();
+    }
+    return QAbstractScrollArea::viewportEvent(event);
+}
+
+void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
+{
+    if (!scenario_) {
+        QAbstractScrollArea::contextMenuEvent(event);
+        return;
+    }
+    auto* lane = laneAtY(event->pos().y());
+    if (!lane || lane->kind == LaneKind::Group) {
+        QAbstractScrollArea::contextMenuEvent(event);
+        return;
+    }
+    setFocus(Qt::MouseFocusReason);
+    selectedLaneId_ = lane->id;
+    selectedLaneIds_ = {lane->id};
+
+    if (event->pos().x() < HeaderWidth) {
+        laneHeaderSelectionActive_ = true;
+        emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+        emit editLaneParametersRequested(
+            QString::fromStdString(lane->id),
+            event->globalPos());
+        viewport()->update();
+        event->accept();
+        return;
+    }
+
+    laneHeaderSelectionActive_ = false;
+    const auto rawTick = scenario_->duration > 0
+        ? std::clamp<Tick>(tickAtX(event->pos().x()), 0, scenario_->duration - 1)
+        : Tick{0};
+    cursorTick_ = snappedTick(rawTick, lane);
+    const auto* segment = segmentAtTick(*lane, cursorTick_);
+    if (segment) {
+        selectedSegmentLaneId_ = lane->id;
+        selectedSegmentId_ = segment->id;
+        selectionRange_ = std::pair{segment->start, segment->end};
+    } else {
+        selectedSegmentLaneId_.clear();
+        selectedSegmentId_.clear();
+        selectionRange_.reset();
+    }
+    emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+    viewport()->update();
+
+    QMenu menu(this);
+    menu.setObjectName(QStringLiteral("WaveformContextMenu"));
+    QAction* editValue = nullptr;
+    QAction* clearValue = nullptr;
+    QAction* setZero = nullptr;
+    QAction* setOne = nullptr;
+    QAction* setX = nullptr;
+    QAction* setZ = nullptr;
+    QAction* pulse = nullptr;
+    QAction* zeroBus = nullptr;
+    QAction* dontCare = nullptr;
+    QAction* customBus = nullptr;
+    QAction* clockGated = nullptr;
+    QAction* clockDisabled = nullptr;
+    QAction* clockRun = nullptr;
+
+    if (lane->kind == LaneKind::Bit) {
+        setZero = menu.addAction(tr("Set beat to 0"));
+        setOne = menu.addAction(tr("Set beat to 1"));
+        setX = menu.addAction(tr("Set beat to X"));
+        setZ = menu.addAction(tr("Set beat to Z"));
+        menu.addSeparator();
+        pulse = menu.addAction(tr("Insert one-beat pulse"));
+    } else if (lane->kind == LaneKind::Bus) {
+        zeroBus = menu.addAction(tr("Set beat to 0"));
+        dontCare = menu.addAction(tr("Don't care"));
+        setX = menu.addAction(tr("Set beat to X"));
+        setZ = menu.addAction(tr("Set beat to Z"));
+        customBus = menu.addAction(tr("Set beat value…"));
+        if (segment) {
+            menu.addSeparator();
+            editValue = menu.addAction(tr("Edit complete segment value…"));
+        }
+    } else if (lane->kind == LaneKind::Clock) {
+        clockGated = menu.addAction(tr("Gate for one period"));
+        clockDisabled = menu.addAction(tr("Drive X for one period"));
+        clockRun = menu.addAction(tr("Run for one period"));
+        if (segment) {
+            menu.addSeparator();
+            editValue = menu.addAction(tr("Edit complete override…"));
+        }
+    } else if (segment) {
+        editValue = menu.addAction(tr("Edit segment value…"));
+    }
+    if (segment) {
+        menu.addSeparator();
+        clearValue = menu.addAction(
+            lane->kind == LaneKind::Bit
+                ? tr("Clear segment to implicit 0")
+                : lane->kind == LaneKind::Bus
+                    ? tr("Clear segment to implicit X")
+                    : tr("Clear segment"));
+    }
+
+    const auto* chosen = menu.exec(event->globalPos());
+    if (!chosen) return;
+    const auto [beatStart, beatEnd] = beatRangeAt(cursorTick_, *lane);
+    if (chosen == editValue) {
+        editSegmentAt(event->pos());
+    } else if (chosen == clearValue) {
+        clearSelectedSegment();
+    } else if (chosen == setZero) {
+        setLaneRangeValue(lane->id, beatStart, beatEnd, "0");
+    } else if (chosen == setOne) {
+        setLaneRangeValue(lane->id, beatStart, beatEnd, "1");
+    } else if (chosen == setX) {
+        if (lane->kind == LaneKind::Bus) applyBusPreset(lane->id, "x", cursorTick_);
+        else setLaneRangeValue(lane->id, beatStart, beatEnd, "X");
+    } else if (chosen == setZ) {
+        if (lane->kind == LaneKind::Bus) applyBusPreset(lane->id, "z", cursorTick_);
+        else setLaneRangeValue(lane->id, beatStart, beatEnd, "Z");
+    } else if (chosen == pulse) {
+        insertPulse();
+    } else if (chosen == zeroBus) {
+        applyBusPreset(lane->id, "zero", cursorTick_);
+    } else if (chosen == dontCare) {
+        applyBusPreset(lane->id, "dont-care", cursorTick_);
+    } else if (chosen == customBus) {
+        promptBusValueAt(lane->id, cursorTick_);
+    } else if (chosen == clockGated) {
+        setLaneRangeValue(lane->id, beatStart, beatEnd, "gated");
+    } else if (chosen == clockDisabled) {
+        setLaneRangeValue(lane->id, beatStart, beatEnd, "disabled");
+    } else if (chosen == clockRun) {
+        try {
+            commandStack_->execute(std::make_unique<ClearLaneRangeCommand>(
+                *scenario_, lane->id, beatStart, beatEnd));
+            emit modelEdited();
+            emit commandAvailabilityChanged();
+            refreshModel();
+        } catch (const std::exception& exception) {
+            emit statusMessage(QString::fromUtf8(exception.what()));
+        }
+    }
+    event->accept();
+}
+
 void WaveCanvas::keyPressEvent(QKeyEvent* event)
 {
+    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
+        spaceHeld_ = true;
+        viewport()->setCursor(Qt::OpenHandCursor);
+        event->accept();
+        return;
+    }
+
+    if (scenario_
+        && laneHeaderSelectionActive_
+        && (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)
+        && !selectedLaneId_.empty()) {
+        emit removeLaneRequested(QString::fromStdString(selectedLaneId_));
+        event->accept();
+        return;
+    }
+
+    if (tool_ == Tool::WaveEdit && scenario_) {
+        if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)
+            && !selectedSegmentId_.empty()) {
+            clearSelectedSegment();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Escape) {
+            panning_ = false;
+            clearWaveEditState();
+            selectedLaneId_.clear();
+            selectedLaneIds_.clear();
+            laneHeaderSelectionActive_ = false;
+            hideBusPresetPalette();
+            snapGuideTick_.reset();
+            viewport()->setCursor(Qt::PointingHandCursor);
+            viewport()->update();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
+            const auto step = cursorKeyboardStep();
+            const auto direction = event->key() == Qt::Key_Left ? Tick{-1} : Tick{1};
+            cursorTick_ = direction < 0
+                ? cursorTick_ - std::min(cursorTick_, step)
+                : cursorTick_ + std::min(scenario_->duration - cursorTick_, step);
+            ensureCursorVisible(cursorTick_);
+            snapGuideTick_.reset();
+            emit statusMessage(
+                tr("Edit cursor %1").arg(QString::fromStdString(
+                    formatTick(cursorTick_, project_->timeBase))));
+            viewport()->update();
+            event->accept();
+            return;
+        }
+        if (event->modifiers() == Qt::NoModifier
+            && (event->key() == Qt::Key_0
+                || event->key() == Qt::Key_1
+                || event->key() == Qt::Key_X
+                || event->key() == Qt::Key_Z)) {
+            const auto* lane = findLane(*scenario_, selectedLaneId_);
+            if (lane && lane->kind == LaneKind::Bit) {
+                const auto [start, end] = beatRangeAt(cursorTick_, *lane);
+                const auto value = event->key() == Qt::Key_0
+                    ? std::string{"0"}
+                    : event->key() == Qt::Key_1
+                        ? std::string{"1"}
+                        : event->key() == Qt::Key_X
+                            ? std::string{"X"}
+                            : std::string{"Z"};
+                setLaneRangeValue(lane->id, start, end, value);
+                event->accept();
+                return;
+            }
+        }
+        QAbstractScrollArea::keyPressEvent(event);
+        return;
+    }
+
     if (tool_ != Tool::Marker || !scenario_) {
         QAbstractScrollArea::keyPressEvent(event);
         return;
@@ -540,11 +1255,26 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
         temporaryCursorTick_.reset();
         selectedMarkerId_.clear();
         viewport()->update();
+        emit measureModeExitRequested();
         event->accept();
         return;
     }
 
     QAbstractScrollArea::keyPressEvent(event);
+}
+
+void WaveCanvas::keyReleaseEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
+        spaceHeld_ = false;
+        if (!panning_) {
+            viewport()->setCursor(
+                tool_ == Tool::Marker ? Qt::CrossCursor : Qt::PointingHandCursor);
+        }
+        event->accept();
+        return;
+    }
+    QAbstractScrollArea::keyReleaseEvent(event);
 }
 
 void WaveCanvas::paintEvent(QPaintEvent* event)
@@ -576,6 +1306,8 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
             visibleEnd);
     }
     drawScenarioOverlays(painter, visibleStart, visibleEnd);
+    drawWaveEditOverlay(painter);
+    drawEditGuide(painter);
     drawAddLaneRow(painter);
 
     if (drawing_
@@ -601,15 +1333,10 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
             painter.drawLine(eventPoint(*source), interactionCurrent_);
             painter.setRenderHint(QPainter::Antialiasing, false);
         }
-    } else if (drawing_ && tool_ == Tool::Transition && !activeEventId_.empty()) {
-        const auto* source = findEvent(*scenario_, activeEventId_);
-        if (source) {
-            const auto x = xAtTick(drawCurrent_);
-            painter.setPen(QPen(QColor(111, 168, 255), 2.0, Qt::DashLine));
-            painter.drawLine(x, RulerHeight, x, viewport()->height());
-            painter.drawLine(eventPoint(*source), QPoint(x, eventPoint(*source).y()));
-        }
-    } else if (drawing_ && !drawLaneId_.empty()) {
+    } else if (drawing_
+               && (tool_ != Tool::WaveEdit
+                   || waveEditInteraction_ == WaveEditInteraction::SelectRange)
+               && !drawLaneId_.empty()) {
         const auto* lane = findLane(*scenario_, drawLaneId_);
         const auto iterator = std::find_if(
             laneLayout_.begin(),
@@ -621,10 +1348,12 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
             const auto y = RulerHeight + iterator->top - verticalScrollBar()->value();
             const auto left = xAtTick(std::min(drawStart_, drawCurrent_));
             const auto right = xAtTick(std::max(drawStart_, drawCurrent_));
-            const auto top = tool_ == Tool::Selection
+            const auto rangeSelecting = tool_ == Tool::Selection
+                || waveEditInteraction_ == WaveEditInteraction::SelectRange;
+            const auto top = rangeSelecting
                 ? std::max(RulerHeight, std::min(selectionStartY_, interactionCurrent_.y()))
                 : y;
-            const auto bottom = tool_ == Tool::Selection
+            const auto bottom = rangeSelecting
                 ? std::min(
                     viewport()->height(),
                     std::max(selectionStartY_, interactionCurrent_.y()))
@@ -637,6 +1366,8 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
                 QRect(QPoint(left, top), QPoint(std::max(left + 1, right), bottom - 1)));
         }
     }
+
+    drawLaneReorderOverlay(painter);
 
     painter.fillRect(QRect(0, 0, HeaderWidth, RulerHeight), kHeaderBackground);
     painter.setPen(kTextPrimary);
@@ -661,21 +1392,218 @@ void WaveCanvas::resizeEvent(QResizeEvent* event)
         updateScrollBars();
     }
     updateAddLaneButtonGeometry();
+    positionQuickLaneSetup();
+    positionDurationEditor();
+    positionBusPresetPalette();
 }
 
 void WaveCanvas::mousePressEvent(QMouseEvent* event)
 {
-    if (!scenario_ || event->button() != Qt::LeftButton) {
+    if (!scenario_) {
         QAbstractScrollArea::mousePressEvent(event);
         return;
     }
     const auto position = event->position().toPoint();
-    if (addLaneRowRect().contains(position)) {
-        emit addLaneRequested();
+    if (event->button() == Qt::LeftButton && hasQuickLaneSetup()) {
+        submitQuickLaneSetup();
+        if (hasQuickLaneSetup()) {
+            event->accept();
+            return;
+        }
+    }
+    if (event->button() == Qt::MiddleButton
+        || (event->button() == Qt::LeftButton && spaceHeld_)) {
+        setFocus(Qt::MouseFocusReason);
+        panning_ = true;
+        panPressPosition_ = position;
+        panStartHorizontal_ = horizontalScrollBar()->value();
+        panStartVertical_ = verticalScrollBar()->value();
+        viewport()->setCursor(Qt::ClosedHandCursor);
+        event->accept();
         return;
     }
+    if (event->button() != Qt::LeftButton) {
+        QAbstractScrollArea::mousePressEvent(event);
+        return;
+    }
+    if (tool_ == Tool::WaveEdit
+        && position.y() < RulerHeight
+        && position.x() >= HeaderWidth) {
+        cursorTick_ = snappedTick(tickAtX(position.x()), nullptr);
+        selectedSegmentLaneId_.clear();
+        selectedSegmentId_.clear();
+        selectionRange_.reset();
+        snapGuideTick_.reset();
+        viewport()->update();
+        event->accept();
+        return;
+    }
+    if (addLaneRowRect().contains(position)) return;
     auto* lane = laneAtY(position.y());
     bypassSnap_ = event->modifiers().testFlag(Qt::AltModifier);
+    if (lane && lane->kind == LaneKind::Bus) {
+        showBusPresetPalette(*lane, position);
+    } else {
+        hideBusPresetPalette();
+    }
+
+    if (position.x() < HeaderWidth && lane && lane->kind != LaneKind::Group) {
+        setFocus(Qt::MouseFocusReason);
+        if (tool_ == Tool::WaveEdit) clearWaveEditState();
+        selectedLaneId_ = lane->id;
+        selectedLaneIds_ = {lane->id};
+        laneHeaderSelectionActive_ = true;
+        laneHeaderPressed_ = true;
+        laneHeaderDragging_ = false;
+        laneHeaderPressPosition_ = position;
+        laneDragId_ = lane->id;
+        laneDropDestinationIndex_.reset();
+        laneDropIndicatorY_.reset();
+        emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+        viewport()->setCursor(Qt::OpenHandCursor);
+        viewport()->update();
+        return;
+    }
+
+    laneHeaderSelectionActive_ = false;
+    laneHeaderPressed_ = false;
+    laneHeaderDragging_ = false;
+    laneDragId_.clear();
+    laneDropDestinationIndex_.reset();
+    laneDropIndicatorY_.reset();
+
+    if (tool_ == Tool::WaveEdit) {
+        setFocus(Qt::MouseFocusReason);
+        if (position.x() < HeaderWidth || !lane || lane->kind == LaneKind::Group) {
+            clearWaveEditState();
+            if (!lane) {
+                selectedLaneId_.clear();
+                selectedLaneIds_.clear();
+                emit selectionChanged(QString{}, cursorTick_);
+            }
+            viewport()->update();
+            return;
+        }
+        selectedLaneId_ = lane->id;
+        selectedLaneIds_ = {lane->id};
+        const auto rawTick = scenario_->duration > 0
+            ? std::clamp<Tick>(tickAtX(position.x()), 0, scenario_->duration - 1)
+            : Tick{0};
+        cursorTick_ = snappedTick(rawTick, lane);
+        emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+
+        if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+            selectedSegmentLaneId_.clear();
+            selectedSegmentId_.clear();
+            waveEditOriginalRange_.reset();
+            waveEditPreviewRange_.reset();
+            waveEditInteraction_ = WaveEditInteraction::SelectRange;
+            drawLaneId_ = lane->id;
+            drawStart_ = cursorTick_;
+            drawCurrent_ = cursorTick_;
+            selectionStartY_ = position.y();
+            interactionCurrent_ = position;
+            selectionRange_ = std::pair{cursorTick_, cursorTick_};
+            drawing_ = true;
+            viewport()->setCursor(Qt::CrossCursor);
+            viewport()->update();
+            return;
+        }
+
+        if (lane->kind == LaneKind::Bit) {
+            const auto* hitEvent = eventAtPosition(position);
+            if (hitEvent
+                && hitEvent->laneId == lane->id
+                && hitEvent->waveformLinked) {
+                selectedSegmentLaneId_.clear();
+                selectedSegmentId_.clear();
+                waveEditOriginalRange_.reset();
+                waveEditPreviewRange_.reset();
+                waveEditHoverLaneId_.clear();
+                waveEditHoverRange_.reset();
+                waveEditInteraction_ = WaveEditInteraction::MoveTransition;
+                activeEventId_ = hitEvent->id;
+                drawLaneId_ = lane->id;
+                drawStart_ = hitEvent->tick;
+                drawCurrent_ = hitEvent->tick;
+                waveEditPressPosition_ = position;
+                drawing_ = true;
+                emit eventSelected(QString::fromStdString(hitEvent->id));
+                viewport()->setCursor(Qt::SizeHorCursor);
+                viewport()->update();
+                return;
+            }
+        }
+
+        if (lane->kind == LaneKind::Bit) {
+            selectedSegmentLaneId_.clear();
+            selectedSegmentId_.clear();
+            waveEditOriginalRange_.reset();
+            waveEditInteraction_ = WaveEditInteraction::ToggleBitRange;
+            drawLaneId_ = lane->id;
+            drawStart_ = rawTick;
+            drawCurrent_ = rawTick;
+            waveEditPressPosition_ = position;
+            waveEditPreviewRange_ = beatRangeAt(rawTick, *lane);
+            waveEditHoverLaneId_ = lane->id;
+            waveEditHoverRange_ = waveEditPreviewRange_;
+            selectionRange_ = waveEditPreviewRange_;
+            drawing_ = true;
+            viewport()->setCursor(Qt::PointingHandCursor);
+            viewport()->update();
+            return;
+        }
+
+        waveEditHoverLaneId_.clear();
+        waveEditHoverRange_.reset();
+        const auto hit = segmentHitAtPosition(*lane, position);
+        if (hit.segment && hit.boundary != SegmentBoundary::None) {
+            selectedSegmentLaneId_ = lane->id;
+            selectedSegmentId_ = hit.segment->id;
+            waveEditOriginalRange_ = std::pair{hit.segment->start, hit.segment->end};
+            waveEditPreviewRange_ = waveEditOriginalRange_;
+            waveEditInteraction_ = hit.boundary == SegmentBoundary::Start
+                ? WaveEditInteraction::ResizeStart
+                : WaveEditInteraction::ResizeEnd;
+            drawLaneId_ = lane->id;
+            drawStart_ = hit.boundary == SegmentBoundary::Start
+                ? hit.segment->start
+                : hit.segment->end;
+            drawCurrent_ = drawStart_;
+            waveEditPressPosition_ = position;
+            drawing_ = true;
+            selectionRange_ = waveEditPreviewRange_;
+            viewport()->setCursor(Qt::SplitHCursor);
+            viewport()->update();
+            return;
+        }
+
+        if (hit.segment) {
+            selectedSegmentLaneId_ = lane->id;
+            selectedSegmentId_ = hit.segment->id;
+            waveEditOriginalRange_ = std::pair{hit.segment->start, hit.segment->end};
+            waveEditPreviewRange_ = waveEditOriginalRange_;
+            waveEditInteraction_ = WaveEditInteraction::MoveSegment;
+            waveEditGrabOffset_ = rawTick - hit.segment->start;
+            drawLaneId_ = lane->id;
+            drawStart_ = rawTick;
+            drawCurrent_ = rawTick;
+            waveEditPressPosition_ = position;
+            selectionRange_ = waveEditOriginalRange_;
+            drawing_ = true;
+            viewport()->setCursor(Qt::SizeAllCursor);
+        } else {
+            drawing_ = false;
+            waveEditInteraction_ = WaveEditInteraction::None;
+            waveEditOriginalRange_.reset();
+            waveEditPreviewRange_.reset();
+            selectedSegmentLaneId_.clear();
+            selectedSegmentId_.clear();
+            selectionRange_.reset();
+        }
+        viewport()->update();
+        return;
+    }
 
     if (tool_ == Tool::Marker) {
         setFocus(Qt::MouseFocusReason);
@@ -730,7 +1658,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    if (tool_ == Tool::Relation || tool_ == Tool::Transition) {
+    if (tool_ == Tool::Relation) {
         const auto* hitEvent = eventAtPosition(position);
         if (!hitEvent) {
             QToolTip::showText(
@@ -816,11 +1744,222 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
 {
     if (!scenario_) return;
     const auto position = event->position().toPoint();
+    if (panning_) {
+        const auto delta = position - panPressPosition_;
+        horizontalScrollBar()->setValue(panStartHorizontal_ - delta.x());
+        verticalScrollBar()->setValue(panStartVertical_ - delta.y());
+        viewport()->setCursor(Qt::ClosedHandCursor);
+        event->accept();
+        return;
+    }
+    if (laneHeaderPressed_) {
+        if (!event->buttons().testFlag(Qt::LeftButton)) {
+            laneHeaderPressed_ = false;
+            laneHeaderDragging_ = false;
+            laneDragId_.clear();
+            laneDropDestinationIndex_.reset();
+            laneDropIndicatorY_.reset();
+            viewport()->setCursor(Qt::OpenHandCursor);
+            viewport()->update();
+            return;
+        }
+        if (!laneHeaderDragging_
+            && (position - laneHeaderPressPosition_).manhattanLength()
+                >= QApplication::startDragDistance()) {
+            laneHeaderDragging_ = true;
+        }
+        if (laneHeaderDragging_) {
+            updateLaneDropTarget(position.y());
+            viewport()->setCursor(Qt::ClosedHandCursor);
+            viewport()->update();
+        }
+        return;
+    }
     bypassSnap_ = event->modifiers().testFlag(Qt::AltModifier);
     interactionCurrent_ = position;
     const auto* lane = laneAtY(position.y());
     const auto rawTick = tickAtX(position.x());
+    const auto boundedRaw = std::clamp<Tick>(rawTick, 0, scenario_->duration);
     cursorTick_ = snappedTick(rawTick, lane);
+    snapGuideTick_ = cursorTick_ == boundedRaw
+        ? std::optional<Tick>{}
+        : std::optional<Tick>{cursorTick_};
+
+    if (tool_ == Tool::WaveEdit) {
+        if (drawing_) {
+            const auto* editLane = findLane(*scenario_, drawLaneId_);
+            drawCurrent_ = std::clamp<Tick>(rawTick, 0, scenario_->duration);
+            if (waveEditInteraction_ == WaveEditInteraction::MoveTransition) {
+                if (const auto* event = findEvent(*scenario_, activeEventId_)) {
+                    drawCurrent_ = constrainedTransitionTick(
+                        *event,
+                        snappedTick(rawTick, editLane));
+                    cursorTick_ = drawCurrent_;
+                }
+            } else if (waveEditInteraction_ == WaveEditInteraction::SelectRange) {
+                drawCurrent_ = snappedTick(rawTick, editLane);
+                selectionRange_ = std::pair{
+                    std::min(drawStart_, drawCurrent_),
+                    std::max(drawStart_, drawCurrent_),
+                };
+                interactionCurrent_ = position;
+            } else if (editLane
+                       && waveEditInteraction_ == WaveEditInteraction::MoveSegment
+                       && waveEditOriginalRange_) {
+                const auto* selected = segmentById(
+                    selectedSegmentLaneId_,
+                    selectedSegmentId_);
+                if (selected) {
+                    const auto index = static_cast<std::size_t>(
+                        selected - editLane->segments.data());
+                    const auto [originalStart, originalEnd] = *waveEditOriginalRange_;
+                    const auto width = originalEnd - originalStart;
+                    auto lower = Tick{0};
+                    auto upper = scenario_->duration - width;
+                    if (index > 0) {
+                        const auto& previous = editLane->segments.at(index - 1);
+                        lower = previous.end == originalStart
+                            ? previous.start + 1
+                            : previous.end;
+                    }
+                    if (index + 1 < editLane->segments.size()) {
+                        const auto& next = editLane->segments.at(index + 1);
+                        upper = next.start == originalEnd
+                            ? next.end - width - 1
+                            : next.start - width;
+                    }
+                    if ((position - waveEditPressPosition_).manhattanLength()
+                        < QApplication::startDragDistance()
+                        || upper < lower) {
+                        waveEditPreviewRange_ = waveEditOriginalRange_;
+                    } else {
+                        const auto requestedStart = snappedTick(
+                            rawTick - waveEditGrabOffset_,
+                            editLane);
+                        const auto start = std::clamp(requestedStart, lower, upper);
+                        waveEditPreviewRange_ = std::pair{start, start + width};
+                    }
+                    selectionRange_ = waveEditPreviewRange_;
+                }
+            } else if (editLane
+                && waveEditInteraction_ == WaveEditInteraction::ToggleBitRange) {
+                const auto beats = beatRangesBetween(drawStart_, drawCurrent_, *editLane);
+                if (!beats.empty()) {
+                    waveEditPreviewRange_ = std::pair{
+                        beats.front().first,
+                        beats.back().second,
+                    };
+                    selectionRange_ = waveEditPreviewRange_;
+                } else {
+                    waveEditPreviewRange_.reset();
+                }
+            } else if (editLane
+                       && waveEditOriginalRange_
+                       && (waveEditInteraction_ == WaveEditInteraction::ResizeStart
+                           || waveEditInteraction_ == WaveEditInteraction::ResizeEnd)) {
+                const auto* selected = segmentById(
+                    selectedSegmentLaneId_,
+                    selectedSegmentId_);
+                if (selected) {
+                    const auto index = static_cast<std::size_t>(
+                        selected - editLane->segments.data());
+                    const auto [originalStart, originalEnd] = *waveEditOriginalRange_;
+                    const auto snapped = snappedTick(rawTick, editLane);
+                    if (waveEditInteraction_ == WaveEditInteraction::ResizeStart) {
+                        auto lower = Tick{0};
+                        if (index > 0) {
+                            const auto& previous = editLane->segments.at(index - 1);
+                            lower = previous.end == originalStart
+                                ? previous.start + 1
+                                : previous.end;
+                        }
+                        const auto start = std::clamp(
+                            snapped,
+                            lower,
+                            originalEnd - 1);
+                        waveEditPreviewRange_ = std::pair{start, originalEnd};
+                    } else {
+                        auto upper = scenario_->duration;
+                        if (index + 1 < editLane->segments.size()) {
+                            const auto& next = editLane->segments.at(index + 1);
+                            upper = next.start == originalEnd
+                                ? next.end - 1
+                                : next.start;
+                        }
+                        const auto end = std::clamp(
+                            snapped,
+                            originalStart + 1,
+                            upper);
+                        waveEditPreviewRange_ = std::pair{originalStart, end};
+                    }
+                    selectionRange_ = waveEditPreviewRange_;
+                }
+            }
+            viewport()->update();
+        } else if (position.x() >= HeaderWidth
+                   && lane
+                   && lane->kind == LaneKind::Bit) {
+            const auto* hitEvent = eventAtPosition(position);
+            if (hitEvent
+                && hitEvent->laneId == lane->id
+                && hitEvent->waveformLinked) {
+                const auto hadHover = waveEditHoverRange_.has_value()
+                    || !waveEditHoverLaneId_.empty();
+                waveEditHoverLaneId_.clear();
+                waveEditHoverRange_.reset();
+                viewport()->setCursor(Qt::SizeHorCursor);
+                if (hadHover) viewport()->update();
+            } else {
+                const auto boundedTick = scenario_->duration > 0
+                    ? std::clamp<Tick>(rawTick, 0, scenario_->duration - 1)
+                    : Tick{0};
+                const auto hoverRange = beatRangeAt(boundedTick, *lane);
+                const auto changed = waveEditHoverLaneId_ != lane->id
+                    || !waveEditHoverRange_
+                    || *waveEditHoverRange_ != hoverRange;
+                waveEditHoverLaneId_ = lane->id;
+                waveEditHoverRange_ = hoverRange;
+                viewport()->setCursor(Qt::PointingHandCursor);
+                if (changed) viewport()->update();
+            }
+        } else if (lane && lane->kind != LaneKind::Group) {
+            const auto hadHover = waveEditHoverRange_.has_value()
+                || !waveEditHoverLaneId_.empty();
+            waveEditHoverLaneId_.clear();
+            waveEditHoverRange_.reset();
+            const auto hit = segmentHitAtPosition(*lane, position);
+            viewport()->setCursor(
+                hit.boundary == SegmentBoundary::None
+                    ? (hit.segment ? Qt::SizeAllCursor : Qt::PointingHandCursor)
+                    : Qt::SplitHCursor);
+            if (hadHover) viewport()->update();
+        } else {
+            const auto hadHover = waveEditHoverRange_.has_value()
+                || !waveEditHoverLaneId_.empty();
+            waveEditHoverLaneId_.clear();
+            waveEditHoverRange_.reset();
+            viewport()->setCursor(Qt::PointingHandCursor);
+            if (hadHover) viewport()->update();
+        }
+        auto message = tr("Wave Edit %1").arg(QString::fromStdString(
+            formatTick(cursorTick_, project_->timeBase)));
+        if (drawing_
+            && waveEditInteraction_ == WaveEditInteraction::MoveTransition) {
+            message += tr("  |  Move edge to %1").arg(QString::fromStdString(
+                formatTick(drawCurrent_, project_->timeBase)));
+        }
+        const auto displayedRange = waveEditPreviewRange_
+            ? waveEditPreviewRange_
+            : waveEditHoverRange_;
+        if (displayedRange) {
+            message += tr("  |  %1 to %2").arg(
+                QString::fromStdString(formatTick(displayedRange->first, project_->timeBase)),
+                QString::fromStdString(formatTick(displayedRange->second, project_->timeBase)));
+        }
+        emit statusMessage(message);
+        return;
+    }
+
     if (drawing_) {
         const auto* drawLane = drawLaneId_.empty()
             ? lane
@@ -859,20 +1998,42 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
 
 void WaveCanvas::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (panning_
+        && (event->button() == Qt::MiddleButton || event->button() == Qt::LeftButton)) {
+        panning_ = false;
+        viewport()->setCursor(
+            spaceHeld_ ? Qt::OpenHandCursor
+                       : tool_ == Tool::Marker ? Qt::CrossCursor : Qt::PointingHandCursor);
+        event->accept();
+        return;
+    }
+    if (event->button() == Qt::LeftButton && laneHeaderPressed_) {
+        if (laneHeaderDragging_) commitLaneReorder();
+        laneHeaderPressed_ = false;
+        laneHeaderDragging_ = false;
+        laneDragId_.clear();
+        laneDropDestinationIndex_.reset();
+        laneDropIndicatorY_.reset();
+        viewport()->setCursor(Qt::OpenHandCursor);
+        viewport()->update();
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton && drawing_) {
         bypassSnap_ = event->modifiers().testFlag(Qt::AltModifier);
         switch (tool_) {
         case Tool::Draw:
             commitDraw(event->position().toPoint());
             break;
+        case Tool::WaveEdit:
+            commitWaveEdit(event->position().toPoint());
+            break;
         case Tool::Marker:
             commitMarker(event->position().toPoint());
             break;
         case Tool::Relation:
             commitRelation(event->position().toPoint());
-            break;
-        case Tool::Transition:
-            commitTransition(event->position().toPoint());
             break;
         case Tool::Selection:
             drawCurrent_ = snappedTick(
@@ -921,6 +2082,35 @@ void WaveCanvas::mouseReleaseEvent(QMouseEvent* event)
 void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (!scenario_ || !commandStack_) return;
+    const auto position = event->position().toPoint();
+    if (event->button() == Qt::LeftButton && position.x() < HeaderWidth) {
+        const auto* lane = laneAtY(position.y());
+        if (lane && lane->kind != LaneKind::Group) {
+            selectedLaneId_ = lane->id;
+            selectedLaneIds_ = {lane->id};
+            laneHeaderSelectionActive_ = true;
+            laneHeaderPressed_ = false;
+            laneHeaderDragging_ = false;
+            laneDragId_.clear();
+            laneDropDestinationIndex_.reset();
+            laneDropIndicatorY_.reset();
+            emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+            emit renameLaneRequested(QString::fromStdString(lane->id));
+            viewport()->update();
+        }
+        return;
+    }
+    if (tool_ == Tool::WaveEdit) {
+        auto* editLane = laneAtY(position.y());
+        if (editLane
+            && editLane->kind == LaneKind::Bus
+            && !segmentAtTick(*editLane, tickAtX(position.x()))) {
+            promptBusValueAt(editLane->id, snappedTick(tickAtX(position.x()), editLane));
+        } else {
+            editSegmentAt(position);
+        }
+        return;
+    }
     bypassSnap_ = event->modifiers().testFlag(Qt::AltModifier);
     auto* lane = laneAtY(event->position().toPoint().y());
     if (!lane || (lane->kind != LaneKind::Bus
@@ -969,6 +2159,55 @@ void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
     viewport()->update();
 }
 
+void WaveCanvas::dragEnterEvent(QDragEnterEvent* event)
+{
+    const auto position = event->position();
+    const auto* lane = laneAtY(position.y());
+    if (event->mimeData()->hasFormat(kBusPresetMimeType)
+        && position.x() >= HeaderWidth
+        && lane
+        && lane->kind == LaneKind::Bus) {
+        event->acceptProposedAction();
+        return;
+    }
+    event->ignore();
+}
+
+void WaveCanvas::dragMoveEvent(QDragMoveEvent* event)
+{
+    const auto position = event->position();
+    const auto* lane = laneAtY(position.y());
+    if (event->mimeData()->hasFormat(kBusPresetMimeType)
+        && position.x() >= HeaderWidth
+        && lane
+        && lane->kind == LaneKind::Bus) {
+        cursorTick_ = snappedTick(tickAtX(position.x()), lane);
+        event->acceptProposedAction();
+        viewport()->update();
+        return;
+    }
+    event->ignore();
+}
+
+void WaveCanvas::dropEvent(QDropEvent* event)
+{
+    const auto position = event->position().toPoint();
+    auto* lane = laneAtY(position.y());
+    if (!event->mimeData()->hasFormat(kBusPresetMimeType)
+        || position.x() < HeaderWidth
+        || !lane
+        || lane->kind != LaneKind::Bus) {
+        event->ignore();
+        return;
+    }
+    const auto presetId = QString::fromUtf8(
+        event->mimeData()->data(kBusPresetMimeType)).toStdString();
+    const auto tick = snappedTick(tickAtX(position.x()), lane);
+    showBusPresetPalette(*lane, position);
+    applyBusPreset(lane->id, presetId, tick);
+    event->acceptProposedAction();
+}
+
 void WaveCanvas::wheelEvent(QWheelEvent* event)
 {
     if (event->modifiers().testFlag(Qt::ControlModifier)) {
@@ -1010,7 +2249,6 @@ void WaveCanvas::rebuildLaneLayout()
 void WaveCanvas::rebuildSnapIndex()
 {
     signalEdgeIndex_.clear();
-    markerTickIndex_.clear();
     if (!scenario_) return;
 
     for (const auto& lane : scenario_->lanes) {
@@ -1026,15 +2264,7 @@ void WaveCanvas::rebuildSnapIndex()
         std::unique(signalEdgeIndex_.begin(), signalEdgeIndex_.end()),
         signalEdgeIndex_.end());
 
-    markerTickIndex_.reserve(scenario_->markers.size() * 2);
-    for (const auto& marker : scenario_->markers) {
-        markerTickIndex_.push_back(marker.start);
-        markerTickIndex_.push_back(marker.end);
-    }
-    std::sort(markerTickIndex_.begin(), markerTickIndex_.end());
-    markerTickIndex_.erase(
-        std::unique(markerTickIndex_.begin(), markerTickIndex_.end()),
-        markerTickIndex_.end());
+
 }
 
 void WaveCanvas::updateScrollBars()
@@ -1076,19 +2306,473 @@ QRect WaveCanvas::addLaneRowRect() const
 
 void WaveCanvas::updateAddLaneButtonGeometry()
 {
-    if (!addLaneButton_) return;
     const auto row = addLaneRowRect();
     const auto visible = scenario_
         && row.bottom() >= RulerHeight
         && row.top() < viewport()->height();
-    addLaneButton_->setVisible(visible);
+    for (auto* button : addLaneButtons_) {
+        if (button) button->setVisible(visible);
+    }
     if (!visible) return;
-    addLaneButton_->setGeometry(
-        10,
-        row.top() + 6,
-        HeaderWidth - 20,
-        row.height() - 12);
-    addLaneButton_->raise();
+
+    const auto empty = std::none_of(
+        scenario_->lanes.begin(),
+        scenario_->lanes.end(),
+        [](const Lane& lane) { return lane.visible && lane.kind != LaneKind::Group; });
+    const auto spacing = empty ? 10 : 4;
+    const auto buttonWidth = empty ? 92 : (HeaderWidth - 20 - spacing * 2) / 3;
+    const auto buttonHeight = empty ? 38 : row.height() - 12;
+    const auto totalWidth = buttonWidth * 3 + spacing * 2;
+    const auto startX = empty
+        ? HeaderWidth + std::max(16, (waveViewportWidth() - totalWidth) / 2)
+        : 10;
+    const auto startY = empty
+        ? RulerHeight + std::max(94, (viewport()->height() - RulerHeight - buttonHeight) / 3)
+        : row.top() + 6;
+    for (std::size_t index = 0; index < addLaneButtons_.size(); ++index) {
+        auto* button = addLaneButtons_.at(index);
+        if (!button) continue;
+        button->setGeometry(
+            startX + static_cast<int>(index) * (buttonWidth + spacing),
+            startY,
+            buttonWidth,
+            buttonHeight);
+        button->raise();
+    }
+}
+
+void WaveCanvas::positionQuickLaneSetup()
+{
+    if (!hasQuickLaneSetup() || !scenario_) return;
+    const auto laneId = quickLaneSetupLaneId_.toStdString();
+    const auto layout = std::find_if(
+        laneLayout_.begin(),
+        laneLayout_.end(),
+        [this, &laneId](const LaneLayout& candidate) {
+            return candidate.laneIndex < scenario_->lanes.size()
+                && scenario_->lanes.at(candidate.laneIndex).id == laneId;
+        });
+    if (layout == laneLayout_.end()) {
+        quickLaneSetupPanel_->hide();
+        quickLaneSetupLaneId_.clear();
+        return;
+    }
+    quickLaneSetupPanel_->adjustSize();
+    const auto hint = quickLaneSetupPanel_->sizeHint();
+    const auto width = std::clamp(
+        hint.width(),
+        std::min(420, std::max(1, viewport()->width() - 16)),
+        std::max(1, viewport()->width() - 16));
+    const auto height = std::min(
+        std::max(36, hint.height()),
+        std::max(36, layout->height - 8));
+    const auto laneTop = RulerHeight + layout->top - verticalScrollBar()->value();
+    const auto y = std::clamp(
+        laneTop + (layout->height - height) / 2,
+        RulerHeight + 2,
+        std::max(RulerHeight + 2, viewport()->height() - height - 2));
+    quickLaneSetupPanel_->setGeometry(8, y, width, height);
+    quickLaneSetupPanel_->raise();
+}
+
+void WaveCanvas::positionDurationEditor()
+{
+    if (!durationEdit_ || !durationLabel_) return;
+    constexpr int editWidth = 112;
+    constexpr int editHeight = 27;
+    const auto editX = std::max(HeaderWidth + 62, viewport()->width() - editWidth - 8);
+    durationEdit_->setGeometry(editX, 6, editWidth, editHeight);
+    durationLabel_->setGeometry(std::max(HeaderWidth + 4, editX - 38), 6, 34, editHeight);
+    durationLabel_->raise();
+    durationEdit_->raise();
+}
+
+void WaveCanvas::positionBusPresetPalette()
+{
+    if (!busPresetPalette_ || !scenario_ || busPresetLaneId_.empty()
+        || !busPresetAnchorTick_) {
+        if (busPresetPalette_) busPresetPalette_->hide();
+        return;
+    }
+    const auto* lane = findLane(*scenario_, busPresetLaneId_);
+    if (!lane || lane->kind != LaneKind::Bus) {
+        hideBusPresetPalette();
+        return;
+    }
+    const auto layout = std::find_if(
+        laneLayout_.begin(),
+        laneLayout_.end(),
+        [this](const LaneLayout& candidate) {
+            return candidate.laneIndex < scenario_->lanes.size()
+                && scenario_->lanes.at(candidate.laneIndex).id == busPresetLaneId_;
+        });
+    if (layout == laneLayout_.end()) {
+        hideBusPresetPalette();
+        return;
+    }
+    const auto laneTop = RulerHeight + layout->top - verticalScrollBar()->value();
+    const auto laneBottom = laneTop + layout->height;
+    if (laneBottom <= RulerHeight || laneTop >= viewport()->height()) {
+        busPresetPalette_->hide();
+        return;
+    }
+
+    busPresetPalette_->adjustSize();
+    const auto size = busPresetPalette_->sizeHint().expandedTo(busPresetPalette_->size());
+    const auto minimumX = HeaderWidth + 6;
+    const auto maximumX = std::max(minimumX, viewport()->width() - size.width() - 7);
+    const auto x = std::clamp(xAtTick(*busPresetAnchorTick_) + 10, minimumX, maximumX);
+    auto y = laneTop - size.height() - 5;
+    if (y < RulerHeight + 4) y = laneTop + 4;
+    y = std::clamp(y, RulerHeight + 4, std::max(RulerHeight + 4, viewport()->height() - size.height() - 6));
+    busPresetPalette_->setGeometry(x, y, size.width(), size.height());
+    busPresetPalette_->show();
+    busPresetPalette_->raise();
+}
+
+void WaveCanvas::showBusPresetPalette(const Lane& lane, const QPoint& anchor)
+{
+    if (lane.kind != LaneKind::Bus || !scenario_ || scenario_->duration <= 0) {
+        hideBusPresetPalette();
+        return;
+    }
+    busPresetLaneId_ = lane.id;
+    const auto requested = anchor.x() >= HeaderWidth
+        ? tickAtX(anchor.x())
+        : cursorTick_;
+    busPresetAnchorTick_ = std::clamp<Tick>(requested, 0, scenario_->duration - 1);
+    const auto [start, end] = beatRangeAt(*busPresetAnchorTick_, lane);
+    if (busPresetContextLabel_) {
+        busPresetContextLabel_->setText(
+            tr("%1 · %2 · 1 beat")
+                .arg(QString::fromStdString(lane.name))
+                .arg(QString::fromStdString(formatTick(start, project_->timeBase))));
+        busPresetContextLabel_->setToolTip(
+            tr("Applies from %1 to %2")
+                .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+                .arg(QString::fromStdString(formatTick(end, project_->timeBase))));
+    }
+    if (busValueEdit_) {
+        const auto* existing = segmentAtTick(lane, *busPresetAnchorTick_);
+        busValueEdit_->setText(existing ? QString::fromStdString(existing->value) : QString{});
+        busValueEdit_->setModified(false);
+        busValueEdit_->setToolTip(tr("Type a value and press Enter"));
+        busValueEdit_->setStyleSheet({});
+    }
+    positionBusPresetPalette();
+}
+
+void WaveCanvas::hideBusPresetPalette()
+{
+    busPresetLaneId_.clear();
+    busPresetAnchorTick_.reset();
+    if (busPresetPalette_) busPresetPalette_->hide();
+}
+
+void WaveCanvas::submitBusValue()
+{
+    if (!scenario_ || busPresetLaneId_.empty() || !busPresetAnchorTick_ || !busValueEdit_) {
+        return;
+    }
+    const auto* lane = findLane(*scenario_, busPresetLaneId_);
+    if (!lane || lane->kind != LaneKind::Bus) {
+        hideBusPresetPalette();
+        return;
+    }
+    const auto value = busValueEdit_->text().trimmed();
+    const auto validation = validateLaneValue(*lane, value.toStdString());
+    if (value.isEmpty() || !validation.valid) {
+        const auto message = value.isEmpty()
+            ? tr("Enter a bus value.")
+            : QString::fromStdString(validation.error);
+        busValueEdit_->setStyleSheet(QStringLiteral(
+            "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
+            "border-radius: 4px; padding: 3px 6px;"));
+        busValueEdit_->setToolTip(message);
+        busValueEdit_->setFocus(Qt::OtherFocusReason);
+        busValueEdit_->selectAll();
+        emit statusMessage(message);
+        return;
+    }
+    const auto laneId = busPresetLaneId_;
+    const auto tick = *busPresetAnchorTick_;
+    const auto [start, end] = beatRangeAt(tick, *lane);
+    if (setLaneRangeValue(laneId, start, end, value.toStdString())) {
+        hideBusPresetPalette();
+        viewport()->setFocus(Qt::OtherFocusReason);
+    }
+}
+
+void WaveCanvas::applyBusPreset(
+    const std::string& laneId,
+    const std::string& presetId,
+    const Tick tick)
+{
+    if (!scenario_ || !commandStack_) return;
+    auto* lane = findLane(*scenario_, laneId);
+    if (!lane || lane->kind != LaneKind::Bus) return;
+    const auto value = busPresetValue(presetId, lane->width);
+    const auto validation = validateLaneValue(*lane, value);
+    const auto [start, end] = beatRangeAt(tick, *lane);
+    if (value.empty() || !validation.valid || end <= start) {
+        emit statusMessage(tr("Cannot apply the selected bus preset"));
+        return;
+    }
+
+    JsonExtensions extensions;
+    extensions.emplace(
+        std::string(kBusPresetExtension),
+        "\"" + presetId + "\"");
+    try {
+        commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
+            *scenario_,
+            laneId,
+            start,
+            end,
+            value,
+            std::move(extensions)));
+    } catch (const std::exception& exception) {
+        emit statusMessage(QString::fromUtf8(exception.what()));
+        return;
+    }
+
+    selectedLaneId_ = laneId;
+    selectedLaneIds_ = {laneId};
+    selectionRange_ = std::pair{start, end};
+    selectedSegmentLaneId_ = laneId;
+    if (const auto* refreshed = findLane(*scenario_, laneId)) {
+        const auto segment = std::find_if(
+            refreshed->segments.begin(),
+            refreshed->segments.end(),
+            [start, end, &presetId](const Segment& candidate) {
+                return candidate.start <= start
+                    && candidate.end >= end
+                    && busPresetId(candidate) == presetId;
+            });
+        selectedSegmentId_ = segment == refreshed->segments.end()
+            ? std::string{}
+            : segment->id;
+    }
+    cursorTick_ = start;
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    emit selectionChanged(QString::fromStdString(laneId), start);
+    rebuildLaneLayout();
+    hideBusPresetPalette();
+    viewport()->update();
+    emit statusMessage(
+        tr("%1 · %2–%3 · Ctrl+Z to undo")
+            .arg(busPresetDisplayLabel(presetId))
+            .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+            .arg(QString::fromStdString(formatTick(end, project_->timeBase))));
+}
+
+void WaveCanvas::promptBusValueAt(const std::string& laneId, const Tick tick)
+{
+    if (!scenario_) return;
+    const auto* lane = findLane(*scenario_, laneId);
+    if (!lane || lane->kind != LaneKind::Bus) return;
+    showBusPresetPalette(*lane, QPoint(xAtTick(tick), 0));
+    if (busValueEdit_) {
+        busValueEdit_->setFocus(Qt::OtherFocusReason);
+        busValueEdit_->selectAll();
+    }
+}
+
+bool WaveCanvas::setLaneRangeValue(
+    const std::string& laneId,
+    const Tick start,
+    const Tick end,
+    std::string value,
+    JsonExtensions extensions)
+{
+    if (!scenario_ || !commandStack_ || start < 0 || end <= start
+        || end > scenario_->duration) {
+        return false;
+    }
+    const auto* lane = findLane(*scenario_, laneId);
+    if (!lane || lane->kind == LaneKind::Group) return false;
+    const auto validation = validateLaneValue(*lane, value);
+    if (!validation.valid) {
+        QToolTip::showText(
+            viewport()->mapToGlobal(QPoint(xAtTick(start), RulerHeight + 4)),
+            QString::fromStdString(validation.error),
+            viewport());
+        return false;
+    }
+    try {
+        commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
+            *scenario_,
+            laneId,
+            start,
+            end,
+            validation.normalizedValue,
+            std::move(extensions)));
+    } catch (const std::exception& exception) {
+        emit statusMessage(QString::fromUtf8(exception.what()));
+        return false;
+    }
+
+    selectedLaneId_ = laneId;
+    selectedLaneIds_ = {laneId};
+    selectedSegmentLaneId_ = laneId;
+    selectedSegmentId_.clear();
+    selectionRange_ = std::pair{start, end};
+    cursorTick_ = start;
+    if (const auto* refreshedLane = findLane(*scenario_, laneId)) {
+        const auto probe = start + (end - start) / 2;
+        if (const auto* segment = segmentAtTick(*refreshedLane, probe)) {
+            selectedSegmentId_ = segment->id;
+            selectionRange_ = std::pair{segment->start, segment->end};
+        }
+    }
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    emit selectionChanged(QString::fromStdString(laneId), cursorTick_);
+    refreshModel();
+    emit statusMessage(
+        tr("%1 · %2–%3 = %4 · Ctrl+Z to undo")
+            .arg(QString::fromStdString(lane->name))
+            .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+            .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
+            .arg(QString::fromStdString(validation.normalizedValue)));
+    return true;
+}
+
+void WaveCanvas::clearSelectedSegment()
+{
+    if (!scenario_ || !commandStack_ || selectedSegmentLaneId_.empty()
+        || selectedSegmentId_.empty()) {
+        return;
+    }
+    const auto* segment = segmentById(selectedSegmentLaneId_, selectedSegmentId_);
+    if (!segment) {
+        clearWaveEditState();
+        viewport()->update();
+        return;
+    }
+    const auto laneId = selectedSegmentLaneId_;
+    const auto start = segment->start;
+    const auto end = segment->end;
+    try {
+        commandStack_->execute(std::make_unique<ClearLaneRangeCommand>(
+            *scenario_,
+            laneId,
+            start,
+            end));
+    } catch (const std::exception& exception) {
+        emit statusMessage(QString::fromUtf8(exception.what()));
+        return;
+    }
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    selectionRange_.reset();
+    cursorTick_ = start;
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    refreshModel();
+    emit statusMessage(tr("Cleared selected segment"));
+}
+void WaveCanvas::updateLaneDropTarget(const int y)
+{
+    laneDropDestinationIndex_.reset();
+    laneDropIndicatorY_.reset();
+    if (!scenario_ || scenario_->lanes.empty() || laneDragId_.empty()) return;
+
+    const auto source = std::find_if(
+        scenario_->lanes.begin(),
+        scenario_->lanes.end(),
+        [this](const Lane& lane) { return lane.id == laneDragId_; });
+    if (source == scenario_->lanes.end() || laneLayout_.empty()) return;
+    const auto sourceIndex = static_cast<std::size_t>(
+        std::distance(scenario_->lanes.begin(), source));
+
+    auto insertionSlot = scenario_->lanes.size();
+    auto indicatorY = RulerHeight;
+    auto found = false;
+    for (const auto& layout : laneLayout_) {
+        const auto screenTop = RulerHeight + layout.top - verticalScrollBar()->value();
+        const auto center = screenTop + layout.height / 2;
+        if (y < center) {
+            insertionSlot = layout.laneIndex;
+            indicatorY = screenTop;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        const auto& last = laneLayout_.back();
+        insertionSlot = std::min(scenario_->lanes.size(), last.laneIndex + 1);
+        indicatorY = RulerHeight + last.top + last.height
+            - verticalScrollBar()->value();
+    }
+
+    insertionSlot = std::min(insertionSlot, scenario_->lanes.size());
+    auto destination = insertionSlot;
+    if (destination > sourceIndex) --destination;
+    destination = std::min(destination, scenario_->lanes.size() - 1);
+    laneDropDestinationIndex_ = destination;
+    laneDropIndicatorY_ = std::clamp(
+        indicatorY,
+        RulerHeight,
+        std::max(RulerHeight, viewport()->height() - 1));
+}
+
+void WaveCanvas::commitLaneReorder()
+{
+    if (!scenario_
+        || !commandStack_
+        || laneDragId_.empty()
+        || !laneDropDestinationIndex_) {
+        return;
+    }
+    const auto source = std::find_if(
+        scenario_->lanes.begin(),
+        scenario_->lanes.end(),
+        [this](const Lane& lane) { return lane.id == laneDragId_; });
+    if (source == scenario_->lanes.end()) return;
+    const auto sourceIndex = static_cast<std::size_t>(
+        std::distance(scenario_->lanes.begin(), source));
+    if (sourceIndex == *laneDropDestinationIndex_) return;
+
+    try {
+        commandStack_->execute(std::make_unique<MoveLaneCommand>(
+            *scenario_,
+            laneDragId_,
+            *laneDropDestinationIndex_));
+    } catch (const std::exception& exception) {
+        QToolTip::showText(
+            viewport()->mapToGlobal(laneHeaderPressPosition_),
+            QString::fromUtf8(exception.what()),
+            viewport());
+        return;
+    }
+    rebuildLaneLayout();
+    rebuildSnapIndex();
+    updateScrollBars();
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    emit selectionChanged(QString::fromStdString(laneDragId_), cursorTick_);
+}
+
+void WaveCanvas::drawLaneReorderOverlay(QPainter& painter)
+{
+    if (!laneHeaderDragging_ || !laneDropIndicatorY_) return;
+
+    const auto y = *laneDropIndicatorY_;
+    const QColor accent(111, 168, 255);
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(accent, 2.5));
+    painter.drawLine(8, y, viewport()->width() - 8, y);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(accent);
+    painter.drawPolygon(QPolygon{
+        QPoint(HeaderWidth - 2, y),
+        QPoint(HeaderWidth - 11, y - 6),
+        QPoint(HeaderWidth - 11, y + 6),
+    });
+    painter.restore();
 }
 
 void WaveCanvas::setScale(const double scale, const int anchorX)
@@ -1191,6 +2875,176 @@ const Marker* WaveCanvas::markerById(const std::string& markerId) const
         });
     return marker == scenario_->markers.end() ? nullptr : &*marker;
 }
+Segment* WaveCanvas::segmentById(
+    const std::string& laneId,
+    const std::string& segmentId)
+{
+    if (!scenario_) return nullptr;
+    auto* lane = findLane(*scenario_, laneId);
+    if (!lane) return nullptr;
+    const auto segment = std::find_if(
+        lane->segments.begin(),
+        lane->segments.end(),
+        [&segmentId](const Segment& candidate) {
+            return candidate.id == segmentId;
+        });
+    return segment == lane->segments.end() ? nullptr : &*segment;
+}
+
+const Segment* WaveCanvas::segmentById(
+    const std::string& laneId,
+    const std::string& segmentId) const
+{
+    return const_cast<WaveCanvas*>(this)->segmentById(laneId, segmentId);
+}
+
+const Segment* WaveCanvas::segmentAtTick(const Lane& lane, const Tick tick) const
+{
+    const auto iterator = std::upper_bound(
+        lane.segments.begin(),
+        lane.segments.end(),
+        tick,
+        [](const Tick value, const Segment& candidate) {
+            return value < candidate.start;
+        });
+    if (iterator == lane.segments.begin()) return nullptr;
+    const auto& candidate = *std::prev(iterator);
+    return candidate.start <= tick && tick < candidate.end ? &candidate : nullptr;
+}
+
+WaveCanvas::SegmentHit WaveCanvas::segmentHitAtPosition(
+    const Lane& lane,
+    const QPoint& position) const
+{
+    if (position.x() < HeaderWidth || lane.kind == LaneKind::Group) return {};
+    constexpr int HandleRadius = 7;
+    const auto tick = tickAtX(position.x());
+    SegmentHit result{segmentAtTick(lane, tick), SegmentBoundary::None};
+    auto bestDistance = HandleRadius + 1;
+
+    const auto consider = [&](const Segment& segment) {
+        const auto startDistance = std::abs(position.x() - xAtTick(segment.start));
+        const auto endDistance = std::abs(position.x() - xAtTick(segment.end));
+        if (startDistance < bestDistance) {
+            result = {&segment, SegmentBoundary::Start};
+            bestDistance = startDistance;
+        }
+        if (endDistance < bestDistance) {
+            result = {&segment, SegmentBoundary::End};
+            bestDistance = endDistance;
+        }
+    };
+
+    if (lane.id == selectedSegmentLaneId_) {
+        if (const auto* selected = segmentById(lane.id, selectedSegmentId_)) {
+            consider(*selected);
+            if (bestDistance <= HandleRadius) return result;
+        }
+    }
+
+    const auto next = std::lower_bound(
+        lane.segments.begin(),
+        lane.segments.end(),
+        tick,
+        [](const Segment& candidate, const Tick value) {
+            return candidate.start < value;
+        });
+    if (next != lane.segments.end()) consider(*next);
+    if (next != lane.segments.begin()) consider(*std::prev(next));
+    if (bestDistance > HandleRadius) result.boundary = SegmentBoundary::None;
+    return result;
+}
+
+std::pair<Tick, Tick> WaveCanvas::beatRangeAt(
+    const Tick tick,
+    const Lane& lane) const
+{
+    if (!scenario_ || scenario_->duration <= 0) return {0, 0};
+    const auto bounded = std::clamp<Tick>(tick, 0, scenario_->duration - 1);
+    auto step = cursorKeyboardStep();
+    Tick anchor = 0;
+    if (project_ && !lane.clockDomainId.empty()) {
+        if (const auto* clock = findClock(*project_, lane.clockDomainId);
+            clock && clock->isValid()) {
+            step = clock->period;
+            anchor = tickAtCycle(*clock, 0, clock->activeEdge).value_or(clock->phase);
+        }
+    }
+    step = std::max<Tick>(1, step);
+    const auto relative = bounded - anchor;
+    const auto rawStart = anchor + floorToStep(relative, step);
+    const auto rawEnd = rawStart > std::numeric_limits<Tick>::max() - step
+        ? std::numeric_limits<Tick>::max()
+        : rawStart + step;
+    auto start = std::clamp<Tick>(rawStart, 0, scenario_->duration);
+    auto end = std::clamp<Tick>(rawEnd, 0, scenario_->duration);
+    if (end <= start) {
+        start = floorToStep(bounded, step);
+        end = std::min(scenario_->duration, start + step);
+    }
+    return {start, end};
+}
+
+std::vector<std::pair<Tick, Tick>> WaveCanvas::beatRangesBetween(
+    const Tick first,
+    const Tick second,
+    const Lane& lane) const
+{
+    const auto firstBeat = beatRangeAt(first, lane);
+    const auto secondBeat = beatRangeAt(second, lane);
+    const auto start = std::min(firstBeat.first, secondBeat.first);
+    const auto end = std::max(firstBeat.second, secondBeat.second);
+    std::vector<std::pair<Tick, Tick>> beats;
+    auto cursor = start;
+    constexpr std::size_t MaximumBeatCount = 100'000;
+    while (cursor < end && beats.size() < MaximumBeatCount) {
+        auto beat = beatRangeAt(cursor, lane);
+        beat.first = std::max(beat.first, start);
+        beat.second = std::min(beat.second, end);
+        if (beat.second <= beat.first || beat.second <= cursor) break;
+        beats.push_back(beat);
+        cursor = beat.second;
+    }
+    if (cursor < end) return {};
+    return beats;
+}
+
+void WaveCanvas::clearWaveEditState()
+{
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    waveEditInteraction_ = WaveEditInteraction::None;
+    waveEditOriginalRange_.reset();
+    waveEditPreviewRange_.reset();
+    waveEditHoverLaneId_.clear();
+    waveEditHoverRange_.reset();
+    selectionRange_.reset();
+    drawing_ = false;
+    activeEventId_.clear();
+}
+
+Tick WaveCanvas::constrainedTransitionTick(
+    const Event& event,
+    const Tick requested) const
+{
+    if (!scenario_ || !event.waveformLinked) return event.tick;
+    const auto* lane = findLane(*scenario_, event.laneId);
+    if (!lane) return event.tick;
+    const auto segment = std::find_if(
+        lane->segments.begin(),
+        lane->segments.end(),
+        [&event](const Segment& candidate) {
+            return candidate.id == event.linkedSegmentId;
+        });
+    if (segment == lane->segments.end()) return event.tick;
+    const auto index = static_cast<std::size_t>(
+        std::distance(lane->segments.begin(), segment));
+    const auto lower = index > 0
+        ? lane->segments.at(index - 1).start + 1
+        : Tick{0};
+    const auto upper = segment->end - 1;
+    return upper >= lower ? std::clamp(requested, lower, upper) : event.tick;
+}
 
 const Marker* WaveCanvas::markerAtPosition(const QPoint& position) const
 {
@@ -1264,11 +3118,16 @@ QString WaveCanvas::cursorValue(const Lane& lane) const
         [](const Tick value, const Segment& candidate) {
             return value < candidate.start;
         });
-    if (segment == lane.segments.begin()) return QStringLiteral("?");
+    const auto undefinedValue = lane.kind == LaneKind::Bus
+        ? QStringLiteral("X")
+        : lane.kind == LaneKind::Bit
+            ? QStringLiteral("0")
+            : QStringLiteral("?");
+    if (segment == lane.segments.begin()) return undefinedValue;
     const auto& candidate = *std::prev(segment);
     return candidate.start <= tick && tick < candidate.end
         ? QString::fromStdString(candidate.value)
-        : QStringLiteral("?");
+        : undefinedValue;
 }
 
 QString WaveCanvas::cursorDeltaText(const Tick from, const Tick to) const
@@ -1344,29 +3203,56 @@ void WaveCanvas::moveSelectedMarkerBy(const Tick delta)
 
 Tick WaveCanvas::snappedTick(const Tick input, const Lane* lane) const
 {
-    if (!project_) return input;
-    if (bypassSnap_ && scenario_) {
-        return std::clamp(input, Tick{0}, scenario_->duration);
-    }
-    const auto grid = std::max<Tick>(
-        1,
-        toTicks(10, TimeUnit::Nanosecond, project_->timeBase).value_or(1));
-    const ClockDomain* clock = nullptr;
-    if (lane && !lane->clockDomainId.empty()) {
-        clock = findClock(*project_, lane->clockDomainId);
-    }
-    if (!clock && !project_->clockDomains.empty()) {
-        clock = &project_->clockDomains.front();
+    if (!scenario_) return std::max<Tick>(0, input);
+    const auto bounded = std::clamp(input, Tick{0}, scenario_->duration);
+    if (bypassSnap_) return bounded;
+
+    auto best = bounded;
+    auto bestDistance = kSoftSnapRadiusPixels + 1;
+    const auto rawX = xAtTick(bounded);
+    const auto consider = [&](const Tick candidate, const bool preferOnTie) {
+        if (candidate < 0 || candidate > scenario_->duration) return;
+        const auto distance = static_cast<int>(std::min<long long>(
+            std::abs(static_cast<long long>(xAtTick(candidate)) - rawX),
+            std::numeric_limits<int>::max()));
+        if (distance > kSoftSnapRadiusPixels
+            || (distance > bestDistance)
+            || (distance == bestDistance && !preferOnTie)) {
+            return;
+        }
+        best = candidate;
+        bestDistance = distance;
+    };
+
+    const auto minorTick = std::max<Tick>(1, majorTickStep() / 5);
+    const auto lowerTick = floorToStep(bounded, minorTick);
+    consider(lowerTick, false);
+    if (lowerTick <= std::numeric_limits<Tick>::max() - minorTick) {
+        consider(lowerTick + minorTick, false);
     }
 
-    const SnapContext context{
-        grid,
-        majorTickStep(),
-        clock,
-        signalEdgeIndex_,
-        markerTickIndex_,
-    };
-    return std::clamp(snapTick(input, snapMode_, context), Tick{0}, scenario_->duration);
+    const auto edge = std::lower_bound(
+        signalEdgeIndex_.begin(),
+        signalEdgeIndex_.end(),
+        bounded);
+    if (edge != signalEdgeIndex_.end()) consider(*edge, true);
+    if (edge != signalEdgeIndex_.begin()) consider(*std::prev(edge), true);
+
+    if (project_) {
+        const auto considerClock = [&](const ClockDomain& clock) {
+            if (!clock.isValid()) return;
+            const SnapContext context{1, 1, &clock, {}, {}};
+            consider(snapTick(bounded, SnapMode::ClockRising, context), true);
+            consider(snapTick(bounded, SnapMode::ClockFalling, context), true);
+        };
+        for (const auto& clock : project_->clockDomains) considerClock(clock);
+        if (lane && !lane->clockDomainId.empty()) {
+            if (const auto* clock = findClock(*project_, lane->clockDomainId)) {
+                considerClock(*clock);
+            }
+        }
+    }
+    return best;
 }
 
 Tick WaveCanvas::majorTickStep() const
@@ -1500,6 +3386,316 @@ void WaveCanvas::commitDraw(const QPoint& releasePosition)
     }
     emit modelEdited();
     emit commandAvailabilityChanged();
+    viewport()->update();
+}
+
+
+void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
+{
+    drawing_ = false;
+    if (!scenario_ || !commandStack_) {
+        waveEditInteraction_ = WaveEditInteraction::None;
+        return;
+    }
+    auto* lane = findLane(*scenario_, drawLaneId_);
+    if (!lane) {
+        clearWaveEditState();
+        return;
+    }
+
+    const auto interaction = waveEditInteraction_;
+    waveEditInteraction_ = WaveEditInteraction::None;
+    const auto rawTick = scenario_->duration > 0
+        ? std::clamp<Tick>(tickAtX(releasePosition.x()), 0, scenario_->duration - 1)
+        : Tick{0};
+    cursorTick_ = snappedTick(rawTick, lane);
+
+    if (interaction == WaveEditInteraction::MoveTransition) {
+        if (const auto* event = findEvent(*scenario_, activeEventId_)) {
+            drawCurrent_ = constrainedTransitionTick(*event, cursorTick_);
+            cursorTick_ = drawCurrent_;
+        }
+        commitTransition(releasePosition);
+        viewport()->setCursor(Qt::PointingHandCursor);
+        return;
+    }
+
+    if (interaction == WaveEditInteraction::SelectRange) {
+        drawCurrent_ = snappedTick(rawTick, lane);
+        selectionRange_ = std::pair{
+            std::min(drawStart_, drawCurrent_),
+            std::max(drawStart_, drawCurrent_),
+        };
+        if (const auto* releaseLane = laneAtY(releasePosition.y())) {
+            const auto first = std::find_if(
+                laneLayout_.begin(),
+                laneLayout_.end(),
+                [this](const LaneLayout& layout) {
+                    return scenario_->lanes.at(layout.laneIndex).id == drawLaneId_;
+                });
+            const auto last = std::find_if(
+                laneLayout_.begin(),
+                laneLayout_.end(),
+                [this, releaseLane](const LaneLayout& layout) {
+                    return scenario_->lanes.at(layout.laneIndex).id == releaseLane->id;
+                });
+            if (first != laneLayout_.end() && last != laneLayout_.end()) {
+                const auto firstIndex = static_cast<std::size_t>(
+                    std::min(first - laneLayout_.begin(), last - laneLayout_.begin()));
+                const auto lastIndex = static_cast<std::size_t>(
+                    std::max(first - laneLayout_.begin(), last - laneLayout_.begin()));
+                selectedLaneIds_.clear();
+                for (auto index = firstIndex; index <= lastIndex; ++index) {
+                    selectedLaneIds_.push_back(
+                        scenario_->lanes.at(laneLayout_[index].laneIndex).id);
+                }
+                if (!selectedLaneIds_.empty()) selectedLaneId_ = selectedLaneIds_.front();
+            }
+        }
+        viewport()->setCursor(Qt::PointingHandCursor);
+        viewport()->update();
+        return;
+    }
+
+    if (interaction == WaveEditInteraction::ToggleBitRange) {
+        const auto beats = beatRangesBetween(drawStart_, rawTick, *lane);
+        waveEditOriginalRange_.reset();
+        waveEditPreviewRange_.reset();
+        if (beats.empty()) {
+            QToolTip::showText(
+                viewport()->mapToGlobal(releasePosition),
+                tr("The selection contains too many beats to toggle at once"),
+                viewport());
+            viewport()->update();
+            return;
+        }
+        commitBitToggle(beats, releasePosition);
+        return;
+    }
+
+    if ((interaction != WaveEditInteraction::ResizeStart
+         && interaction != WaveEditInteraction::ResizeEnd
+         && interaction != WaveEditInteraction::MoveSegment)
+        || !waveEditPreviewRange_) {
+        waveEditOriginalRange_.reset();
+        waveEditPreviewRange_.reset();
+        viewport()->update();
+        return;
+    }
+
+    const auto* segment = segmentById(selectedSegmentLaneId_, selectedSegmentId_);
+    if (!segment) {
+        clearWaveEditState();
+        viewport()->update();
+        return;
+    }
+    const auto [start, end] = *waveEditPreviewRange_;
+    const auto segmentValue = segment->value;
+    const auto editedLaneId = lane->id;
+    const auto editedLaneName = lane->name;
+    if (start != segment->start || end != segment->end) {
+        try {
+            commandStack_->execute(std::make_unique<EditSegmentCommand>(
+                *scenario_,
+                editedLaneId,
+                segment->id,
+                start,
+                end,
+                segmentValue));
+        } catch (const std::exception& exception) {
+            QToolTip::showText(
+                viewport()->mapToGlobal(releasePosition),
+                QString::fromUtf8(exception.what()),
+                viewport());
+            waveEditOriginalRange_.reset();
+            waveEditPreviewRange_.reset();
+            viewport()->update();
+            return;
+        }
+        emit modelEdited();
+        emit commandAvailabilityChanged();
+        refreshModel();
+        if (const auto* refreshedLane = findLane(*scenario_, editedLaneId)) {
+            const auto midpoint = start + (end - start) / 2;
+            if (const auto* refreshed = segmentAtTick(*refreshedLane, midpoint)) {
+                selectedSegmentLaneId_ = refreshedLane->id;
+                selectedSegmentId_ = refreshed->id;
+                selectionRange_ = std::pair{refreshed->start, refreshed->end};
+            }
+        }
+        emit statusMessage(
+            tr("%1 segment %2 to %3–%4 · Ctrl+Z to undo")
+                .arg(QString::fromStdString(editedLaneName))
+                .arg(interaction == WaveEditInteraction::MoveSegment ? tr("moved") : tr("resized"))
+                .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+                .arg(QString::fromStdString(formatTick(end, project_->timeBase))));
+    }
+    waveEditOriginalRange_.reset();
+    waveEditPreviewRange_.reset();
+    viewport()->setCursor(
+        interaction == WaveEditInteraction::MoveSegment
+            ? Qt::SizeAllCursor
+            : Qt::PointingHandCursor);
+    viewport()->update();
+}
+
+void WaveCanvas::commitBitToggle(
+    const std::vector<std::pair<Tick, Tick>>& beats,
+    const QPoint& position)
+{
+    if (!scenario_ || !commandStack_ || beats.empty() || drawLaneId_.empty()) return;
+    const auto* originalLane = findLane(*scenario_, drawLaneId_);
+    if (!originalLane) return;
+    const auto laneName = originalLane->name;
+    QString beforeValue = QStringLiteral("0");
+    QString afterValue = QStringLiteral("1");
+    if (beats.size() == 1) {
+        const auto probe = beats.front().first
+            + (beats.front().second - beats.front().first) / 2;
+        if (const auto* segment = segmentAtTick(*originalLane, probe)) {
+            beforeValue = QString::fromStdString(segment->value).toUpper();
+        }
+        afterValue = beforeValue == QStringLiteral("1")
+            ? QStringLiteral("0")
+            : QStringLiteral("1");
+    }
+    try {
+        commandStack_->execute(std::make_unique<ToggleBitRangeCommand>(
+            *scenario_,
+            drawLaneId_,
+            beats));
+    } catch (const std::exception& exception) {
+        QToolTip::showText(
+            viewport()->mapToGlobal(position),
+            QString::fromUtf8(exception.what()),
+            viewport());
+        viewport()->update();
+        return;
+    }
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    refreshModel();
+    selectionRange_ = std::pair{beats.front().first, beats.back().second};
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    if (const auto* lane = findLane(*scenario_, drawLaneId_)) {
+        const auto hoverTick = scenario_->duration > 0
+            ? std::clamp<Tick>(tickAtX(position.x()), 0, scenario_->duration - 1)
+            : Tick{0};
+        waveEditHoverLaneId_ = lane->id;
+        waveEditHoverRange_ = beatRangeAt(hoverTick, *lane);
+    }
+    viewport()->update();
+    if (beats.size() == 1) {
+        emit statusMessage(
+            tr("%1 · %2–%3: %4 → %5 · Ctrl+Z to undo")
+                .arg(QString::fromStdString(laneName))
+                .arg(QString::fromStdString(formatTick(beats.front().first, project_->timeBase)))
+                .arg(QString::fromStdString(formatTick(beats.front().second, project_->timeBase)))
+                .arg(beforeValue, afterValue));
+    } else {
+        emit statusMessage(
+            tr("%1 · toggled %2 beats from %3 to %4 · Ctrl+Z to undo")
+                .arg(QString::fromStdString(laneName))
+                .arg(beats.size())
+                .arg(QString::fromStdString(formatTick(beats.front().first, project_->timeBase)))
+                .arg(QString::fromStdString(formatTick(beats.back().second, project_->timeBase))));
+    }
+}
+
+void WaveCanvas::editSegmentAt(const QPoint& position)
+{
+    if (!scenario_ || !commandStack_ || position.x() < HeaderWidth) return;
+    auto* lane = laneAtY(position.y());
+    if (!lane || lane->kind == LaneKind::Group) return;
+    const auto* segment = segmentAtTick(*lane, tickAtX(position.x()));
+    if (!segment) return;
+
+    if (lane->kind == LaneKind::Bit) {
+        const auto hoverTick = scenario_->duration > 0
+            ? std::clamp<Tick>(tickAtX(position.x()), 0, scenario_->duration - 1)
+            : Tick{0};
+        selectedSegmentLaneId_.clear();
+        selectedSegmentId_.clear();
+        selectionRange_ = beatRangeAt(hoverTick, *lane);
+        waveEditHoverLaneId_ = lane->id;
+        waveEditHoverRange_ = selectionRange_;
+        QToolTip::showText(
+            viewport()->mapToGlobal(position),
+            tr("Click or drag to toggle beats; press 0, 1, X or Z to set an explicit value"),
+            viewport());
+        viewport()->update();
+        return;
+    }
+
+    selectedSegmentLaneId_ = lane->id;
+    selectedSegmentId_ = segment->id;
+    selectionRange_ = std::pair{segment->start, segment->end};
+
+    bool accepted = false;
+    std::string replacementValue;
+    bool clearClockOverride = false;
+    if (lane->kind == LaneKind::Clock) {
+        const auto choice = QInputDialog::getItem(
+            this,
+            tr("Edit clock segment"),
+            tr("Mode for %1:").arg(QString::fromStdString(lane->name)),
+            {
+                tr("Gated ? hold low"),
+                tr("Disabled ? drive X"),
+                tr("Run ? clear override"),
+            },
+            segment->value == "disabled" ? 1 : 0,
+            false,
+            &accepted);
+        if (accepted) {
+            clearClockOverride = choice.startsWith(tr("Run"));
+            replacementValue = choice.startsWith(tr("Disabled"))
+                ? "disabled"
+                : "gated";
+        }
+    } else {
+        const auto entered = QInputDialog::getText(
+            this,
+            tr("Edit segment value"),
+            tr("Value for %1:").arg(QString::fromStdString(lane->name)),
+            QLineEdit::Normal,
+            QString::fromStdString(segment->value),
+            &accepted);
+        replacementValue = entered.toStdString();
+    }
+    if (!accepted) return;
+
+    const auto laneId = lane->id;
+    const auto segmentId = segment->id;
+    const auto start = segment->start;
+    const auto end = segment->end;
+    try {
+        if (clearClockOverride) {
+            commandStack_->execute(std::make_unique<ClearLaneRangeCommand>(
+                *scenario_, laneId, start, end));
+        } else {
+            commandStack_->execute(std::make_unique<EditSegmentCommand>(
+                *scenario_, laneId, segmentId, start, end, replacementValue));
+        }
+    } catch (const std::exception& exception) {
+        QToolTip::showText(
+            viewport()->mapToGlobal(position),
+            QString::fromUtf8(exception.what()),
+            viewport());
+        viewport()->update();
+        return;
+    }
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    refreshModel();
+    if (const auto* refreshedLane = findLane(*scenario_, laneId)) {
+        if (const auto* refreshed = segmentAtTick(*refreshedLane, start)) {
+            selectedSegmentLaneId_ = refreshedLane->id;
+            selectedSegmentId_ = refreshed->id;
+            selectionRange_ = std::pair{refreshed->start, refreshed->end};
+        }
+    }
     viewport()->update();
 }
 
@@ -1657,14 +3853,23 @@ void WaveCanvas::commitRelation(const QPoint& releasePosition)
 void WaveCanvas::commitTransition(const QPoint& releasePosition)
 {
     drawing_ = false;
-    if (!scenario_ || !commandStack_ || activeEventId_.empty()) return;
+    if (!scenario_ || !commandStack_ || activeEventId_.empty()) {
+        activeEventId_.clear();
+        return;
+    }
     const auto* existing = findEvent(*scenario_, activeEventId_);
-    if (!existing) return;
+    if (!existing) {
+        activeEventId_.clear();
+        return;
+    }
+    const auto previousTick = existing->tick;
+    const auto transitionLaneId = existing->laneId;
     auto replacement = *existing;
-    const auto* lane = findLane(*scenario_, existing->laneId);
-    replacement.tick = snappedTick(tickAtX(releasePosition.x()), lane);
+    replacement.tick = constrainedTransitionTick(*existing, drawCurrent_);
+    cursorTick_ = replacement.tick;
     if (replacement.tick == existing->tick) {
         activeEventId_.clear();
+        viewport()->setCursor(Qt::PointingHandCursor);
         viewport()->update();
         return;
     }
@@ -1678,13 +3883,22 @@ void WaveCanvas::commitTransition(const QPoint& releasePosition)
             viewport()->mapToGlobal(releasePosition),
             QString::fromUtf8(exception.what()),
             viewport());
+        activeEventId_.clear();
+        viewport()->setCursor(Qt::PointingHandCursor);
         viewport()->update();
         return;
     }
     activeEventId_.clear();
     emit modelEdited();
     emit commandAvailabilityChanged();
-    viewport()->update();
+    refreshModel();
+    viewport()->setCursor(Qt::PointingHandCursor);
+    const auto* transitionLane = findLane(*scenario_, transitionLaneId);
+    emit statusMessage(
+        tr("%1 edge moved from %2 to %3 · Ctrl+Z to undo")
+            .arg(transitionLane ? QString::fromStdString(transitionLane->name) : tr("Signal"))
+            .arg(QString::fromStdString(formatTick(previousTick, project_->timeBase)))
+            .arg(QString::fromStdString(formatTick(cursorTick_, project_->timeBase))));
 }
 
 const Event* WaveCanvas::eventAtPosition(const QPoint& position) const
@@ -1770,8 +3984,8 @@ void WaveCanvas::drawLane(
         lane.id) != selectedLaneIds_.end();
     painter.fillRect(
         QRect(0, y, HeaderWidth, layout.height),
-        selected ? QColor(46, 60, 81) : kHeaderBackground);
-    if (selected) painter.fillRect(waveformRect, QColor(34, 43, 57));
+        selected ? QColor(63, 80, 104) : kHeaderBackground);
+    if (selected) painter.fillRect(waveformRect, QColor(105, 151, 205, 34));
     painter.setPen(kTextPrimary);
     QFont nameFont = painter.font();
     nameFont.setBold(selected);
@@ -1855,7 +4069,36 @@ void WaveCanvas::drawAddLaneRow(QPainter& painter)
         return;
     }
 
-    painter.fillRect(row, QColor(21, 27, 36));
+    const auto empty = scenario_ && std::none_of(
+        scenario_->lanes.begin(),
+        scenario_->lanes.end(),
+        [](const Lane& lane) { return lane.visible && lane.kind != LaneKind::Group; });
+    if (empty) {
+        const auto buttonsTop = addLaneButtons_.front()
+            ? addLaneButtons_.front()->geometry().top()
+            : RulerHeight + 150;
+        QFont title = painter.font();
+        title.setBold(true);
+        title.setPointSizeF(title.pointSizeF() + 2.0);
+        painter.setFont(title);
+        painter.setPen(kTextPrimary);
+        painter.drawText(
+            QRect(HeaderWidth + 24, buttonsTop - 70, waveViewportWidth() - 48, 28),
+            Qt::AlignCenter,
+            tr("Start with a clock or signal"));
+        QFont detail = painter.font();
+        detail.setBold(false);
+        detail.setPointSizeF(std::max(8.0, detail.pointSizeF() - 1.0));
+        painter.setFont(detail);
+        painter.setPen(kTextSecondary);
+        painter.drawText(
+            QRect(HeaderWidth + 24, buttonsTop - 40, waveViewportWidth() - 48, 24),
+            Qt::AlignCenter,
+            tr("Add a lane, then click or drag its waveform to edit."));
+        return;
+    }
+
+    painter.fillRect(row, QColor(35, 43, 55));
     painter.fillRect(
         QRect(0, row.top(), HeaderWidth, row.height()),
         kHeaderBackground);
@@ -1981,41 +4224,61 @@ void WaveCanvas::drawBitSegments(
 {
     const auto highY = rect.top() + 12;
     const auto lowY = rect.bottom() - 12;
+    auto previousY = lowY;
+    auto havePrevious = false;
+    const auto drawInterval = [&](const Tick start, const Tick end, const char rawValue) {
+        if (end <= start) return;
+        const auto left = xAtTick(start);
+        const auto right = xAtTick(end);
+        if (right <= left) return;
+        const auto value = rawValue == 'x' ? 'X' : rawValue == 'z' ? 'Z' : rawValue;
+        if (value == 'X' || value == 'Z') {
+            painter.save();
+            QColor fill = value == 'Z' ? QColor(171, 110, 191) : kUndefined;
+            fill.setAlpha(35);
+            painter.fillRect(
+                QRect(left, highY, std::max(1, right - left), lowY - highY),
+                fill);
+            painter.setPen(QPen(
+                value == 'Z' ? QColor(171, 110, 191) : kUndefined,
+                1.25,
+                Qt::DashLine));
+            painter.drawLine(left, (highY + lowY) / 2, right, (highY + lowY) / 2);
+            painter.drawText(
+                QRect(left + 4, highY, std::max(0, right - left - 8), lowY - highY),
+                Qt::AlignCenter,
+                QString(QChar::fromLatin1(value)));
+            painter.restore();
+            havePrevious = false;
+            return;
+        }
+        const auto y = value == '1' ? highY : lowY;
+        painter.setPen(QPen(laneColor(lane), 2.0));
+        if (havePrevious && previousY != y) painter.drawLine(left, previousY, left, y);
+        painter.drawLine(left, y, right, y);
+        previousY = y;
+        havePrevious = true;
+    };
+
     auto iterator = std::lower_bound(
         lane.segments.begin(),
         lane.segments.end(),
         visibleStart,
         [](const Segment& segment, const Tick tick) { return segment.end <= tick; });
-    painter.setPen(QPen(laneColor(lane), 2.0));
-    int previousY = lowY;
-    bool havePrevious = false;
+    auto cursor = visibleStart;
     for (; iterator != lane.segments.end() && iterator->start < visibleEnd; ++iterator) {
-        const auto left = xAtTick(iterator->start);
-        const auto right = xAtTick(iterator->end);
-        const auto value = iterator->value.empty() ? 'X' : iterator->value.front();
-        if (value == 'X' || value == 'Z') {
-            painter.save();
-            QColor fill = laneColor(lane);
-            fill.setAlpha(44);
-            painter.fillRect(QRect(left, highY, std::max(1, right - left), lowY - highY), fill);
-            painter.setPen(QPen(laneColor(lane), 1.0, value == 'Z' ? Qt::DashLine : Qt::SolidLine));
-            painter.drawLine(left, (highY + lowY) / 2, right, (highY + lowY) / 2);
-            painter.drawText(
-                QRect(left + 4, highY, std::max(0, right - left - 8), lowY - highY),
-                Qt::AlignCenter,
-                QString(value));
-            painter.restore();
-            havePrevious = false;
-            continue;
+        const auto segmentStart = std::max(iterator->start, visibleStart);
+        const auto segmentEnd = std::min(iterator->end, visibleEnd);
+        if (segmentStart > cursor) drawInterval(cursor, segmentStart, '0');
+        if (segmentEnd > segmentStart) {
+            drawInterval(
+                segmentStart,
+                segmentEnd,
+                iterator->value.empty() ? 'X' : iterator->value.front());
+            cursor = std::max(cursor, segmentEnd);
         }
-        const auto y = value == '1' ? highY : lowY;
-        if (havePrevious && left >= rect.left() && previousY != y) {
-            painter.drawLine(left, previousY, left, y);
-        }
-        painter.drawLine(left, y, right, y);
-        previousY = y;
-        havePrevious = true;
     }
+    if (cursor < visibleEnd) drawInterval(cursor, visibleEnd, '0');
 }
 
 void WaveCanvas::drawBusSegments(
@@ -2028,15 +4291,70 @@ void WaveCanvas::drawBusSegments(
     const auto top = rect.top() + 10;
     const auto bottom = rect.bottom() - 10;
     const auto middle = (top + bottom) / 2;
+    const auto drawUndefined = [this, &painter, top, bottom, middle](
+                                   const Tick start,
+                                   const Tick end,
+                                   const QString& label,
+                                   const bool highImpedance = false) {
+        if (end <= start) return;
+        const auto left = xAtTick(start);
+        const auto right = xAtTick(end);
+        if (right <= left) return;
+        const auto color = highImpedance ? QColor(171, 110, 191) : kUndefined;
+        auto fill = color;
+        fill.setAlpha(24);
+        painter.fillRect(QRect(left, top, std::max(1, right - left), bottom - top), fill);
+        painter.setPen(QPen(color, 1.5, Qt::DashLine));
+        painter.drawLine(left, middle, right, middle);
+        painter.setPen(QPen(color, 1.0, Qt::DashLine));
+        painter.drawLine(left, top, left, bottom);
+        painter.drawLine(right, top, right, bottom);
+        if (right - left > 24) {
+            painter.setPen(color.lighter(135));
+            painter.drawText(
+                QRect(left + 4, top, right - left - 8, bottom - top),
+                Qt::AlignCenter,
+                label);
+        }
+    };
+
+    const auto implicitUndefined = lane.kind == LaneKind::Bus;
     auto iterator = std::lower_bound(
         lane.segments.begin(),
         lane.segments.end(),
         visibleStart,
         [](const Segment& segment, const Tick tick) { return segment.end <= tick; });
-    painter.setPen(QPen(laneColor(lane), 1.5));
+    auto cursor = visibleStart;
     for (; iterator != lane.segments.end() && iterator->start < visibleEnd; ++iterator) {
-        const auto left = xAtTick(iterator->start);
-        const auto right = xAtTick(iterator->end);
+        const auto segmentStart = std::max(iterator->start, visibleStart);
+        const auto segmentEnd = std::min(iterator->end, visibleEnd);
+        if (implicitUndefined && segmentStart > cursor) {
+            drawUndefined(cursor, segmentStart, QStringLiteral("X"));
+        }
+        if (segmentEnd <= segmentStart) continue;
+
+        const auto bits = implicitUndefined
+            ? laneValueBits(lane, iterator->value)
+            : std::optional<std::string>{};
+        const auto allX = bits && !bits->empty()
+            && std::all_of(bits->begin(), bits->end(), [](const char bit) { return bit == 'X'; });
+        const auto allZ = bits && !bits->empty()
+            && std::all_of(bits->begin(), bits->end(), [](const char bit) { return bit == 'Z'; });
+        const auto presetLabel = busPresetLabel(*iterator);
+        if (allX || allZ) {
+            drawUndefined(
+                segmentStart,
+                segmentEnd,
+                presetLabel.isEmpty()
+                    ? (allZ ? QStringLiteral("Z") : QStringLiteral("X"))
+                    : presetLabel,
+                allZ);
+            cursor = std::max(cursor, segmentEnd);
+            continue;
+        }
+
+        const auto left = xAtTick(segmentStart);
+        const auto right = xAtTick(segmentEnd);
         const auto bevel = std::min(7, std::max(0, (right - left) / 3));
         QPainterPath path;
         path.moveTo(left, middle);
@@ -2049,16 +4367,262 @@ void WaveCanvas::drawBusSegments(
         QColor fill = laneColor(lane);
         fill.setAlpha(35);
         painter.fillPath(path, fill);
+        painter.setPen(QPen(laneColor(lane), 1.5));
         painter.drawPath(path);
         if (right - left > 28) {
             painter.setPen(kTextPrimary);
             painter.drawText(
                 QRect(left + bevel + 4, top, right - left - 2 * bevel - 8, bottom - top),
                 Qt::AlignCenter,
-                QString::fromStdString(iterator->value));
-            painter.setPen(QPen(laneColor(lane), 1.5));
+                presetLabel.isEmpty()
+                    ? QString::fromStdString(iterator->value)
+                    : presetLabel);
+        }
+        cursor = std::max(cursor, segmentEnd);
+    }
+    if (implicitUndefined && cursor < visibleEnd) {
+        drawUndefined(cursor, visibleEnd, QStringLiteral("X"));
+    }
+}
+
+void WaveCanvas::drawWaveEditOverlay(QPainter& painter)
+{
+    if (tool_ != Tool::WaveEdit || !scenario_) return;
+
+    const QColor accent(83, 164, 255);
+    const auto layoutForLane = [this](const std::string& laneId) {
+        return std::find_if(
+            laneLayout_.begin(),
+            laneLayout_.end(),
+            [this, &laneId](const LaneLayout& layout) {
+                return scenario_->lanes.at(layout.laneIndex).id == laneId;
+            });
+    };
+    const auto drawRange = [&](const std::string& laneId,
+                               const std::pair<Tick, Tick>& range,
+                               const bool handles,
+                               const bool preview) {
+        const auto layout = layoutForLane(laneId);
+        if (layout == laneLayout_.end() || range.second <= range.first) return;
+        const auto y = RulerHeight + layout->top - verticalScrollBar()->value();
+        if (y + layout->height < RulerHeight || y > viewport()->height()) return;
+        const auto left = xAtTick(range.first);
+        const auto right = xAtTick(range.second);
+        const QRect segmentRect(
+            QPoint(left, y + 2),
+            QPoint(std::max(left + 1, right), y + layout->height - 3));
+        auto fill = accent;
+        fill.setAlpha(preview ? 58 : 34);
+        painter.fillRect(segmentRect, fill);
+        painter.setPen(QPen(
+            accent,
+            preview ? 1.5 : 2.0,
+            preview ? Qt::DashLine : Qt::SolidLine));
+        painter.drawRect(segmentRect.adjusted(0, 0, -1, -1));
+        if (!handles) return;
+        const auto handleY = y + layout->height / 2 - 10;
+        painter.setPen(QPen(QColor(222, 237, 255), 1.0));
+        painter.setBrush(accent);
+        painter.drawRoundedRect(QRect(left - 4, handleY, 8, 20), 2, 2);
+        painter.drawRoundedRect(QRect(right - 4, handleY, 8, 20), 2, 2);
+    };
+
+    painter.save();
+    painter.setClipRect(QRect(
+        HeaderWidth,
+        RulerHeight,
+        waveViewportWidth(),
+        viewport()->height() - RulerHeight));
+    drawWaveEditTransitionPreview(painter);
+    if (!drawing_
+        && waveEditHoverRange_
+        && !waveEditHoverLaneId_.empty()) {
+        drawRange(waveEditHoverLaneId_, *waveEditHoverRange_, false, false);
+        const auto* hoverLane = findLane(*scenario_, waveEditHoverLaneId_);
+        const auto layout = layoutForLane(waveEditHoverLaneId_);
+        if (hoverLane && hoverLane->kind == LaneKind::Bit
+            && layout != laneLayout_.end()) {
+            const auto probe = waveEditHoverRange_->first
+                + (waveEditHoverRange_->second - waveEditHoverRange_->first) / 2;
+            QString current = QStringLiteral("0");
+            if (const auto* segment = segmentAtTick(*hoverLane, probe)) {
+                current = QString::fromStdString(segment->value).toUpper();
+            }
+            const auto target = current == QStringLiteral("0")
+                ? QStringLiteral("→ 1")
+                : current == QStringLiteral("1")
+                    ? QStringLiteral("→ 0")
+                    : tr("press 0/1");
+            const auto left = xAtTick(waveEditHoverRange_->first);
+            const auto right = xAtTick(waveEditHoverRange_->second);
+            if (right - left > 24) {
+                const auto y = RulerHeight + layout->top - verticalScrollBar()->value();
+                painter.setPen(QColor(225, 239, 255));
+                painter.drawText(
+                    QRect(left + 3, y + 2, right - left - 6, layout->height - 4),
+                    Qt::AlignCenter,
+                    target);
+            }
         }
     }
+    if (waveEditInteraction_ == WaveEditInteraction::ToggleBitRange
+        && waveEditPreviewRange_
+        && !drawLaneId_.empty()) {
+        drawRange(drawLaneId_, *waveEditPreviewRange_, false, true);
+    } else if (!selectedSegmentId_.empty()) {
+        const auto* segment = segmentById(
+            selectedSegmentLaneId_,
+            selectedSegmentId_);
+        if (segment) {
+            const auto previewing = waveEditInteraction_ == WaveEditInteraction::ResizeStart
+                || waveEditInteraction_ == WaveEditInteraction::ResizeEnd
+                || waveEditInteraction_ == WaveEditInteraction::MoveSegment;
+            const auto range = previewing && waveEditPreviewRange_
+                ? *waveEditPreviewRange_
+                : std::pair{segment->start, segment->end};
+            drawRange(selectedSegmentLaneId_, range, true, previewing);
+
+            const auto layout = layoutForLane(selectedSegmentLaneId_);
+            if (layout != laneLayout_.end()) {
+                const auto y = RulerHeight + layout->top
+                    - verticalScrollBar()->value();
+                painter.setPen(QColor(222, 237, 255));
+                painter.drawText(
+                    QRect(xAtTick(range.first) + 8, y + 3, 180, 18),
+                    Qt::AlignLeft | Qt::AlignVCenter,
+                    QString::fromStdString(segment->value));
+            }
+        }
+    }
+    painter.restore();
+}
+
+void WaveCanvas::drawEditGuide(QPainter& painter)
+{
+    if (tool_ != Tool::WaveEdit || !scenario_ || cursorTick_ < 0
+        || cursorTick_ > scenario_->duration) {
+        return;
+    }
+    const auto x = xAtTick(cursorTick_);
+    if (x < HeaderWidth || x > viewport()->width()) return;
+    const auto snapped = snapGuideTick_.has_value();
+    const auto color = snapped ? QColor(255, 183, 77) : QColor(79, 195, 247, 145);
+    painter.save();
+    painter.setClipRect(QRect(
+        HeaderWidth,
+        0,
+        waveViewportWidth(),
+        viewport()->height()));
+    painter.setPen(QPen(color, snapped ? 1.75 : 1.0, Qt::DashLine));
+    painter.drawLine(x, RulerHeight, x, viewport()->height());
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawPolygon(QPolygon{
+        QPoint(x - 5, RulerHeight),
+        QPoint(x + 5, RulerHeight),
+        QPoint(x, RulerHeight + 7),
+    });
+    const auto label = (snapped ? tr("Snap  ") : QString{})
+        + QString::fromStdString(formatTick(cursorTick_, project_->timeBase));
+    const auto width = painter.fontMetrics().horizontalAdvance(label) + 12;
+    const auto labelX = std::clamp(
+        x + 6,
+        HeaderWidth + 3,
+        std::max(HeaderWidth + 3, viewport()->width() - width - 3));
+    auto fill = color;
+    fill.setAlpha(210);
+    painter.fillRect(QRect(labelX, RulerHeight + 3, width, 19), fill);
+    painter.setPen(QColor(20, 26, 34));
+    painter.drawText(
+        QRect(labelX + 6, RulerHeight + 3, width - 8, 19),
+        Qt::AlignLeft | Qt::AlignVCenter,
+        label);
+    painter.restore();
+}
+void WaveCanvas::drawWaveEditTransitionPreview(QPainter& painter)
+{
+    if (!scenario_
+        || !drawing_
+        || waveEditInteraction_ != WaveEditInteraction::MoveTransition
+        || activeEventId_.empty()) {
+        return;
+    }
+    const auto* event = findEvent(*scenario_, activeEventId_);
+    const auto* sourceLane = event ? findLane(*scenario_, event->laneId) : nullptr;
+    if (!event || !sourceLane || sourceLane->kind != LaneKind::Bit) return;
+    const auto previewRange = waveEditTransitionPreviewRange();
+    if (!previewRange) return;
+
+    auto previewLane = *sourceLane;
+    const auto segment = std::find_if(
+        previewLane.segments.begin(),
+        previewLane.segments.end(),
+        [event](const Segment& candidate) {
+            return candidate.id == event->linkedSegmentId;
+        });
+    if (segment == previewLane.segments.end()) return;
+    const auto segmentIndex = static_cast<std::size_t>(
+        std::distance(previewLane.segments.begin(), segment));
+    if (segmentIndex > 0
+        && previewLane.segments.at(segmentIndex - 1).end == segment->start) {
+        previewLane.segments.at(segmentIndex - 1).end = drawCurrent_;
+    }
+    segment->start = drawCurrent_;
+
+    const auto layout = std::find_if(
+        laneLayout_.begin(),
+        laneLayout_.end(),
+        [this, event](const LaneLayout& candidate) {
+            return scenario_->lanes.at(candidate.laneIndex).id == event->laneId;
+        });
+    if (layout == laneLayout_.end()) return;
+    const auto y = RulerHeight + layout->top - verticalScrollBar()->value();
+    const QRect rect(HeaderWidth, y, waveViewportWidth(), layout->height);
+    if (rect.bottom() < RulerHeight || rect.top() > viewport()->height()) return;
+
+    const auto highY = rect.top() + 12;
+    const auto lowY = rect.bottom() - 12;
+    const QColor accent(111, 168, 255);
+    painter.save();
+    const auto previewLeft = xAtTick(previewRange->first);
+    const auto previewRight = xAtTick(previewRange->second);
+    painter.setClipRect(
+        rect.intersected(QRect(
+            QPoint(previewLeft - 7, rect.top()),
+            QPoint(std::max(previewLeft, previewRight) + 1, rect.bottom()))),
+        Qt::IntersectClip);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(accent, 2.25, Qt::DashLine));
+    int previousY = lowY;
+    auto havePrevious = false;
+    for (const auto& preview : previewLane.segments) {
+        const auto left = xAtTick(preview.start);
+        const auto right = xAtTick(preview.end);
+        if (right < HeaderWidth || left > viewport()->width()) continue;
+        const auto value = preview.value.empty() ? 'X' : preview.value.front();
+        if (value == 'X' || value == 'Z') {
+            painter.drawLine(left, (highY + lowY) / 2, right, (highY + lowY) / 2);
+            havePrevious = false;
+            continue;
+        }
+        const auto levelY = value == '1' ? highY : lowY;
+        if (havePrevious && previousY != levelY) {
+            painter.drawLine(left, previousY, left, levelY);
+        }
+        painter.drawLine(left, levelY, right, levelY);
+        previousY = levelY;
+        havePrevious = true;
+    }
+    const auto x = xAtTick(drawCurrent_);
+    painter.setBrush(kBackground);
+    painter.drawPolygon(QPolygon{
+        QPoint(x, y + 6),
+        QPoint(x + 6, y + 12),
+        QPoint(x, y + 18),
+        QPoint(x - 6, y + 12),
+    });
+    painter.drawLine(x, y + 19, x, y + layout->height - 4);
+    painter.restore();
 }
 
 void WaveCanvas::drawScenarioOverlays(

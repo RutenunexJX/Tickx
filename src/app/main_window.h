@@ -12,6 +12,7 @@
 #include <QString>
 
 #include <atomic>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <set>
@@ -20,6 +21,7 @@ class QAction;
 class QCloseEvent;
 class QComboBox;
 class QCheckBox;
+class QPoint;
 class QLabel;
 class QLineEdit;
 class QMenu;
@@ -50,6 +52,7 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private slots:
+    void newProject();
     void openProject();
     void saveProject();
     void saveProjectAs();
@@ -101,6 +104,19 @@ private:
     void populateTraceMappingTable();
     void populateCompareTable();
     [[nodiscard]] QString selectedLaneIdForEditing() const;
+    void addQuickLane(LaneKind kind);
+    void completeQuickLaneSetup(
+        const QString& laneId,
+        const QString& name,
+        const QString& parameter,
+        const QString& clockId);
+    void cancelQuickLaneSetup(const QString& laneId);
+    void changeScenarioDuration(const QString& value);
+    [[nodiscard]] Tick latestContentTick(const Scenario& scenario) const noexcept;
+    void renameLaneById(const QString& laneId);
+    void removeLaneById(const QString& laneId);
+    void showLaneContextMenu(const QString& laneId, const QPoint& globalPosition);
+    void editLaneKeyParameters(const QString& laneId);
     void moveSelectedLaneBy(int offset);
     void updateLaneOrderActions();
     void editLaneById(const QString& laneId);
@@ -127,6 +143,10 @@ private:
     Project project_;
     QString projectFile_;
     bool dirty_{false};
+    bool recoveryLoaded_{false};
+    bool quickLaneDirtyBefore_{false};
+    std::size_t pendingQuickCommandSize_{0};
+    QString pendingQuickLaneId_;
     CommandStack commandStack_;
     WaveCanvas* canvas_{nullptr};
     QTreeWidget* signalTree_{nullptr};
@@ -152,13 +172,13 @@ private:
     QLabel* compareSummary_{nullptr};
     QProgressBar* traceProgress_{nullptr};
     QLabel* traceSummary_{nullptr};
+    QLabel* saveStateLabel_{nullptr};
     QAction* undoAction_{nullptr};
     QAction* redoAction_{nullptr};
     QAction* moveLaneUpAction_{nullptr};
     QAction* moveLaneDownAction_{nullptr};
     QAction* selectAction_{nullptr};
     QAction* drawAction_{nullptr};
-    QAction* transitionAction_{nullptr};
     QAction* markerAction_{nullptr};
     QAction* relationAction_{nullptr};
     QAction* exportAction_{nullptr};
@@ -167,7 +187,6 @@ private:
     QAction* compareModeAction_{nullptr};
     QMenu* editMenu_{nullptr};
     QAction* pinloomAction_{nullptr};
-    QComboBox* snapCombo_{nullptr};
     bool populatingTables_{false};
     bool populatingTraceMapping_{false};
     std::optional<TraceIndex> traceIndex_;

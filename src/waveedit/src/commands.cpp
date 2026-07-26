@@ -208,6 +208,38 @@ void CommandStack::execute(std::unique_ptr<EditCommand> command)
     cursor_ = commands_.size();
 }
 
+void CommandStack::replaceLast(std::unique_ptr<EditCommand> command)
+{
+    if (!command) throw std::invalid_argument("command is null");
+    if (commands_.empty() || cursor_ != commands_.size()) {
+        throw std::logic_error("no executed command is available for replacement");
+    }
+
+    auto previous = std::move(commands_.back());
+    commands_.pop_back();
+    --cursor_;
+    previous->undo();
+    try {
+        command->redo();
+    } catch (...) {
+        previous->redo();
+        commands_.push_back(std::move(previous));
+        cursor_ = commands_.size();
+        throw;
+    }
+    commands_.push_back(std::move(command));
+    cursor_ = commands_.size();
+}
+
+bool CommandStack::discardLast()
+{
+    if (commands_.empty() || cursor_ != commands_.size()) return false;
+    commands_.back()->undo();
+    commands_.pop_back();
+    cursor_ = commands_.size();
+    return true;
+}
+
 bool CommandStack::undo()
 {
     if (!canUndo()) {
@@ -259,17 +291,44 @@ std::size_t CommandStack::size() const noexcept
     return commands_.size();
 }
 
+ChangeScenarioDurationCommand::ChangeScenarioDurationCommand(
+    Scenario& scenario,
+    const Tick duration)
+    : scenario_(&scenario)
+    , before_(scenario.duration)
+    , after_(duration)
+{
+    if (duration <= 0) throw std::invalid_argument("scenario duration must be positive");
+}
+
+void ChangeScenarioDurationCommand::redo()
+{
+    scenario_->duration = after_;
+}
+
+void ChangeScenarioDurationCommand::undo()
+{
+    scenario_->duration = before_;
+}
+
+std::string ChangeScenarioDurationCommand::description() const
+{
+    return "Change scenario duration";
+}
+
 SetLaneRangeCommand::SetLaneRangeCommand(
     Scenario& scenario,
     std::string laneId,
     const Tick start,
     const Tick end,
-    std::string value)
+    std::string value,
+    JsonExtensions extensions)
     : scenario_(&scenario)
     , laneId_(std::move(laneId))
     , start_(start)
     , end_(end)
     , value_(std::move(value))
+    , extensions_(std::move(extensions))
 {
     const auto* lane = findLane(*scenario_, laneId_);
     if (!lane) {
@@ -286,7 +345,7 @@ void SetLaneRangeCommand::redo()
         throw std::runtime_error("lane was removed before command execution");
     }
     if (!initialized_) {
-        setSegmentRange(*lane, start_, end_, value_);
+        setSegmentRange(*lane, start_, end_, value_, {}, extensions_);
         if (lane->kind == LaneKind::Bit
             || lane->kind == LaneKind::Bus
             || lane->kind == LaneKind::Enum) {
@@ -368,6 +427,160 @@ std::string ClearLaneRangeCommand::description() const
     return "Clear lane range";
 }
 
+EditSegmentCommand::EditSegmentCommand(
+    Scenario& scenario,
+    std::string laneId,
+    std::string segmentId,
+    const Tick start,
+    const Tick end,
+    std::string value)
+    : scenario_(&scenario)
+    , laneId_(std::move(laneId))
+    , segmentId_(std::move(segmentId))
+    , start_(start)
+    , end_(end)
+    , value_(std::move(value))
+{
+}
+
+void EditSegmentCommand::redo()
+{
+    snapshotRedo(*scenario_, before_, after_, [this] {
+        auto* lane = findLane(*scenario_, laneId_);
+        if (!lane) throw std::invalid_argument("lane does not exist");
+        auto* segment = findLinkedSegment(*lane, segmentId_);
+        if (!segment) throw std::invalid_argument("segment does not exist");
+        if (start_ < 0 || end_ <= start_ || end_ > scenario_->duration) {
+            throw std::invalid_argument("segment interval is invalid");
+        }
+        const auto validation = validateLaneValue(*lane, value_);
+        if (!validation.valid) throw std::invalid_argument(validation.error);
+
+        const auto index = static_cast<std::size_t>(segment - lane->segments.data());
+        const auto oldStart = segment->start;
+        const auto oldEnd = segment->end;
+        auto* previous = index > 0 ? &lane->segments.at(index - 1) : nullptr;
+        auto* next = index + 1 < lane->segments.size()
+            ? &lane->segments.at(index + 1)
+            : nullptr;
+        const auto previousTouches = previous && previous->end == oldStart;
+        const auto nextTouches = next && next->start == oldEnd;
+
+        if (previousTouches) {
+            if (start_ <= previous->start) {
+                throw std::invalid_argument("segment start would consume its previous segment");
+            }
+        } else if (previous && start_ < previous->end) {
+            throw std::invalid_argument("segment start overlaps its previous segment");
+        }
+        if (nextTouches) {
+            if (end_ >= next->end) {
+                throw std::invalid_argument("segment end would consume its next segment");
+            }
+        } else if (next && end_ > next->start) {
+            throw std::invalid_argument("segment end overlaps its next segment");
+        }
+
+        if (previousTouches) previous->end = start_;
+        if (nextTouches) next->start = end_;
+        segment->start = start_;
+        segment->end = end_;
+        segment->value = validation.normalizedValue;
+        normalizeSegments(*lane);
+        if (lane->kind == LaneKind::Bit
+            || lane->kind == LaneKind::Bus
+            || lane->kind == LaneKind::Enum) {
+            synchronizeLaneEventsFromSegments(*scenario_, laneId_);
+        }
+    });
+}
+
+void EditSegmentCommand::undo()
+{
+    if (!before_) throw std::runtime_error("segment command has not been executed");
+    *scenario_ = *before_;
+}
+
+std::string EditSegmentCommand::description() const
+{
+    return "Edit segment";
+}
+
+ToggleBitRangeCommand::ToggleBitRangeCommand(
+    Scenario& scenario,
+    std::string laneId,
+    std::vector<std::pair<Tick, Tick>> beatRanges)
+    : scenario_(&scenario)
+    , laneId_(std::move(laneId))
+    , beatRanges_(std::move(beatRanges))
+{
+}
+
+void ToggleBitRangeCommand::redo()
+{
+    snapshotRedo(*scenario_, before_, after_, [this] {
+        auto* lane = findLane(*scenario_, laneId_);
+        if (!lane) throw std::invalid_argument("lane does not exist");
+        if (lane->kind != LaneKind::Bit) {
+            throw std::invalid_argument("only bit lanes can toggle beats");
+        }
+        if (beatRanges_.empty()) {
+            throw std::invalid_argument("toggle range is empty");
+        }
+
+        std::vector<std::string> replacements;
+        replacements.reserve(beatRanges_.size());
+        Tick previousEnd = -1;
+        for (const auto& [start, end] : beatRanges_) {
+            if (start < 0 || end <= start || end > scenario_->duration
+                || (previousEnd >= 0 && start < previousEnd)) {
+                throw std::invalid_argument("toggle beat interval is invalid");
+            }
+            previousEnd = end;
+            const auto iterator = std::upper_bound(
+                lane->segments.begin(),
+                lane->segments.end(),
+                start,
+                [](const Tick tick, const Segment& candidate) {
+                    return tick < candidate.start;
+                });
+            const Segment* covering = nullptr;
+            if (iterator != lane->segments.begin()) {
+                const auto& candidate = *std::prev(iterator);
+                if (candidate.start <= start && start < candidate.end) {
+                    covering = &candidate;
+                }
+            }
+            if (!covering) {
+                replacements.emplace_back("1");
+            } else if (covering->value == "0") {
+                replacements.emplace_back("1");
+            } else if (covering->value == "1") {
+                replacements.emplace_back("0");
+            } else {
+                throw std::invalid_argument("X/Z beats must be edited explicitly");
+            }
+        }
+
+        for (std::size_t index = 0; index < beatRanges_.size(); ++index) {
+            const auto [start, end] = beatRanges_.at(index);
+            setSegmentRange(*lane, start, end, replacements.at(index));
+        }
+        synchronizeLaneEventsFromSegments(*scenario_, laneId_);
+    });
+}
+
+void ToggleBitRangeCommand::undo()
+{
+    if (!before_) throw std::runtime_error("toggle command has not been executed");
+    *scenario_ = *before_;
+}
+
+std::string ToggleBitRangeCommand::description() const
+{
+    return beatRanges_.size() == 1 ? "Toggle bit beat" : "Toggle bit beats";
+}
+
 AddLaneCommand::AddLaneCommand(Scenario& scenario, Lane lane)
     : scenario_(&scenario)
     , lane_(std::move(lane))
@@ -378,12 +591,40 @@ AddLaneCommand::AddLaneCommand(Scenario& scenario, Lane lane)
     }
 }
 
+AddLaneCommand::AddLaneCommand(
+    Project& project,
+    Scenario& scenario,
+    Lane lane,
+    ClockDomain clockDomain)
+    : AddLaneCommand(scenario, std::move(lane))
+{
+    project_ = &project;
+    if (clockDomain.id.empty()) clockDomain.id = makeStableId("clock");
+    if (clockDomain.name.empty()) clockDomain.name = lane_.name;
+    if (!clockDomain.isValid()) {
+        throw std::invalid_argument("clock domain is invalid");
+    }
+
+    if (lane_.kind != LaneKind::Clock) {
+        throw std::invalid_argument("only a clock lane can create a clock domain");
+    }
+    if (lane_.clockDomainId.empty()) lane_.clockDomainId = clockDomain.id;
+    if (lane_.clockDomainId != clockDomain.id) {
+        throw std::invalid_argument("clock lane references a different clock domain");
+    }
+    clockDomain_ = std::move(clockDomain);
+}
+
 void AddLaneCommand::redo()
 {
     if (findLane(*scenario_, lane_.id)) {
         throw std::runtime_error("lane already exists");
     }
+    if (clockDomain_ && (!project_ || findClock(*project_, clockDomain_->id))) {
+        throw std::runtime_error("clock domain already exists");
+    }
     const auto index = std::min(insertionIndex_, scenario_->lanes.size());
+    if (clockDomain_) project_->clockDomains.push_back(*clockDomain_);
     scenario_->lanes.insert(
         scenario_->lanes.begin() + static_cast<std::ptrdiff_t>(index),
         lane_);
@@ -399,6 +640,19 @@ void AddLaneCommand::undo()
         throw std::runtime_error("lane was removed before undo");
     }
     scenario_->lanes.erase(iterator);
+    if (clockDomain_) {
+        if (!project_) throw std::runtime_error("clock project is unavailable");
+        const auto clock = std::find_if(
+            project_->clockDomains.begin(),
+            project_->clockDomains.end(),
+            [this](const ClockDomain& candidate) {
+                return candidate.id == clockDomain_->id;
+            });
+        if (clock == project_->clockDomains.end()) {
+            throw std::runtime_error("clock domain was removed before undo");
+        }
+        project_->clockDomains.erase(clock);
+    }
 }
 
 std::string AddLaneCommand::description() const
