@@ -12,8 +12,9 @@ Expected/Actual 比较，这些派生与比较能力由独立 CLI 和领域模�
 可编辑性与覆盖语义迭代、Lane/Group 属性编辑迭代以及依赖感知删除迭代均已完成并
 验收；Lane/Group 显示顺序、Relation condition 求值和画布末尾添加信号入口迭代也已
 完成，光标模式增强、Wave Edit 直接波形编辑、画布信号管理、工具收敛、纯波形工作区、
-局部边沿预览、桌面吸附控件移除、轻吸附/画布层次/Bus 快捷值、基础操作闭环以及任务闭环/
-直接编辑/双视角验收迭代亦已完成。最终静默回归为 25/25 核心测试和 21/21 CTest；常规构建
+局部边沿预览、桌面吸附控件移除、轻吸附/画布层次/Bus 快捷值、基础操作闭环、任务闭环/
+直接编辑/双视角验收以及信号名就地重命名迭代亦已完成。最终静默回归为 25/25 核心测试和
+21/21 CTest；常规构建
 与 Qt Creator Debug 构建均通过。明确保留范围记录于 `README.md` 和 `PLAN.md`。
 
 ## 不变量
@@ -33,7 +34,7 @@ Expected/Actual 比较，这些派生与比较能力由独立 CLI 和领域模�
 |---|---|---|
 | 可运行桌面应用 | 完成 | 单一 WaveCanvas 工作区、波形编辑/导出与恢复快照可运行；trace/Compare/集成由 CLI 和领域模块保留 |
 | 示例工程 | 阶段 1 完成 | `examples/handshake/project.wave.json` |
-| 自动化测试 | 完成 | 核心 25 组及 21 个 CTest 入口均通过；新增独立用户旅程 |
+| 自动化测试 | 完成 | 核心 25 组及 21 个 CTest 入口均通过；独立用户旅程验证重命名后的保存回读 |
 | README/PLAN/GOAL | 完成 | 根目录三个文档 |
 | 工程格式说明 | 阶段 1 完成 | `docs/project-format.md` |
 | SystemVerilog/cocotb 示例 | 阶段 3 完成 | `examples/handshake/generated` |
@@ -44,7 +45,7 @@ Expected/Actual 比较，这些派生与比较能力由独立 CLI 和领域模�
 | Lane/Group 删除 | 持续迭代 3 完成 | Event/Relation/trace 依赖清理、Group 解组及离屏 Undo 回归 |
 | Lane/Group 显示顺序 | 持续迭代 4 完成 | 可撤销重排、跨视图顺序一致性及生成确定性 |
 | Relation condition | 持续迭代 5 完成 | Expected/Actual 整数 tick 采样、四态条件、错误定位及报告可见性 |
-| 画布信号管理 | 持续迭代 9/14 完成 | 三按钮、随机颜色、lane 内联属性、单步 Undo/Esc 取消、时钟自动关联及标题管理 |
+| 画布信号管理 | 持续迭代 9/14/15 完成 | 三按钮、随机颜色、lane 内联属性、双击/F2 就地重命名、原处校验、单步 Undo/Esc 取消及时钟自动关联 |
 | 跨应用契约 | 阶段 6 完成 | `docs/integration-contracts.md` 与 `wave-bridge` |
 | 光标模式增强 | 持续迭代 7 完成 | 活动/临时/锁定光标、带符号测量、采样值、键鼠编辑及离屏回归 |
 | Wave Edit 直接编辑 | 持续迭代 8/9/10/13 完成 | Segment 选择/移动/缩放/删除、Bit 单拍/多拍/四态输入及局部边沿虚线预览 |

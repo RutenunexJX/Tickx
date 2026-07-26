@@ -517,6 +517,31 @@ int main(int argc, char* argv[])
                 };
 
                 const auto bitY = laneCenter(bitLaneId);
+                click(QPoint(72, bitY));
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_F2);
+                QCoreApplication::processEvents();
+                auto* renameEdit = canvas->findChild<QLineEdit*>(
+                    QStringLiteral("LaneRenameEdit"));
+                if (!renameEdit
+                    || !renameEdit->isVisible()
+                    || !renameEdit->hasFocus()
+                    || QApplication::activeModalWidget()) {
+                    fail(QStringLiteral("User could not rename the selected signal inline"));
+                    return;
+                }
+                renameEdit->setText(QStringLiteral("req_valid"));
+                sendKey(renameEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                bitLane = wave::findLane(window.project().scenarios.front(), bitLaneId);
+                if (!bitLane
+                    || bitLane->name != "req_valid"
+                    || renameEdit->isVisible()
+                    || !window.statusBar()->currentMessage().contains(QStringLiteral("Ctrl+Z"))) {
+                    fail(QStringLiteral("Inline rename gave no clear result or undo feedback"));
+                    return;
+                }
+
                 click(QPoint(xAtTick(30'000), bitY));
                 bitLane = wave::findLane(window.project().scenarios.front(), bitLaneId);
                 if (!bitLane
@@ -631,9 +656,14 @@ int main(int argc, char* argv[])
                 }
                 QCoreApplication::processEvents();
                 const auto saved = wave::loadProjectFile(userJourneySavePath);
+                const auto* savedRenamedBit = saved.ok()
+                    ? wave::findLane(saved.project->scenarios.front(), bitLaneId)
+                    : nullptr;
                 if (!saveDialogHandled
                     || !QFileInfo::exists(userJourneySavePath)
                     || !saved.ok()
+                    || !savedRenamedBit
+                    || savedRenamedBit->name != "req_valid"
                     || saved.project->scenarios.front().lanes.size() != 3
                     || saved.project->scenarios.front().duration != 500'000
                     || saveState->text() != QStringLiteral("Saved")
@@ -1298,30 +1328,167 @@ int main(int argc, char* argv[])
             canvas->revealLocation(QString::fromStdString(quickBit.id), 0);
             QCoreApplication::processEvents();
             auto bitY = laneCenter(quickBit.id);
-            bool renameHandled = false;
-            QTimer::singleShot(0, &application, [&renameHandled] {
-                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-                auto* edit = dialog ? dialog->findChild<QLineEdit*>() : nullptr;
-                if (!dialog
-                    || dialog->objectName() != QStringLiteral("RenameLaneDialog")
-                    || !edit) {
-                    if (dialog) dialog->reject();
-                    return;
-                }
-                edit->setText(QStringLiteral("renamed_bit"));
-                renameHandled = true;
-                dialog->accept();
-            });
+            window.activateWindow();
+            canvas->setFocus(Qt::OtherFocusReason);
+            QCoreApplication::processEvents();
             sendMouse(
                 QEvent::MouseButtonDblClick,
                 QPoint(80, bitY),
                 Qt::LeftButton,
                 Qt::LeftButton);
             QCoreApplication::processEvents();
-            const auto* renamedBit = wave::findLane(
+            auto* renameEdit = canvas->findChild<QLineEdit*>(QStringLiteral("LaneRenameEdit"));
+            if (!renameEdit) {
+                fail(QStringLiteral("Double-click signal rename editor is missing"));
+                return;
+            }
+            if (!renameEdit->isVisible()) {
+                fail(QStringLiteral("Double-click signal rename editor is not visible"));
+                return;
+            }
+            if (QApplication::activeModalWidget()) {
+                fail(QStringLiteral("Double-click signal rename opened a modal widget"));
+                return;
+            }
+            if (!renameEdit->hasFocus()) {
+                const auto* focus = QApplication::focusWidget();
+                fail(QStringLiteral("Double-click signal rename focus remained on %1")
+                         .arg(focus ? focus->objectName() : QStringLiteral("<none>")));
+                return;
+            }
+            renameEdit->setText(QStringLiteral("cancelled_bit"));
+            sendKey(renameEdit, Qt::Key_Escape);
+            QCoreApplication::processEvents();
+            auto* renamedBit = wave::findLane(
                 window.project().scenarios.front(), quickBit.id);
-            if (!renameHandled || !renamedBit || renamedBit->name != "renamed_bit") {
-                fail(QStringLiteral("Double-click signal rename did not use ChangeLaneCommand"));
+            if (renameEdit->isVisible()
+                || !renamedBit
+                || renamedBit->name != quickBit.name) {
+                fail(QStringLiteral("Escape did not cancel inline signal rename"));
+                return;
+            }
+
+            clickHeader(QPoint(80, bitY));
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_F2);
+            QCoreApplication::processEvents();
+            if (!renameEdit->isVisible()
+                || !renameEdit->hasFocus()
+                || QApplication::activeModalWidget()) {
+                fail(QStringLiteral("F2 did not open inline signal rename"));
+                return;
+            }
+            renameEdit->setText(QString::fromStdString(quickClock.name));
+            sendKey(renameEdit, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            renamedBit = wave::findLane(window.project().scenarios.front(), quickBit.id);
+            if (!renameEdit->isVisible()
+                || !renameEdit->hasFocus()
+                || !renamedBit
+                || renamedBit->name != quickBit.name
+                || !renameEdit->toolTip().contains(QStringLiteral("already uses"))) {
+                fail(QStringLiteral("Duplicate inline signal name was not recoverable in place"));
+                return;
+            }
+            const auto laneCountBeforeBlockedAdd = window.project().scenarios.front().lanes.size();
+            addButtons.at(1)->click();
+            QCoreApplication::processEvents();
+            if (!renameEdit->isVisible()
+                || !renameEdit->hasFocus()
+                || window.project().scenarios.front().lanes.size() != laneCountBeforeBlockedAdd) {
+                fail(QStringLiteral("Invalid inline rename did not block quick-add safely"));
+                return;
+            }
+
+            renameEdit->setText(QStringLiteral(" "));
+            sendKey(renameEdit, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            if (!renameEdit->isVisible()
+                || !renameEdit->hasFocus()
+                || !renameEdit->toolTip().contains(QStringLiteral("empty"))) {
+                fail(QStringLiteral("Empty inline signal name was not recoverable in place"));
+                return;
+            }
+            renameEdit->setText(QStringLiteral("renamed_bit"));
+            sendKey(renameEdit, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            renamedBit = wave::findLane(window.project().scenarios.front(), quickBit.id);
+            if (renameEdit->isVisible()
+                || !renamedBit
+                || renamedBit->name != "renamed_bit"
+                || !window.statusBar()->currentMessage().contains(QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Inline signal rename did not commit with visible undo feedback"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            renamedBit = wave::findLane(window.project().scenarios.front(), quickBit.id);
+            if (!renamedBit || renamedBit->name != quickBit.name) {
+                fail(QStringLiteral("Inline signal rename was not one undoable command"));
+                return;
+            }
+            redoAction->trigger();
+            QCoreApplication::processEvents();
+            renamedBit = wave::findLane(window.project().scenarios.front(), quickBit.id);
+            if (!renamedBit || renamedBit->name != "renamed_bit") {
+                fail(QStringLiteral("Inline signal rename could not be redone"));
+                return;
+            }
+
+            canvas->zoomIn();
+            canvas->zoomIn();
+            canvas->zoomIn();
+            QCoreApplication::processEvents();
+            if (canvas->horizontalScrollBar()->maximum() <= 0) {
+                fail(QStringLiteral("Rename viewport regression setup could not create horizontal scroll"));
+                return;
+            }
+            canvas->horizontalScrollBar()->setValue(canvas->horizontalScrollBar()->maximum());
+            const auto renameScrollPosition = canvas->horizontalScrollBar()->value();
+
+            clickHeader(QPoint(80, bitY));
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_F2);
+            QCoreApplication::processEvents();
+            renameEdit->setText(QStringLiteral("blurred_bit"));
+            clickHeader(QPoint(80, bitY));
+            QCoreApplication::processEvents();
+            renamedBit = wave::findLane(window.project().scenarios.front(), quickBit.id);
+            if (renameEdit->isVisible()
+                || !renamedBit
+                || renamedBit->name != "blurred_bit"
+                || canvas->horizontalScrollBar()->value() != renameScrollPosition) {
+                fail(QStringLiteral("Click-submitted rename changed the viewport or result"));
+                return;
+            }
+            canvas->fitScenario();
+            QCoreApplication::processEvents();
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            renamedBit = wave::findLane(window.project().scenarios.front(), quickBit.id);
+            if (!renamedBit || renamedBit->name != "renamed_bit") {
+                fail(QStringLiteral("Blur-submitted rename was not undoable"));
+                return;
+            }
+
+            clickHeader(QPoint(80, bitY));
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_F2);
+            QCoreApplication::processEvents();
+            renameEdit->setText(QStringLiteral("focusout_bit"));
+            addButtons.at(0)->setFocus(Qt::OtherFocusReason);
+            QCoreApplication::processEvents();
+            QCoreApplication::processEvents();
+            renamedBit = wave::findLane(window.project().scenarios.front(), quickBit.id);
+            if (renameEdit->isVisible() || !renamedBit || renamedBit->name != "focusout_bit") {
+                fail(QStringLiteral("Real focus loss did not submit inline signal rename"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            renamedBit = wave::findLane(window.project().scenarios.front(), quickBit.id);
+            if (!renamedBit || renamedBit->name != "renamed_bit") {
+                fail(QStringLiteral("Focus-loss rename was not undoable"));
                 return;
             }
 

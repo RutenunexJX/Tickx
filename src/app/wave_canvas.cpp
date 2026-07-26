@@ -26,6 +26,7 @@
 #include <QScrollBar>
 #include <QToolButton>
 #include <QToolTip>
+#include <QTimer>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -256,6 +257,25 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     quickLaneClockCombo_->installEventFilter(this);
     quickLaneSetupPanel_->hide();
 
+    laneRenameEdit_ = new QLineEdit(viewport());
+    laneRenameEdit_->setObjectName(QStringLiteral("LaneRenameEdit"));
+    laneRenameEdit_->setAccessibleName(tr("Signal name"));
+    laneRenameEdit_->setPlaceholderText(tr("Signal name"));
+    laneRenameEdit_->setToolTip(tr("Enter or click elsewhere to apply · Esc to cancel"));
+    laneRenameEdit_->setStyleSheet(QStringLiteral(
+        "QLineEdit { color: #f4f7fb; background: #222b38;"
+        " border: 1px solid #8fc3ff; border-radius: 4px; padding: 3px 6px;"
+        " font-weight: 600; }"));
+    laneRenameEdit_->installEventFilter(this);
+    connect(laneRenameEdit_, &QLineEdit::textEdited, this, [this] {
+        laneRenameEdit_->setStyleSheet(QStringLiteral(
+            "QLineEdit { color: #f4f7fb; background: #222b38;"
+            " border: 1px solid #8fc3ff; border-radius: 4px; padding: 3px 6px;"
+            " font-weight: 600; }"));
+        laneRenameEdit_->setToolTip(tr("Enter or click elsewhere to apply · Esc to cancel"));
+    });
+    laneRenameEdit_->hide();
+
     durationLabel_ = new QLabel(tr("End"), viewport());
     durationLabel_->setObjectName(QStringLiteral("TimelineDurationLabel"));
     durationLabel_->setStyleSheet(QStringLiteral("color: #b9c6d8; background: transparent;"));
@@ -337,6 +357,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
         updateAddLaneButtonGeometry();
         positionQuickLaneSetup();
+        positionLaneRename();
         positionBusPresetPalette();
         viewport()->update();
     });
@@ -346,6 +367,69 @@ WaveCanvas::WaveCanvas(QWidget* parent)
 bool WaveCanvas::hasQuickLaneSetup() const noexcept
 {
     return quickLaneSetupPanel_ && quickLaneSetupPanel_->isVisible();
+}
+
+bool WaveCanvas::hasLaneRename() const noexcept
+{
+    return laneRenameEdit_ && laneRenameEdit_->isVisible();
+}
+
+bool WaveCanvas::commitLaneRename()
+{
+    if (!hasLaneRename()) return true;
+    submitLaneRename();
+    return !hasLaneRename();
+}
+
+void WaveCanvas::beginLaneRename(const QString& laneId, const QString& name)
+{
+    if (!laneRenameEdit_ || laneId.isEmpty() || hasQuickLaneSetup() || hasLaneRename()) return;
+    laneRenameLaneId_ = laneId;
+    laneRenameEdit_->setText(name);
+    laneRenameEdit_->setModified(false);
+    laneRenameEdit_->setToolTip(tr("Enter or click elsewhere to apply · Esc to cancel"));
+    laneRenameEdit_->setStyleSheet(QStringLiteral(
+        "QLineEdit { color: #f4f7fb; background: #222b38;"
+        " border: 1px solid #8fc3ff; border-radius: 4px; padding: 3px 6px;"
+        " font-weight: 600; }"));
+    laneRenameEdit_->show();
+    positionLaneRename();
+    laneRenameEdit_->raise();
+    laneRenameEdit_->setFocus(Qt::OtherFocusReason);
+    laneRenameEdit_->selectAll();
+    QTimer::singleShot(0, laneRenameEdit_, [this, laneId] {
+        if (hasLaneRename() && laneRenameLaneId_ == laneId) {
+            laneRenameEdit_->setFocus(Qt::OtherFocusReason);
+            laneRenameEdit_->selectAll();
+        }
+    });
+    emit statusMessage(tr("Rename signal · Enter or click elsewhere to apply · Esc to cancel"));
+    viewport()->update();
+}
+
+void WaveCanvas::finishLaneRename()
+{
+    if (!laneRenameEdit_) return;
+    laneRenameClosing_ = true;
+    laneRenameEdit_->hide();
+    laneRenameEdit_->clearFocus();
+    laneRenameLaneId_.clear();
+    laneRenameClosing_ = false;
+    viewport()->setFocus(Qt::OtherFocusReason);
+    viewport()->update();
+}
+
+void WaveCanvas::showLaneRenameError(const QString& message)
+{
+    if (!hasLaneRename()) return;
+    laneRenameEdit_->setStyleSheet(QStringLiteral(
+        "QLineEdit { color: #fff1f1; background: #4b2d35;"
+        " border: 1px solid #ef7773; border-radius: 4px; padding: 3px 6px;"
+        " font-weight: 600; }"));
+    laneRenameEdit_->setToolTip(message);
+    laneRenameEdit_->setFocus(Qt::OtherFocusReason);
+    laneRenameEdit_->selectAll();
+    emit statusMessage(message);
 }
 
 void WaveCanvas::beginQuickLaneSetup(
@@ -444,6 +528,14 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
             cancelQuickLaneSetup();
             return true;
         }
+        if (watched == laneRenameEdit_ && acceptKey) {
+            submitLaneRename();
+            return true;
+        }
+        if (watched == laneRenameEdit_ && keyEvent->key() == Qt::Key_Escape) {
+            cancelLaneRename();
+            return true;
+        }
         if (watched == durationEdit_ && acceptKey) {
             durationEdit_->setModified(false);
             emit durationEditRequested(durationEdit_->text());
@@ -464,6 +556,14 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
             viewport()->setFocus(Qt::OtherFocusReason);
             return true;
         }
+    }
+    if (watched == laneRenameEdit_
+        && event->type() == QEvent::FocusOut
+        && hasLaneRename()
+        && !laneRenameClosing_) {
+        QTimer::singleShot(0, this, [this] {
+            if (hasLaneRename() && !laneRenameEdit_->hasFocus()) submitLaneRename();
+        });
     }
     return QAbstractScrollArea::eventFilter(watched, event);
 }
@@ -486,6 +586,21 @@ void WaveCanvas::cancelQuickLaneSetup()
 {
     if (!hasQuickLaneSetup()) return;
     emit quickLaneSetupCanceled(quickLaneSetupLaneId_);
+}
+
+void WaveCanvas::submitLaneRename()
+{
+    if (!hasLaneRename()) return;
+    const auto laneId = laneRenameLaneId_;
+    const auto name = laneRenameEdit_->text().trimmed();
+    emit laneRenameAccepted(laneId, name);
+}
+
+void WaveCanvas::cancelLaneRename()
+{
+    if (!hasLaneRename()) return;
+    finishLaneRename();
+    emit statusMessage(tr("Rename cancelled"));
 }
 
 void WaveCanvas::syncDurationEditor()
@@ -513,6 +628,10 @@ void WaveCanvas::setDocument(
 {
     if (quickLaneSetupPanel_) quickLaneSetupPanel_->hide();
     quickLaneSetupLaneId_.clear();
+    laneRenameClosing_ = true;
+    if (laneRenameEdit_) laneRenameEdit_->hide();
+    laneRenameLaneId_.clear();
+    laneRenameClosing_ = false;
     project_ = project;
     scenario_ = scenario;
     commandStack_ = commandStack;
@@ -731,6 +850,7 @@ void WaveCanvas::refreshModel()
     updateScrollBars();
     syncDurationEditor();
     positionQuickLaneSetup();
+    positionLaneRename();
     positionDurationEditor();
     if (!busPresetLaneId_.empty()
         && (!scenario_ || !findLane(*scenario_, busPresetLaneId_))) {
@@ -999,6 +1119,10 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         QAbstractScrollArea::contextMenuEvent(event);
         return;
     }
+    if (!commitLaneRename()) {
+        event->accept();
+        return;
+    }
     auto* lane = laneAtY(event->pos().y());
     if (!lane || lane->kind == LaneKind::Group) {
         QAbstractScrollArea::contextMenuEvent(event);
@@ -1141,6 +1265,15 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
         viewport()->setCursor(Qt::OpenHandCursor);
         event->accept();
         return;
+    }
+
+    if (scenario_ && event->key() == Qt::Key_F2 && !selectedLaneId_.empty()) {
+        const auto* lane = findLane(*scenario_, selectedLaneId_);
+        if (lane && lane->kind != LaneKind::Group) {
+            emit renameLaneRequested(QString::fromStdString(lane->id));
+            event->accept();
+            return;
+        }
     }
 
     if (scenario_
@@ -1393,6 +1526,7 @@ void WaveCanvas::resizeEvent(QResizeEvent* event)
     }
     updateAddLaneButtonGeometry();
     positionQuickLaneSetup();
+    positionLaneRename();
     positionDurationEditor();
     positionBusPresetPalette();
 }
@@ -1404,6 +1538,13 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         return;
     }
     const auto position = event->position().toPoint();
+    if (event->button() == Qt::LeftButton && hasLaneRename()) {
+        submitLaneRename();
+        if (hasLaneRename()) {
+            event->accept();
+            return;
+        }
+    }
     if (event->button() == Qt::LeftButton && hasQuickLaneSetup()) {
         submitQuickLaneSetup();
         if (hasQuickLaneSetup()) {
@@ -2096,6 +2237,7 @@ void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
             laneDropIndicatorY_.reset();
             emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
             emit renameLaneRequested(QString::fromStdString(lane->id));
+            event->accept();
             viewport()->update();
         }
         return;
@@ -2373,6 +2515,27 @@ void WaveCanvas::positionQuickLaneSetup()
         std::max(RulerHeight + 2, viewport()->height() - height - 2));
     quickLaneSetupPanel_->setGeometry(8, y, width, height);
     quickLaneSetupPanel_->raise();
+}
+
+void WaveCanvas::positionLaneRename()
+{
+    if (!hasLaneRename() || !scenario_) return;
+    const auto laneId = laneRenameLaneId_.toStdString();
+    const auto layout = std::find_if(
+        laneLayout_.begin(),
+        laneLayout_.end(),
+        [this, &laneId](const LaneLayout& candidate) {
+            return candidate.laneIndex < scenario_->lanes.size()
+                && scenario_->lanes.at(candidate.laneIndex).id == laneId;
+        });
+    if (layout == laneLayout_.end()) {
+        finishLaneRename();
+        return;
+    }
+    const auto laneTop = RulerHeight + layout->top - verticalScrollBar()->value();
+    const auto height = std::clamp(layout->height / 2 + 2, 24, 32);
+    laneRenameEdit_->setGeometry(10, laneTop + 3, HeaderWidth - 20, height);
+    laneRenameEdit_->raise();
 }
 
 void WaveCanvas::positionDurationEditor()

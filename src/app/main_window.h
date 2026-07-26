@@ -111,6 +111,7 @@ private:
         const QString& parameter,
         const QString& clockId);
     void cancelQuickLaneSetup(const QString& laneId);
+    void completeLaneRename(const QString& laneId, const QString& name);
     void changeScenarioDuration(const QString& value);
     [[nodiscard]] Tick latestContentTick(const Scenario& scenario) const noexcept;
     void renameLaneById(const QString& laneId);

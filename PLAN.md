@@ -775,6 +775,62 @@ Visual QA: direct toolbar, three created lanes, transparent grid, Bus X baseline
            500 ns End control, edit cursor and Saved state are legible
 Desktop interaction: none
 ```
+
+## 持续迭代 15：信号名就地重命名
+
+状态：完成
+
+已交付：
+
+- 左侧信号名双击或选中后按 `F2` 直接出现 lane 内编辑框，不再打开模态对话框。Enter、点击画布
+  其他位置或真实失焦均提交，Esc 取消且不修改模型。
+- 空名与不区分大小写的重名会在原编辑框中提示、保留焦点和草稿；合法名称通过单个
+  `ChangeLaneCommand` 提交，状态栏明确显示结果与 `Ctrl+Z`，Undo/Redo 均保持单步语义。
+- 保存、另存为、新建、打开、关闭、快速添加和画布右键会先同步提交重命名；校验失败时原地
+  阻止后续动作。提交使用 ID/文本副本且不重置视口，避免成员清空或同次点击坐标变化。
+- `wave-canvas-add-lane-smoke` 覆盖双击、F2、Esc、空名/重名、真实失焦、快速添加门禁、
+  Enter、点击别处及 Undo/Redo；独立用户旅程验证重命名后的保存回读。
+
+开发视角验收：
+
+```text
+cmake --build build --parallel 4
+Result: success
+
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 25/25 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure -j 4
+21/21 tests passed
+Total Test time: 2.66 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure -j 4
+21/21 tests passed
+Total Test time: 2.70 sec
+
+git diff --check
+Result: clean
+Desktop interaction: none
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R ^wave-user-journey-smoke$ --output-on-failure
+1/1 passed
+Total Test time: 0.28 sec
+
+Saved project: build/qtcreator-debug/user-journey.wave.json
+Screenshot: build/qtcreator-debug/user-journey-smoke.png (1440×900)
+Visual QA: req_valid rename, three created lanes, transparent grid, Bus X baseline,
+           500 ns End control, edit cursor and Saved state are legible
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

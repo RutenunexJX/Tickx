@@ -66,6 +66,8 @@ public:
     [[nodiscard]] std::optional<std::pair<Tick, Tick>>
     waveEditTransitionPreviewRange() const noexcept;
     [[nodiscard]] bool hasQuickLaneSetup() const noexcept;
+    [[nodiscard]] bool hasLaneRename() const noexcept;
+    [[nodiscard]] bool commitLaneRename();
 
     void beginQuickLaneSetup(
         const QString& laneId,
@@ -77,6 +79,9 @@ public:
         const QString& selectedClockId = {});
     void finishQuickLaneSetup();
     void showQuickLaneSetupError(const QString& message, bool focusParameter = false);
+    void beginLaneRename(const QString& laneId, const QString& name);
+    void finishLaneRename();
+    void showLaneRenameError(const QString& message);
     void showDurationEditError(const QString& message);
 
 public slots:
@@ -106,6 +111,7 @@ signals:
         const QString& parameter,
         const QString& clockId);
     void quickLaneSetupCanceled(const QString& laneId);
+    void laneRenameAccepted(const QString& laneId, const QString& name);
     void durationEditRequested(const QString& value);
     void measureModeExitRequested();
 
@@ -175,9 +181,12 @@ private:
     void updateScrollBars();
     void updateAddLaneButtonGeometry();
     void positionQuickLaneSetup();
+    void positionLaneRename();
     void positionDurationEditor();
     void submitQuickLaneSetup();
     void cancelQuickLaneSetup();
+    void submitLaneRename();
+    void cancelLaneRename();
     void submitBusValue();
     void syncDurationEditor();
     void positionBusPresetPalette();
@@ -293,6 +302,9 @@ private:
     QLabel* quickLaneErrorLabel_{nullptr};
     QString quickLaneSetupLaneId_;
     LaneKind quickLaneSetupKind_{LaneKind::Bit};
+    QLineEdit* laneRenameEdit_{nullptr};
+    QString laneRenameLaneId_;
+    bool laneRenameClosing_{false};
     QLabel* durationLabel_{nullptr};
     QLineEdit* durationEdit_{nullptr};
     QFrame* busPresetPalette_{nullptr};

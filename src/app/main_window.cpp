@@ -702,6 +702,11 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
         &MainWindow::cancelQuickLaneSetup);
     connect(
         canvas_,
+        &WaveCanvas::laneRenameAccepted,
+        this,
+        &MainWindow::completeLaneRename);
+    connect(
+        canvas_,
         &WaveCanvas::durationEditRequested,
         this,
         &MainWindow::changeScenarioDuration);
@@ -813,6 +818,10 @@ void MainWindow::openEditMenuPreview()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    if (!canvas_->commitLaneRename()) {
+        event->ignore();
+        return;
+    }
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (confirmDiscardChanges()) {
         if (traceCancelFlag_) traceCancelFlag_->store(true);
@@ -824,6 +833,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 void MainWindow::openProject()
 {
+    if (!canvas_->commitLaneRename()) return;
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (!confirmDiscardChanges()) return;
     const auto path = QFileDialog::getOpenFileName(
@@ -836,6 +846,7 @@ void MainWindow::openProject()
 
 void MainWindow::saveProject()
 {
+    if (!canvas_->commitLaneRename()) return;
     if (!pendingQuickLaneId_.isEmpty()) {
         canvas_->showQuickLaneSetupError(tr("Press Enter to finish this signal before saving."));
         return;
@@ -849,6 +860,7 @@ void MainWindow::saveProject()
 
 void MainWindow::saveProjectAs()
 {
+    if (!canvas_->commitLaneRename()) return;
     if (!pendingQuickLaneId_.isEmpty()) {
         canvas_->showQuickLaneSetupError(tr("Press Enter to finish this signal before saving."));
         return;
@@ -929,6 +941,7 @@ void MainWindow::updateCommandActions()
 
 void MainWindow::newProject()
 {
+    if (!canvas_->commitLaneRename()) return;
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (!confirmDiscardChanges()) return;
 
@@ -966,6 +979,7 @@ void MainWindow::newProject()
 }
 void MainWindow::addLane()
 {
+    if (!canvas_->commitLaneRename()) return;
     auto* scenario = activeScenario();
     if (!scenario) return;
     Lane lane;
@@ -1010,6 +1024,7 @@ void MainWindow::addLane()
 
 void MainWindow::addQuickLane(const LaneKind kind)
 {
+    if (!canvas_->commitLaneRename()) return;
     auto* scenario = activeScenario();
     if (!scenario
         || (kind != LaneKind::Clock
@@ -1362,23 +1377,30 @@ void MainWindow::editSelectedLane()
 
 void MainWindow::renameLaneById(const QString& laneId)
 {
+    if (!canvas_->commitLaneRename()) return;
+    auto* scenario = activeScenario();
+    const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
+    if (!lane || lane->kind == LaneKind::Group) return;
+    if (!pendingQuickLaneId_.isEmpty()) {
+        canvas_->showQuickLaneSetupError(tr("Press Enter or Esc before renaming another signal."));
+        return;
+    }
+    canvas_->beginLaneRename(laneId, QString::fromStdString(lane->name));
+}
+
+void MainWindow::completeLaneRename(const QString& laneId, const QString& requestedName)
+{
     auto* scenario = activeScenario();
     auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
-    if (!lane || lane->kind == LaneKind::Group) return;
+    if (!lane || lane->kind == LaneKind::Group) {
+        canvas_->finishLaneRename();
+        statusBar()->showMessage(tr("The signal being renamed is no longer available."), 4'000);
+        return;
+    }
 
-    QInputDialog dialog(this);
-    dialog.setObjectName(QStringLiteral("RenameLaneDialog"));
-    dialog.setWindowTitle(tr("Rename signal"));
-    dialog.setLabelText(tr("Signal name"));
-    dialog.setInputMode(QInputDialog::TextInput);
-    dialog.setTextValue(QString::fromStdString(lane->name));
-    dialog.setOkButtonText(tr("Rename"));
-    dialog.resize(360, dialog.sizeHint().height());
-    if (dialog.exec() != QDialog::Accepted) return;
-
-    const auto name = dialog.textValue().trimmed();
+    const auto name = requestedName.trimmed();
     if (name.isEmpty()) {
-        QMessageBox::warning(this, tr("Invalid name"), tr("Signal name cannot be empty."));
+        canvas_->showLaneRenameError(tr("Signal name cannot be empty."));
         return;
     }
     const auto duplicate = std::any_of(
@@ -1393,13 +1415,16 @@ void MainWindow::renameLaneById(const QString& laneId)
                     == 0;
         });
     if (duplicate) {
-        QMessageBox::warning(
-            this,
-            tr("Invalid name"),
-            tr("Another signal already uses this name."));
+        canvas_->showLaneRenameError(tr("Another signal already uses this name."));
         return;
     }
-    if (name == QString::fromStdString(lane->name)) return;
+
+    const auto previousName = QString::fromStdString(lane->name);
+    if (name == previousName) {
+        canvas_->finishLaneRename();
+        statusBar()->showMessage(tr("Signal name unchanged"), 3'000);
+        return;
+    }
 
     auto replacement = *lane;
     replacement.name = name.toStdString();
@@ -1407,12 +1432,16 @@ void MainWindow::renameLaneById(const QString& laneId)
         commandStack_.execute(std::make_unique<ChangeLaneCommand>(
             project_, *scenario, lane->id, std::move(replacement)));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(this, tr("Cannot rename signal"), QString::fromUtf8(exception.what()));
+        canvas_->showLaneRenameError(QString::fromUtf8(exception.what()));
         return;
     }
+
+    canvas_->finishLaneRename();
     canvas_->refreshModel();
     markEdited();
-    canvas_->revealLocation(laneId, canvas_->cursorTick());
+    statusBar()->showMessage(
+        tr("Renamed %1 to %2 · Ctrl+Z to undo").arg(previousName, name),
+        5'000);
 }
 
 QString MainWindow::selectedLaneIdForEditing() const
