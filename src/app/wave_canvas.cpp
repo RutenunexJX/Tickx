@@ -9,6 +9,7 @@
 #include <QDropEvent>
 #include <QEvent>
 #include <QFrame>
+#include <QFocusEvent>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QJsonArray>
@@ -290,9 +291,17 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         "QLineEdit:focus { border-color: #8fc3ff; }"));
     durationEdit_->installEventFilter(this);
     connect(durationEdit_, &QLineEdit::editingFinished, this, [this] {
-        if (!durationEdit_->isModified()) return;
-        durationEdit_->setModified(false);
-        emit durationEditRequested(durationEdit_->text());
+        const auto consumeCanvasInput = durationEditMouseFocusOut_;
+        durationEditMouseFocusOut_ = false;
+        if (!durationEdit_->isModified() || durationEditSubmitting_) return;
+        submitDurationEdit(consumeCanvasInput);
+        if (consumeCanvasInput) durationEditBlurConsumesCanvasInput_ = true;
+    });
+    connect(qApp, &QApplication::focusChanged, this, [this](QWidget*, QWidget* newFocus) {
+        if (!durationEditBlurConsumesCanvasInput_) return;
+        if (newFocus != this && newFocus != viewport()) {
+            durationEditBlurConsumesCanvasInput_ = false;
+        }
     });
 
     busPresetPalette_ = new QFrame(viewport());
@@ -379,6 +388,24 @@ bool WaveCanvas::commitLaneRename()
     if (!hasLaneRename()) return true;
     submitLaneRename();
     return !hasLaneRename();
+}
+
+bool WaveCanvas::commitPendingInlineEdits()
+{
+    durationEditBlurConsumesCanvasInput_ = false;
+    if (hasQuickLaneSetup()) {
+        submitQuickLaneSetup();
+        if (hasQuickLaneSetup()) return false;
+    }
+    if (!commitLaneRename()) return false;
+    if (durationEdit_ && durationEdit_->isVisible() && durationEdit_->isModified()) {
+        submitDurationEdit();
+        if (durationEdit_->isModified() || hasPendingBusValueEdit()) return false;
+    } else if (hasPendingBusValueEdit()) {
+        submitBusValue();
+        if (hasPendingBusValueEdit()) return false;
+    }
+    return true;
 }
 
 void WaveCanvas::beginLaneRename(const QString& laneId, const QString& name)
@@ -506,6 +533,7 @@ void WaveCanvas::showDurationEditError(const QString& message)
         "QLineEdit { color: #fff2f2; background: #452d34;"
         " border: 1px solid #ef7773; border-radius: 4px; padding: 2px 5px; }"));
     durationEdit_->setToolTip(message);
+    durationEdit_->setModified(true);
     durationEdit_->setFocus(Qt::OtherFocusReason);
     durationEdit_->selectAll();
     emit statusMessage(message);
@@ -513,6 +541,10 @@ void WaveCanvas::showDurationEditError(const QString& message)
 
 bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
 {
+    if (watched == durationEdit_ && event->type() == QEvent::FocusOut) {
+        const auto* focusEvent = static_cast<QFocusEvent*>(event);
+        durationEditMouseFocusOut_ = focusEvent->reason() == Qt::MouseFocusReason;
+    }
     if (event->type() == QEvent::KeyPress) {
         auto* keyEvent = static_cast<QKeyEvent*>(event);
         const auto acceptKey = keyEvent->key() == Qt::Key_Return
@@ -537,11 +569,12 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
             return true;
         }
         if (watched == durationEdit_ && acceptKey) {
-            durationEdit_->setModified(false);
-            emit durationEditRequested(durationEdit_->text());
+            submitDurationEdit();
             return true;
         }
         if (watched == durationEdit_ && keyEvent->key() == Qt::Key_Escape) {
+            durationEditMouseFocusOut_ = false;
+            durationEditBlurConsumesCanvasInput_ = false;
             durationEdit_->setModified(false);
             durationEdit_->clearFocus();
             syncDurationEditor();
@@ -571,21 +604,22 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
 void WaveCanvas::submitQuickLaneSetup()
 {
     if (!hasQuickLaneSetup()) return;
-    emit quickLaneSetupAccepted(
-        quickLaneSetupLaneId_,
-        quickLaneNameEdit_->text().trimmed(),
-        quickLaneParameterEdit_->isVisible()
-            ? quickLaneParameterEdit_->text().trimmed()
-            : QString{},
-        quickLaneClockCombo_->isVisible()
-            ? quickLaneClockCombo_->currentData().toString()
-            : QString{});
+    const auto laneId = quickLaneSetupLaneId_;
+    const auto name = quickLaneNameEdit_->text().trimmed();
+    const auto parameter = quickLaneParameterEdit_->isVisible()
+        ? quickLaneParameterEdit_->text().trimmed()
+        : QString{};
+    const auto clockId = quickLaneClockCombo_->isVisible()
+        ? quickLaneClockCombo_->currentData().toString()
+        : QString{};
+    emit quickLaneSetupAccepted(laneId, name, parameter, clockId);
 }
 
 void WaveCanvas::cancelQuickLaneSetup()
 {
     if (!hasQuickLaneSetup()) return;
-    emit quickLaneSetupCanceled(quickLaneSetupLaneId_);
+    const auto laneId = quickLaneSetupLaneId_;
+    emit quickLaneSetupCanceled(laneId);
 }
 
 void WaveCanvas::submitLaneRename()
@@ -603,13 +637,65 @@ void WaveCanvas::cancelLaneRename()
     emit statusMessage(tr("Rename cancelled"));
 }
 
+void WaveCanvas::submitDurationEdit(const bool preserveMouseFocusTarget)
+{
+    if (!durationEdit_ || durationEditSubmitting_) return;
+    durationEditSubmitting_ = true;
+    const auto busWasOutsideTimeline = hasPendingBusValueEdit()
+        && scenario_
+        && (scenario_->duration <= 0
+            || *busPresetAnchorTick_ < 0
+            || *busPresetAnchorTick_ >= scenario_->duration);
+    if (hasPendingBusValueEdit() && !busWasOutsideTimeline) {
+        submitBusValue();
+        if (hasPendingBusValueEdit()) {
+            durationEditSubmitting_ = false;
+            return;
+        }
+    }
+    const auto value = durationEdit_->text();
+    durationEdit_->setModified(false);
+    emit durationEditRequested(value);
+    const auto durationAccepted = !durationEdit_->isModified();
+    if (durationAccepted && busWasOutsideTimeline && hasPendingBusValueEdit()) {
+        submitBusValue();
+    }
+    const auto fullyAccepted = durationAccepted && !hasPendingBusValueEdit();
+    if (fullyAccepted && !preserveMouseFocusTarget) {
+        viewport()->setFocus(Qt::OtherFocusReason);
+    }
+    durationEditSubmitting_ = false;
+    if (!durationAccepted) return;
+    if (preserveMouseFocusTarget && fullyAccepted) {
+        QTimer::singleShot(0, this, [this] {
+            if (durationEdit_ && !durationEdit_->isModified()) syncDurationEditor();
+        });
+    } else {
+        syncDurationEditor();
+    }
+}
+
+bool WaveCanvas::hasPendingBusValueEdit() const noexcept
+{
+    return busValueEdit_
+        && busValueEdit_->isModified()
+        && !busPresetLaneId_.empty()
+        && busPresetAnchorTick_;
+}
+
+bool WaveCanvas::hasPendingValueEdit() const noexcept
+{
+    return (durationEdit_ && durationEdit_->isModified())
+        || hasPendingBusValueEdit();
+}
+
 void WaveCanvas::syncDurationEditor()
 {
     if (!durationEdit_ || !durationLabel_) return;
     const auto available = project_ && scenario_;
     durationEdit_->setVisible(available);
     durationLabel_->setVisible(available);
-    if (!available || durationEdit_->hasFocus()) return;
+    if (!available || durationEdit_->hasFocus() || durationEdit_->isModified()) return;
     durationEdit_->setText(QString::fromStdString(
         formatTick(scenario_->duration, project_->timeBase)));
     durationEdit_->setModified(false);
@@ -632,6 +718,8 @@ void WaveCanvas::setDocument(
     if (laneRenameEdit_) laneRenameEdit_->hide();
     laneRenameLaneId_.clear();
     laneRenameClosing_ = false;
+    durationEditMouseFocusOut_ = false;
+    durationEditBlurConsumesCanvasInput_ = false;
     project_ = project;
     scenario_ = scenario;
     commandStack_ = commandStack;
@@ -1119,7 +1207,15 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         QAbstractScrollArea::contextMenuEvent(event);
         return;
     }
-    if (!commitLaneRename()) {
+    if (durationEditBlurConsumesCanvasInput_) {
+        durationEditBlurConsumesCanvasInput_ = false;
+        event->accept();
+        return;
+    }
+    const auto hadPendingInlineEdit = hasQuickLaneSetup()
+        || hasLaneRename()
+        || hasPendingValueEdit();
+    if (!commitPendingInlineEdits() || hadPendingInlineEdit) {
         event->accept();
         return;
     }
@@ -1537,6 +1633,11 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         QAbstractScrollArea::mousePressEvent(event);
         return;
     }
+    if (event->button() == Qt::LeftButton && durationEditBlurConsumesCanvasInput_) {
+        durationEditBlurConsumesCanvasInput_ = false;
+        event->accept();
+        return;
+    }
     const auto position = event->position().toPoint();
     if (event->button() == Qt::LeftButton && hasLaneRename()) {
         submitLaneRename();
@@ -1547,10 +1648,13 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
     }
     if (event->button() == Qt::LeftButton && hasQuickLaneSetup()) {
         submitQuickLaneSetup();
-        if (hasQuickLaneSetup()) {
-            event->accept();
-            return;
-        }
+        event->accept();
+        return;
+    }
+    if (event->button() == Qt::LeftButton && hasPendingValueEdit()) {
+        static_cast<void>(commitPendingInlineEdits());
+        event->accept();
+        return;
     }
     if (event->button() == Qt::MiddleButton
         || (event->button() == Qt::LeftButton && spaceHeld_)) {
@@ -2629,6 +2733,7 @@ void WaveCanvas::hideBusPresetPalette()
 {
     busPresetLaneId_.clear();
     busPresetAnchorTick_.reset();
+    if (busValueEdit_) busValueEdit_->setModified(false);
     if (busPresetPalette_) busPresetPalette_->hide();
 }
 
@@ -2642,6 +2747,27 @@ void WaveCanvas::submitBusValue()
         hideBusPresetPalette();
         return;
     }
+    if (scenario_->duration <= 0
+        || *busPresetAnchorTick_ < 0
+        || *busPresetAnchorTick_ >= scenario_->duration) {
+        const auto message = tr(
+            "This Bus draft is beyond End. Extend the timeline or press Esc to discard it.");
+        busValueEdit_->setStyleSheet(QStringLiteral(
+            "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
+            "border-radius: 4px; padding: 3px 6px;"));
+        busValueEdit_->setToolTip(message);
+        busValueEdit_->setModified(true);
+        if (scenario_->duration > 0) {
+            revealLocation(
+                QString::fromStdString(lane->id),
+                std::clamp<Tick>(*busPresetAnchorTick_, 0, scenario_->duration - 1));
+        }
+        positionBusPresetPalette();
+        busValueEdit_->setFocus(Qt::OtherFocusReason);
+        busValueEdit_->selectAll();
+        emit statusMessage(message);
+        return;
+    }
     const auto value = busValueEdit_->text().trimmed();
     const auto validation = validateLaneValue(*lane, value.toStdString());
     if (value.isEmpty() || !validation.valid) {
@@ -2652,6 +2778,9 @@ void WaveCanvas::submitBusValue()
             "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
             "border-radius: 4px; padding: 3px 6px;"));
         busValueEdit_->setToolTip(message);
+        busValueEdit_->setModified(true);
+        revealLocation(QString::fromStdString(lane->id), *busPresetAnchorTick_);
+        positionBusPresetPalette();
         busValueEdit_->setFocus(Qt::OtherFocusReason);
         busValueEdit_->selectAll();
         emit statusMessage(message);

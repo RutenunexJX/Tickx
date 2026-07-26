@@ -818,7 +818,7 @@ void MainWindow::openEditMenuPreview()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    if (!canvas_->commitLaneRename()) {
+    if (!canvas_->commitPendingInlineEdits()) {
         event->ignore();
         return;
     }
@@ -833,7 +833,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 void MainWindow::openProject()
 {
-    if (!canvas_->commitLaneRename()) return;
+    if (!canvas_->commitPendingInlineEdits()) return;
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (!confirmDiscardChanges()) return;
     const auto path = QFileDialog::getOpenFileName(
@@ -846,7 +846,7 @@ void MainWindow::openProject()
 
 void MainWindow::saveProject()
 {
-    if (!canvas_->commitLaneRename()) return;
+    if (!canvas_->commitPendingInlineEdits()) return;
     if (!pendingQuickLaneId_.isEmpty()) {
         canvas_->showQuickLaneSetupError(tr("Press Enter to finish this signal before saving."));
         return;
@@ -860,7 +860,7 @@ void MainWindow::saveProject()
 
 void MainWindow::saveProjectAs()
 {
-    if (!canvas_->commitLaneRename()) return;
+    if (!canvas_->commitPendingInlineEdits()) return;
     if (!pendingQuickLaneId_.isEmpty()) {
         canvas_->showQuickLaneSetupError(tr("Press Enter to finish this signal before saving."));
         return;
@@ -941,7 +941,7 @@ void MainWindow::updateCommandActions()
 
 void MainWindow::newProject()
 {
-    if (!canvas_->commitLaneRename()) return;
+    if (!canvas_->commitPendingInlineEdits()) return;
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (!confirmDiscardChanges()) return;
 
@@ -979,7 +979,7 @@ void MainWindow::newProject()
 }
 void MainWindow::addLane()
 {
-    if (!canvas_->commitLaneRename()) return;
+    if (!canvas_->commitPendingInlineEdits()) return;
     auto* scenario = activeScenario();
     if (!scenario) return;
     Lane lane;
@@ -1024,7 +1024,7 @@ void MainWindow::addLane()
 
 void MainWindow::addQuickLane(const LaneKind kind)
 {
-    if (!canvas_->commitLaneRename()) return;
+    if (!canvas_->commitPendingInlineEdits()) return;
     auto* scenario = activeScenario();
     if (!scenario
         || (kind != LaneKind::Clock
@@ -1311,7 +1311,6 @@ void MainWindow::changeScenarioDuration(const QString& value)
         return;
     }
     if (*duration == scenario->duration) {
-        canvas_->setFocus(Qt::OtherFocusReason);
         canvas_->refreshModel();
         statusBar()->showMessage(tr("Timeline end is unchanged"), 2'000);
         return;
@@ -1324,7 +1323,6 @@ void MainWindow::changeScenarioDuration(const QString& value)
         canvas_->showDurationEditError(QString::fromUtf8(exception.what()));
         return;
     }
-    canvas_->setFocus(Qt::OtherFocusReason);
     canvas_->refreshModel();
     canvas_->fitScenario();
     markEdited();
@@ -1377,7 +1375,7 @@ void MainWindow::editSelectedLane()
 
 void MainWindow::renameLaneById(const QString& laneId)
 {
-    if (!canvas_->commitLaneRename()) return;
+    if (!canvas_->commitPendingInlineEdits()) return;
     auto* scenario = activeScenario();
     const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
     if (!lane || lane->kind == LaneKind::Group) return;
@@ -2233,6 +2231,7 @@ void MainWindow::removeSelectedRelation()
 
 void MainWindow::exportArtifacts()
 {
+    if (!canvas_->commitPendingInlineEdits()) return;
     const auto* scenario = activeScenario();
     if (!scenario) return;
     const auto options = requestExportOptions(

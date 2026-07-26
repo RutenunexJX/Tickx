@@ -68,6 +68,7 @@ public:
     [[nodiscard]] bool hasQuickLaneSetup() const noexcept;
     [[nodiscard]] bool hasLaneRename() const noexcept;
     [[nodiscard]] bool commitLaneRename();
+    [[nodiscard]] bool commitPendingInlineEdits();
 
     void beginQuickLaneSetup(
         const QString& laneId,
@@ -188,6 +189,9 @@ private:
     void submitLaneRename();
     void cancelLaneRename();
     void submitBusValue();
+    void submitDurationEdit(bool preserveMouseFocusTarget = false);
+    [[nodiscard]] bool hasPendingBusValueEdit() const noexcept;
+    [[nodiscard]] bool hasPendingValueEdit() const noexcept;
     void syncDurationEditor();
     void positionBusPresetPalette();
     void showBusPresetPalette(const Lane& lane, const QPoint& anchor);
@@ -307,6 +311,9 @@ private:
     bool laneRenameClosing_{false};
     QLabel* durationLabel_{nullptr};
     QLineEdit* durationEdit_{nullptr};
+    bool durationEditSubmitting_{false};
+    bool durationEditMouseFocusOut_{false};
+    bool durationEditBlurConsumesCanvasInput_{false};
     QFrame* busPresetPalette_{nullptr};
     QLabel* busPresetContextLabel_{nullptr};
     QLineEdit* busValueEdit_{nullptr};

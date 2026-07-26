@@ -831,6 +831,70 @@ Visual QA: req_valid rename, three created lanes, transparent grid, Bus X baseli
 Desktop interaction: none
 ```
 
+## 持续迭代 16：未提交草稿统一收口
+
+状态：完成
+
+已交付：
+
+- 新建、打开、关闭、保存、另存为、导出、快速添加、重命名和画布点击统一经过就地草稿门禁。
+  有效的创建、信号名、Bus 值与 End 草稿先提交；非法草稿保留文本、位置与焦点并阻止后续动作，
+  不再出现界面显示新值而保存旧模型的状态。
+- Bus 与 End 同时待提交时采用条件顺序：Bus 仍在当前 End 内时先提交 Bus 再校验 End，防止缩短
+  后位置错移；Undo/Redo 使 Bus 原位置超出 End 时先允许合法的 End 扩展，再将 Bus 写回原 anchor。
+  End 仍不足或非法时原位阻断，绝不进入末拍钳制。
+- End 的 Enter、Ctrl+S、真实鼠标失焦和点击画布共用同一管线。模型刷新保留 modified 草稿；
+  提交具有重入保护，鼠标导致缩放变化时只吞掉触发该变化的画布输入，转焦 Bus 或其他控件时
+  不残留误吞标志。
+- 隐藏的 Bus 草稿仍按 lane ID、原 anchor 与 modified 状态识别；非法值或越界位置会重新显示浮层、
+  聚焦输入框并给出恢复方式。快速添加提交信号使用字段副本，避免同步回调清空成员后产生悬空引用。
+- `wave-canvas-add-lane-smoke` 新增点击别处提交、隐藏有效/非法草稿、Undo 后越界阻断、延长 End
+  原位置恢复与两步 Undo；`wave-user-journey-smoke` 新增真实 Ctrl+S/Export 门禁、Bus→End 冲突、
+  鼠标失焦坐标保护、End→Bus 焦点交接以及最终保存回读。
+
+开发视角验收：
+
+```text
+cmake --build build --parallel 4
+Result: success
+
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 25/25 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure -j 4
+21/21 tests passed
+Total Test time: 2.67 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure -j 4
+21/21 tests passed
+Total Test time: 3.08 sec
+
+git diff --check
+Result: clean
+Desktop interaction: none
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R ^wave-user-journey-smoke$ --output-on-failure
+1/1 passed
+Total Test time: 0.32 sec
+
+Saved project: build/qtcreator-debug/user-journey.wave.json
+Saved model: req_valid; durationTick=650000;
+             data 60000..80000=0x1234, 260000..280000=0xabcd,
+             460000..480000=0xbeef, 480000..500000=0xcafe
+Screenshot: build/qtcreator-debug/user-journey-smoke.png (1440×900)
+Visual QA: direct toolbar, three lanes, transparent grid, 650 ns End, Bus values,
+           edit cursor and Saved state are legible
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

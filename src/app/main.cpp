@@ -571,15 +571,52 @@ int main(int argc, char* argv[])
                     fail(QStringLiteral("Invalid Bus value did not remain visible and recoverable"));
                     return;
                 }
+                sendKey(busValue, Qt::Key_S, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (QApplication::activeModalWidget()
+                    || QFileInfo::exists(userJourneySavePath)
+                    || !palette->isVisible()
+                    || !busValue->hasFocus()
+                    || saveState->text() == QStringLiteral("Saved")) {
+                    fail(QStringLiteral("Invalid Bus draft did not block Save in place"));
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "exportArtifacts", Qt::DirectConnection)) {
+                    fail(QStringLiteral("User journey could not test invalid Bus export gate"));
+                    return;
+                }
+                QCoreApplication::processEvents();
+                if (QApplication::activeModalWidget()
+                    || !palette->isVisible()
+                    || !busValue->hasFocus()) {
+                    fail(QStringLiteral("Invalid Bus draft did not block Export in place"));
+                    return;
+                }
+                durationEdit->setText(QStringLiteral("450 ns"));
+                durationEdit->setModified(true);
+                durationEdit->setFocus(Qt::OtherFocusReason);
+                busValue->setFocus(Qt::MouseFocusReason);
+                QCoreApplication::processEvents();
+                if (!palette->isVisible()
+                    || !busValue->hasFocus()
+                    || !durationEdit->isModified()
+                    || durationEdit->text() != QStringLiteral("450 ns")
+                    || window.project().scenarios.front().duration != 200'000) {
+                    fail(QStringLiteral("Invalid Bus draft did not preserve the pending End draft"));
+                    return;
+                }
                 busValue->setText(QStringLiteral("0x1234"));
+                busValue->setModified(true);
                 sendKey(busValue, Qt::Key_Return);
                 QCoreApplication::processEvents();
                 busLane = wave::findLane(window.project().scenarios.front(), busLaneId);
                 if (palette->isVisible()
                     || !busLane
                     || valueAt(*busLane, 70'000) != "0x1234"
+                    || !durationEdit->isModified()
+                    || durationEdit->text() != QStringLiteral("450 ns")
                     || !window.statusBar()->currentMessage().contains(QStringLiteral("Ctrl+Z"))) {
-                    fail(QStringLiteral("Corrected Bus value did not apply with visible confirmation"));
+                    fail(QStringLiteral("Corrected Bus value discarded the pending End draft"));
                     return;
                 }
 
@@ -591,6 +628,16 @@ int main(int argc, char* argv[])
                     fail(QStringLiteral("Unsafe timeline shortening was not explained in place"));
                     return;
                 }
+                sendKey(durationEdit, Qt::Key_S, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (QApplication::activeModalWidget()
+                    || QFileInfo::exists(userJourneySavePath)
+                    || window.project().scenarios.front().duration != 200'000
+                    || !durationEdit->hasFocus()
+                    || saveState->text() == QStringLiteral("Saved")) {
+                    fail(QStringLiteral("Invalid End draft did not block Save in place"));
+                    return;
+                }
                 durationEdit->setText(QStringLiteral("500 ns"));
                 sendKey(durationEdit, Qt::Key_Return);
                 QCoreApplication::processEvents();
@@ -599,6 +646,62 @@ int main(int argc, char* argv[])
                     fail(QStringLiteral("Direct timeline extension did not apply"));
                     return;
                 }
+
+                constexpr wave::Tick blurProbeTick = 90'000;
+                bitLane = wave::findLane(window.project().scenarios.front(), bitLaneId);
+                const auto blurProbeBefore = bitLane ? valueAt(*bitLane, blurProbeTick) : std::string{};
+                durationEdit->setFocus(Qt::OtherFocusReason);
+                durationEdit->setText(QStringLiteral("550 ns"));
+                durationEdit->setModified(true);
+                canvas->setFocus(Qt::MouseFocusReason);
+                QCoreApplication::processEvents();
+                if (window.project().scenarios.front().duration != 550'000) {
+                    fail(QStringLiteral("Mouse blur did not submit the End draft"));
+                    return;
+                }
+                const QPoint blurProbePoint(xAtTick(blurProbeTick), bitY);
+                click(blurProbePoint);
+                bitLane = wave::findLane(window.project().scenarios.front(), bitLaneId);
+                if (!bitLane || valueAt(*bitLane, blurProbeTick) != blurProbeBefore) {
+                    fail(QStringLiteral("End blur click was reinterpreted after the time scale changed"));
+                    return;
+                }
+                click(blurProbePoint);
+                bitLane = wave::findLane(window.project().scenarios.front(), bitLaneId);
+                if (!bitLane || valueAt(*bitLane, blurProbeTick) != "1") {
+                    fail(QStringLiteral("The click after the End blur guard did not edit normally"));
+                    return;
+                }
+                click(blurProbePoint);
+
+                durationEdit->setText(QStringLiteral("500 ns"));
+                sendKey(durationEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                durationEdit->setFocus(Qt::OtherFocusReason);
+                durationEdit->setText(QStringLiteral("550 ns"));
+                durationEdit->setModified(true);
+                canvas->setFocus(Qt::MouseFocusReason);
+                QCoreApplication::processEvents();
+                bool unexpectedContextMenu = false;
+                QTimer::singleShot(0, &application, [&unexpectedContextMenu] {
+                    if (auto* popup = QApplication::activePopupWidget()) {
+                        unexpectedContextMenu = true;
+                        popup->close();
+                    }
+                });
+                QContextMenuEvent blurContext(
+                    QContextMenuEvent::Mouse,
+                    blurProbePoint,
+                    canvas->viewport()->mapToGlobal(blurProbePoint));
+                QCoreApplication::sendEvent(canvas->viewport(), &blurContext);
+                QCoreApplication::processEvents();
+                if (unexpectedContextMenu) {
+                    fail(QStringLiteral("End blur right-click opened a menu at remapped coordinates"));
+                    return;
+                }
+                durationEdit->setText(QStringLiteral("500 ns"));
+                sendKey(durationEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
 
                 measureAction->trigger();
                 QCoreApplication::processEvents();
@@ -633,6 +736,105 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                click(QPoint(xAtTick(470'000), busY));
+                if (!palette->isVisible()) {
+                    fail(QStringLiteral("Bus conflict draft controls were unavailable"));
+                    return;
+                }
+                busValue->setText(QStringLiteral("0xbeef"));
+                busValue->setModified(true);
+                durationEdit->setText(QStringLiteral("300 ns"));
+                durationEdit->setModified(true);
+                durationEdit->setFocus(Qt::OtherFocusReason);
+                sendKey(durationEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                sendKey(durationEdit, Qt::Key_S, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                busLane = wave::findLane(window.project().scenarios.front(), busLaneId);
+                if (QApplication::activeModalWidget()
+                    || QFileInfo::exists(userJourneySavePath)
+                    || window.project().scenarios.front().duration != 500'000
+                    || !busLane
+                    || valueAt(*busLane, 470'000) != "0xbeef"
+                    || !durationEdit->hasFocus()) {
+                    fail(QStringLiteral("Bus draft was not preserved before rejecting a conflicting End"));
+                    return;
+                }
+
+                durationEdit->setText(QStringLiteral("500 ns"));
+                durationEdit->setModified(true);
+                sendKey(durationEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                click(QPoint(xAtTick(480'000), busY));
+                if (!palette->isVisible()) {
+                    fail(QStringLiteral("Bus mouse-conflict draft controls were unavailable"));
+                    return;
+                }
+                busValue->setText(QStringLiteral("0xcafe"));
+                busValue->setModified(true);
+                durationEdit->setText(QStringLiteral("300 ns"));
+                durationEdit->setModified(true);
+                durationEdit->setFocus(Qt::OtherFocusReason);
+                canvas->setFocus(Qt::MouseFocusReason);
+                QCoreApplication::processEvents();
+                busLane = wave::findLane(window.project().scenarios.front(), busLaneId);
+                if (window.project().scenarios.front().duration != 500'000
+                    || !busLane
+                    || valueAt(*busLane, 480'000) != "0xcafe"
+                    || !durationEdit->isModified()
+                    || durationEdit->text() != QStringLiteral("300 ns")
+                    || !durationEdit->hasFocus()) {
+                    fail(QStringLiteral("Mouse blur did not preserve Bus-before-End draft ordering"));
+                    return;
+                }
+
+                durationEdit->setText(QStringLiteral("600 ns"));
+                durationEdit->setModified(true);
+                click(QPoint(xAtTick(270'000), busY));
+                QCoreApplication::processEvents();
+                if (window.project().scenarios.front().duration != 600'000
+                    || palette->isVisible()) {
+                    fail(QStringLiteral("Corrected End did not consume only the first canvas click"));
+                    return;
+                }
+                click(QPoint(xAtTick(270'000), busY));
+                if (!palette->isVisible()) {
+                    fail(QStringLiteral("Bus draft controls were unavailable before focus handoff"));
+                    return;
+                }
+                durationEdit->setText(QStringLiteral("620 ns"));
+                durationEdit->setModified(true);
+                durationEdit->setFocus(Qt::OtherFocusReason);
+                busValue->setFocus(Qt::MouseFocusReason);
+                QCoreApplication::processEvents();
+                if (window.project().scenarios.front().duration != 620'000
+                    || !busValue->hasFocus()) {
+                    fail(QStringLiteral("End-to-Bus focus handoff did not preserve the intended target"));
+                    return;
+                }
+                busValue->setText(QStringLiteral("0x55aa"));
+                busValue->setModified(true);
+                click(QPoint(80, busY));
+                QCoreApplication::processEvents();
+                busLane = wave::findLane(window.project().scenarios.front(), busLaneId);
+                if (palette->isVisible()
+                    || !busLane
+                    || valueAt(*busLane, 270'000) != "0x55aa") {
+                    fail(QStringLiteral("A stale End blur guard swallowed the Bus commit click"));
+                    return;
+                }
+                click(QPoint(xAtTick(270'000), busY));
+                if (!palette->isVisible()) {
+                    fail(QStringLiteral("Bus draft controls were unavailable before Save"));
+                    return;
+                }
+                busValue->setText(QStringLiteral("0xabcd"));
+                busValue->setModified(true);
+                durationEdit->setText(QStringLiteral("650 ns"));
+                durationEdit->setModified(true);
+                durationEdit->setFocus(Qt::OtherFocusReason);
+                QCoreApplication::processEvents();
+
                 bool saveDialogHandled = false;
                 QTimer::singleShot(
                     0,
@@ -650,22 +852,24 @@ int main(int argc, char* argv[])
                         saveDialogHandled = true;
                         QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
                     });
-                if (!QMetaObject::invokeMethod(&window, "saveProject", Qt::DirectConnection)) {
-                    fail(QStringLiteral("User journey could not invoke Save"));
-                    return;
-                }
+                sendKey(durationEdit, Qt::Key_S, Qt::ControlModifier);
                 QCoreApplication::processEvents();
                 const auto saved = wave::loadProjectFile(userJourneySavePath);
                 const auto* savedRenamedBit = saved.ok()
                     ? wave::findLane(saved.project->scenarios.front(), bitLaneId)
+                    : nullptr;
+                const auto* savedBus = saved.ok()
+                    ? wave::findLane(saved.project->scenarios.front(), busLaneId)
                     : nullptr;
                 if (!saveDialogHandled
                     || !QFileInfo::exists(userJourneySavePath)
                     || !saved.ok()
                     || !savedRenamedBit
                     || savedRenamedBit->name != "req_valid"
+                    || !savedBus
+                    || valueAt(*savedBus, 270'000) != "0xabcd"
                     || saved.project->scenarios.front().lanes.size() != 3
-                    || saved.project->scenarios.front().duration != 500'000
+                    || saved.project->scenarios.front().duration != 650'000
                     || saveState->text() != QStringLiteral("Saved")
                     || window.project().name == "Untitled") {
                     fail(QStringLiteral("Save did not produce a valid file and unambiguous Saved state"));
@@ -1148,6 +1352,203 @@ int main(int argc, char* argv[])
             }
             undoAction->trigger();
             QCoreApplication::processEvents();
+
+            sendMouse(
+                QEvent::MouseButtonPress,
+                paletteClick,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                paletteClick,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            directValue->setText(QStringLiteral("0x3c"));
+            directValue->setModified(true);
+            clickHeader(QPoint(80, laneCenter(quickBit.id)));
+            QCoreApplication::processEvents();
+            busAfterButtonClick = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            if (presetPalette->isVisible()
+                || !busAfterButtonClick
+                || busAfterButtonClick->segments.empty()
+                || busAfterButtonClick->segments.front().value != "0x3c") {
+                fail(QStringLiteral("Clicking elsewhere discarded an unsubmitted Bus draft"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+
+            sendMouse(
+                QEvent::MouseButtonPress,
+                paletteClick,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                paletteClick,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            directValue->setText(QStringLiteral("0x4d"));
+            directValue->setModified(true);
+            presetPalette->hide();
+            if (!canvas->commitPendingInlineEdits()) {
+                fail(QStringLiteral("A hidden valid Bus draft could not be committed"));
+                return;
+            }
+            busAfterButtonClick = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            if (!busAfterButtonClick
+                || busAfterButtonClick->segments.empty()
+                || busAfterButtonClick->segments.front().value != "0x4d") {
+                fail(QStringLiteral("A hidden valid Bus draft was ignored"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+
+            sendMouse(
+                QEvent::MouseButtonPress,
+                paletteClick,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                paletteClick,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            directValue->setText(QStringLiteral("0x1ff"));
+            directValue->setModified(true);
+            presetPalette->hide();
+            if (canvas->commitPendingInlineEdits()
+                || !presetPalette->isVisible()
+                || !directValue->hasFocus()
+                || !directValue->isModified()) {
+                fail(QStringLiteral("A hidden invalid Bus draft was not recoverable in place"));
+                return;
+            }
+            directValue->setText(QStringLiteral("0x5e"));
+            sendKey(directValue, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            busAfterButtonClick = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            if (presetPalette->isVisible()
+                || !busAfterButtonClick
+                || busAfterButtonClick->segments.empty()
+                || busAfterButtonClick->segments.front().value != "0x5e") {
+                fail(QStringLiteral("A recovered hidden Bus draft could not be corrected"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+
+            auto* rangeDurationEdit = canvas->findChild<QLineEdit*>(
+                QStringLiteral("TimelineDurationEdit"));
+            const auto originalDuration = window.project().scenarios.front().duration;
+            const auto extendedDuration = originalDuration + 300'000;
+            const auto staleDraftTick = originalDuration + 200'000;
+            if (!rangeDurationEdit) {
+                fail(QStringLiteral("Timeline End editor is unavailable for Bus range regression"));
+                return;
+            }
+            rangeDurationEdit->setText(QString::fromStdString(
+                wave::formatTick(extendedDuration, window.project().timeBase)));
+            rangeDurationEdit->setModified(true);
+            rangeDurationEdit->setFocus(Qt::OtherFocusReason);
+            sendKey(rangeDurationEdit, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front().duration != extendedDuration) {
+                fail(QStringLiteral("Could not extend End for Bus range regression"));
+                return;
+            }
+            const auto staleDraftX = 190 + static_cast<int>(std::llround(
+                static_cast<double>(staleDraftTick)
+                / static_cast<double>(extendedDuration)
+                * static_cast<double>(canvas->viewport()->width() - 190)))
+                - canvas->horizontalScrollBar()->value();
+            const QPoint staleDraftPoint(staleDraftX, laneCenter(quickBus.id));
+            sendMouse(
+                QEvent::MouseButtonPress,
+                staleDraftPoint,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                staleDraftPoint,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            if (!presetPalette->isVisible()) {
+                fail(QStringLiteral("Bus controls were unavailable for range regression"));
+                return;
+            }
+            directValue->setText(QStringLiteral("0x6f"));
+            directValue->setModified(true);
+            presetPalette->hide();
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front().duration != originalDuration
+                || canvas->commitPendingInlineEdits()
+                || !presetPalette->isVisible()
+                || !directValue->hasFocus()
+                || !directValue->isModified()
+                || !directValue->toolTip().contains(QStringLiteral("beyond End"))) {
+                fail(QStringLiteral("An out-of-range Bus draft was not blocked after End undo"));
+                return;
+            }
+            busAfterButtonClick = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            if (!busAfterButtonClick
+                || std::any_of(
+                    busAfterButtonClick->segments.begin(),
+                    busAfterButtonClick->segments.end(),
+                    [](const wave::Segment& segment) { return segment.value == "0x6f"; })) {
+                fail(QStringLiteral("An out-of-range Bus draft was clamped into the timeline"));
+                return;
+            }
+            rangeDurationEdit->setText(QString::fromStdString(
+                wave::formatTick(extendedDuration, window.project().timeBase)));
+            rangeDurationEdit->setModified(true);
+            rangeDurationEdit->setFocus(Qt::OtherFocusReason);
+            sendKey(rangeDurationEdit, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            busAfterButtonClick = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto recoveredAtOriginalTick = busAfterButtonClick
+                && std::any_of(
+                    busAfterButtonClick->segments.begin(),
+                    busAfterButtonClick->segments.end(),
+                    [staleDraftTick](const wave::Segment& segment) {
+                        return segment.start <= staleDraftTick
+                            && staleDraftTick < segment.end
+                            && segment.value == "0x6f";
+                    });
+            if (window.project().scenarios.front().duration != extendedDuration
+                || presetPalette->isVisible()
+                || !recoveredAtOriginalTick) {
+                fail(QStringLiteral("Extending End did not recover the Bus draft at its original position"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            canvas->fitScenario();
+            QCoreApplication::processEvents();
+            busAfterButtonClick = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            if (window.project().scenarios.front().duration != originalDuration
+                || !busAfterButtonClick
+                || std::any_of(
+                    busAfterButtonClick->segments.begin(),
+                    busAfterButtonClick->segments.end(),
+                    [](const wave::Segment& segment) { return segment.value == "0x6f"; })) {
+                fail(QStringLiteral("Recovered Bus draft and End change were not independently undoable"));
+                return;
+            }
 
             QMimeData presetMime;
             presetMime.setData(
