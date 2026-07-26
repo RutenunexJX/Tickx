@@ -469,6 +469,7 @@ void WaveCanvas::beginQuickLaneSetup(
     const QString& selectedClockId)
 {
     if (!quickLaneSetupPanel_ || laneId.isEmpty()) return;
+    hideBusPresetPalette();
     quickLaneSetupLaneId_ = laneId;
     quickLaneSetupKind_ = kind;
     quickLaneNameEdit_->setText(name);
@@ -641,6 +642,13 @@ void WaveCanvas::submitDurationEdit(const bool preserveMouseFocusTarget)
 {
     if (!durationEdit_ || durationEditSubmitting_) return;
     durationEditSubmitting_ = true;
+    if (hasQuickLaneSetup()) {
+        submitQuickLaneSetup();
+        if (hasQuickLaneSetup()) {
+            durationEditSubmitting_ = false;
+            return;
+        }
+    }
     const auto busWasOutsideTimeline = hasPendingBusValueEdit()
         && scenario_
         && (scenario_->duration <= 0
@@ -1057,6 +1065,7 @@ void WaveCanvas::copySelection()
 
 void WaveCanvas::pasteAtCursor()
 {
+    if (!commitPendingInlineEdits()) return;
     if (!scenario_ || !commandStack_) return;
     const auto* mime = QApplication::clipboard()->mimeData();
     const auto content = mime->hasFormat(kRangeMimeType)
@@ -1155,6 +1164,7 @@ void WaveCanvas::pasteAtCursor()
 
 void WaveCanvas::insertPulse()
 {
+    if (!commitPendingInlineEdits()) return;
     if (!scenario_ || !project_ || !commandStack_) return;
     auto* lane = findLane(*scenario_, selectedLaneId_);
     if (!lane || lane->kind != LaneKind::Bit) {
@@ -1359,6 +1369,19 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         spaceHeld_ = true;
         viewport()->setCursor(Qt::OpenHandCursor);
+        event->accept();
+        return;
+    }
+
+    if (event->key() == Qt::Key_Escape
+        && (laneHeaderPressed_ || laneHeaderDragging_)) {
+        laneHeaderPressed_ = false;
+        laneHeaderDragging_ = false;
+        laneDragId_.clear();
+        laneDropDestinationIndex_.reset();
+        laneDropIndicatorY_.reset();
+        viewport()->setCursor(Qt::OpenHandCursor);
+        viewport()->update();
         event->accept();
         return;
     }
@@ -2327,6 +2350,14 @@ void WaveCanvas::mouseReleaseEvent(QMouseEvent* event)
 void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (!scenario_ || !commandStack_) return;
+    const auto hadPendingInlineEdit = hasQuickLaneSetup()
+        || hasLaneRename()
+        || hasPendingValueEdit();
+    if (hadPendingInlineEdit) {
+        static_cast<void>(commitPendingInlineEdits());
+        event->accept();
+        return;
+    }
     const auto position = event->position().toPoint();
     if (event->button() == Qt::LeftButton && position.x() < HeaderWidth) {
         const auto* lane = laneAtY(position.y());
@@ -2739,6 +2770,10 @@ void WaveCanvas::hideBusPresetPalette()
 
 void WaveCanvas::submitBusValue()
 {
+    if (hasQuickLaneSetup()) {
+        submitQuickLaneSetup();
+        return;
+    }
     if (!scenario_ || busPresetLaneId_.empty() || !busPresetAnchorTick_ || !busValueEdit_) {
         return;
     }
@@ -2800,6 +2835,10 @@ void WaveCanvas::applyBusPreset(
     const std::string& presetId,
     const Tick tick)
 {
+    if (hasQuickLaneSetup()) {
+        submitQuickLaneSetup();
+        return;
+    }
     if (!scenario_ || !commandStack_) return;
     auto* lane = findLane(*scenario_, laneId);
     if (!lane || lane->kind != LaneKind::Bus) return;

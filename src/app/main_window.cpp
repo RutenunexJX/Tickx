@@ -818,7 +818,7 @@ void MainWindow::openEditMenuPreview()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    if (!canvas_->commitPendingInlineEdits()) {
+    if (!commitPendingEdits()) {
         event->ignore();
         return;
     }
@@ -833,7 +833,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 void MainWindow::openProject()
 {
-    if (!canvas_->commitPendingInlineEdits()) return;
+    if (!commitPendingEdits()) return;
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (!confirmDiscardChanges()) return;
     const auto path = QFileDialog::getOpenFileName(
@@ -846,7 +846,7 @@ void MainWindow::openProject()
 
 void MainWindow::saveProject()
 {
-    if (!canvas_->commitPendingInlineEdits()) return;
+    if (!commitPendingEdits()) return;
     if (!pendingQuickLaneId_.isEmpty()) {
         canvas_->showQuickLaneSetupError(tr("Press Enter to finish this signal before saving."));
         return;
@@ -860,7 +860,7 @@ void MainWindow::saveProject()
 
 void MainWindow::saveProjectAs()
 {
-    if (!canvas_->commitPendingInlineEdits()) return;
+    if (!commitPendingEdits()) return;
     if (!pendingQuickLaneId_.isEmpty()) {
         canvas_->showQuickLaneSetupError(tr("Press Enter to finish this signal before saving."));
         return;
@@ -878,6 +878,27 @@ void MainWindow::saveProjectAs()
 
 void MainWindow::undo()
 {
+    if (!pendingQuickLaneId_.isEmpty()
+        && commandStack_.size() > pendingQuickCommandSize_) {
+        if (commandStack_.undoLastAfter(pendingQuickCommandSize_)) {
+            invalidateCompareResult();
+            dirty_ = commandStack_.size() > pendingQuickCommandSize_
+                ? true
+                : quickLaneDirtyBefore_;
+            if (dirty_) scheduleAutosave();
+            else autosavePending_ = false;
+            canvas_->refreshModel();
+            updateCommandActions();
+            updateWindowTitle();
+            statusBar()->showMessage(
+                tr("Undid the later edit · finish the signal or press Ctrl+Z again to cancel"),
+                5'000);
+        } else {
+            canvas_->showQuickLaneSetupError(
+                tr("The later edit could not be undone; finish or cancel the signal first."));
+        }
+        return;
+    }
     if (!pendingQuickLaneId_.isEmpty()) {
         cancelQuickLaneSetup(pendingQuickLaneId_);
         return;
@@ -939,9 +960,18 @@ void MainWindow::updateCommandActions()
     updateLaneOrderActions();
 }
 
+bool MainWindow::commitPendingEdits()
+{
+    if (!canvas_ || !canvas_->commitPendingInlineEdits()) return false;
+    if (pendingQuickLaneId_.isEmpty()) return true;
+    canvas_->showQuickLaneSetupError(
+        tr("Finish or cancel the current signal before continuing."));
+    return false;
+}
+
 void MainWindow::newProject()
 {
-    if (!canvas_->commitPendingInlineEdits()) return;
+    if (!commitPendingEdits()) return;
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (!confirmDiscardChanges()) return;
 
@@ -979,7 +1009,7 @@ void MainWindow::newProject()
 }
 void MainWindow::addLane()
 {
-    if (!canvas_->commitPendingInlineEdits()) return;
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     if (!scenario) return;
     Lane lane;
@@ -1024,7 +1054,7 @@ void MainWindow::addLane()
 
 void MainWindow::addQuickLane(const LaneKind kind)
 {
-    if (!canvas_->commitPendingInlineEdits()) return;
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     if (!scenario
         || (kind != LaneKind::Clock
@@ -1262,6 +1292,7 @@ void MainWindow::cancelQuickLaneSetup(const QString& laneId)
     updateCommandActions();
     updateWindowTitle();
     if (dirty_) scheduleAutosave();
+    else autosavePending_ = false;
     statusBar()->showMessage(tr("Signal creation canceled"), 3'000);
 }
 
@@ -1333,6 +1364,7 @@ void MainWindow::changeScenarioDuration(const QString& value)
 }
 void MainWindow::addGroup()
 {
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     if (!scenario) return;
     Lane group;
@@ -1375,7 +1407,7 @@ void MainWindow::editSelectedLane()
 
 void MainWindow::renameLaneById(const QString& laneId)
 {
-    if (!canvas_->commitPendingInlineEdits()) return;
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
     if (!lane || lane->kind == LaneKind::Group) return;
@@ -1473,6 +1505,7 @@ void MainWindow::removeSelectedLane()
 
 void MainWindow::removeLaneById(const QString& laneId)
 {
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
     if (!lane) return;
@@ -1535,6 +1568,7 @@ void MainWindow::showLaneContextMenu(
 
 void MainWindow::editLaneKeyParameters(const QString& laneId)
 {
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
     if (!lane || lane->kind == LaneKind::Group) return;
@@ -1712,6 +1746,7 @@ void MainWindow::moveSelectedLaneDown()
 
 void MainWindow::moveSelectedLaneBy(const int offset)
 {
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     const auto laneId = selectedLaneIdForEditing();
     if (!scenario || laneId.isEmpty() || offset == 0) return;
@@ -1774,6 +1809,7 @@ void MainWindow::updateLaneOrderActions()
 
 void MainWindow::editLaneById(const QString& laneId)
 {
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
     if (!lane) return;
@@ -1806,6 +1842,7 @@ void MainWindow::editLaneById(const QString& laneId)
 
 void MainWindow::editSelectedClock()
 {
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     const auto* item = clockTree_ ? clockTree_->currentItem() : nullptr;
     if (!scenario || !item) return;
@@ -1906,6 +1943,7 @@ void MainWindow::editSelectedClock()
 
 void MainWindow::addEvent()
 {
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     if (!scenario) return;
     auto* lane = findLane(*scenario, canvas_->selectedLaneId().toStdString());
@@ -1965,6 +2003,7 @@ void MainWindow::addEvent()
 
 void MainWindow::removeSelectedEvent()
 {
+    if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     const auto row = eventTable_->currentRow();
     if (!scenario || row < 0 || !eventTable_->item(row, 0)) return;
@@ -2209,6 +2248,7 @@ void MainWindow::relationCellChanged(const int row, const int column)
 
 void MainWindow::removeSelectedRelation()
 {
+    if (!commitPendingEdits()) return;
     const auto row = relationTable_->currentRow();
     auto* scenario = activeScenario();
     if (!scenario || row < 0 || !relationTable_->item(row, 0)) return;
@@ -2231,7 +2271,7 @@ void MainWindow::removeSelectedRelation()
 
 void MainWindow::exportArtifacts()
 {
-    if (!canvas_->commitPendingInlineEdits()) return;
+    if (!commitPendingEdits()) return;
     const auto* scenario = activeScenario();
     if (!scenario) return;
     const auto options = requestExportOptions(

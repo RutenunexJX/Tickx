@@ -240,6 +240,17 @@ bool CommandStack::discardLast()
     return true;
 }
 
+bool CommandStack::undoLastAfter(const std::size_t baseline)
+{
+    if (cursor_ <= baseline) return false;
+    --cursor_;
+    commands_[cursor_]->undo();
+    commands_.erase(
+        commands_.begin() + static_cast<std::ptrdiff_t>(cursor_),
+        commands_.end());
+    return true;
+}
+
 bool CommandStack::undo()
 {
     if (!canUndo()) {

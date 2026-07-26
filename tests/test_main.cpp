@@ -896,6 +896,44 @@ void testCommandStackReplacementAndDuration()
         wave::findLane(scenario, provisional.id)
             && wave::findLane(scenario, provisional.id)->name == "valid",
         "quick lane redo lost completed details");
+    const auto quickLaneBaseline = stack.size();
+    auto interleaved = provisional;
+    interleaved.id = "lane-interleaved";
+    interleaved.name = "interleaved";
+    auto interleavedSecond = provisional;
+    interleavedSecond.id = "lane-interleaved-second";
+    interleavedSecond.name = "interleaved_second";
+    stack.execute(std::make_unique<wave::AddLaneCommand>(scenario, interleaved));
+    stack.execute(std::make_unique<wave::AddLaneCommand>(scenario, interleavedSecond));
+    expect(
+        wave::findLane(scenario, interleaved.id)
+            && wave::findLane(scenario, interleavedSecond.id),
+        "interleaved commands were not applied");
+    expect(
+        stack.undoLastAfter(quickLaneBaseline),
+        "pending transaction did not undo its latest command");
+    expect(
+        wave::findLane(scenario, interleaved.id)
+            && !wave::findLane(scenario, interleavedSecond.id),
+        "transaction recovery crossed more than one later command");
+    expectEqual(
+        stack.size(),
+        quickLaneBaseline + 1,
+        "first transaction recovery lost the remaining later command");
+    expect(!stack.canRedo(), "transaction recovery left the latest command redoable");
+    expect(
+        stack.undoLastAfter(quickLaneBaseline),
+        "pending transaction did not undo its remaining later command");
+    expect(
+        !wave::findLane(scenario, interleaved.id),
+        "remaining later command survived transaction recovery");
+    expectEqual(
+        stack.size(),
+        quickLaneBaseline,
+        "transaction recovery retained redo history");
+    expect(
+        !stack.undoLastAfter(quickLaneBaseline),
+        "transaction recovery crossed its pending-command baseline");
     expect(stack.discardLast(), "discarding the pending quick lane failed");
     expect(!wave::findLane(scenario, provisional.id), "discard did not undo the pending lane");
     expectEqual(stack.size(), std::size_t{0}, "discard retained a history entry");

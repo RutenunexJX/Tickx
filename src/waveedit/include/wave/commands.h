@@ -25,6 +25,7 @@ public:
     void execute(std::unique_ptr<EditCommand> command);
     void replaceLast(std::unique_ptr<EditCommand> command);
     bool discardLast();
+    bool undoLastAfter(std::size_t baseline);
     bool undo();
     bool redo();
     void clear() noexcept;

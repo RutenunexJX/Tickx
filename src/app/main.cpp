@@ -2032,6 +2032,43 @@ int main(int argc, char* argv[])
                 fail(QStringLiteral("Quick lanes are not visible for header drag"));
                 return;
             }
+            canvas->setTool(wave::WaveCanvas::Tool::Marker);
+            sendMouse(
+                QEvent::MouseButtonPress,
+                QPoint(80, busY),
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseMove,
+                QPoint(80, clockTop + 3),
+                Qt::NoButton,
+                Qt::LeftButton);
+            QCoreApplication::processEvents();
+            if (!canvas->laneDropDestinationIndex()
+                || *canvas->laneDropDestinationIndex() != expectedDrop) {
+                sendMouse(
+                    QEvent::MouseButtonRelease,
+                    QPoint(80, clockTop + 3),
+                    Qt::LeftButton,
+                    Qt::NoButton);
+                fail(QStringLiteral("Header drag did not begin before Escape cancellation"));
+                return;
+            }
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_Escape);
+            QCoreApplication::processEvents();
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                QPoint(80, clockTop + 3),
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            if (laneOrder() != orderBeforeDrag || canvas->laneDropDestinationIndex()) {
+                fail(QStringLiteral("Escape did not cancel the pending header drag"));
+                return;
+            }
+            canvas->setTool(wave::WaveCanvas::Tool::WaveEdit);
+
             sendMouse(
                 QEvent::MouseButtonPress,
                 QPoint(80, busY),
@@ -2087,12 +2124,166 @@ int main(int argc, char* argv[])
                 return;
             }
 
-            canvas->revealLocation(QString::fromStdString(quickBit.id), 0);
+            auto* transactionPanel = canvas->findChild<QWidget*>(
+                QStringLiteral("QuickLaneSetupPanel"));
+            auto* transactionName = canvas->findChild<QLineEdit*>(
+                QStringLiteral("QuickLaneNameEdit"));
+            auto* transactionError = canvas->findChild<QLabel*>(
+                QStringLiteral("QuickLaneSetupError"));
+            auto* transactionBusPalette = canvas->findChild<QWidget*>(
+                QStringLiteral("BusPresetPalette"));
+            auto* transactionBusPreset = canvas->findChild<QToolButton*>(
+                QStringLiteral("BusPresetXButton"));
+            if (!transactionPanel
+                || !transactionName
+                || !transactionError
+                || !transactionBusPalette
+                || !transactionBusPreset) {
+                fail(QStringLiteral("Quick signal transaction controls are unavailable"));
+                return;
+            }
+            const auto movedBusY = laneCenter(quickBus.id);
+            sendMouse(
+                QEvent::MouseButtonPress,
+                QPoint(360, movedBusY),
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                QPoint(360, movedBusY),
+                Qt::LeftButton,
+                Qt::NoButton);
             QCoreApplication::processEvents();
-            bitY = laneCenter(quickBit.id);
-            clickHeader(QPoint(80, bitY));
-            bool removalConfirmed = false;
-            QTimer::singleShot(0, &application, [&removalConfirmed] {
+            if (!transactionBusPalette->isVisible()) {
+                fail(QStringLiteral("Could not expose the Bus palette before quick signal setup"));
+                return;
+            }
+            transactionBusPreset->click();
+            QCoreApplication::processEvents();
+            const auto* transactionBusLane = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            if (!transactionBusLane || transactionBusLane->segments.empty()) {
+                fail(QStringLiteral("Could not create a Bus segment for transaction isolation"));
+                return;
+            }
+            const auto transactionBusSegments = transactionBusLane->segments;
+            sendMouse(
+                QEvent::MouseButtonPress,
+                QPoint(360, movedBusY),
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                QPoint(360, movedBusY),
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            if (!transactionBusPalette->isVisible()) {
+                fail(QStringLiteral("Could not reopen the Bus palette before quick signal setup"));
+                return;
+            }
+            addButtons.at(1)->click();
+            QCoreApplication::processEvents();
+            if (!transactionPanel->isVisible() || transactionBusPalette->isVisible()) {
+                fail(QStringLiteral("Quick signal setup did not replace the Bus palette"));
+                return;
+            }
+            const auto invalidTransactionLaneId =
+                window.project().scenarios.front().lanes.back().id;
+            transactionName->clear();
+            transactionName->setModified(true);
+            transactionBusPreset->click();
+            QCoreApplication::processEvents();
+            bool doubleClickEditorOpened = false;
+            QTimer::singleShot(0, &application, [&doubleClickEditorOpened] {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                auto* edit = dialog ? dialog->findChild<QLineEdit*>() : nullptr;
+                if (!dialog || !edit) {
+                    if (dialog) dialog->reject();
+                    return;
+                }
+                doubleClickEditorOpened = true;
+                edit->setText(QStringLiteral("0x1"));
+                QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+            });
+            sendMouse(
+                QEvent::MouseButtonDblClick,
+                QPoint(360, movedBusY),
+                Qt::LeftButton,
+                Qt::LeftButton);
+            QCoreApplication::processEvents();
+            const auto* guardedBusLane = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto busSegmentsUnchanged = guardedBusLane
+                && guardedBusLane->segments.size() == transactionBusSegments.size()
+                && std::equal(
+                    guardedBusLane->segments.begin(),
+                    guardedBusLane->segments.end(),
+                    transactionBusSegments.begin(),
+                    [](const wave::Segment& current, const wave::Segment& expected) {
+                        return current.id == expected.id
+                            && current.start == expected.start
+                            && current.end == expected.end
+                            && current.value == expected.value;
+                    });
+            if (doubleClickEditorOpened
+                || !transactionPanel->isVisible()
+                || !busSegmentsUnchanged) {
+                fail(QStringLiteral("Bus controls or double-click bypassed quick signal isolation"));
+                return;
+            }
+            bool unexpectedRemovalDialog = false;
+            QTimer::singleShot(0, &application, [&unexpectedRemovalDialog] {
+                auto* confirmation = qobject_cast<QMessageBox*>(
+                    QApplication::activeModalWidget());
+                if (!confirmation) return;
+                unexpectedRemovalDialog = true;
+                confirmation->reject();
+            });
+            if (!QMetaObject::invokeMethod(
+                    canvas,
+                    "removeLaneRequested",
+                    Qt::DirectConnection,
+                    Q_ARG(QString, QString::fromStdString(quickBit.id)))) {
+                fail(QStringLiteral("Could not invoke quick-transaction removal guard"));
+                return;
+            }
+            QCoreApplication::processEvents();
+            if (unexpectedRemovalDialog
+                || !transactionPanel->isVisible()
+                || transactionError->text().isEmpty()
+                || !wave::findLane(window.project().scenarios.front(), quickBit.id)
+                || !wave::findLane(
+                    window.project().scenarios.front(), invalidTransactionLaneId)) {
+                fail(QStringLiteral("Invalid quick signal guard state: dialog=%1 panel=%2 error=%3 original=%4 pending=%5")
+                         .arg(unexpectedRemovalDialog)
+                         .arg(transactionPanel->isVisible())
+                         .arg(!transactionError->text().isEmpty())
+                         .arg(wave::findLane(window.project().scenarios.front(), quickBit.id) != nullptr)
+                         .arg(wave::findLane(window.project().scenarios.front(), invalidTransactionLaneId) != nullptr));
+                return;
+            }
+            sendKey(transactionName, Qt::Key_Escape);
+            QCoreApplication::processEvents();
+            if (transactionPanel->isVisible()
+                || wave::findLane(
+                    window.project().scenarios.front(), invalidTransactionLaneId)) {
+                fail(QStringLiteral("Escape did not recover the blocked quick signal transaction"));
+                return;
+            }
+
+            addButtons.at(1)->click();
+            QCoreApplication::processEvents();
+            if (!transactionPanel->isVisible()) {
+                fail(QStringLiteral("Could not begin valid quick signal transaction"));
+                return;
+            }
+            const auto committedTransactionLaneId =
+                window.project().scenarios.front().lanes.back().id;
+            transactionName->setText(QStringLiteral("transaction_bit"));
+            transactionName->setModified(true);
+            bool deleteConfirmed = false;
+            QTimer::singleShot(0, &application, [&deleteConfirmed] {
                 auto* confirmation = qobject_cast<QMessageBox*>(
                     QApplication::activeModalWidget());
                 auto* yes = confirmation ? confirmation->button(QMessageBox::Yes) : nullptr;
@@ -2100,12 +2291,64 @@ int main(int argc, char* argv[])
                     if (confirmation) confirmation->reject();
                     return;
                 }
-                removalConfirmed = true;
+                deleteConfirmed = true;
+                yes->click();
+            });
+            if (!QMetaObject::invokeMethod(
+                    canvas,
+                    "removeLaneRequested",
+                    Qt::DirectConnection,
+                    Q_ARG(QString, QString::fromStdString(quickBit.id)))) {
+                fail(QStringLiteral("Could not invoke committed quick-transaction removal"));
+                return;
+            }
+            QCoreApplication::processEvents();
+            const auto* committedTransactionLane = wave::findLane(
+                window.project().scenarios.front(), committedTransactionLaneId);
+            if (!deleteConfirmed
+                || transactionPanel->isVisible()
+                || wave::findLane(window.project().scenarios.front(), quickBit.id)
+                || !committedTransactionLane
+                || committedTransactionLane->name != "transaction_bit") {
+                fail(QStringLiteral("Valid quick signal was not committed before lane removal"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (!wave::findLane(window.project().scenarios.front(), quickBit.id)
+                || !wave::findLane(
+                    window.project().scenarios.front(), committedTransactionLaneId)) {
+                fail(QStringLiteral("Undo did not restore the removal after quick signal commit"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (wave::findLane(
+                    window.project().scenarios.front(), committedTransactionLaneId)
+                || laneOrder() != orderAfterDrag) {
+                fail(QStringLiteral("Second Undo did not remove the committed quick signal"));
+                return;
+            }
+
+            canvas->revealLocation(QString::fromStdString(quickBit.id), 0);
+            QCoreApplication::processEvents();
+            bitY = laneCenter(quickBit.id);
+            clickHeader(QPoint(80, bitY));
+            bool selectedDeleteConfirmed = false;
+            QTimer::singleShot(0, &application, [&selectedDeleteConfirmed] {
+                auto* confirmation = qobject_cast<QMessageBox*>(
+                    QApplication::activeModalWidget());
+                auto* yes = confirmation ? confirmation->button(QMessageBox::Yes) : nullptr;
+                if (!confirmation || !yes) {
+                    if (confirmation) confirmation->reject();
+                    return;
+                }
+                selectedDeleteConfirmed = true;
                 yes->click();
             });
             sendKey(canvas, Qt::Key_Delete);
             QCoreApplication::processEvents();
-            if (!removalConfirmed
+            if (!selectedDeleteConfirmed
                 || wave::findLane(window.project().scenarios.front(), quickBit.id)) {
                 fail(QStringLiteral("Selected header Delete did not remove the signal"));
                 return;

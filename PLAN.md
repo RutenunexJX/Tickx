@@ -895,6 +895,74 @@ Visual QA: direct toolbar, three lanes, transparent grid, 650 ns End, Bus values
 Desktop interaction: none
 ```
 
+## 持续迭代 17：快速新增事务隔离与拖动取消
+
+状态：完成
+
+已交付：
+
+- 快速新增在输入条关闭前保持为单一事务。删除、重排、参数编辑、分组、事件/关系、范围粘贴、
+  End 和已接入的画布动作会先尝试完成新增；有效值原子补齐原 `AddLaneCommand` 后再继续，无效值
+  原处保留并阻断，不再允许后续命令插入待完成的新增命令之后。
+- 开始快速新增会关闭并清空 Bus 便携面板；Bus 直接值、预设、Insert Pulse 与 Segment 双击入口均有
+  防御性门控。双击事件会统一处理 Quick/Rename/End/Bus 草稿，避免 Qt 双击序列绕过首次按下门禁。
+- 命令栈新增基线恢复原语。若历史状态中已存在交错命令，Ctrl+Z 每次只撤销并丢弃基线之后的
+  最新一项；全部后续项清除后，再按一次取消待新增信号。恢复过程同步还原 dirty/autosave 状态，
+  不会继续撤销事务之前的命令。
+- 信号标题拖动期间按 Esc 会立即清除拖动状态和插入位置；该行为不依赖 Wave Edit/Measure 模式，
+  随后释放鼠标不会提交 `MoveLaneCommand`，正常拖动与 Undo/Redo 保持原行为。
+- `wave-canvas-add-lane-smoke` 覆盖 Bus 面板替换、隐藏控件隔离、无效新增下 Segment 双击与删除阻断、
+  Esc 恢复、有效新增先提交后删除、两步 Undo 以及 Marker 模式标题拖动取消；核心测试覆盖两个
+  交错命令逐次恢复与基线边界。全部 GUI 路径使用 `QT_QPA_PLATFORM=offscreen`，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build --parallel 4
+Result: success
+
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 25/25 passed
+Million-transition metric: 25 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+21/21 tests passed
+Total Test time: 7.37 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.66 sec
+
+git diff --check
+Result: clean
+Desktop interaction: none
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R ^wave-canvas-add-lane-smoke$ --output-on-failure
+1/1 passed
+Total Test time: 0.42 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R ^wave-user-journey-smoke$ --output-on-failure
+1/1 passed
+Total Test time: 0.41 sec
+
+Saved project: build/qtcreator-debug/user-journey.wave.json
+Saved model: req_valid; durationTick=650000;
+             data 60000..80000=0x1234, 260000..280000=0xabcd,
+             460000..480000=0xbeef, 480000..500000=0xcafe
+Screenshot: build/qtcreator-debug/user-journey-smoke.png (1440×900)
+Visual QA: direct toolbar, three lanes, transparent grid, 650 ns End, Bus values,
+           edit cursor and Saved state remain legible; no visual regression observed
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

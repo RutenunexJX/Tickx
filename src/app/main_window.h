@@ -104,6 +104,7 @@ private:
     void populateTraceMappingTable();
     void populateCompareTable();
     [[nodiscard]] QString selectedLaneIdForEditing() const;
+    [[nodiscard]] bool commitPendingEdits();
     void addQuickLane(LaneKind kind);
     void completeQuickLaneSetup(
         const QString& laneId,
