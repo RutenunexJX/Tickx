@@ -83,6 +83,33 @@ private:
     bool initialized_{false};
 };
 
+struct LaneRangeAssignment {
+    std::string laneId;
+    std::string value;
+    JsonExtensions extensions;
+};
+
+class SetLaneRangesCommand final : public EditCommand {
+public:
+    SetLaneRangesCommand(
+        Scenario& scenario,
+        Tick start,
+        Tick end,
+        std::vector<LaneRangeAssignment> assignments);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    Tick start_;
+    Tick end_;
+    std::vector<LaneRangeAssignment> assignments_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
 class ClearLaneRangeCommand final : public EditCommand {
 public:
     ClearLaneRangeCommand(

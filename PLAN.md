@@ -963,6 +963,65 @@ Visual QA: direct toolbar, three lanes, transparent grid, 650 ns End, Bus values
 Desktop interaction: none
 ```
 
+## 持续迭代 18：持久范围选择与同类型批量赋值
+
+状态：完成
+
+已交付：
+
+- `Shift` + 拖动在一个或多个 lane 上建立显式、持久的时间范围；选择覆盖层保持低透明度，
+  不遮挡刻度和波形。缩放、Fit 和模型刷新后重新计算位置，删除、隐藏或失效 lane 时自动清除。
+- 同类型 Bit/Bus 选择在附近显示轻量面板。Bit 支持 `0`、`1`、`X`、`Z` 按钮与键盘整段赋值；
+  Bus 支持直接值及 `0`、`X`、`Z`、`Don't care`，多条不同位宽 Bus 按各自宽度生成预设值。
+  混合类型或不支持的选择仅保留 Copy，不提供赋值入口。
+- 新增 `SetLaneRangesCommand`，先验证所有 lane、范围和值，再以单个场景快照提交；任一目标不兼容
+  时零写入且不产生历史项。成功批量赋值、Undo 和 Redo 后均保留选择。
+- Esc 在画布或 Bus 输入框聚焦时均清除范围；第一次点击范围外只清除选择，不触发 Bit 翻转或
+  Segment 编辑。隐藏的 Bus 草稿不会泄漏到后续选择，错误提示在纠正成功后复位。
+- 核心测试覆盖多 Bit、不同位宽 Bus、完整区间与相邻值、原子失败和单步 Undo/Redo；
+  `wave-wave-edit-smoke` 覆盖实际面板、键盘、缩放/Fit、模型刷新、混合选择与清除行为。
+  全部 GUI 路径使用 `QT_QPA_PLATFORM=offscreen`，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 23 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.53 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.15 sec
+
+git diff --check
+Result: clean
+Desktop interaction: none
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.65 sec
+
+Screenshots:
+  build/qtcreator-debug/wave-edit-smoke-range-selection.png
+  build/qtcreator-debug/user-journey-smoke.png
+Visual QA: 持久选择范围、同类型批量操作面板、波形与网格均清晰可辨；
+           用户旅程的创建、编辑、保存状态无视觉回归
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

@@ -2973,9 +2973,156 @@ int main(int argc, char* argv[])
                 const auto multiLaneIds = canvas->selectedLaneIds();
                 if (!multiLaneRange
                     || multiLaneRange->second <= multiLaneRange->first
+                    || multiLaneIds.size() != 2
                     || !multiLaneIds.contains(QStringLiteral("lane-request"))
                     || !multiLaneIds.contains(QStringLiteral("lane-ack"))) {
                     qCritical().noquote() << "Shift-drag did not select a multi-lane time range";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                auto* rangePalette = window.findChild<QFrame*>(
+                    QStringLiteral("RangeEditPalette"));
+                auto* rangeContext = window.findChild<QLabel*>(
+                    QStringLiteral("RangeEditContextLabel"));
+                auto* rangeOneButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditOneButton"));
+                auto* rangeXButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditXButton"));
+                if (!canvas->hasExplicitRangeSelection()
+                    || !rangePalette
+                    || !rangePalette->isVisible()
+                    || !rangeContext
+                    || !rangeContext->text().contains(QStringLiteral("Bit"))
+                    || !rangeOneButton
+                    || !rangeOneButton->isEnabled()
+                    || !rangeXButton
+                    || !rangeXButton->isEnabled()) {
+                    qCritical().noquote() << "Released Bit range is not persistently actionable";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto rangePaletteXBeforeZoom = rangePalette->x();
+                canvas->zoomOut();
+                QCoreApplication::processEvents();
+                if (!rangePalette->isVisible()
+                    || rangePalette->x() == rangePaletteXBeforeZoom) {
+                    qCritical().noquote() << "Range palette did not follow a zero-scroll zoom";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                canvas->fitScenario();
+                QCoreApplication::processEvents();
+                if (!rangePalette->isVisible()
+                    || std::abs(rangePalette->x() - rangePaletteXBeforeZoom) > 1) {
+                    qCritical().noquote() << "Range palette did not return with Fit scenario";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto rangeScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix = rangeScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        rangeScreenshotPath.insert(suffix, QStringLiteral("-range-selection"));
+                    } else {
+                        rangeScreenshotPath.append(QStringLiteral("-range-selection.png"));
+                    }
+                    if (!window.grab().save(rangeScreenshotPath)) {
+                        qCritical().noquote() << "Cannot save persistent range screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+
+                const auto beforeBitRangeAssignment = scenario;
+                const auto* beforeRequestLane = wave::findLane(
+                    beforeBitRangeAssignment, "lane-request");
+                const auto* beforeAcknowledgeLane = wave::findLane(
+                    beforeBitRangeAssignment, "lane-ack");
+                sendKey(Qt::Key_1);
+                requestLane = wave::findLane(scenario, "lane-request");
+                auto* acknowledgeLane = wave::findLane(scenario, "lane-ack");
+                if (!beforeRequestLane
+                    || !beforeAcknowledgeLane
+                    || !requestLane
+                    || !acknowledgeLane
+                    || valueAt(*requestLane, multiLaneRange->first + 1) != "1"
+                    || valueAt(*requestLane, multiLaneRange->second - 1) != "1"
+                    || valueAt(*acknowledgeLane, multiLaneRange->first + 1) != "1"
+                    || valueAt(*acknowledgeLane, multiLaneRange->second - 1) != "1"
+                    || valueAt(*requestLane, multiLaneRange->first - 1)
+                        != valueAt(*beforeRequestLane, multiLaneRange->first - 1)
+                    || valueAt(*requestLane, multiLaneRange->second)
+                        != valueAt(*beforeRequestLane, multiLaneRange->second)
+                    || valueAt(*acknowledgeLane, multiLaneRange->first - 1)
+                        != valueAt(*beforeAcknowledgeLane, multiLaneRange->first - 1)
+                    || valueAt(*acknowledgeLane, multiLaneRange->second)
+                        != valueAt(*beforeAcknowledgeLane, multiLaneRange->second)
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != multiLaneRange
+                    || canvas->selectedLaneIds() != multiLaneIds) {
+                    qCritical().noquote() << "1 key did not assign the complete Bit selection";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto afterBitRangeAssignment = scenario;
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeBitRangeAssignment) {
+                    qCritical().noquote() << "Bit range assignment was not one atomic undo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || scenario != afterBitRangeAssignment) {
+                    qCritical().noquote() << "Bit range assignment atomic redo failed";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeBitRangeAssignment
+                    || !canvas->hasExplicitRangeSelection()) {
+                    qCritical().noquote() << "Bit range selection was not retained through undo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                rangeXButton->click();
+                QCoreApplication::processEvents();
+                requestLane = wave::findLane(scenario, "lane-request");
+                acknowledgeLane = wave::findLane(scenario, "lane-ack");
+                if (!requestLane
+                    || !acknowledgeLane
+                    || valueAt(*requestLane, multiLaneRange->first + 1) != "X"
+                    || valueAt(*requestLane, multiLaneRange->second - 1) != "X"
+                    || valueAt(*acknowledgeLane, multiLaneRange->first + 1) != "X"
+                    || valueAt(*acknowledgeLane, multiLaneRange->second - 1) != "X") {
+                    qCritical().noquote() << "Bit range palette did not assign both complete ranges";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeBitRangeAssignment) {
+                    qCritical().noquote() << "Bit range palette assignment was not atomic";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto beforeRangeDismissClick = scenario;
+                click(QPoint(xAtTick(65'000), requestY));
+                if (scenario != beforeRangeDismissClick
+                    || canvas->hasExplicitRangeSelection()
+                    || rangePalette->isVisible()
+                    || canvas->selectedTimeRange()) {
+                    qCritical().noquote()
+                        << "First click outside the range did not clear it without editing";
                     window.hide();
                     application.exit(4);
                     return;
@@ -2991,6 +3138,258 @@ int main(int argc, char* argv[])
                     || valueAt(*requestLane, 35'000) != "1"
                     || valueAt(*requestLane, 45'000) != "1") {
                     qCritical().noquote() << "Drag selection did not toggle all covered bit beats";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                dataLane = wave::findLane(scenario, "lane-data");
+                if (!dataLane) {
+                    qCritical().noquote() << "Primary Bus lane disappeared before range editing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                auto smallBus = *dataLane;
+                smallBus.id = "lane-data-small";
+                smallBus.name = "data_small";
+                smallBus.width = 4;
+                smallBus.segments.clear();
+                auto& mutableScenarioFixture = const_cast<wave::Scenario&>(scenario);
+                const auto dataIterator = std::find_if(
+                    mutableScenarioFixture.lanes.begin(),
+                    mutableScenarioFixture.lanes.end(),
+                    [](const wave::Lane& lane) { return lane.id == "lane-data"; });
+                mutableScenarioFixture.lanes.insert(
+                    std::next(dataIterator),
+                    std::move(smallBus));
+                canvas->refreshModel();
+                QCoreApplication::processEvents();
+                const auto smallBusY = laneCenterY("lane-data-small");
+                if (smallBusY < 0) {
+                    qCritical().noquote() << "Secondary Bus lane is not visible";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                dragModified(
+                    QPoint(xAtTick(20'000), dataY),
+                    QPoint(xAtTick(50'000), smallBusY),
+                    Qt::ShiftModifier);
+                const auto busRange = canvas->selectedTimeRange();
+                auto* rangeValueEdit = window.findChild<QLineEdit*>(
+                    QStringLiteral("RangeEditValueEdit"));
+                auto* rangeDontCareButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditDontCareButton"));
+                if (!busRange
+                    || busRange->second <= busRange->first
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedLaneIds()
+                        != QStringList{
+                            QStringLiteral("lane-data"),
+                            QStringLiteral("lane-data-small")}
+                    || !rangePalette->isVisible()
+                    || !rangeContext->text().contains(QStringLiteral("Bus"))
+                    || !rangeValueEdit
+                    || !rangeValueEdit->isVisible()
+                    || !rangeDontCareButton
+                    || !rangeDontCareButton->isVisible()
+                    || !rangeDontCareButton->isEnabled()) {
+                    qCritical().noquote() << "Bus range palette is not actionable";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                const auto beforeBusRangeAssignment = scenario;
+                const auto* beforeDataLane = wave::findLane(
+                    beforeBusRangeAssignment, "lane-data");
+                const auto* beforeSmallDataLane = wave::findLane(
+                    beforeBusRangeAssignment, "lane-data-small");
+                rangeDontCareButton->click();
+                QCoreApplication::processEvents();
+                dataLane = wave::findLane(scenario, "lane-data");
+                auto* smallDataLane = wave::findLane(scenario, "lane-data-small");
+                if (!beforeDataLane
+                    || !beforeSmallDataLane
+                    || !dataLane
+                    || !smallDataLane
+                    || valueAt(*dataLane, busRange->first + 1) != "0bxxxxxxxx"
+                    || valueAt(*dataLane, busRange->second - 1) != "0bxxxxxxxx"
+                    || valueAt(*smallDataLane, busRange->first + 1) != "0bxxxx"
+                    || valueAt(*smallDataLane, busRange->second - 1) != "0bxxxx"
+                    || valueAt(*dataLane, busRange->first - 1)
+                        != valueAt(*beforeDataLane, busRange->first - 1)
+                    || valueAt(*dataLane, busRange->second)
+                        != valueAt(*beforeDataLane, busRange->second)
+                    || valueAt(*smallDataLane, busRange->first - 1)
+                        != valueAt(*beforeSmallDataLane, busRange->first - 1)
+                    || valueAt(*smallDataLane, busRange->second)
+                        != valueAt(*beforeSmallDataLane, busRange->second)
+                    || !canvas->hasExplicitRangeSelection()) {
+                    qCritical().noquote() << "Don't care did not fill both complete Bus ranges";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeBusRangeAssignment) {
+                    qCritical().noquote() << "Bus preset range was not one atomic undo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                rangeValueEdit->setText(QStringLiteral("0xa5"));
+                rangeValueEdit->setModified(true);
+                QKeyEvent invalidBusEnter(
+                    QEvent::KeyPress,
+                    Qt::Key_Return,
+                    Qt::NoModifier);
+                QCoreApplication::sendEvent(rangeValueEdit, &invalidBusEnter);
+                QCoreApplication::processEvents();
+                if (scenario != beforeBusRangeAssignment
+                    || !rangeValueEdit->isModified()
+                    || !canvas->hasExplicitRangeSelection()) {
+                    qCritical().noquote() << "Invalid Bus range value caused a partial edit";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                auto* mutableSmallDataLane = wave::findLane(
+                    mutableScenarioFixture,
+                    "lane-data-small");
+                if (!mutableSmallDataLane) {
+                    qCritical().noquote() << "Secondary Bus lane disappeared during refresh test";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                mutableSmallDataLane->kind = wave::LaneKind::Bit;
+                canvas->refreshModel();
+                QCoreApplication::processEvents();
+                if (rangeValueEdit->isVisible()
+                    || rangeValueEdit->isModified()
+                    || !canvas->hasExplicitRangeSelection()) {
+                    qCritical().noquote()
+                        << "Bus draft survived a refreshed mixed-type selection invisibly";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                mutableSmallDataLane = wave::findLane(
+                    mutableScenarioFixture,
+                    "lane-data-small");
+                mutableSmallDataLane->kind = wave::LaneKind::Bus;
+                canvas->refreshModel();
+                QCoreApplication::processEvents();
+                if (!rangeValueEdit->isVisible()
+                    || rangeValueEdit->isModified()
+                    || !canvas->hasExplicitRangeSelection()) {
+                    qCritical().noquote() << "Bus range did not recover cleanly after model refresh";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                rangeValueEdit->setText(QStringLiteral("0xa"));
+                rangeValueEdit->setModified(true);
+                QKeyEvent validBusEnter(
+                    QEvent::KeyPress,
+                    Qt::Key_Return,
+                    Qt::NoModifier);
+                QCoreApplication::sendEvent(rangeValueEdit, &validBusEnter);
+                QCoreApplication::processEvents();
+                dataLane = wave::findLane(scenario, "lane-data");
+                smallDataLane = wave::findLane(scenario, "lane-data-small");
+                if (!dataLane
+                    || !smallDataLane
+                    || valueAt(*dataLane, busRange->first + 1) != "0xa"
+                    || valueAt(*dataLane, busRange->second - 1) != "0xa"
+                    || valueAt(*smallDataLane, busRange->first + 1) != "0xa"
+                    || valueAt(*smallDataLane, busRange->second - 1) != "0xa"
+                    || valueAt(*dataLane, busRange->first - 1)
+                        != valueAt(*beforeDataLane, busRange->first - 1)
+                    || valueAt(*dataLane, busRange->second)
+                        != valueAt(*beforeDataLane, busRange->second)
+                    || valueAt(*smallDataLane, busRange->first - 1)
+                        != valueAt(*beforeSmallDataLane, busRange->first - 1)
+                    || valueAt(*smallDataLane, busRange->second)
+                        != valueAt(*beforeSmallDataLane, busRange->second)
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != busRange) {
+                    qCritical().noquote() << "Custom value did not fill the complete Bus range";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto afterBusRangeAssignment = scenario;
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeBusRangeAssignment) {
+                    qCritical().noquote() << "Custom Bus range was not one atomic undo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || scenario != afterBusRangeAssignment) {
+                    qCritical().noquote() << "Custom Bus range atomic redo failed";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeBusRangeAssignment) {
+                    qCritical().noquote() << "Custom Bus range final undo failed";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                rangeValueEdit->setFocus(Qt::OtherFocusReason);
+                QKeyEvent focusedRangeEscape(
+                    QEvent::KeyPress,
+                    Qt::Key_Escape,
+                    Qt::NoModifier);
+                QCoreApplication::sendEvent(rangeValueEdit, &focusedRangeEscape);
+                QCoreApplication::processEvents();
+                if (canvas->hasExplicitRangeSelection()
+                    || rangePalette->isVisible()
+                    || canvas->selectedTimeRange()) {
+                    qCritical().noquote()
+                        << "Escape in the Bus range value field did not clear the selection";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                dragModified(
+                    QPoint(xAtTick(20'000), requestY),
+                    QPoint(xAtTick(40'000), dataY),
+                    Qt::ShiftModifier);
+                const auto beforeMixedAssignment = scenario;
+                if (!canvas->hasExplicitRangeSelection()
+                    || !rangePalette->isVisible()
+                    || !rangeContext->text().contains(QStringLiteral("Copy only"))
+                    || rangeOneButton->isEnabled()) {
+                    qCritical().noquote() << "Mixed range did not enter safe copy-only state";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_1);
+                if (scenario != beforeMixedAssignment
+                    || !canvas->hasExplicitRangeSelection()) {
+                    qCritical().noquote() << "Mixed range assignment modified waveform data";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_Escape);
+                if (canvas->hasExplicitRangeSelection()
+                    || rangePalette->isVisible()
+                    || canvas->selectedTimeRange()) {
+                    qCritical().noquote() << "Escape did not clear the mixed range";
                     window.hide();
                     application.exit(4);
                     return;
@@ -3013,6 +3412,7 @@ int main(int argc, char* argv[])
                     return;
                 }
                 const auto transitionId = transition->id;
+                requestLane = wave::findLane(scenario, "lane-request");
                 const auto linkedSegment = requestLane
                     ? std::find_if(
                           requestLane->segments.begin(),

@@ -868,6 +868,143 @@ void testUndoRedo()
         "preset semantics leaked into adjacent bus values");
 }
 
+void testMultiLaneRangeAssignmentCommand()
+{
+    auto project = wave::makeDemonstrationProject();
+    auto& scenario = project.scenarios.front();
+    const auto before = scenario;
+
+    wave::CommandStack stack;
+    stack.execute(std::make_unique<wave::SetLaneRangesCommand>(
+        scenario,
+        20'000,
+        40'000,
+        std::vector<wave::LaneRangeAssignment>{
+            {"lane-request", "1", {}},
+            {"lane-ack", "1", {}},
+        }));
+    expectEqual(
+        stack.size(),
+        std::size_t{1},
+        "multi-lane range assignment must create one history entry");
+    const auto valueAt = [](const wave::Lane& lane, const wave::Tick tick) {
+        const auto iterator = std::find_if(
+            lane.segments.begin(),
+            lane.segments.end(),
+            [tick](const wave::Segment& segment) {
+                return segment.start <= tick && tick < segment.end;
+            });
+        return iterator == lane.segments.end() ? std::string{} : iterator->value;
+    };
+    const auto* request = wave::findLane(scenario, "lane-request");
+    const auto* acknowledge = wave::findLane(scenario, "lane-ack");
+    expect(request != nullptr && acknowledge != nullptr, "batch target lanes are missing");
+    expectEqual(valueAt(*request, 25'000), std::string{"1"}, "request range was not assigned");
+    expectEqual(valueAt(*acknowledge, 35'000), std::string{"1"}, "ack range was not assigned");
+    const auto after = scenario;
+    expect(stack.undo(), "multi-lane range assignment undo failed");
+    expectEqual(scenario, before, "one undo did not restore every assigned lane");
+    expect(stack.redo(), "multi-lane range assignment redo failed");
+    expectEqual(scenario, after, "one redo did not restore every assigned lane");
+
+    auto busScenario = before;
+    auto* wideBus = wave::findLane(busScenario, "lane-data");
+    expect(wideBus != nullptr, "wide Bus target is missing");
+    auto narrowBus = *wideBus;
+    narrowBus.id = "lane-data-small";
+    narrowBus.name = "data_small";
+    narrowBus.width = 4;
+    narrowBus.segments.clear();
+    busScenario.lanes.push_back(std::move(narrowBus));
+    const auto busBefore = busScenario;
+    const wave::JsonExtensions dontCare{{
+        "waveWorkbench.busPreset",
+        "\"dont-care\"",
+    }};
+    wave::CommandStack busStack;
+    busStack.execute(std::make_unique<wave::SetLaneRangesCommand>(
+        busScenario,
+        20'000,
+        40'000,
+        std::vector<wave::LaneRangeAssignment>{
+            {"lane-data", "0bxxxxxxxx", dontCare},
+            {"lane-data-small", "0bxxxx", dontCare},
+        }));
+    const auto* editedWide = wave::findLane(busScenario, "lane-data");
+    const auto* editedNarrow = wave::findLane(busScenario, "lane-data-small");
+    expect(editedWide != nullptr && editedNarrow != nullptr, "Bus batch targets disappeared");
+    expectEqual(valueAt(*editedWide, 25'000), std::string{"0bxxxxxxxx"},
+                "wide Bus preset did not use its own width");
+    expectEqual(valueAt(*editedNarrow, 25'000), std::string{"0bxxxx"},
+                "narrow Bus preset did not use its own width");
+    const auto widePreset = std::find_if(
+        editedWide->segments.begin(),
+        editedWide->segments.end(),
+        [](const wave::Segment& segment) {
+            return segment.start <= 25'000 && 25'000 < segment.end;
+        });
+    const auto narrowPreset = std::find_if(
+        editedNarrow->segments.begin(),
+        editedNarrow->segments.end(),
+        [](const wave::Segment& segment) {
+            return segment.start <= 25'000 && 25'000 < segment.end;
+        });
+    expect(widePreset != editedWide->segments.end()
+               && narrowPreset != editedNarrow->segments.end(),
+           "Bus preset segments are missing");
+    expectEqual(widePreset->extensions, dontCare,
+                "wide Bus preset metadata was not preserved");
+    expectEqual(narrowPreset->extensions, dontCare,
+                "narrow Bus preset metadata was not preserved");
+    expectEqual(busStack.size(), std::size_t{1},
+                "different-width Bus assignment was not atomic");
+    expect(busStack.undo(), "different-width Bus assignment undo failed");
+    expectEqual(busScenario, busBefore,
+                "different-width Bus assignment undo did not restore all lanes");
+
+    wave::CommandStack invalidBusStack;
+    bool invalidBusRejected = false;
+    try {
+        invalidBusStack.execute(std::make_unique<wave::SetLaneRangesCommand>(
+            busScenario,
+            50'000,
+            60'000,
+            std::vector<wave::LaneRangeAssignment>{
+                {"lane-data", "0xa5", {}},
+                {"lane-data-small", "0xa5", {}},
+            }));
+    } catch (const std::invalid_argument&) {
+        invalidBusRejected = true;
+    }
+    expect(invalidBusRejected, "value incompatible with one Bus width was accepted");
+    expectEqual(busScenario, busBefore,
+                "incompatible multi-Bus value caused a partial edit");
+    expectEqual(invalidBusStack.size(), std::size_t{0},
+                "rejected multi-Bus value polluted command history");
+
+    const auto invalidBefore = scenario;
+    wave::CommandStack invalidStack;
+    bool rejected = false;
+    try {
+        invalidStack.execute(std::make_unique<wave::SetLaneRangesCommand>(
+            scenario,
+            50'000,
+            60'000,
+            std::vector<wave::LaneRangeAssignment>{
+                {"lane-request", "0", {}},
+                {"lane-missing", "1", {}},
+            }));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    expect(rejected, "missing batch target was accepted");
+    expectEqual(scenario, invalidBefore, "failed batch assignment partially modified the scenario");
+    expectEqual(
+        invalidStack.size(),
+        std::size_t{0},
+        "failed batch assignment polluted command history");
+}
+
 void testCommandStackReplacementAndDuration()
 {
     wave::Scenario scenario;
@@ -2239,6 +2376,7 @@ int main(int argc, char* argv[])
         {"lane display reordering", testLaneReordering},
         {"lane values and segment merge/split", testLaneValuesAndSegments},
         {"undo and redo", testUndoRedo},
+        {"multi-lane range assignment command", testMultiLaneRangeAssignmentCommand},
         {"command replacement, cancel, and duration", testCommandStackReplacementAndDuration},
         {"direct segment editing commands", testDirectSegmentEditingCommands},
         {"multi-lane copy/paste command", testMultiLanePasteCommand},

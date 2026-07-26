@@ -120,8 +120,12 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   完整 Segment 或清除 Segment。提交后状态栏显示信号、时间范围、结果和 `Ctrl+Z` 提示。
 - Bit lane 悬浮时高亮当前拍并显示将变为 `0` 或 `1`；单击只翻转这一拍，横向拖动逐拍翻转
   覆盖范围。选中 Bit 后可直接按 `0`、`1`、`X`、`Z` 写入当前拍，也可从右键菜单选择四态值。
-- `Shift` + 拖动在一个或多个 lane 上建立时间范围；Edit 菜单的 Copy/Paste range 按稳定 lane ID
-  和相对整数 tick 复制，粘贴作为一个可撤销命令。左右方向键移动直接编辑时间光标。
+- `Shift` + 拖动在一个或多个 lane 上建立持久时间范围；同类型 Bit/Bus 选择会在附近显示轻量赋值
+  面板。Bit 可用面板或 `0`、`1`、`X`、`Z` 键一次写入完整范围；Bus 可直接输入值或选择
+  `0`、`X`、`Z`、`Don't care`，每条 lane 按自身位宽生成值。混合类型只保留复制入口，
+  不允许产生部分写入。一次批量赋值对应一个 Undo/Redo，Esc 清除选择，第一次点击范围外只
+  清除选择而不修改波形。Edit 菜单的 Copy/Paste range 按稳定 lane ID 和相对整数 tick 复制，
+  粘贴作为一个可撤销命令。左右方向键移动直接编辑时间光标。
 - Bit Event 菱形无需切换模式即可直接拖动。预览期间模型不变，虚线只覆盖原/新边沿中较早位置
   到后继 Segment 结束的局部范围；释放后以一个命令同步更新 Segment 与 Event。
 - 单击 Bus 波形会在附近显示上下文、直接值输入框以及 `0`、`X`、`Z`、`Don't care`。预设可
@@ -215,7 +219,8 @@ exports/
 - bit 的 0/1/X/Z、bus width/signedness、enum。
 - segment 覆盖、合并、拆分和清除。
 - 单命令撤销/重做，以及快速创建命令的原子替换、取消和场景时长 Undo/Redo。
-- 多 lane 范围复制/粘贴及完整撤销/重做。
+- 多 lane 范围复制/粘贴、同类型 Bit/Bus 原子批量赋值、不同 Bus 位宽值生成、失败零部分写入及
+  完整撤销/重做。
 - Event 时间和值与关联 Segment 的双向同步。
 - 画布式区间编辑到步骤表 Event 的同步。
 - Marker command、Relation min/max delay、满足、违反、缺失目标和未定义区间。
@@ -230,7 +235,8 @@ exports/
   无效新增阻止删除/Bus 控件/Segment 双击并可 Esc 恢复、有效新增先提交再删除、两步 Undo 顺序、
   多个交错命令逐次恢复以及 Marker 模式标题拖动 Esc 取消均具有专项 offscreen 覆盖。
 - 无模式直接编辑的 Segment 选择、整体移动、边界缩放、双击改值、Delete 清除与 Undo，Bit
-  单拍/多拍翻转、0/1/X/Z 键盘输入、Shift 跨 lane 框选和中键平移均通过离屏回归。
+  单拍/多拍翻转、0/1/X/Z 键盘输入和中键平移均通过离屏回归；Shift 跨 lane 持久框选覆盖
+  Bit/Bus 整段赋值、边界与相邻值保持、混合类型零修改、缩放/刷新定位以及 Esc/外部点击清除。
 - Event 菱形局部虚线预览期间模型不变，释放、Undo 与 Redo 后 Event/Segment 保持同步。
 - Bus 浮层覆盖直接值、非法值纠错、0/X/Z/Don't care 单击与拖放以及波形右键；未提交值的
   点击别处提交、隐藏草稿恢复、Save/New/Open/Close/Export 门禁、Bus/End 冲突顺序、鼠标失焦
@@ -255,8 +261,8 @@ exports/
 - ZeroSlack signal-list、Private Frame sample、Pinloom entry 和 Wave Workbench URI。
 - 主窗口后台 autosave 生成可由正式加载器读取的恢复快照。
 
-最近一次验证结果：21 个 CTest 入口均通过，其中核心入口包含 25 组细分测试；常规构建和
-Qt Creator Debug 构建均已验证。完整验收记录见 [PLAN.md](PLAN.md)。
+最近一次验证结果：21 个 CTest 入口均通过，其中核心入口包含 26 组细分测试；Qt Creator
+Debug 与 Release 构建均已验证。完整验收记录见 [PLAN.md](PLAN.md)。
 
 ## 当前限制
 

@@ -386,6 +386,83 @@ std::string SetLaneRangeCommand::description() const
     return "Set lane range";
 }
 
+SetLaneRangesCommand::SetLaneRangesCommand(
+    Scenario& scenario,
+    const Tick start,
+    const Tick end,
+    std::vector<LaneRangeAssignment> assignments)
+    : scenario_(&scenario)
+    , start_(start)
+    , end_(end)
+    , assignments_(std::move(assignments))
+{
+    if (assignments_.empty()) {
+        throw std::invalid_argument("range assignment contains no lanes");
+    }
+    if (start_ < 0 || end_ <= start_ || end_ > scenario.duration) {
+        throw std::invalid_argument("range assignment is outside the scenario");
+    }
+
+    std::vector<std::string> laneIds;
+    laneIds.reserve(assignments_.size());
+    for (auto& assignment : assignments_) {
+        if (assignment.laneId.empty()
+            || std::find(laneIds.begin(), laneIds.end(), assignment.laneId) != laneIds.end()) {
+            throw std::invalid_argument("range assignment contains an invalid or duplicate lane");
+        }
+        const auto* lane = findLane(scenario, assignment.laneId);
+        if (!lane || lane->kind == LaneKind::Group) {
+            throw std::invalid_argument("range assignment target lane does not exist");
+        }
+        const auto validation = validateLaneValue(*lane, assignment.value);
+        if (!validation.valid) throw std::invalid_argument(validation.error);
+        assignment.value = validation.normalizedValue;
+        laneIds.push_back(assignment.laneId);
+    }
+}
+
+void SetLaneRangesCommand::redo()
+{
+    if (after_) {
+        *scenario_ = *after_;
+        return;
+    }
+
+    before_ = *scenario_;
+    auto candidate = *scenario_;
+    for (const auto& assignment : assignments_) {
+        auto* lane = findLane(candidate, assignment.laneId);
+        if (!lane) {
+            throw std::runtime_error("range assignment target lane was removed");
+        }
+        setSegmentRange(
+            *lane,
+            start_,
+            end_,
+            assignment.value,
+            {},
+            assignment.extensions);
+        if (lane->kind == LaneKind::Bit
+            || lane->kind == LaneKind::Bus
+            || lane->kind == LaneKind::Enum) {
+            synchronizeLaneEventsFromSegments(candidate, lane->id);
+        }
+    }
+    after_ = std::move(candidate);
+    *scenario_ = *after_;
+}
+
+void SetLaneRangesCommand::undo()
+{
+    if (!before_) throw std::runtime_error("range assignment command was not initialized");
+    *scenario_ = *before_;
+}
+
+std::string SetLaneRangesCommand::description() const
+{
+    return "Set selected ranges";
+}
+
 ClearLaneRangeCommand::ClearLaneRangeCommand(
     Scenario& scenario,
     std::string laneId,

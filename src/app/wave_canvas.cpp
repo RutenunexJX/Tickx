@@ -359,8 +359,81 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     busPresetPalette_->adjustSize();
     busPresetPalette_->hide();
 
+    rangeEditPalette_ = new QFrame(viewport());
+    rangeEditPalette_->setObjectName(QStringLiteral("RangeEditPalette"));
+    rangeEditPalette_->setFrameShape(QFrame::StyledPanel);
+    rangeEditPalette_->setAttribute(Qt::WA_StyledBackground, true);
+    rangeEditPalette_->setStyleSheet(QStringLiteral(
+        "QFrame#RangeEditPalette {"
+        " background: rgba(45, 57, 73, 246);"
+        " border: 1px solid #78aef0; border-radius: 7px;"
+        "}"
+        "QFrame#RangeEditPalette QLabel { color: #e4ecf7; font-weight: 600; }"
+        "QFrame#RangeEditPalette QLineEdit {"
+        " color: #f3f6fa; background: #263241;"
+        " border: 1px solid #7588a2; border-radius: 4px; padding: 3px 6px;"
+        "}"
+        "QFrame#RangeEditPalette QLineEdit:focus { border-color: #8dc0ff; }"
+        "QFrame#RangeEditPalette QToolButton {"
+        " color: #f3f6fa; background: #46566c;"
+        " border: 1px solid #6f8099; border-radius: 4px; padding: 3px 8px;"
+        "}"
+        "QFrame#RangeEditPalette QToolButton:hover {"
+        " background: #56708f; border-color: #8dc0ff;"
+        "}"
+        "QFrame#RangeEditPalette QToolButton:disabled {"
+        " color: #8894a5; background: #374352; border-color: #526074;"
+        "}"));
+    auto* rangeLayout = new QHBoxLayout(rangeEditPalette_);
+    rangeLayout->setContentsMargins(7, 5, 7, 5);
+    rangeLayout->setSpacing(5);
+    rangeEditContextLabel_ = new QLabel(tr("Selected range"), rangeEditPalette_);
+    rangeEditContextLabel_->setObjectName(QStringLiteral("RangeEditContextLabel"));
+    rangeEditContextLabel_->setMaximumWidth(310);
+    rangeLayout->addWidget(rangeEditContextLabel_);
+    rangeValueEdit_ = new QLineEdit(rangeEditPalette_);
+    rangeValueEdit_->setObjectName(QStringLiteral("RangeEditValueEdit"));
+    rangeValueEdit_->setPlaceholderText(tr("Value + Enter"));
+    rangeValueEdit_->setAccessibleName(tr("Selected bus range value"));
+    rangeValueEdit_->setMinimumWidth(105);
+    rangeValueEdit_->setMaximumWidth(140);
+    rangeValueEdit_->installEventFilter(this);
+    rangeLayout->addWidget(rangeValueEdit_);
+    const auto makeRangeButton = [this, rangeLayout](
+                                     const QString& text,
+                                     const QString& objectName,
+                                     const std::string& presetId) {
+        auto* button = new QToolButton(rangeEditPalette_);
+        button->setText(text);
+        button->setObjectName(objectName);
+        button->setAutoRaise(true);
+        button->setFocusPolicy(Qt::NoFocus);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setToolTip(tr("Set the whole selected range to %1").arg(text));
+        rangeLayout->addWidget(button);
+        connect(button, &QToolButton::clicked, this, [this, presetId] {
+            applyExplicitRangePreset(presetId);
+        });
+        return button;
+    };
+    rangeZeroButton_ = makeRangeButton(
+        QStringLiteral("0"), QStringLiteral("RangeEditZeroButton"), "zero");
+    rangeOneButton_ = makeRangeButton(
+        QStringLiteral("1"), QStringLiteral("RangeEditOneButton"), "one");
+    rangeXButton_ = makeRangeButton(
+        QStringLiteral("X"), QStringLiteral("RangeEditXButton"), "x");
+    rangeZButton_ = makeRangeButton(
+        QStringLiteral("Z"), QStringLiteral("RangeEditZButton"), "z");
+    rangeDontCareButton_ = makeRangeButton(
+        tr("Don't care"),
+        QStringLiteral("RangeEditDontCareButton"),
+        "dont-care");
+    rangeEditPalette_->adjustSize();
+    rangeEditPalette_->hide();
+
     connect(horizontalScrollBar(), &QScrollBar::valueChanged, this, [this] {
         positionBusPresetPalette();
+        positionRangeEditPalette();
         viewport()->update();
     });
     connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
@@ -368,6 +441,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         positionQuickLaneSetup();
         positionLaneRename();
         positionBusPresetPalette();
+        positionRangeEditPalette();
         viewport()->update();
     });
     positionDurationEditor();
@@ -400,10 +474,18 @@ bool WaveCanvas::commitPendingInlineEdits()
     if (!commitLaneRename()) return false;
     if (durationEdit_ && durationEdit_->isVisible() && durationEdit_->isModified()) {
         submitDurationEdit();
-        if (durationEdit_->isModified() || hasPendingBusValueEdit()) return false;
+        if (durationEdit_->isModified()
+            || hasPendingBusValueEdit()
+            || hasPendingRangeValueEdit()) {
+            return false;
+        }
     } else if (hasPendingBusValueEdit()) {
         submitBusValue();
         if (hasPendingBusValueEdit()) return false;
+    }
+    if (hasPendingRangeValueEdit()) {
+        submitRangeValue();
+        if (hasPendingRangeValueEdit()) return false;
     }
     return true;
 }
@@ -590,6 +672,16 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
             viewport()->setFocus(Qt::OtherFocusReason);
             return true;
         }
+        if (watched == rangeValueEdit_ && acceptKey) {
+            submitRangeValue();
+            return true;
+        }
+        if (watched == rangeValueEdit_ && keyEvent->key() == Qt::Key_Escape) {
+            clearExplicitRangeSelection();
+            viewport()->setFocus(Qt::OtherFocusReason);
+            emit statusMessage(tr("Range selection cleared"));
+            return true;
+        }
     }
     if (watched == laneRenameEdit_
         && event->type() == QEvent::FocusOut
@@ -691,10 +783,21 @@ bool WaveCanvas::hasPendingBusValueEdit() const noexcept
         && busPresetAnchorTick_;
 }
 
+bool WaveCanvas::hasPendingRangeValueEdit() const noexcept
+{
+    return rangeValueEdit_
+        && rangeValueEdit_->isVisible()
+        && rangeValueEdit_->isModified()
+        && explicitRangeSelection_
+        && rangeEditPalette_
+        && rangeEditPalette_->isVisible();
+}
+
 bool WaveCanvas::hasPendingValueEdit() const noexcept
 {
     return (durationEdit_ && durationEdit_->isModified())
-        || hasPendingBusValueEdit();
+        || hasPendingBusValueEdit()
+        || hasPendingRangeValueEdit();
 }
 
 void WaveCanvas::syncDurationEditor()
@@ -829,6 +932,12 @@ std::optional<std::pair<Tick, Tick>> WaveCanvas::selectedTimeRange() const noexc
 {
     return selectionRange_;
 }
+
+bool WaveCanvas::hasExplicitRangeSelection() const noexcept
+{
+    return explicitRangeSelection_;
+}
+
 QString WaveCanvas::selectedSegmentLaneId() const
 {
     return QString::fromStdString(selectedSegmentLaneId_);
@@ -908,6 +1017,8 @@ void WaveCanvas::fitScenario()
         100.0);
     updateScrollBars();
     horizontalScrollBar()->setValue(0);
+    positionBusPresetPalette();
+    positionRangeEditPalette();
     viewport()->update();
 }
 
@@ -930,6 +1041,8 @@ void WaveCanvas::fitSelection()
         0.0,
         static_cast<double>(horizontalScrollBar()->maximum()));
     horizontalScrollBar()->setValue(static_cast<int>(std::llround(scroll)));
+    positionBusPresetPalette();
+    positionRangeEditPalette();
     viewport()->update();
 }
 
@@ -954,12 +1067,36 @@ void WaveCanvas::refreshModel()
     } else {
         positionBusPresetPalette();
     }
+    if (explicitRangeSelection_) {
+        const auto validRange = scenario_
+            && selectionRange_
+            && selectionRange_->first >= 0
+            && selectionRange_->second > selectionRange_->first
+            && selectionRange_->second <= scenario_->duration;
+        const auto validLanes = validRange
+            && !selectedLaneIds_.empty()
+            && std::all_of(
+                selectedLaneIds_.begin(),
+                selectedLaneIds_.end(),
+                [this](const std::string& laneId) {
+                    const auto* lane = findLane(*scenario_, laneId);
+                    return lane && lane->visible;
+                });
+        if (validLanes) {
+            showRangeEditPalette();
+        } else {
+            clearExplicitRangeSelection();
+        }
+    } else {
+        positionRangeEditPalette();
+    }
     viewport()->update();
 }
 
 void WaveCanvas::revealLocation(const QString& laneId, const qint64 tick)
 {
     if (!scenario_) return;
+    if (explicitRangeSelection_) clearExplicitRangeSelection(false);
     const auto* lane = findLane(*scenario_, laneId.toStdString());
     if (!lane) return;
     selectedLaneId_ = lane->id;
@@ -1150,6 +1287,9 @@ void WaveCanvas::pasteAtCursor()
         emit statusMessage(QString::fromUtf8(exception.what()));
         return;
     }
+    explicitRangeSelection_ = false;
+    hideRangeEditPalette();
+    if (rangeValueEdit_) rangeValueEdit_->setModified(false);
     selectedLaneIds_.clear();
     for (const auto& copied : copiedLanes) selectedLaneIds_.push_back(copied.laneId);
     selectedLaneId_ = selectedLaneIds_.front();
@@ -1226,6 +1366,12 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         || hasLaneRename()
         || hasPendingValueEdit();
     if (!commitPendingInlineEdits() || hadPendingInlineEdit) {
+        event->accept();
+        return;
+    }
+    if (explicitRangeSelection_) {
+        clearExplicitRangeSelection();
+        emit statusMessage(tr("Range selection cleared"));
         event->accept();
         return;
     }
@@ -1444,16 +1590,36 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                 || event->key() == Qt::Key_1
                 || event->key() == Qt::Key_X
                 || event->key() == Qt::Key_Z)) {
+            const auto value = event->key() == Qt::Key_0
+                ? std::string{"0"}
+                : event->key() == Qt::Key_1
+                    ? std::string{"1"}
+                    : event->key() == Qt::Key_X
+                        ? std::string{"X"}
+                        : std::string{"Z"};
+            if (explicitRangeSelection_) {
+                const auto kind = explicitRangeKind();
+                if (!kind) {
+                    emit statusMessage(
+                        tr("No values changed · select only Bit signals or only Bus signals"));
+                } else if (*kind == LaneKind::Bit) {
+                    static_cast<void>(applyExplicitRangeValue(value));
+                } else if (event->key() == Qt::Key_0) {
+                    applyExplicitRangePreset("zero");
+                } else if (event->key() == Qt::Key_X) {
+                    applyExplicitRangePreset("x");
+                } else if (event->key() == Qt::Key_Z) {
+                    applyExplicitRangePreset("z");
+                } else {
+                    emit statusMessage(
+                        tr("No values changed · use the Bus value field to assign 1"));
+                }
+                event->accept();
+                return;
+            }
             const auto* lane = findLane(*scenario_, selectedLaneId_);
             if (lane && lane->kind == LaneKind::Bit) {
                 const auto [start, end] = beatRangeAt(cursorTick_, *lane);
-                const auto value = event->key() == Qt::Key_0
-                    ? std::string{"0"}
-                    : event->key() == Qt::Key_1
-                        ? std::string{"1"}
-                        : event->key() == Qt::Key_X
-                            ? std::string{"X"}
-                            : std::string{"Z"};
                 setLaneRangeValue(lane->id, start, end, value);
                 event->accept();
                 return;
@@ -1648,6 +1814,7 @@ void WaveCanvas::resizeEvent(QResizeEvent* event)
     positionLaneRename();
     positionDurationEditor();
     positionBusPresetPalette();
+    positionRangeEditPalette();
 }
 
 void WaveCanvas::mousePressEvent(QMouseEvent* event)
@@ -1676,6 +1843,18 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
     }
     if (event->button() == Qt::LeftButton && hasPendingValueEdit()) {
         static_cast<void>(commitPendingInlineEdits());
+        event->accept();
+        return;
+    }
+    if (event->button() == Qt::LeftButton
+        && tool_ == Tool::WaveEdit
+        && explicitRangeSelection_
+        && !spaceHeld_
+        && !event->modifiers().testFlag(Qt::ShiftModifier)) {
+        clearExplicitRangeSelection();
+        snapGuideTick_.reset();
+        viewport()->setFocus(Qt::MouseFocusReason);
+        emit statusMessage(tr("Range selection cleared"));
         event->accept();
         return;
     }
@@ -1709,7 +1888,9 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
     if (addLaneRowRect().contains(position)) return;
     auto* lane = laneAtY(position.y());
     bypassSnap_ = event->modifiers().testFlag(Qt::AltModifier);
-    if (lane && lane->kind == LaneKind::Bus) {
+    const auto startingExplicitRange = tool_ == Tool::WaveEdit
+        && event->modifiers().testFlag(Qt::ShiftModifier);
+    if (lane && lane->kind == LaneKind::Bus && !startingExplicitRange) {
         showBusPresetPalette(*lane, position);
     } else {
         hideBusPresetPalette();
@@ -1761,6 +1942,9 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
 
         if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+            explicitRangeSelection_ = false;
+            hideRangeEditPalette();
+            if (rangeValueEdit_) rangeValueEdit_->setModified(false);
             selectedSegmentLaneId_.clear();
             selectedSegmentId_.clear();
             waveEditOriginalRange_.reset();
@@ -2768,6 +2952,308 @@ void WaveCanvas::hideBusPresetPalette()
     if (busPresetPalette_) busPresetPalette_->hide();
 }
 
+std::optional<LaneKind> WaveCanvas::explicitRangeKind() const
+{
+    if (!scenario_ || !explicitRangeSelection_ || selectedLaneIds_.empty()) {
+        return std::nullopt;
+    }
+    std::optional<LaneKind> kind;
+    for (const auto& laneId : selectedLaneIds_) {
+        const auto* lane = findLane(*scenario_, laneId);
+        if (!lane || (lane->kind != LaneKind::Bit && lane->kind != LaneKind::Bus)) {
+            return std::nullopt;
+        }
+        if (!kind) {
+            kind = lane->kind;
+        } else if (*kind != lane->kind) {
+            return std::nullopt;
+        }
+    }
+    return kind;
+}
+
+void WaveCanvas::positionRangeEditPalette()
+{
+    if (!rangeEditPalette_ || !scenario_ || !explicitRangeSelection_
+        || !selectionRange_ || selectionRange_->second <= selectionRange_->first
+        || selectedLaneIds_.empty()) {
+        if (rangeEditPalette_) rangeEditPalette_->hide();
+        return;
+    }
+
+    const auto firstLayout = std::find_if(
+        laneLayout_.begin(),
+        laneLayout_.end(),
+        [this](const LaneLayout& candidate) {
+            if (candidate.laneIndex >= scenario_->lanes.size()) return false;
+            const auto& laneId = scenario_->lanes.at(candidate.laneIndex).id;
+            return std::find(
+                selectedLaneIds_.begin(),
+                selectedLaneIds_.end(),
+                laneId) != selectedLaneIds_.end();
+        });
+    if (firstLayout == laneLayout_.end()) {
+        rangeEditPalette_->hide();
+        return;
+    }
+
+    rangeEditPalette_->adjustSize();
+    const auto size = rangeEditPalette_->sizeHint().expandedTo(rangeEditPalette_->size());
+    const auto minimumX = HeaderWidth + 6;
+    const auto maximumX = std::max(minimumX, viewport()->width() - size.width() - 7);
+    const auto x = std::clamp(
+        xAtTick(selectionRange_->first) + 10,
+        minimumX,
+        maximumX);
+    const auto laneTop = RulerHeight + firstLayout->top - verticalScrollBar()->value();
+    auto y = laneTop - size.height() - 5;
+    if (y < RulerHeight + 4) y = laneTop + 4;
+    y = std::clamp(
+        y,
+        RulerHeight + 4,
+        std::max(RulerHeight + 4, viewport()->height() - size.height() - 6));
+    rangeEditPalette_->setGeometry(x, y, size.width(), size.height());
+    rangeEditPalette_->show();
+    rangeEditPalette_->raise();
+}
+
+void WaveCanvas::showRangeEditPalette()
+{
+    if (!rangeEditPalette_ || !scenario_ || !explicitRangeSelection_
+        || !selectionRange_ || selectionRange_->second <= selectionRange_->first
+        || selectedLaneIds_.empty()) {
+        hideRangeEditPalette();
+        return;
+    }
+
+    const auto kind = explicitRangeKind();
+    const auto bitRange = kind && *kind == LaneKind::Bit;
+    const auto busRange = kind && *kind == LaneKind::Bus;
+    const auto editable = bitRange || busRange;
+    const auto count = static_cast<qulonglong>(selectedLaneIds_.size());
+    const auto format = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : QString::number(tick);
+    };
+    if (rangeEditContextLabel_) {
+        rangeEditContextLabel_->setText(
+            editable
+                ? tr("%1 %2 · %3–%4")
+                      .arg(count)
+                      .arg(bitRange ? tr("Bit") : tr("Bus"))
+                      .arg(format(selectionRange_->first))
+                      .arg(format(selectionRange_->second))
+                : tr("Mixed/unsupported selection · Copy only"));
+        rangeEditContextLabel_->setToolTip(
+            editable
+                ? tr("Applies to every selected signal from %1 to %2")
+                      .arg(format(selectionRange_->first))
+                      .arg(format(selectionRange_->second))
+                : tr("Batch assignment requires only Bit signals or only Bus signals"));
+    }
+
+    for (auto* button : {
+             rangeZeroButton_,
+             rangeOneButton_,
+             rangeXButton_,
+             rangeZButton_,
+             rangeDontCareButton_}) {
+        if (button) button->setEnabled(editable);
+    }
+    if (rangeZeroButton_) rangeZeroButton_->show();
+    if (rangeOneButton_) rangeOneButton_->setVisible(bitRange || !editable);
+    if (rangeXButton_) rangeXButton_->show();
+    if (rangeZButton_) rangeZButton_->show();
+    if (rangeDontCareButton_) rangeDontCareButton_->setVisible(busRange);
+    if (rangeValueEdit_) {
+        rangeValueEdit_->setVisible(busRange);
+        if (!busRange) {
+            rangeValueEdit_->clear();
+            rangeValueEdit_->setModified(false);
+            rangeValueEdit_->setStyleSheet({});
+            rangeValueEdit_->setToolTip({});
+        } else if (!rangeValueEdit_->hasFocus() && !rangeValueEdit_->isModified()) {
+            rangeValueEdit_->clear();
+            rangeValueEdit_->setToolTip(tr("Type one value for the whole selected Bus range"));
+            rangeValueEdit_->setStyleSheet({});
+        }
+    }
+    positionRangeEditPalette();
+}
+
+void WaveCanvas::hideRangeEditPalette()
+{
+    if (rangeEditPalette_) rangeEditPalette_->hide();
+}
+
+void WaveCanvas::clearExplicitRangeSelection(const bool clearLanes)
+{
+    explicitRangeSelection_ = false;
+    hideRangeEditPalette();
+    if (rangeValueEdit_) {
+        rangeValueEdit_->setModified(false);
+        rangeValueEdit_->setStyleSheet({});
+    }
+    selectionRange_.reset();
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    if (clearLanes) {
+        selectedLaneId_.clear();
+        selectedLaneIds_.clear();
+    }
+    viewport()->update();
+}
+
+bool WaveCanvas::applyExplicitRangeValue(
+    const std::string& value,
+    const std::string& presetId)
+{
+    if (!scenario_ || !commandStack_ || !explicitRangeSelection_
+        || !selectionRange_ || selectionRange_->second <= selectionRange_->first) {
+        return false;
+    }
+    const auto kind = explicitRangeKind();
+    if (!kind) {
+        emit statusMessage(
+            tr("No values changed · select only Bit signals or only Bus signals"));
+        return false;
+    }
+
+    std::vector<LaneRangeAssignment> assignments;
+    assignments.reserve(selectedLaneIds_.size());
+    for (const auto& laneId : selectedLaneIds_) {
+        const auto* lane = findLane(*scenario_, laneId);
+        if (!lane) {
+            emit statusMessage(tr("No values changed · a selected signal no longer exists"));
+            return false;
+        }
+        auto targetValue = value;
+        JsonExtensions extensions;
+        if (*kind == LaneKind::Bus && !presetId.empty()) {
+            targetValue = busPresetValue(presetId, lane->width);
+            extensions.emplace(
+                std::string(kBusPresetExtension),
+                "\"" + presetId + "\"");
+        }
+        const auto validation = validateLaneValue(*lane, targetValue);
+        if (targetValue.empty() || !validation.valid) {
+            const auto message = targetValue.empty()
+                ? tr("Enter a bus value.")
+                : QString::fromStdString(validation.error);
+            if (rangeValueEdit_ && rangeValueEdit_->isVisible()) {
+                rangeValueEdit_->setStyleSheet(QStringLiteral(
+                    "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
+                    "border-radius: 4px; padding: 3px 6px;"));
+                rangeValueEdit_->setToolTip(message);
+                rangeValueEdit_->setModified(true);
+            }
+            emit statusMessage(tr("No values changed · %1").arg(message));
+            return false;
+        }
+        assignments.push_back({
+            laneId,
+            validation.normalizedValue,
+            std::move(extensions),
+        });
+    }
+
+    const auto [start, end] = *selectionRange_;
+    try {
+        commandStack_->execute(std::make_unique<SetLaneRangesCommand>(
+            *scenario_,
+            start,
+            end,
+            std::move(assignments)));
+    } catch (const std::exception& exception) {
+        emit statusMessage(
+            tr("No values changed · %1").arg(QString::fromUtf8(exception.what())));
+        return false;
+    }
+
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    cursorTick_ = start;
+    if (rangeValueEdit_) {
+        rangeValueEdit_->setModified(false);
+        rangeValueEdit_->setStyleSheet({});
+        rangeValueEdit_->setToolTip(
+            tr("Type one value for the whole selected Bus range"));
+    }
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    if (!selectedLaneIds_.empty()) {
+        emit selectionChanged(QString::fromStdString(selectedLaneIds_.front()), start);
+    }
+    rebuildLaneLayout();
+    showRangeEditPalette();
+    viewport()->update();
+    const auto displayValue = !presetId.empty()
+        ? busPresetDisplayLabel(presetId)
+        : QString::fromStdString(value);
+    emit statusMessage(
+        tr("%1 signals · %2–%3 = %4 · Ctrl+Z to undo")
+            .arg(static_cast<qulonglong>(selectedLaneIds_.size()))
+            .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+            .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
+            .arg(displayValue));
+    return true;
+}
+
+void WaveCanvas::applyExplicitRangePreset(const std::string& presetId)
+{
+    const auto kind = explicitRangeKind();
+    if (!kind) {
+        emit statusMessage(
+            tr("No values changed · select only Bit signals or only Bus signals"));
+        return;
+    }
+    if (*kind == LaneKind::Bit) {
+        const auto value = presetId == "zero" ? std::string{"0"}
+            : presetId == "one" ? std::string{"1"}
+            : presetId == "x" ? std::string{"X"}
+            : presetId == "z" ? std::string{"Z"}
+                               : std::string{};
+        if (value.empty()) {
+            emit statusMessage(tr("No values changed · Don't care is available for Bus ranges"));
+            return;
+        }
+        static_cast<void>(applyExplicitRangeValue(value));
+        return;
+    }
+    if (presetId == "one") {
+        emit statusMessage(tr("No values changed · use a custom Bus value for 1"));
+        return;
+    }
+    static_cast<void>(applyExplicitRangeValue({}, presetId));
+}
+
+void WaveCanvas::submitRangeValue()
+{
+    if (!rangeValueEdit_ || !explicitRangeSelection_) return;
+    const auto value = rangeValueEdit_->text().trimmed();
+    if (value.isEmpty()) {
+        const auto message = tr("Enter a bus value.");
+        rangeValueEdit_->setStyleSheet(QStringLiteral(
+            "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
+            "border-radius: 4px; padding: 3px 6px;"));
+        rangeValueEdit_->setToolTip(message);
+        rangeValueEdit_->setModified(true);
+        rangeValueEdit_->setFocus(Qt::OtherFocusReason);
+        emit statusMessage(tr("No values changed · %1").arg(message));
+        return;
+    }
+    if (applyExplicitRangeValue(value.toStdString())) {
+        rangeValueEdit_->setModified(false);
+        rangeValueEdit_->clearFocus();
+        viewport()->setFocus(Qt::OtherFocusReason);
+        return;
+    }
+    rangeValueEdit_->setModified(true);
+    rangeValueEdit_->setFocus(Qt::OtherFocusReason);
+    rangeValueEdit_->selectAll();
+}
+
 void WaveCanvas::submitBusValue()
 {
     if (hasQuickLaneSetup()) {
@@ -3119,6 +3605,8 @@ void WaveCanvas::setScale(const double scale, const int anchorX)
         std::llround(newScroll),
         0LL,
         static_cast<long long>(horizontalScrollBar()->maximum()))));
+    positionBusPresetPalette();
+    positionRangeEditPalette();
     viewport()->update();
 }
 
@@ -3342,6 +3830,9 @@ std::vector<std::pair<Tick, Tick>> WaveCanvas::beatRangesBetween(
 
 void WaveCanvas::clearWaveEditState()
 {
+    explicitRangeSelection_ = false;
+    hideRangeEditPalette();
+    if (rangeValueEdit_) rangeValueEdit_->setModified(false);
     selectedSegmentLaneId_.clear();
     selectedSegmentId_.clear();
     waveEditInteraction_ = WaveEditInteraction::None;
@@ -3783,7 +4274,37 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
                 if (!selectedLaneIds_.empty()) selectedLaneId_ = selectedLaneIds_.front();
             }
         }
+        selectedSegmentLaneId_.clear();
+        selectedSegmentId_.clear();
+        waveEditHoverLaneId_.clear();
+        waveEditHoverRange_.reset();
+        explicitRangeSelection_ = selectionRange_
+            && selectionRange_->second > selectionRange_->first
+            && !selectedLaneIds_.empty();
+        hideBusPresetPalette();
         viewport()->setCursor(Qt::PointingHandCursor);
+        if (!explicitRangeSelection_) {
+            selectionRange_.reset();
+            hideRangeEditPalette();
+            emit statusMessage(tr("Drag across time to create a non-empty range"));
+            viewport()->update();
+            return;
+        }
+
+        cursorTick_ = selectionRange_->first;
+        showRangeEditPalette();
+        const auto duration = selectionRange_->second - selectionRange_->first;
+        if (explicitRangeKind()) {
+            emit statusMessage(
+                tr("Selected %1 · %2 signals · use 0/1/X/Z or the range palette · Esc clears")
+                    .arg(QString::fromStdString(formatTick(duration, project_->timeBase)))
+                    .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
+        } else {
+            emit statusMessage(
+                tr("Selected %1 · mixed/unsupported signal types · Copy only")
+                    .arg(QString::fromStdString(formatTick(duration, project_->timeBase))));
+        }
+        emit selectionChanged(QString::fromStdString(selectedLaneId_), cursorTick_);
         viewport()->update();
         return;
     }
@@ -4765,6 +5286,11 @@ void WaveCanvas::drawWaveEditOverlay(QPainter& painter)
         waveViewportWidth(),
         viewport()->height() - RulerHeight));
     drawWaveEditTransitionPreview(painter);
+    if (explicitRangeSelection_ && selectionRange_) {
+        for (const auto& laneId : selectedLaneIds_) {
+            drawRange(laneId, *selectionRange_, false, false);
+        }
+    }
     if (!drawing_
         && waveEditHoverRange_
         && !waveEditHoverLaneId_.empty()) {

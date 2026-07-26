@@ -57,6 +57,7 @@ public:
     [[nodiscard]] std::optional<Tick> temporaryCursorTick() const noexcept;
     [[nodiscard]] QString selectedMarkerId() const;
     [[nodiscard]] std::optional<std::pair<Tick, Tick>> selectedTimeRange() const noexcept;
+    [[nodiscard]] bool hasExplicitRangeSelection() const noexcept;
     [[nodiscard]] QString selectedSegmentLaneId() const;
     [[nodiscard]] QString selectedSegmentId() const;
     [[nodiscard]] QString hoveredBitBeatLaneId() const;
@@ -189,13 +190,24 @@ private:
     void submitLaneRename();
     void cancelLaneRename();
     void submitBusValue();
+    void submitRangeValue();
     void submitDurationEdit(bool preserveMouseFocusTarget = false);
     [[nodiscard]] bool hasPendingBusValueEdit() const noexcept;
+    [[nodiscard]] bool hasPendingRangeValueEdit() const noexcept;
     [[nodiscard]] bool hasPendingValueEdit() const noexcept;
     void syncDurationEditor();
     void positionBusPresetPalette();
     void showBusPresetPalette(const Lane& lane, const QPoint& anchor);
     void hideBusPresetPalette();
+    void positionRangeEditPalette();
+    void showRangeEditPalette();
+    void hideRangeEditPalette();
+    void clearExplicitRangeSelection(bool clearLanes = true);
+    [[nodiscard]] std::optional<LaneKind> explicitRangeKind() const;
+    bool applyExplicitRangeValue(
+        const std::string& value,
+        const std::string& presetId = {});
+    void applyExplicitRangePreset(const std::string& presetId);
     void applyBusPreset(const std::string& laneId, const std::string& presetId, Tick tick);
     void promptBusValueAt(const std::string& laneId, Tick tick);
     bool setLaneRangeValue(
@@ -319,6 +331,15 @@ private:
     QLineEdit* busValueEdit_{nullptr};
     std::optional<Tick> busPresetAnchorTick_;
     std::string busPresetLaneId_;
+    QFrame* rangeEditPalette_{nullptr};
+    QLabel* rangeEditContextLabel_{nullptr};
+    QLineEdit* rangeValueEdit_{nullptr};
+    QToolButton* rangeZeroButton_{nullptr};
+    QToolButton* rangeOneButton_{nullptr};
+    QToolButton* rangeXButton_{nullptr};
+    QToolButton* rangeZButton_{nullptr};
+    QToolButton* rangeDontCareButton_{nullptr};
+    bool explicitRangeSelection_{false};
     std::vector<LaneLayout> laneLayout_;
     std::vector<Tick> signalEdgeIndex_;
     std::optional<Tick> movableCursorTick_;
