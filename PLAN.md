@@ -2014,6 +2014,69 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 36：单 lane 目标感知 Paste 与空历史收口
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `Paste copied range here` 只采用右键点击的时间，`pasteAtCursor()` 仍把 clipboard
+  中的源 lane ID 直接作为目标；用户在 `ack` 上粘贴 `req`，实际修改的是 `req`。此外
+  `PasteRangeCommand` 始终被视为有效，正常 Clock 空区间粘贴到另一正常区间也会制造空 Undo。
+- 用户主流程中，“在此粘贴”的空间指向与真实结果矛盾；用户必须事后观察哪条波形改变。点击 Bus
+  等不兼容信号时仍会静默写回源信号，而不是说明目标不可用；空粘贴后的第一次撤销没有可见变化。
+- 单 lane clipboard 现在以当前点击或选中的 lane 为目标。类型必须一致，Bus/Enum 位宽必须一致，
+  目标值还会按目标 lane 校验并规范化；不兼容时显示 source/target、类型或位宽原因，Scenario 不变。
+  多 lane clipboard 保持原有完整源 lane 集合语义，避免隐式猜测配对。
+- 成功跨 lane Paste 显示 `source → target`、目标时间、实际宽度及关系感知 Undo 提示，并保持实际目标
+  范围选中。`PasteRangeCommand` 现在按完整 Scenario 前后快照报告真实效果；空 Paste 保持目标范围，
+  显示 `already matches copied range · no values changed`，不标记修改、不入栈并保留 Redo。
+- 核心回归覆盖空目标 Paste、真实目标写入、完整 Undo/Redo 以及空 Paste 后的 Redo 保留；Wave Edit
+  smoke 真实执行 `req` Copy→Bit→Bus 拒绝→`ack` Paste→Undo、正常 Clock 空 Paste→Redo/Undo。
+  全部 GUI 路径使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.00 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.51 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 1.12 sec
+
+Screenshots generated:
+  build/qtcreator-debug/wave-edit-smoke-target-aware-paste.png
+  build/qtcreator-debug/wave-edit-smoke-paste-no-effect-feedback.png
+Automated QA: req 的 90–100 ns 内容仅写入 ack 的 50–60 ns，req 不变；Bit→Bus 显示类型拒绝；
+              正常 Clock 空 Paste 显示 no values changed，一次 Redo 直接恢复真实跨 lane Paste
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

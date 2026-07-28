@@ -1341,15 +1341,73 @@ void WaveCanvas::pasteAtCursor()
         emit statusMessage(tr("No clipboard lanes exist in this scenario."));
         return;
     }
+
+    auto targetSummary = tr("%1 lane(s)")
+                             .arg(static_cast<qulonglong>(copiedLanes.size()));
+    if (copiedLanes.size() == 1 && !selectedLaneId_.empty()) {
+        auto& copied = copiedLanes.front();
+        const auto* sourceLane = findLane(*scenario_, copied.laneId);
+        const auto* targetLane = findLane(*scenario_, selectedLaneId_);
+        if (sourceLane && targetLane && targetLane->kind != LaneKind::Group
+            && sourceLane->id != targetLane->id) {
+            const auto kindLabel = [](const LaneKind kind) {
+                const auto label = toString(kind);
+                return QString::fromLatin1(
+                    label.data(),
+                    static_cast<qsizetype>(label.size()));
+            };
+            const auto sourceName = QString::fromStdString(sourceLane->name);
+            const auto targetName = QString::fromStdString(targetLane->name);
+            if (sourceLane->kind != targetLane->kind) {
+                emit statusMessage(
+                    tr("Cannot paste %1 (%2) into %3 (%4) · signal types must match")
+                        .arg(
+                            sourceName,
+                            kindLabel(sourceLane->kind),
+                            targetName,
+                            kindLabel(targetLane->kind)));
+                return;
+            }
+            if ((sourceLane->kind == LaneKind::Bus
+                 || sourceLane->kind == LaneKind::Enum)
+                && sourceLane->width != targetLane->width) {
+                emit statusMessage(
+                    tr("Cannot paste %1 (%2-bit) into %3 (%4-bit) · signal widths must match")
+                        .arg(sourceName)
+                        .arg(static_cast<qulonglong>(sourceLane->width))
+                        .arg(targetName)
+                        .arg(static_cast<qulonglong>(targetLane->width)));
+                return;
+            }
+            for (auto& segment : copied.relativeSegments) {
+                const auto validation = validateLaneValue(*targetLane, segment.value);
+                if (!validation.valid) {
+                    emit statusMessage(
+                        tr("Cannot paste %1 into %2 · %3")
+                            .arg(
+                                sourceName,
+                                targetName,
+                                QString::fromStdString(validation.error)));
+                    return;
+                }
+                segment.value = validation.normalizedValue;
+            }
+            copied.laneId = targetLane->id;
+            targetSummary = tr("%1 → %2").arg(sourceName, targetName);
+        }
+    }
+
     const auto pasteStart = cursorTick_;
+    const auto relationCountBefore = scenario_->relations.size();
+    bool changed = false;
     try {
-        commandStack_->execute(std::make_unique<PasteRangeCommand>(
+        changed = commandStack_->execute(std::make_unique<PasteRangeCommand>(
             *scenario_,
             copiedLanes,
             pasteStart,
             duration));
     } catch (const std::exception& exception) {
-        emit statusMessage(QString::fromUtf8(exception.what()));
+        emit statusMessage(tr("Paste failed · %1").arg(QString::fromUtf8(exception.what())));
         return;
     }
     explicitRangeSelection_ = false;
@@ -1363,8 +1421,10 @@ void WaveCanvas::pasteAtCursor()
         pasteStart + std::min<Tick>(duration, scenario_->duration - pasteStart),
     };
     explicitRangeSelection_ = true;
-    emit modelEdited();
-    emit commandAvailabilityChanged();
+    if (changed) {
+        emit modelEdited();
+        emit commandAvailabilityChanged();
+    }
     refreshModel();
     const auto pastedDuration = selectionRange_->second - selectionRange_->first;
     const auto startLabel = project_
@@ -1373,11 +1433,18 @@ void WaveCanvas::pasteAtCursor()
     const auto durationLabel = project_
         ? QString::fromStdString(formatTick(pastedDuration, project_->timeBase))
         : QString::number(pastedDuration);
+    const auto message = changed
+        ? tr("Pasted %1 at %2 · %3")
+              .arg(targetSummary, startLabel, durationLabel)
+        : tr("%1 at %2 · %3 already matches copied range · no values changed")
+              .arg(targetSummary, startLabel, durationLabel);
     emit statusMessage(
-        tr("Pasted %1 lane(s) at %2 · %3 · Ctrl+Z to undo")
-            .arg(static_cast<qulonglong>(copiedLanes.size()))
-            .arg(startLabel)
-            .arg(durationLabel));
+        changed
+            ? appendRelationAwareUndo(
+                  message,
+                  relationCountBefore,
+                  scenario_->relations.size())
+            : message);
 }
 
 void WaveCanvas::insertPulse()

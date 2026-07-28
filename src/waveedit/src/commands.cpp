@@ -1438,6 +1438,11 @@ std::string PasteRangeCommand::description() const
     return "Paste range";
 }
 
+bool PasteRangeCommand::hasEffect() const noexcept
+{
+    return before_ && after_ && *before_ != *after_;
+}
+
 AddEventCommand::AddEventCommand(Scenario& scenario, Event event)
     : scenario_(&scenario)
     , event_(std::move(event))

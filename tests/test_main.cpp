@@ -1702,6 +1702,70 @@ void testMultiLanePasteCommand()
     expectEqual(scenario, before, "paste undo did not restore the complete scenario");
     expect(stack.redo(), "paste redo failed");
     expectEqual(scenario, after, "paste redo did not restore the complete pasted range");
+
+    auto targetScenario = wave::makeDemonstrationProject().scenarios.front();
+    wave::Lane emptyTarget;
+    emptyTarget.id = "lane-empty-target";
+    emptyTarget.name = "empty_target";
+    emptyTarget.kind = wave::LaneKind::Bit;
+    emptyTarget.color = "#90caf9";
+    targetScenario.lanes.push_back(emptyTarget);
+    const auto targetBefore = targetScenario;
+    std::vector<wave::CopiedLaneRange> emptyCopied{
+        {emptyTarget.id, {}},
+    };
+    wave::CommandStack targetStack;
+    expect(
+        !targetStack.execute(std::make_unique<wave::PasteRangeCommand>(
+            targetScenario,
+            emptyCopied,
+            20'000,
+            10'000)),
+        "empty Paste into an implicit range reported an effect");
+    expectEqual(targetScenario, targetBefore, "empty Paste changed the target Scenario");
+    expectEqual(targetStack.size(), std::size_t{0}, "empty Paste polluted history");
+
+    wave::Segment targetSegment;
+    targetSegment.start = 0;
+    targetSegment.end = 10'000;
+    targetSegment.value = "1";
+    std::vector<wave::CopiedLaneRange> targetCopied{
+        {emptyTarget.id, {targetSegment}},
+    };
+    expect(
+        targetStack.execute(std::make_unique<wave::PasteRangeCommand>(
+            targetScenario,
+            targetCopied,
+            40'000,
+            10'000)),
+        "real Paste into another lane reported no effect");
+    const auto targetAfter = targetScenario;
+    const auto* pastedTargetLane = wave::findLane(targetScenario, emptyTarget.id);
+    const auto pastedTargetSegment = pastedTargetLane
+        ? std::find_if(
+              pastedTargetLane->segments.begin(),
+              pastedTargetLane->segments.end(),
+              [](const wave::Segment& segment) {
+                  return segment.start <= 45'000 && 45'000 < segment.end;
+              })
+        : std::vector<wave::Segment>::const_iterator{};
+    expect(
+        pastedTargetLane
+            && pastedTargetSegment != pastedTargetLane->segments.end()
+            && pastedTargetSegment->value == "1",
+        "target-aware Paste command wrote the wrong lane value");
+    expect(targetStack.undo(), "target-aware Paste undo failed");
+    expectEqual(targetScenario, targetBefore, "target-aware Paste undo was not exact");
+    expect(
+        !targetStack.execute(std::make_unique<wave::PasteRangeCommand>(
+            targetScenario,
+            emptyCopied,
+            20'000,
+            10'000)),
+        "empty Paste after Undo reported an effect");
+    expect(targetStack.canRedo(), "empty Paste discarded the real Paste Redo branch");
+    expect(targetStack.redo(), "real Paste Redo was unavailable after empty Paste");
+    expectEqual(targetScenario, targetAfter, "real Paste Redo changed after empty Paste");
 }
 
 void testEventSegmentSynchronization()

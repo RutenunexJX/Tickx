@@ -5081,6 +5081,195 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                const auto beforeTargetAwarePaste = scenario;
+                dragModified(
+                    QPoint(xAtTick(90'000), requestY),
+                    QPoint(xAtTick(100'000), requestY),
+                    Qt::ShiftModifier);
+                settleLayouts();
+                const auto copiedSingleRange = canvas->selectedTimeRange();
+                const auto copiedSingleLaneIds = canvas->selectedLaneIds();
+                const auto* sourceRequest = wave::findLane(scenario, "lane-request");
+                const auto* targetAcknowledge = wave::findLane(scenario, "lane-ack");
+                if (!copiedSingleRange
+                    || copiedSingleRange->second <= copiedSingleRange->first
+                    || copiedSingleLaneIds.size() != 1
+                    || copiedSingleLaneIds.front() != QStringLiteral("lane-request")
+                    || !sourceRequest
+                    || !targetAcknowledge
+                    || valueAt(*sourceRequest, 95'000)
+                        == valueAt(*targetAcknowledge, 55'000)
+                    || !clickWidget(rangeCopyButton)) {
+                    qCritical().noquote()
+                        << "Single-lane target-aware Paste fixture could not be copied";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto copiedRequestValue = valueAt(*sourceRequest, 95'000);
+                if (!chooseWaveformAction(
+                        QPoint(xAtTick(50'000), dataY),
+                        QStringLiteral("Paste copied range here"))) {
+                    qCritical().noquote()
+                        << "Incompatible target Paste action could not be invoked";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto incompatiblePasteMessage =
+                    window.statusBar()->currentMessage();
+                if (scenario != beforeTargetAwarePaste
+                    || !incompatiblePasteMessage.contains(
+                        QStringLiteral("Cannot paste req"))
+                    || !incompatiblePasteMessage.contains(
+                        QStringLiteral("signal types must match"))) {
+                    qCritical().noquote()
+                        << "Incompatible target Paste did not fail visibly and atomically";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!chooseWaveformAction(
+                        QPoint(xAtTick(50'000), acknowledgeY),
+                        QStringLiteral("Paste copied range here"))) {
+                    qCritical().noquote()
+                        << "Compatible target-aware Paste action could not be invoked";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                settleLayouts();
+                const auto afterTargetAwarePaste = scenario;
+                const auto* pastedRequest = wave::findLane(scenario, "lane-request");
+                const auto* pastedAcknowledge = wave::findLane(scenario, "lane-ack");
+                const auto targetPasteRange = canvas->selectedTimeRange();
+                const auto targetPasteLaneIds = canvas->selectedLaneIds();
+                if (afterTargetAwarePaste == beforeTargetAwarePaste
+                    || !pastedRequest
+                    || !pastedAcknowledge
+                    || pastedRequest->segments
+                        != wave::findLane(beforeTargetAwarePaste, "lane-request")->segments
+                    || valueAt(*pastedAcknowledge, 55'000) != copiedRequestValue
+                    || !canvas->hasExplicitRangeSelection()
+                    || !targetPasteRange
+                    || targetPasteRange->first != 50'000
+                    || targetPasteRange->second - targetPasteRange->first
+                        != copiedSingleRange->second - copiedSingleRange->first
+                    || targetPasteLaneIds.size() != 1
+                    || targetPasteLaneIds.front() != QStringLiteral("lane-ack")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("req → ack"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Single-lane Paste did not use the clicked compatible target";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto targetPasteScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix = targetPasteScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        targetPasteScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-target-aware-paste"));
+                    } else {
+                        targetPasteScreenshotPath.append(
+                            QStringLiteral("-target-aware-paste.png"));
+                    }
+                    if (!window.grab().save(targetPasteScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save target-aware Paste screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeTargetAwarePaste) {
+                    qCritical().noquote()
+                        << "Target-aware Paste was not one atomic Undo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                sendKey(Qt::Key_Escape);
+                settleLayouts();
+                dragModified(
+                    QPoint(xAtTick(20'000), clockY),
+                    QPoint(xAtTick(30'000), clockY),
+                    Qt::ShiftModifier);
+                settleLayouts();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedLaneIds().size() != 1
+                    || canvas->selectedLaneIds().front() != QStringLiteral("lane-clk")
+                    || !clickWidget(rangeCopyButton)
+                    || !chooseWaveformAction(
+                        QPoint(xAtTick(40'000), clockY),
+                        QStringLiteral("Paste copied range here"))) {
+                    qCritical().noquote()
+                        << "Normal Clock no-effect Paste workflow could not be invoked";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                settleLayouts();
+                const auto noEffectPasteMessage = window.statusBar()->currentMessage();
+                if (scenario != beforeTargetAwarePaste
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedLaneIds().size() != 1
+                    || canvas->selectedLaneIds().front() != QStringLiteral("lane-clk")
+                    || !noEffectPasteMessage.contains(
+                        QStringLiteral("already matches copied range"))
+                    || !noEffectPasteMessage.contains(
+                        QStringLiteral("no values changed"))
+                    || noEffectPasteMessage.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "No-effect Clock Paste changed the model or misreported its result";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto noEffectPasteScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix = noEffectPasteScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        noEffectPasteScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-paste-no-effect-feedback"));
+                    } else {
+                        noEffectPasteScreenshotPath.append(
+                            QStringLiteral("-paste-no-effect-feedback.png"));
+                    }
+                    if (!window.grab().save(noEffectPasteScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save no-effect Paste screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || scenario != afterTargetAwarePaste) {
+                    qCritical().noquote()
+                        << "No-effect Paste discarded the real target Paste Redo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeTargetAwarePaste) {
+                    qCritical().noquote()
+                        << "Target-aware Paste baseline was not recoverable after Redo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_Escape);
+                settleLayouts();
+
                 canvas->viewport()->update();
                 QCoreApplication::processEvents();
                 const auto transition = std::find_if(
