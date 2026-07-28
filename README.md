@@ -153,9 +153,11 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   复制或剪切后可在目标波形时间右键选择 `Paste copied range here`；同一次右键会清除旧范围并直接
   打开菜单，无需先点空白处。单 lane 内容以当前点击或选中的兼容信号为实际目标，结果显示
   `source → target`、目标时间、宽度和 `Ctrl+Z`；Bit→Bus 等类型不匹配及 Bus/Enum 位宽不匹配
-  会原子拒绝并说明原因。多 lane 内容继续保持复制时的完整 lane 集合。目标已与复制范围一致时显示
-  `no values changed`，不新增 Undo 或清除 Redo。粘贴后的目标范围保持显式选中，固定范围栏立即
-  可用于再次 Copy、Cut、Clear 或批量编辑；Undo 后选择仍保留，Esc 清除。Edit 菜单及
+  会原子拒绝并说明原因。固定范围栏显示可见 `Paste`；多 lane clipboard 与显式目标选择数量相等时，
+  按双方可见顺序一一映射，数量或任一配对不兼容时零写入。未建立显式多 lane 目标而使用右键 Paste
+  时仍保持复制时的完整源 lane 集合，避免猜测配对。目标已与复制范围一致时显示 `no values changed`，
+  不新增 Undo 或清除 Redo。粘贴后的目标范围保持显式选中，固定范围栏立即可用于再次
+  Copy、Cut、Paste、Clear 或批量编辑；Undo 后选择仍保留，Esc 清除。Edit 菜单及
   `Ctrl+C` / `Ctrl+X` / `Ctrl+V` 入口继续保留；当内联文本框获得焦点时，这三个快捷键只操作文本，
   不会修改波形。
   左右方向键移动直接编辑时间光标。
@@ -281,8 +283,9 @@ exports/
   保留具有专项覆盖；Shift 跨 lane 持久框选覆盖
   Bit/Bus 整段赋值、边界与相邻值保持、可见 Copy 的实际点击与 clipboard lane/宽度校验、
   左右范围手柄拖动、lane 集合与模型保持、同次右键清除旧范围并 Paste here、单 lane `req → ack`
-  目标映射、Bit→Bus 原子拒绝、正常 Clock 空 Paste 的无效果反馈/Redo 保留、粘贴结果持久选中、
-  标题/标尺同次清除并重定向、波形正文防误触、单步 Undo 后选择保留、混合类型无效控件
+  目标映射、Bit→Bus 原子拒绝、正常 Clock 空 Paste 的无效果反馈/Redo 保留、可见 Paste 按钮、
+  2→1 数量拒绝、两 lane 顺序目标映射及 960 像素无裁切命中、粘贴结果持久选中、标题/标尺同次
+  清除并重定向、波形正文防误触、单步 Undo 后选择保留、混合类型无效控件
   隐藏和零修改、缩放/刷新定位以及 Esc/外部点击清除。
 - Event 菱形局部虚线预览期间模型不变，释放、Undo 与 Redo 后 Event/Segment 保持同步。
 - Clock 真实右键 Gate→Run→重复 Run、拍级选择、无效果反馈、一次 Undo/Redo 及基线恢复具有专项

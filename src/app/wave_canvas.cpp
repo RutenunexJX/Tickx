@@ -429,6 +429,19 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeCutButton_->setAccessibleName(tr("Cut selected range"));
     rangeLayout->addWidget(rangeCutButton_);
     connect(rangeCutButton_, &QToolButton::clicked, this, &WaveCanvas::cutSelection);
+    rangePasteButton_ = new QToolButton(rangeEditPalette_);
+    rangePasteButton_->setText(tr("Paste"));
+    rangePasteButton_->setObjectName(QStringLiteral("RangeEditPasteButton"));
+    rangePasteButton_->setAutoRaise(true);
+    rangePasteButton_->setFocusPolicy(Qt::NoFocus);
+    rangePasteButton_->setCursor(Qt::PointingHandCursor);
+    rangePasteButton_->setToolTip(tr("Paste a copied range at the selected start (Ctrl+V)"));
+    rangePasteButton_->setAccessibleName(tr("Paste copied range into selected signals"));
+    rangeLayout->addWidget(rangePasteButton_);
+    connect(rangePasteButton_, &QToolButton::clicked, this, &WaveCanvas::pasteAtCursor);
+    connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [this] {
+        if (rangeEditPaletteVisible_) showRangeEditPalette();
+    });
     rangeClearButton_ = new QToolButton(rangeEditPalette_);
     rangeClearButton_->setText(tr("Clear"));
     rangeClearButton_->setObjectName(QStringLiteral("RangeEditClearButton"));
@@ -1344,18 +1357,40 @@ void WaveCanvas::pasteAtCursor()
 
     auto targetSummary = tr("%1 lane(s)")
                              .arg(static_cast<qulonglong>(copiedLanes.size()));
-    if (copiedLanes.size() == 1 && !selectedLaneId_.empty()) {
-        auto& copied = copiedLanes.front();
-        const auto* sourceLane = findLane(*scenario_, copied.laneId);
-        const auto* targetLane = findLane(*scenario_, selectedLaneId_);
-        if (sourceLane && targetLane && targetLane->kind != LaneKind::Group
-            && sourceLane->id != targetLane->id) {
-            const auto kindLabel = [](const LaneKind kind) {
-                const auto label = toString(kind);
-                return QString::fromLatin1(
-                    label.data(),
-                    static_cast<qsizetype>(label.size()));
-            };
+    std::vector<std::string> requestedTargetIds;
+    bool explicitTargetMapping = false;
+    if (explicitRangeSelection_) {
+        explicitTargetMapping = true;
+        if (selectedLaneIds_.size() != copiedLanes.size()) {
+            emit statusMessage(
+                tr("Cannot paste %1 copied signal(s) into %2 selected signal(s) · select the same number of targets")
+                    .arg(static_cast<qulonglong>(copiedLanes.size()))
+                    .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
+            return;
+        }
+        requestedTargetIds = selectedLaneIds_;
+    } else if (copiedLanes.size() == 1 && !selectedLaneId_.empty()) {
+        requestedTargetIds.push_back(selectedLaneId_);
+    }
+
+    if (!requestedTargetIds.empty()) {
+        const auto kindLabel = [](const LaneKind kind) {
+            const auto label = toString(kind);
+            return QString::fromLatin1(
+                label.data(),
+                static_cast<qsizetype>(label.size()));
+        };
+        bool remapped = false;
+        for (std::size_t index = 0; index < copiedLanes.size(); ++index) {
+            auto& copied = copiedLanes.at(index);
+            const auto* sourceLane = findLane(*scenario_, copied.laneId);
+            const auto* targetLane = findLane(*scenario_, requestedTargetIds.at(index));
+            if (!sourceLane || !targetLane || targetLane->kind == LaneKind::Group) {
+                emit statusMessage(
+                    tr("Cannot paste signal %1 · source or selected target is unavailable")
+                        .arg(static_cast<qulonglong>(index + 1)));
+                return;
+            }
             const auto sourceName = QString::fromStdString(sourceLane->name);
             const auto targetName = QString::fromStdString(targetLane->name);
             if (sourceLane->kind != targetLane->kind) {
@@ -1392,8 +1427,16 @@ void WaveCanvas::pasteAtCursor()
                 }
                 segment.value = validation.normalizedValue;
             }
+            remapped = remapped || copied.laneId != targetLane->id;
             copied.laneId = targetLane->id;
-            targetSummary = tr("%1 → %2").arg(sourceName, targetName);
+            if (copiedLanes.size() == 1 && remapped) {
+                targetSummary = tr("%1 → %2").arg(sourceName, targetName);
+            }
+        }
+        if (explicitTargetMapping && copiedLanes.size() > 1) {
+            targetSummary = tr("%1 copied signals → %2 selected signals")
+                                .arg(static_cast<qulonglong>(copiedLanes.size()))
+                                .arg(static_cast<qulonglong>(requestedTargetIds.size()));
         }
     }
 
@@ -3384,6 +3427,32 @@ void WaveCanvas::showRangeEditPalette()
     if (rangeCutButton_) {
         rangeCutButton_->setVisible(true);
         rangeCutButton_->setEnabled(true);
+    }
+    if (rangePasteButton_) {
+        const auto* mime = QApplication::clipboard()->mimeData();
+        const auto content = !mime
+            ? QByteArray{}
+            : mime->hasFormat(kRangeMimeType)
+                ? mime->data(kRangeMimeType)
+                : mime->text().toUtf8();
+        const auto document = QJsonDocument::fromJson(content);
+        const auto root = document.isObject() ? document.object() : QJsonObject{};
+        const auto copiedCount = root.value(QStringLiteral("schemaVersion")).toInt(-1) == 1
+                && root.value(QStringLiteral("lanes")).isArray()
+            ? root.value(QStringLiteral("lanes")).toArray().size()
+            : qsizetype{0};
+        rangePasteButton_->setVisible(true);
+        rangePasteButton_->setEnabled(copiedCount > 0);
+        rangePasteButton_->setToolTip(
+            copiedCount <= 0
+                ? tr("Copy a waveform range before pasting")
+                : copiedCount == static_cast<qsizetype>(selectedLaneIds_.size())
+                    ? tr("Paste %1 copied signal(s) into the selected targets at %2 (Ctrl+V)")
+                          .arg(copiedCount)
+                          .arg(format(selectionRange_->first))
+                    : tr("Copied range has %1 signal(s); current selection has %2")
+                          .arg(copiedCount)
+                          .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
     }
     if (rangeClearButton_) {
         rangeClearButton_->setVisible(true);

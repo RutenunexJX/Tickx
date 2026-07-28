@@ -343,6 +343,7 @@ private:
     QLabel* rangeEditContextLabel_{nullptr};
     QToolButton* rangeCopyButton_{nullptr};
     QToolButton* rangeCutButton_{nullptr};
+    QToolButton* rangePasteButton_{nullptr};
     QToolButton* rangeClearButton_{nullptr};
     QLineEdit* rangeValueEdit_{nullptr};
     QToolButton* rangeZeroButton_{nullptr};

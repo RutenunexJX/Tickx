@@ -2077,6 +2077,69 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 37：多 lane 显式目标 Paste 与可见入口
+
+状态：完成
+
+已交付：
+
+- 开发审计确认第 36 轮仅使单 lane Paste 采用当前目标；多 lane clipboard 即使配合同数量显式目标
+  选择，仍沿用源 lane ID。固定范围栏只有 Copy/Cut/Clear，用户必须记忆 `Ctrl+V`，也无法在提交前
+  确认目标数量是否匹配。
+- 用户主流程中，移动或复制两条关联波形到另外两条信号，需要先框选目标再粘贴；现有界面既没有
+  Paste 按钮，也忽略已框选目标。用户只能逐 lane 操作，或接受内容回写到原信号。
+- 固定范围栏在 Cut 与 Clear 之间新增可见 `Paste`，识别 Wave Workbench MIME 或等价文本 JSON；
+  无有效 clipboard 时禁用并说明先 Copy，有效 clipboard 时 tooltip 显示复制/目标数量和目标起点。
+  clipboard 改变时按钮状态即时刷新。
+- 显式范围选择存在时，Paste 要求复制 lane 数与目标 lane 数完全相同，并按双方可见顺序一一映射。
+  数量、类型、Bus/Enum 位宽或目标值校验任一失败时显示具体 source/target 原因，Scenario 零写入。
+  右键多 lane Paste 未提供显式目标集合时继续保持原源集合，避免依据单个点击 lane 猜测批量配对。
+- 成功后状态显示 `N copied signals → N selected signals`、目标时间、宽度及关系感知 Undo，目标范围
+  持续选中。Wave Edit smoke 真实执行 req/ack 120–130 ns Copy、2→1 拒绝、reset/request 20–30 ns
+  可见 Paste、原子 Undo/Redo，并将 Paste 纳入 960 像素全部可见/可命中/无裁切检查。
+  全部 GUI 路径使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 22 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.86 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.52 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 1.11 sec
+
+Screenshot generated:
+  build/qtcreator-debug/wave-edit-smoke-multi-target-paste.png
+Automated QA: Paste 在固定范围栏可见可命中；2 个复制 lane 对 1 个目标明确拒绝；req/ack 按顺序
+              写入 reset/request，源 ack 不变；Undo/Redo 原子恢复，960 像素下所有控件无裁切
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

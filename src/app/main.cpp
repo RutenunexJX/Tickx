@@ -3967,6 +3967,8 @@ int main(int argc, char* argv[])
                     QStringLiteral("RangeEditCopyButton"));
                 auto* rangeCutButton = window.findChild<QToolButton*>(
                     QStringLiteral("RangeEditCutButton"));
+                auto* rangePasteButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditPasteButton"));
                 auto* rangeClearButton = window.findChild<QToolButton*>(
                     QStringLiteral("RangeEditClearButton"));
                 auto* rangeOneButton = window.findChild<QToolButton*>(
@@ -3985,6 +3987,8 @@ int main(int argc, char* argv[])
                     || !rangeCutButton
                     || !rangeCutButton->isVisibleTo(&window)
                     || !rangeCutButton->isEnabled()
+                    || !rangePasteButton
+                    || !rangePasteButton->isVisibleTo(&window)
                     || !rangeClearButton
                     || !rangeClearButton->isVisibleTo(&window)
                     || !rangeClearButton->isEnabled()
@@ -4559,10 +4563,11 @@ int main(int argc, char* argv[])
                 settleLayouts();
                 const auto toolbarGlobalRect = widgetGlobalRect(waveformToolbar);
                 const auto rangePaletteGlobalRect = widgetGlobalRect(rangePalette);
-                const std::array<QWidget*, 9> visibleRangeControls{
+                const std::array<QWidget*, 10> visibleRangeControls{
                     rangeContext,
                     rangeCopyButton,
                     rangeCutButton,
+                    rangePasteButton,
                     rangeClearButton,
                     rangeValueEdit,
                     rangeZeroButton,
@@ -5080,6 +5085,149 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
+
+                const auto beforeMultiTargetPaste = scenario;
+                dragModified(
+                    QPoint(xAtTick(120'000), requestY),
+                    QPoint(xAtTick(130'000), acknowledgeY),
+                    Qt::ShiftModifier);
+                settleLayouts();
+                const auto multiPasteSourceRange = canvas->selectedTimeRange();
+                const auto multiPasteSourceIds = canvas->selectedLaneIds();
+                const auto* multiSourceRequest = wave::findLane(scenario, "lane-request");
+                const auto* multiSourceAcknowledge = wave::findLane(scenario, "lane-ack");
+                if (!multiPasteSourceRange
+                    || multiPasteSourceRange->second - multiPasteSourceRange->first
+                        != 10'000
+                    || multiPasteSourceIds
+                        != QStringList{
+                            QStringLiteral("lane-request"),
+                            QStringLiteral("lane-ack")}
+                    || !multiSourceRequest
+                    || !multiSourceAcknowledge
+                    || valueAt(*multiSourceRequest, 125'000) != "1"
+                    || valueAt(*multiSourceAcknowledge, 125'000) != "1"
+                    || !clickWidget(rangeCopyButton)) {
+                    qCritical().noquote()
+                        << "Multi-lane target Paste source could not be copied";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                sendKey(Qt::Key_Escape);
+                settleLayouts();
+                dragModified(
+                    QPoint(xAtTick(20'000), resetY),
+                    QPoint(xAtTick(30'000), resetY),
+                    Qt::ShiftModifier);
+                settleLayouts();
+                if (!rangePasteButton
+                    || !rangePasteButton->isVisibleTo(&window)
+                    || !rangePasteButton->isEnabled()
+                    || !clickWidget(rangePasteButton)) {
+                    qCritical().noquote()
+                        << "Visible range Paste button is unavailable for count validation";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (scenario != beforeMultiTargetPaste
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("2 copied signal(s) into 1 selected signal(s)"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("select the same number of targets"))) {
+                    qCritical().noquote()
+                        << "Multi-lane Paste count mismatch was not rejected visibly";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                sendKey(Qt::Key_Escape);
+                settleLayouts();
+                dragModified(
+                    QPoint(xAtTick(20'000), resetY),
+                    QPoint(xAtTick(30'000), requestY),
+                    Qt::ShiftModifier);
+                settleLayouts();
+                const auto multiTargetRange = canvas->selectedTimeRange();
+                const auto multiTargetIds = canvas->selectedLaneIds();
+                if (!multiTargetRange
+                    || multiTargetRange->first != 20'000
+                    || multiTargetRange->second != 30'000
+                    || multiTargetIds
+                        != QStringList{
+                            QStringLiteral("lane-reset"),
+                            QStringLiteral("lane-request")}
+                    || !rangePasteButton->isVisibleTo(&window)
+                    || !rangePasteButton->isEnabled()
+                    || !clickWidget(rangePasteButton)) {
+                    qCritical().noquote()
+                        << "Matching multi-lane target selection could not invoke Paste";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                settleLayouts();
+                const auto afterMultiTargetPaste = scenario;
+                const auto* multiTargetReset = wave::findLane(scenario, "lane-reset");
+                const auto* multiTargetRequest = wave::findLane(scenario, "lane-request");
+                const auto* unchangedMultiSourceAck = wave::findLane(scenario, "lane-ack");
+                if (afterMultiTargetPaste == beforeMultiTargetPaste
+                    || !multiTargetReset
+                    || !multiTargetRequest
+                    || !unchangedMultiSourceAck
+                    || valueAt(*multiTargetReset, 25'000) != "1"
+                    || valueAt(*multiTargetRequest, 25'000) != "1"
+                    || unchangedMultiSourceAck->segments
+                        != wave::findLane(beforeMultiTargetPaste, "lane-ack")->segments
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != multiTargetRange
+                    || canvas->selectedLaneIds() != multiTargetIds
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("2 copied signals → 2 selected signals"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Multi-lane Paste did not map sources to selected targets in order";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto multiTargetScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix = multiTargetScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        multiTargetScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-multi-target-paste"));
+                    } else {
+                        multiTargetScreenshotPath.append(
+                            QStringLiteral("-multi-target-paste.png"));
+                    }
+                    if (!window.grab().save(multiTargetScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save multi-target Paste screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeMultiTargetPaste
+                    || !QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || scenario != afterMultiTargetPaste
+                    || !QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeMultiTargetPaste) {
+                    qCritical().noquote()
+                        << "Multi-lane target Paste Undo/Redo was not atomic";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_Escape);
+                settleLayouts();
 
                 const auto beforeTargetAwarePaste = scenario;
                 dragModified(
