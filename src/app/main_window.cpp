@@ -4218,6 +4218,8 @@ bool MainWindow::loadFromPath(const QString& path)
             10'000);
     } else if (!result.warnings.isEmpty()) {
         statusBar()->showMessage(result.warnings.join(QStringLiteral("; ")), 10'000);
+    } else {
+        statusBar()->showMessage(tr("Opened %1").arg(path), 5'000);
     }
     if (traceCanvas_) traceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
     if (compareTraceCanvas_) {

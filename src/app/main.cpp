@@ -960,6 +960,66 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                const auto newInvoked = QMetaObject::invokeMethod(
+                    &window,
+                    "newProject",
+                    Qt::DirectConnection);
+                QCoreApplication::processEvents();
+                if (!newInvoked
+                    || !window.project().scenarios.front().lanes.empty()
+                    || window.project().scenarios.front().duration != 200'000
+                    || window.project().name != "Untitled"
+                    || !saveState->text().startsWith(QStringLiteral("Not saved"))) {
+                    fail(QStringLiteral(
+                        "New did not create a clean blank waveform before reopen"));
+                    return;
+                }
+
+                bool savedProjectSelectedForOpen = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&application,
+                     &savedProjectSelectedForOpen,
+                     userJourneySavePath] {
+                        auto* dialog = qobject_cast<QFileDialog*>(
+                            QApplication::activeModalWidget());
+                        if (!dialog) {
+                            qCritical().noquote()
+                                << "Open dialog did not appear for saved project";
+                            application.exit(4);
+                            return;
+                        }
+                        dialog->setDirectory(
+                            QFileInfo(userJourneySavePath).absolutePath());
+                        dialog->selectFile(
+                            QFileInfo(userJourneySavePath).fileName());
+                        savedProjectSelectedForOpen = true;
+                        QMetaObject::invokeMethod(
+                            dialog,
+                            "accept",
+                            Qt::DirectConnection);
+                    });
+                const auto reopenInvoked = QMetaObject::invokeMethod(
+                    &window,
+                    "openProject",
+                    Qt::DirectConnection);
+                QCoreApplication::processEvents();
+                const auto reopenStatus = window.statusBar()->currentMessage();
+                if (!reopenInvoked
+                    || !savedProjectSelectedForOpen
+                    || QApplication::activeModalWidget()
+                    || window.project().scenarios.front().duration != 650'000
+                    || window.project().scenarios.front().lanes.size() != 3
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !reopenStatus.startsWith(QStringLiteral("Opened "))
+                    || !reopenStatus.contains(
+                        QFileInfo(userJourneySavePath).fileName())) {
+                    fail(QStringLiteral(
+                        "Saved project did not reopen with explicit success feedback"));
+                    return;
+                }
+
                 bool invalidExportRangeRetained = false;
                 bool invalidPdfSpanRetained = false;
                 bool exportDirectoryReached = false;

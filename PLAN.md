@@ -2951,6 +2951,63 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 52：项目重新打开与结果反馈闭环
+
+状态：完成
+
+已交付：
+
+- 开发审计确认普通 `.wave.json` 成功加载时，窗口标题和波形虽会变化，但状态栏仅在 recovery 或 warning 分支
+  显示消息；无警告的正常 Open 会保留旧状态文字，无法明确区分成功加载、取消或仍在旧工程。
+- 用户从保存后的工程执行 New，再重新 Open，真正需要确认的是磁盘文件已被读取且当前画布对应所选路径。只依赖
+  视觉内容变化会在相似波形或大工程加载时增加误判风险。
+- 普通工程成功加载后状态栏现显示 `Opened <path>`；恢复快照继续显示必须 Save 的目标路径，迁移/解析 warning
+  继续优先显示，不覆盖更重要的恢复或兼容性说明。
+- `wave-user-journey-smoke` 在保存并验证 filter 后先取消一次 Open，随后执行 New，断言回到干净 200 ns 空白工程；
+  再从真实 Open 对话框选择刚保存的文件，断言恢复 650 ns/3 lane、永久状态为 Saved 且成功消息包含文件名。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 32 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.20 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.72 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-user-journey-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.47 sec
+
+Screenshot generated:
+  build/qtcreator-debug/user-journey-smoke.png
+Automated QA: 保存 650 ns/3 lane 工程后，Open 取消保持当前工程；New 生成干净 200 ns 空白波形；
+              再 Open 已保存文件恢复全部内容，SaveState=Saved，状态为 Opened <user-journey.wave.json>。
+              后续 Export 两级原位纠错、目录交接和最终截图均基于重新加载的磁盘工程通过。
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
