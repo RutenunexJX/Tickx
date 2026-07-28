@@ -334,6 +334,7 @@ private:
     std::string busPresetLaneId_;
     QFrame* rangeEditPalette_{nullptr};
     QLabel* rangeEditContextLabel_{nullptr};
+    QToolButton* rangeCopyButton_{nullptr};
     QLineEdit* rangeValueEdit_{nullptr};
     QToolButton* rangeZeroButton_{nullptr};
     QToolButton* rangeOneButton_{nullptr};

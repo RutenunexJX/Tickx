@@ -1141,6 +1141,65 @@ Visual QA: 范围栏隐藏和显示时画布起点均为 y=68；范围栏不覆�
 Desktop interaction: none
 ```
 
+## 持续迭代 21：持久范围复制闭环
+
+状态：完成
+
+已交付：
+
+- 开发审计确认固定范围栏的文案与行为不一致：混合类型显示 `Copy only`，但没有可见 Copy
+  按钮，仍展示不可用的 0/1/X/Z 控件，用户只能猜测 Ctrl+C 或进入 Edit 菜单。
+- 固定范围栏新增始终可见的 `Copy` 按钮。Bit、Bus 和混合选择均可直接复制完整 lane 集合与
+  整数时间宽度，复用既有 Wave Workbench range MIME 和状态栏成功反馈。
+- 混合或不支持类型的范围选择隐藏值输入及全部赋值按钮，只保留上下文和 `Copy`；Bit/Bus
+  继续显示各自有效控件。960 像素宽度下 Copy 也纳入包含、命中和无裁切检查。
+- `wave-wave-edit-smoke` 使用真实鼠标事件点击 Copy，解析 clipboard JSON 并核对 lane 数量与
+  durationTick，同时断言选择和模型不变；新增混合范围 Copy 状态截图。全部 GUI 路径继续使用
+  `QT_QPA_PLATFORM=offscreen`，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.44 sec
+
+cmake --build build/qtcreator-release --parallel
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.12 sec
+
+git diff --check
+Result: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.68 sec
+
+Screenshots:
+  build/qtcreator-debug/wave-edit-smoke-range-selection.png
+  build/qtcreator-debug/wave-edit-smoke-mixed-copy.png
+  build/qtcreator-debug/user-journey-smoke.png
+Visual QA: Copy 在范围栏中可见且未造成工具栏拥挤；混合选择只保留 Copy；
+           赋值控件无残留，波形、刻度与选择范围仍清晰
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

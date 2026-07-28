@@ -391,6 +391,16 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeEditContextLabel_->setObjectName(QStringLiteral("RangeEditContextLabel"));
     rangeEditContextLabel_->setMaximumWidth(310);
     rangeLayout->addWidget(rangeEditContextLabel_);
+    rangeCopyButton_ = new QToolButton(rangeEditPalette_);
+    rangeCopyButton_->setText(tr("Copy"));
+    rangeCopyButton_->setObjectName(QStringLiteral("RangeEditCopyButton"));
+    rangeCopyButton_->setAutoRaise(true);
+    rangeCopyButton_->setFocusPolicy(Qt::NoFocus);
+    rangeCopyButton_->setCursor(Qt::PointingHandCursor);
+    rangeCopyButton_->setToolTip(tr("Copy the selected signals and time range (Ctrl+C)"));
+    rangeCopyButton_->setAccessibleName(tr("Copy selected range"));
+    rangeLayout->addWidget(rangeCopyButton_);
+    connect(rangeCopyButton_, &QToolButton::clicked, this, &WaveCanvas::copySelection);
     rangeValueEdit_ = new QLineEdit(rangeEditPalette_);
     rangeValueEdit_->setObjectName(QStringLiteral("RangeEditValueEdit"));
     rangeValueEdit_->setPlaceholderText(tr("Value + Enter"));
@@ -3006,6 +3016,10 @@ void WaveCanvas::showRangeEditPalette()
                 : tr("Batch assignment requires only Bit signals or only Bus signals"));
     }
 
+    if (rangeCopyButton_) {
+        rangeCopyButton_->setVisible(true);
+        rangeCopyButton_->setEnabled(true);
+    }
     for (auto* button : {
              rangeZeroButton_,
              rangeOneButton_,
@@ -3014,10 +3028,10 @@ void WaveCanvas::showRangeEditPalette()
              rangeDontCareButton_}) {
         if (button) button->setEnabled(editable);
     }
-    if (rangeZeroButton_) rangeZeroButton_->show();
-    if (rangeOneButton_) rangeOneButton_->setVisible(bitRange || !editable);
-    if (rangeXButton_) rangeXButton_->show();
-    if (rangeZButton_) rangeZButton_->show();
+    if (rangeZeroButton_) rangeZeroButton_->setVisible(editable);
+    if (rangeOneButton_) rangeOneButton_->setVisible(bitRange);
+    if (rangeXButton_) rangeXButton_->setVisible(editable);
+    if (rangeZButton_) rangeZButton_->setVisible(editable);
     if (rangeDontCareButton_) rangeDontCareButton_->setVisible(busRange);
     if (rangeValueEdit_) {
         const auto restoreCanvasFocus = rangeValueEdit_->hasFocus() && !busRange;

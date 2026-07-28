@@ -8,6 +8,7 @@
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QClipboard>
 #include <QColor>
 #include <QComboBox>
 #include <QContextMenuEvent>
@@ -20,6 +21,9 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QLabel>
@@ -3049,6 +3053,8 @@ int main(int argc, char* argv[])
                     QStringLiteral("RangeEditPalette"));
                 auto* rangeContext = window.findChild<QLabel*>(
                     QStringLiteral("RangeEditContextLabel"));
+                auto* rangeCopyButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditCopyButton"));
                 auto* rangeOneButton = window.findChild<QToolButton*>(
                     QStringLiteral("RangeEditOneButton"));
                 auto* rangeXButton = window.findChild<QToolButton*>(
@@ -3059,6 +3065,9 @@ int main(int argc, char* argv[])
                     || !rangePalette->isVisibleTo(&window)
                     || !rangeContext
                     || !rangeContext->text().contains(QStringLiteral("Bit"))
+                    || !rangeCopyButton
+                    || !rangeCopyButton->isVisibleTo(&window)
+                    || !rangeCopyButton->isEnabled()
                     || !rangeOneButton
                     || !rangeOneButton->isEnabled()
                     || !rangeXButton
@@ -3453,8 +3462,9 @@ int main(int argc, char* argv[])
                 settleLayouts();
                 const auto toolbarGlobalRect = widgetGlobalRect(waveformToolbar);
                 const auto rangePaletteGlobalRect = widgetGlobalRect(rangePalette);
-                const std::array<QWidget*, 6> visibleRangeControls{
+                const std::array<QWidget*, 7> visibleRangeControls{
                     rangeContext,
+                    rangeCopyButton,
                     rangeValueEdit,
                     rangeZeroButton,
                     rangeXButton,
@@ -3699,13 +3709,73 @@ int main(int argc, char* argv[])
                     Qt::ShiftModifier);
                 settleLayouts();
                 const auto beforeMixedAssignment = scenario;
+                const auto mixedRange = canvas->selectedTimeRange();
+                const auto mixedLaneIds = canvas->selectedLaneIds();
                 if (!canvas->hasExplicitRangeSelection()
                     || !rangePalette->isVisibleTo(&window)
                     || !rangeToolbarAction->isVisible()
                     || !stableVerticalLayout()
                     || !rangeContext->text().contains(QStringLiteral("Copy only"))
-                    || rangeOneButton->isEnabled()) {
+                    || !rangeCopyButton
+                    || !rangeCopyButton->isVisibleTo(&window)
+                    || !rangeCopyButton->isEnabled()
+                    || rangeValueEdit->isVisibleTo(&window)
+                    || rangeZeroButton->isVisibleTo(&window)
+                    || rangeOneButton->isVisibleTo(&window)
+                    || rangeXButton->isVisibleTo(&window)
+                    || rangeZButton->isVisibleTo(&window)
+                    || rangeDontCareButton->isVisibleTo(&window)) {
                     qCritical().noquote() << "Mixed range did not enter safe copy-only state";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto mixedCopyScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix = mixedCopyScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        mixedCopyScreenshotPath.insert(suffix, QStringLiteral("-mixed-copy"));
+                    } else {
+                        mixedCopyScreenshotPath.append(QStringLiteral("-mixed-copy.png"));
+                    }
+                    if (!window.grab().save(mixedCopyScreenshotPath)) {
+                        qCritical().noquote() << "Cannot save mixed range Copy screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                if (!clickWidget(rangeCopyButton)) {
+                    qCritical().noquote() << "Mixed range Copy button is not hit-testable";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto* copiedMime = QApplication::clipboard()->mimeData();
+                const auto copiedDocument = copiedMime
+                    ? QJsonDocument::fromJson(copiedMime->data(
+                          QByteArrayLiteral("application/x-wave-workbench-range+json")))
+                    : QJsonDocument{};
+                const auto copiedRoot = copiedDocument.object();
+                bool validCopiedDuration = false;
+                const auto copiedDuration = copiedRoot.value(QStringLiteral("durationTick"))
+                                                .toString()
+                                                .toLongLong(&validCopiedDuration);
+                if (scenario != beforeMixedAssignment
+                    || !canvas->hasExplicitRangeSelection()
+                    || !mixedRange
+                    || !copiedMime
+                    || !copiedMime->hasFormat(
+                        QByteArrayLiteral("application/x-wave-workbench-range+json"))
+                    || !copiedDocument.isObject()
+                    || copiedRoot.value(QStringLiteral("lanes")).toArray().size()
+                        != mixedLaneIds.size()
+                    || !validCopiedDuration
+                    || copiedDuration != mixedRange->second - mixedRange->first
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Copied"))) {
+                    qCritical().noquote()
+                        << "Visible Copy did not preserve the complete mixed range";
                     window.hide();
                     application.exit(4);
                     return;
