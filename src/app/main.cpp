@@ -3788,6 +3788,67 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
+                bool pasteMenuHandled = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&application, &pasteMenuHandled] {
+                        auto* menu = qobject_cast<QMenu*>(
+                            QApplication::activePopupWidget());
+                        auto* pasteRange = menu
+                            ? menu->findChild<QAction*>(
+                                  QStringLiteral("PasteRangeHereAction"))
+                            : nullptr;
+                        if (!menu
+                            || menu->objectName() != QStringLiteral("WaveformContextMenu")
+                            || !pasteRange
+                            || pasteRange->text()
+                                != QStringLiteral("Paste copied range here")) {
+                            qCritical().noquote()
+                                << "Waveform context menu Paste here action is missing";
+                            if (menu) menu->close();
+                            application.exit(4);
+                            return;
+                        }
+                        menu->setActiveAction(pasteRange);
+                        pasteMenuHandled = true;
+                        QKeyEvent enter(
+                            QEvent::KeyPress,
+                            Qt::Key_Return,
+                            Qt::NoModifier);
+                        QCoreApplication::sendEvent(menu, &enter);
+                    });
+                const QPoint pasteContextPoint(xAtTick(90'000), requestY);
+                QContextMenuEvent pasteContext(
+                    QContextMenuEvent::Mouse,
+                    pasteContextPoint,
+                    canvas->viewport()->mapToGlobal(pasteContextPoint));
+                QCoreApplication::sendEvent(canvas->viewport(), &pasteContext);
+                settleLayouts();
+                const auto pastedRange = canvas->selectedTimeRange();
+                if (!pasteMenuHandled
+                    || scenario == beforeMixedAssignment
+                    || canvas->hasExplicitRangeSelection()
+                    || rangePalette->isVisibleTo(&window)
+                    || rangeToolbarAction->isVisible()
+                    || !pastedRange
+                    || pastedRange->first <= mixedRange->second
+                    || pastedRange->second - pastedRange->first != copiedDuration
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Pasted"))) {
+                    qCritical().noquote()
+                        << "Context-menu Paste here did not apply at the clicked destination";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeMixedAssignment) {
+                    qCritical().noquote() << "Context-menu Paste here was not one atomic undo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
                 sendKey(Qt::Key_Escape);
                 settleLayouts();
                 if (canvas->hasExplicitRangeSelection()

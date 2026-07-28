@@ -1200,6 +1200,65 @@ Visual QA: Copy 在范围栏中可见且未造成工具栏拥挤；混合选择�
 Desktop interaction: none
 ```
 
+## 持续迭代 22：右键就地粘贴闭环
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `pasteAtCursor` 仅由 Edit 菜单和 Ctrl+V 暴露。用户点击 Copy 后还要先清除旧范围、
+  再定位光标、再记忆快捷键；第一次右键只清除范围而不打开菜单，形成额外一次操作。
+- 当 clipboard 含 Wave Workbench range MIME 时，波形右键菜单顶部显示
+  `Paste copied range here`。右键位置直接成为目标时间；存在旧范围时同一次右键先清除范围并
+  继续打开菜单，不再要求第二次右键。
+- 粘贴成功后状态栏显示 lane 数、目标时间、实际宽度及 `Ctrl+Z`；仍通过单个
+  `PasteRangeCommand` 提交。无兼容 range 时不显示该入口，原有 Bit/Bus/Clock 菜单保持不变。
+- `wave-wave-edit-smoke` 在混合范围 Copy 后通过真实 `QContextMenuEvent` 打开菜单、选择 Paste，
+  验证目标范围、模型变化、范围栏关闭、成功反馈及单步 Undo 完整恢复。全部 GUI 路径继续使用
+  `QT_QPA_PLATFORM=offscreen`，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 9.92 sec
+
+cmake --build build/qtcreator-release --parallel
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.69 sec
+
+git diff --check
+Result: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.70 sec
+
+Interaction QA: Copy 后第一次右键即出现 Paste copied range here；
+                粘贴到点击时间并显示明确反馈，Ctrl+Z 单步恢复
+Screenshots:
+  build/qtcreator-debug/wave-edit-smoke-mixed-copy.png
+  build/qtcreator-debug/user-journey-smoke.png
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

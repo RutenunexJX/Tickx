@@ -128,7 +128,9 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   Esc 清除选择，第一次点击范围外只
   清除选择而不修改波形。同一时间边沿仍存在时复用稳定 Event ID，Relation 保持不变；边沿确实
   消失时仅删除引用它的 Relation，状态栏说明删除数量、原因以及 `Ctrl+Z` 会同时恢复波形和关系。
-  Edit 菜单的 Copy/Paste range 按稳定 lane ID 和相对整数 tick 复制，粘贴作为一个可撤销命令。
+  复制后可在目标波形时间右键选择 `Paste copied range here`；同一次右键会清除旧范围并直接打开
+  菜单，无需先点空白处。粘贴结果显示 lane 数、目标时间、宽度和 `Ctrl+Z` 提示，并作为一个
+  可撤销命令提交。Edit 菜单及 `Ctrl+C` / `Ctrl+V` 入口继续保留。
   左右方向键移动直接编辑时间光标。
 - Bit Event 菱形无需切换模式即可直接拖动。预览期间模型不变，虚线只覆盖原/新边沿中较早位置
   到后继 Segment 结束的局部范围；释放后以一个命令同步更新 Segment 与 Event。
@@ -243,7 +245,8 @@ exports/
 - 无模式直接编辑的 Segment 选择、整体移动、边界缩放、双击改值、Delete 清除与 Undo，Bit
   单拍/多拍翻转、0/1/X/Z 键盘输入和中键平移均通过离屏回归；Shift 跨 lane 持久框选覆盖
   Bit/Bus 整段赋值、边界与相邻值保持、可见 Copy 的实际点击与 clipboard lane/宽度校验、
-  混合类型无效控件隐藏和零修改、缩放/刷新定位以及 Esc/外部点击清除。
+  同次右键清除旧范围并 Paste here、单步 Undo、混合类型无效控件隐藏和零修改、缩放/刷新定位
+  以及 Esc/外部点击清除。
 - Event 菱形局部虚线预览期间模型不变，释放、Undo 与 Redo 后 Event/Segment 保持同步。
 - Bus 浮层覆盖直接值、非法值纠错、0/X/Z/Don't care 单击与拖放以及波形右键；未提交值的
   点击别处提交、隐藏草稿恢复、Save/New/Open/Close/Export 门禁、Bus/End 冲突顺序、鼠标失焦

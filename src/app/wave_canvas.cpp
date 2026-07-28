@@ -1286,11 +1286,12 @@ void WaveCanvas::pasteAtCursor()
         emit statusMessage(tr("No clipboard lanes exist in this scenario."));
         return;
     }
+    const auto pasteStart = cursorTick_;
     try {
         commandStack_->execute(std::make_unique<PasteRangeCommand>(
             *scenario_,
             copiedLanes,
-            cursorTick_,
+            pasteStart,
             duration));
     } catch (const std::exception& exception) {
         emit statusMessage(QString::fromUtf8(exception.what()));
@@ -1303,12 +1304,24 @@ void WaveCanvas::pasteAtCursor()
     for (const auto& copied : copiedLanes) selectedLaneIds_.push_back(copied.laneId);
     selectedLaneId_ = selectedLaneIds_.front();
     selectionRange_ = std::pair{
-        cursorTick_,
-        cursorTick_ + std::min<Tick>(duration, scenario_->duration - cursorTick_),
+        pasteStart,
+        pasteStart + std::min<Tick>(duration, scenario_->duration - pasteStart),
     };
     emit modelEdited();
     emit commandAvailabilityChanged();
     refreshModel();
+    const auto pastedDuration = selectionRange_->second - selectionRange_->first;
+    const auto startLabel = project_
+        ? QString::fromStdString(formatTick(pasteStart, project_->timeBase))
+        : QString::number(pasteStart);
+    const auto durationLabel = project_
+        ? QString::fromStdString(formatTick(pastedDuration, project_->timeBase))
+        : QString::number(pastedDuration);
+    emit statusMessage(
+        tr("Pasted %1 lane(s) at %2 · %3 · Ctrl+Z to undo")
+            .arg(static_cast<qulonglong>(copiedLanes.size()))
+            .arg(startLabel)
+            .arg(durationLabel));
 }
 
 void WaveCanvas::insertPulse()
@@ -1381,8 +1394,6 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     if (explicitRangeSelection_) {
         clearExplicitRangeSelection();
         emit statusMessage(tr("Range selection cleared"));
-        event->accept();
-        return;
     }
     auto* lane = laneAtY(event->pos().y());
     if (!lane || lane->kind == LaneKind::Group) {
@@ -1424,6 +1435,15 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
 
     QMenu menu(this);
     menu.setObjectName(QStringLiteral("WaveformContextMenu"));
+    QAction* pasteRange = nullptr;
+    const auto* clipboardMime = QApplication::clipboard()->mimeData();
+    if (clipboardMime && clipboardMime->hasFormat(kRangeMimeType)) {
+        pasteRange = menu.addAction(tr("Paste copied range here"));
+        pasteRange->setObjectName(QStringLiteral("PasteRangeHereAction"));
+        pasteRange->setToolTip(
+            tr("Paste the copied signals at this time as one undo command"));
+        menu.addSeparator();
+    }
     QAction* editValue = nullptr;
     QAction* clearValue = nullptr;
     QAction* setZero = nullptr;
@@ -1479,7 +1499,9 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     const auto* chosen = menu.exec(event->globalPos());
     if (!chosen) return;
     const auto [beatStart, beatEnd] = beatRangeAt(cursorTick_, *lane);
-    if (chosen == editValue) {
+    if (chosen == pasteRange) {
+        pasteAtCursor();
+    } else if (chosen == editValue) {
         editSegmentAt(event->pos());
     } else if (chosen == clearValue) {
         clearSelectedSegment();
