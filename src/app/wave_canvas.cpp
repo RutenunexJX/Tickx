@@ -2159,6 +2159,31 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         }
+        if (!drawing_
+            && (event->key() == Qt::Key_Home
+                || event->key() == Qt::Key_End)
+            && (event->modifiers() == Qt::NoModifier
+                || event->modifiers() == Qt::ControlModifier)) {
+            const auto atStart = event->key() == Qt::Key_Home;
+            cursorTick_ = atStart ? Tick{0} : scenario_->duration;
+            ensureCursorVisible(cursorTick_);
+            snapGuideTick_.reset();
+            const auto format = [this](const Tick tick) {
+                return QString::fromStdString(
+                    formatTick(tick, project_->timeBase));
+            };
+            emit statusMessage(
+                atStart
+                    ? tr("Timeline start · edit cursor %1 · End jumps to %2")
+                          .arg(format(cursorTick_))
+                          .arg(format(scenario_->duration))
+                    : tr("Timeline end · edit cursor %1 · Home jumps to %2")
+                          .arg(format(cursorTick_))
+                          .arg(format(0)));
+            viewport()->update();
+            event->accept();
+            return;
+        }
         if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
             const auto step = cursorKeyboardStep();
             const auto direction = event->key() == Qt::Key_Left ? Tick{-1} : Tick{1};

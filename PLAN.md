@@ -3953,6 +3953,58 @@ Automated QA: Saved 长时间轴中，Shift 范围出现后同一按钮从 Fit s
 Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-fit-selection.png
 Desktop interaction: none
 ```
+## 持续迭代 70：长时间轴 Home/End 边界导航
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Wave Edit 只处理左右方向键的步进移动，未处理 Home/End；QAbstractScrollArea 的默认按键行为不代表时间轴首尾。长波形保持放大时，用户无法用键盘直接到达 0 或 End。
+- 用户视角在局部放大后需要核对起始复位或末端状态：原路径是拖水平滚动条、Fit 后重新放大，或连续按方向键。用户真正需要的是保持当前缩放与编辑上下文，只改变当前时间位置。
+- Wave Edit 画布获得焦点、未处于拖动且无 Shift/Alt 等组合时，Home 与 End 分别将编辑光标设置为 0 和 Scenario End，并通过既有 `ensureCursorVisible()` 将水平视图滚到相应边界；Ctrl+Home 与 Ctrl+End 使用相同语义。
+- 导航保留缩放比例、水平滚动范围、所选 signal、显式范围和固定范围栏；状态栏显示 `Timeline start/end`、精确光标时间及反向边界键。导航不触发命令、autosave 或 Saved 变化。
+- 未注册全局 QAction 快捷键。End、重命名、Bus 值和范围值等内联 QLineEdit 获得焦点时继续自行处理 Home/End；Measure 的锁定 Marker 移动语义不变，避免一个导航键在不同选择状态下意外修改模型。
+- 继续扩展 `wave-wave-edit-autoscroll-smoke`：Fit scenario 回到全局后放大 5 级，覆盖普通 End 到场景末端、滚动值等于最大值、End 输入框 Home 仅将文本光标移到 0、Ctrl+Home 回到时间 0、滚动最大值/缩放保持、Scenario/Undo/Saved 隔离、状态反馈及第三张离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 19 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure -j 4
+26/26 tests passed
+Total Test time: 3.97 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure -j 4
+26/26 tests passed
+Total Test time: 4.58 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 1.77 sec
+
+Automated QA: Saved 的 1 µs 时间轴先保持 5 级放大，End 将编辑光标与视图直接移动到 1 µs，滚动值等于既有最大值；
+              End 输入框获得焦点后按 Home 只把文本光标移至开头，时间轴仍在 1 µs；
+              画布重新获得焦点后 Ctrl+Home 将光标与视图移到 0 ps，滚动最大值不变，证明缩放未丢失；全过程模型、Undo、Saved 和 Fit scenario 状态不变。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-timeline-home.png
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

@@ -2142,6 +2142,8 @@ int main(int argc, char* argv[])
                     QStringLiteral("UndoAction"));
                 auto* fitAction = window.findChild<QAction*>(
                     QStringLiteral("FitScenarioAction"));
+                auto* durationEdit = window.findChild<QLineEdit*>(
+                    QStringLiteral("TimelineDurationEdit"));
                 auto* saveState = window.findChild<QLabel*>(
                     QStringLiteral("SaveStateLabel"));
                 auto fail = [&application, &window](const QString& message) {
@@ -2149,7 +2151,7 @@ int main(int argc, char* argv[])
                     window.hide();
                     application.exit(4);
                 };
-                if (!canvas || !undoAction || !fitAction || !saveState
+                if (!canvas || !undoAction || !fitAction || !durationEdit || !saveState
                     || window.project().scenarios.empty()) {
                     fail(QStringLiteral(
                         "Wave Edit autoscroll smoke prerequisites are missing"));
@@ -2190,10 +2192,14 @@ int main(int argc, char* argv[])
                         modifiers);
                     QCoreApplication::sendEvent(canvas->viewport(), &event);
                 };
-                const auto sendKey = [](QObject* target, const int key) {
-                    QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier);
+                const auto sendKey = [](
+                                         QObject* target,
+                                         const int key,
+                                         const Qt::KeyboardModifiers modifiers
+                                             = Qt::NoModifier) {
+                    QKeyEvent press(QEvent::KeyPress, key, modifiers);
                     QCoreApplication::sendEvent(target, &press);
-                    QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier);
+                    QKeyEvent release(QEvent::KeyRelease, key, modifiers);
                     QCoreApplication::sendEvent(target, &release);
                 };
                 const auto waitForScroll = [](const int milliseconds) {
@@ -2521,6 +2527,85 @@ int main(int argc, char* argv[])
                     fail(QStringLiteral(
                         "Contextual Fit scenario did not restore the complete overview"));
                     return;
+                }
+
+                for (auto index = 0; index < 5; ++index) canvas->zoomIn();
+                QCoreApplication::processEvents();
+                const auto navigationMaximum =
+                    canvas->horizontalScrollBar()->maximum();
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_End);
+                if (navigationMaximum <= 0
+                    || canvas->cursorTick() != scenario.duration
+                    || canvas->horizontalScrollBar()->value()
+                        != navigationMaximum
+                    || canvas->horizontalScrollBar()->maximum()
+                        != navigationMaximum
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Timeline end"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Home jumps to"))) {
+                    fail(QStringLiteral(
+                        "End did not jump the edit cursor and viewport to the timeline boundary"));
+                    return;
+                }
+
+                durationEdit->setFocus(Qt::OtherFocusReason);
+                durationEdit->setCursorPosition(durationEdit->text().size());
+                sendKey(durationEdit, Qt::Key_Home);
+                QCoreApplication::processEvents();
+                if (durationEdit->cursorPosition() != 0
+                    || canvas->cursorTick() != scenario.duration
+                    || canvas->horizontalScrollBar()->value()
+                        != navigationMaximum
+                    || durationEdit->isModified()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Timeline Home intercepted the End text field instead of moving its caret"));
+                    return;
+                }
+
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Home, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (canvas->cursorTick() != 0
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || canvas->horizontalScrollBar()->maximum()
+                        != navigationMaximum
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Timeline start"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("End jumps to"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+Home did not preserve zoom while returning to timeline start"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto navigationScreenshotPath =
+                        waveEditAutoScrollScreenshotPath;
+                    const auto suffix = navigationScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        navigationScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-timeline-home"));
+                    } else {
+                        navigationScreenshotPath.append(
+                            QStringLiteral("-timeline-home.png"));
+                    }
+                    if (!window.grab().save(navigationScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save timeline Home navigation screenshot"));
+                        return;
+                    }
                 }
 
                 window.hide();
