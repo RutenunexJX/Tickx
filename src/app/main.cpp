@@ -1069,6 +1069,7 @@ int main(int argc, char* argv[])
                 QStringLiteral("WaveformToolbar"));
             auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
             auto* redoAction = window.findChild<QAction*>(QStringLiteral("RedoAction"));
+            auto* cutRangeAction = window.findChild<QAction*>(QStringLiteral("CutRangeAction"));
             auto* measureAction = window.findChild<QAction*>(
                 QStringLiteral("MeasureToolAction"));
             const auto toolbarActions = waveformToolbar
@@ -1092,6 +1093,7 @@ int main(int argc, char* argv[])
             if (!waveformToolbar
                 || !undoAction
                 || !redoAction
+                || !cutRangeAction
                 || !measureAction
                 || window.findChild<QAction*>(QStringLiteral("WaveEditToolAction"))
                 || checkableModeCount != 1
@@ -1105,8 +1107,10 @@ int main(int argc, char* argv[])
                 || undoAction->shortcut().matches(QKeySequence(QKeySequence::Undo))
                     != QKeySequence::ExactMatch
                 || redoAction->shortcut().matches(QKeySequence(QKeySequence::Redo))
+                    != QKeySequence::ExactMatch
+                || cutRangeAction->shortcut().matches(QKeySequence(QKeySequence::Cut))
                     != QKeySequence::ExactMatch) {
-                fail(QStringLiteral("Toolbar convergence or Undo/Redo menu shortcuts are incorrect"));
+                fail(QStringLiteral("Toolbar convergence or Undo/Redo/Cut menu shortcuts are incorrect"));
                 return;
             }
 
@@ -3055,6 +3059,8 @@ int main(int argc, char* argv[])
                     QStringLiteral("RangeEditContextLabel"));
                 auto* rangeCopyButton = window.findChild<QToolButton*>(
                     QStringLiteral("RangeEditCopyButton"));
+                auto* rangeCutButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditCutButton"));
                 auto* rangeClearButton = window.findChild<QToolButton*>(
                     QStringLiteral("RangeEditClearButton"));
                 auto* rangeOneButton = window.findChild<QToolButton*>(
@@ -3070,6 +3076,9 @@ int main(int argc, char* argv[])
                     || !rangeCopyButton
                     || !rangeCopyButton->isVisibleTo(&window)
                     || !rangeCopyButton->isEnabled()
+                    || !rangeCutButton
+                    || !rangeCutButton->isVisibleTo(&window)
+                    || !rangeCutButton->isEnabled()
                     || !rangeClearButton
                     || !rangeClearButton->isVisibleTo(&window)
                     || !rangeClearButton->isEnabled()
@@ -3462,14 +3471,42 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                auto* cutRangeAction = window.findChild<QAction*>(
+                    QStringLiteral("CutRangeAction"));
+                const auto beforeTextCut = scenario;
+                rangeValueEdit->setText(QStringLiteral("0xa5"));
+                rangeValueEdit->selectAll();
+                rangeValueEdit->setFocus(Qt::OtherFocusReason);
+                QCoreApplication::processEvents();
+                if (!cutRangeAction) {
+                    qCritical().noquote() << "Cut range menu action is missing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                cutRangeAction->trigger();
+                QCoreApplication::processEvents();
+                if (!rangeValueEdit->text().isEmpty()
+                    || scenario != beforeTextCut
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != busRange) {
+                    qCritical().noquote()
+                        << "Ctrl+X route replaced text Cut with a waveform edit";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                rangeValueEdit->setModified(false);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
                 const auto fullWindowSize = window.size();
                 window.resize(960, fullWindowSize.height());
                 settleLayouts();
                 const auto toolbarGlobalRect = widgetGlobalRect(waveformToolbar);
                 const auto rangePaletteGlobalRect = widgetGlobalRect(rangePalette);
-                const std::array<QWidget*, 8> visibleRangeControls{
+                const std::array<QWidget*, 9> visibleRangeControls{
                     rangeContext,
                     rangeCopyButton,
+                    rangeCutButton,
                     rangeClearButton,
                     rangeValueEdit,
                     rangeZeroButton,
@@ -3721,10 +3758,12 @@ int main(int argc, char* argv[])
                     || !rangePalette->isVisibleTo(&window)
                     || !rangeToolbarAction->isVisible()
                     || !stableVerticalLayout()
-                    || !rangeContext->text().contains(QStringLiteral("Copy or clear"))
+                    || !rangeContext->text().contains(QStringLiteral("Copy, cut, or clear"))
                     || !rangeCopyButton
                     || !rangeCopyButton->isVisibleTo(&window)
                     || !rangeCopyButton->isEnabled()
+                    || !rangeCutButton->isVisibleTo(&window)
+                    || !rangeCutButton->isEnabled()
                     || !rangeClearButton->isVisibleTo(&window)
                     || !rangeClearButton->isEnabled()
                     || rangeValueEdit->isVisibleTo(&window)
@@ -3733,7 +3772,7 @@ int main(int argc, char* argv[])
                     || rangeXButton->isVisibleTo(&window)
                     || rangeZButton->isVisibleTo(&window)
                     || rangeDontCareButton->isVisibleTo(&window)) {
-                    qCritical().noquote() << "Mixed range did not enter safe copy/clear state";
+                    qCritical().noquote() << "Mixed range did not enter safe copy/cut/clear state";
                     window.hide();
                     application.exit(4);
                     return;
@@ -3796,6 +3835,44 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
+                if (!clickWidget(rangeCutButton)) {
+                    qCritical().noquote() << "Mixed range Cut button is not hit-testable";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                settleLayouts();
+                const auto afterCut = scenario;
+                const auto* cutMime = QApplication::clipboard()->mimeData();
+                const auto cutDocument = cutMime
+                    ? QJsonDocument::fromJson(cutMime->data(
+                          QByteArrayLiteral("application/x-wave-workbench-range+json")))
+                    : QJsonDocument{};
+                if (afterCut == beforeMixedAssignment
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != mixedRange
+                    || !rangePalette->isVisibleTo(&window)
+                    || !rangeToolbarAction->isVisible()
+                    || !cutMime
+                    || cutDocument != copiedDocument
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Cut"))) {
+                    qCritical().noquote()
+                        << "Visible Cut did not copy and clear the mixed range in place";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeMixedAssignment
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != mixedRange
+                    || !rangePalette->isVisibleTo(&window)) {
+                    qCritical().noquote() << "Range Cut was not one atomic source undo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
                 bool pasteMenuHandled = false;
                 QTimer::singleShot(
                     0,
@@ -3840,7 +3917,7 @@ int main(int argc, char* argv[])
                     || !rangePalette->isVisibleTo(&window)
                     || !rangeToolbarAction->isVisible()
                     || !stableVerticalLayout()
-                    || !rangeContext->text().contains(QStringLiteral("Copy or clear"))
+                    || !rangeContext->text().contains(QStringLiteral("Copy, cut, or clear"))
                     || !pastedRange
                     || pastedRange->first <= mixedRange->second
                     || pastedRange->second - pastedRange->first != copiedDuration

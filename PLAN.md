@@ -1376,6 +1376,64 @@ Visual QA: 固定范围栏同时显示 Copy 与 Clear；混合范围动作可发
 Desktop interaction: none
 ```
 
+## 持续迭代 25：标准范围 Cut 与文本焦点保护
+
+状态：完成
+
+已交付：
+
+- 用户审计确认移动一段波形需要依次 Copy、Clear、Paste；缺少标准 Cut，使一次常规移动多一步，
+  且用户可能在清除源区间前改变选择。Edit 菜单也没有 `Ctrl+X`。
+- 固定范围工具栏在 Copy 与 Clear 之间新增可见 `Cut`；同类型和混合类型范围均可直接使用。
+  Cut 先写入与 Copy 相同的整数 tick/MIME 数据，再通过现有原子范围清除命令删除源值；成功后
+  保持范围、lane 集合和工具栏，状态栏明确显示源区间可由 `Ctrl+Z` 恢复。移动范围缩为 Cut 后
+  在目标时间 Paste 两步。
+- Edit 菜单新增 `Cut range` 与标准 `Ctrl+X`。为避免全局 QAction 劫持内联值、名称或时长编辑，
+  Cut/Copy/Paste 在 `QLineEdit` 获得焦点时分别执行文本 cut/copy/paste；其余焦点才路由到波形范围。
+- `wave-app-smoke` 验证 Cut QAction 与标准快捷键；`wave-wave-edit-smoke` 在 960 像素窗口断言
+  Copy/Cut/Clear 全部可见可命中，真实点击 Cut 后验证剪贴板、源清除、选区保持和单步 Undo，并
+  验证 Bus 值输入框中的 Cut 不修改 Scenario。全部 GUI 路径继续使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.46 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.04 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-app-smoke|wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+3/3 passed
+Total Test time: 1.06 sec
+
+Screenshot:
+  build/qtcreator-debug/wave-edit-smoke-pasted-range.png
+Visual QA: 固定范围栏按 Copy / Cut / Clear 排列，三项动作均可见可命中；
+           范围上下文、刻度和波形无覆盖，960 像素窗口布局稳定
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

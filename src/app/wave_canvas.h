@@ -94,6 +94,7 @@ public slots:
     void fitSelection();
     void refreshModel();
     void revealLocation(const QString& laneId, qint64 tick);
+    void cutSelection();
     void copySelection();
     void pasteAtCursor();
     void insertPulse();
@@ -208,7 +209,7 @@ private:
     bool applyExplicitRangeValue(
         const std::string& value,
         const std::string& presetId = {});
-    bool clearExplicitRange();
+    bool clearExplicitRange(bool cutting = false);
     void applyExplicitRangePreset(const std::string& presetId);
     void applyBusPreset(const std::string& laneId, const std::string& presetId, Tick tick);
     void promptBusValueAt(const std::string& laneId, Tick tick);
@@ -336,6 +337,7 @@ private:
     QFrame* rangeEditPalette_{nullptr};
     QLabel* rangeEditContextLabel_{nullptr};
     QToolButton* rangeCopyButton_{nullptr};
+    QToolButton* rangeCutButton_{nullptr};
     QToolButton* rangeClearButton_{nullptr};
     QLineEdit* rangeValueEdit_{nullptr};
     QToolButton* rangeZeroButton_{nullptr};

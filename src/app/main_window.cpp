@@ -3063,14 +3063,39 @@ void MainWindow::createActions()
     redoAction_->setObjectName(QStringLiteral("RedoAction"));
     redoAction_->setToolTip(tr("Redo the last reverted edit"));
     editMenu_->addSeparator();
+    auto* cutAction = editMenu_->addAction(tr("Cu&t range"));
+    cutAction->setObjectName(QStringLiteral("CutRangeAction"));
+    cutAction->setShortcut(QKeySequence::Cut);
+    cutAction->setToolTip(tr("Copy and clear the selected time range as one undo command"));
+    connect(cutAction, &QAction::triggered, this, [this] {
+        if (auto* editor = qobject_cast<QLineEdit*>(focusWidget())) {
+            editor->cut();
+            return;
+        }
+        canvas_->cutSelection();
+    });
     auto* copyAction = editMenu_->addAction(tr("&Copy range"));
+    copyAction->setObjectName(QStringLiteral("CopyRangeAction"));
     copyAction->setShortcut(QKeySequence::Copy);
     copyAction->setToolTip(tr("Copy the selected time range across all selected lanes"));
-    connect(copyAction, &QAction::triggered, canvas_, &WaveCanvas::copySelection);
+    connect(copyAction, &QAction::triggered, this, [this] {
+        if (auto* editor = qobject_cast<QLineEdit*>(focusWidget())) {
+            editor->copy();
+            return;
+        }
+        canvas_->copySelection();
+    });
     auto* pasteAction = editMenu_->addAction(tr("&Paste range"));
+    pasteAction->setObjectName(QStringLiteral("PasteRangeAction"));
     pasteAction->setShortcut(QKeySequence::Paste);
     pasteAction->setToolTip(tr("Paste the copied range at the current cursor as one undo command"));
-    connect(pasteAction, &QAction::triggered, canvas_, &WaveCanvas::pasteAtCursor);
+    connect(pasteAction, &QAction::triggered, this, [this] {
+        if (auto* editor = qobject_cast<QLineEdit*>(focusWidget())) {
+            editor->paste();
+            return;
+        }
+        canvas_->pasteAtCursor();
+    });
     editMenu_->addSeparator();
     auto* addLaneAction = editMenu_->addAction(
         tr("Add &lane…"),
