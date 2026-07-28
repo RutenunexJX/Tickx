@@ -1455,7 +1455,14 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         : Tick{0};
     cursorTick_ = snappedTick(rawTick, lane);
     const auto* segment = segmentAtTick(*lane, cursorTick_);
-    if (segment) {
+    if (lane->kind == LaneKind::Bit) {
+        const auto beatRange = beatRangeAt(cursorTick_, *lane);
+        selectedSegmentLaneId_.clear();
+        selectedSegmentId_.clear();
+        selectionRange_ = beatRange;
+        waveEditHoverLaneId_ = lane->id;
+        waveEditHoverRange_ = beatRange;
+    } else if (segment) {
         selectedSegmentLaneId_ = lane->id;
         selectedSegmentId_ = segment->id;
         selectionRange_ = std::pair{segment->start, segment->end};
@@ -1524,7 +1531,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         menu.addSeparator();
         clearValue = menu.addAction(
             lane->kind == LaneKind::Bit
-                ? tr("Clear segment to implicit 0")
+                ? tr("Clear beat to implicit 0")
                 : lane->kind == LaneKind::Bus
                     ? tr("Clear segment to implicit X")
                     : tr("Clear segment"));
@@ -1538,7 +1545,11 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     } else if (chosen == editValue) {
         editSegmentAt(event->pos());
     } else if (chosen == clearValue) {
-        clearSelectedSegment();
+        if (lane->kind == LaneKind::Bit) {
+            static_cast<void>(clearSelectedBitRange());
+        } else {
+            clearSelectedSegment();
+        }
     } else if (chosen == setZero) {
         setLaneRangeValue(lane->id, beatStart, beatEnd, "0");
     } else if (chosen == setOne) {
@@ -1621,6 +1632,15 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             static_cast<void>(clearExplicitRange());
             event->accept();
             return;
+        }
+        if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)
+            && selectionRange_) {
+            const auto* lane = findLane(*scenario_, selectedLaneId_);
+            if (lane && lane->kind == LaneKind::Bit) {
+                static_cast<void>(clearSelectedBitRange());
+                event->accept();
+                return;
+            }
         }
         if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)
             && !selectedSegmentId_.empty()) {
@@ -3655,6 +3675,8 @@ bool WaveCanvas::setLaneRangeValue(
             viewport());
         return false;
     }
+    const auto laneName = lane->name;
+    const auto laneKind = lane->kind;
     try {
         commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
             *scenario_,
@@ -3670,13 +3692,18 @@ bool WaveCanvas::setLaneRangeValue(
 
     selectedLaneId_ = laneId;
     selectedLaneIds_ = {laneId};
-    selectedSegmentLaneId_ = laneId;
+    laneHeaderSelectionActive_ = false;
+    selectedSegmentLaneId_.clear();
     selectedSegmentId_.clear();
     selectionRange_ = std::pair{start, end};
     cursorTick_ = start;
-    if (const auto* refreshedLane = findLane(*scenario_, laneId)) {
+    if (laneKind == LaneKind::Bit) {
+        waveEditHoverLaneId_ = laneId;
+        waveEditHoverRange_ = selectionRange_;
+    } else if (const auto* refreshedLane = findLane(*scenario_, laneId)) {
         const auto probe = start + (end - start) / 2;
         if (const auto* segment = segmentAtTick(*refreshedLane, probe)) {
+            selectedSegmentLaneId_ = laneId;
             selectedSegmentId_ = segment->id;
             selectionRange_ = std::pair{segment->start, segment->end};
         }
@@ -3687,10 +3714,68 @@ bool WaveCanvas::setLaneRangeValue(
     refreshModel();
     emit statusMessage(
         tr("%1 · %2–%3 = %4 · Ctrl+Z to undo")
-            .arg(QString::fromStdString(lane->name))
+            .arg(QString::fromStdString(laneName))
             .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
             .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
             .arg(QString::fromStdString(validation.normalizedValue)));
+    return true;
+}
+
+bool WaveCanvas::clearSelectedBitRange()
+{
+    if (!scenario_ || !commandStack_ || explicitRangeSelection_
+        || !selectionRange_ || selectionRange_->second <= selectionRange_->first) {
+        return false;
+    }
+    const auto* lane = findLane(*scenario_, selectedLaneId_);
+    if (!lane || lane->kind != LaneKind::Bit) return false;
+    const auto [start, end] = *selectionRange_;
+    if (start < 0 || end > scenario_->duration) return false;
+    const auto intersectsExplicit = std::any_of(
+        lane->segments.begin(),
+        lane->segments.end(),
+        [start, end](const Segment& segment) {
+            return segment.start < end && segment.end > start;
+        });
+    if (!intersectsExplicit) {
+        emit statusMessage(
+            tr("%1 · %2–%3 already uses implicit 0")
+                .arg(QString::fromStdString(lane->name))
+                .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+                .arg(QString::fromStdString(formatTick(end, project_->timeBase))));
+        return false;
+    }
+
+    const auto laneId = lane->id;
+    const auto laneName = lane->name;
+    try {
+        commandStack_->execute(std::make_unique<ClearLaneRangeCommand>(
+            *scenario_,
+            laneId,
+            start,
+            end));
+    } catch (const std::exception& exception) {
+        emit statusMessage(QString::fromUtf8(exception.what()));
+        return false;
+    }
+    selectedLaneId_ = laneId;
+    selectedLaneIds_ = {laneId};
+    laneHeaderSelectionActive_ = false;
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    selectionRange_ = std::pair{start, end};
+    waveEditHoverLaneId_ = laneId;
+    waveEditHoverRange_ = selectionRange_;
+    cursorTick_ = start;
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    emit selectionChanged(QString::fromStdString(laneId), cursorTick_);
+    refreshModel();
+    emit statusMessage(
+        tr("%1 · %2–%3 cleared to implicit 0 · Ctrl+Z to undo")
+            .arg(QString::fromStdString(laneName))
+            .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+            .arg(QString::fromStdString(formatTick(end, project_->timeBase))));
     return true;
 }
 

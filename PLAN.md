@@ -1546,6 +1546,63 @@ Visual QA: 范围栏已在同次标尺点击后隐藏；60 ns 编辑光标和纵
 Desktop interaction: none
 ```
 
+## 持续迭代 28：Bit 写值与清除保持拍级选择
+
+状态：完成
+
+已交付：
+
+- 用户审计确认 Bit 单击翻转已保持一拍，但随后按 `0/1/X/Z` 或通过右键 `Set beat` 写值时，
+  通用选择逻辑会重新选中合并后的整段 Segment。用户再按 Delete 可能清除相邻同电平拍，
+  与“单 Bit 操作始终一拍”的既有规则冲突。
+- Bit 的键盘与右键写值现在保留请求的拍级时间范围，并明确清空 Segment 选择；右键打开后即使
+  取消，也只保持当前拍。Bus、Clock 与其他非 Bit lane 仍沿用完整 Segment 选择和边界编辑。
+- `Delete` / `Backspace` 对 Bit 拍级选择清除到隐式 0；右键动作改名为
+  `Clear beat to implicit 0` 并执行同一逻辑。单拍或拖动形成的多拍范围均保持选择，成功反馈包含
+  时间范围和 `Ctrl+Z`；已经是隐式 0 时不产生空 Undo。
+- `wave-wave-edit-smoke` 真实执行键盘写值、右键 Set X、右键 Clear、Delete 及 Undo/Redo，
+  验证相邻拍不变、选择从未扩展、Scenario 精确往返。全部 GUI 测试继续使用 offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.34 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.13 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.79 sec
+
+Screenshot:
+  build/qtcreator-debug/wave-edit-smoke-bit-beat-selection.png
+Visual QA: req 的 60–70 ns 单拍单独高亮并显示 X；左右相邻 0 电平拍未进入选择；
+           状态栏明确显示一拍范围、结果与 Ctrl+Z，波形刻度和布局无遮挡
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

@@ -222,6 +222,7 @@ private:
         Tick end,
         std::string value,
         JsonExtensions extensions = {});
+    bool clearSelectedBitRange();
     void clearSelectedSegment();
     void updateLaneDropTarget(int y);
     void commitLaneReorder();

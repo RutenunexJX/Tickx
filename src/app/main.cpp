@@ -3029,8 +3029,186 @@ int main(int argc, char* argv[])
                 }
                 sendKey(Qt::Key_0);
                 requestLane = wave::findLane(scenario, "lane-request");
-                if (!requestLane || valueAt(*requestLane, 65'000) != "0") {
-                    qCritical().noquote() << "0 key did not restore the selected Bit beat";
+                const auto bitBeatRange =
+                    std::pair<wave::Tick, wave::Tick>{60'000, 70'000};
+                const auto hasBeatScopedSelection = [&canvas, &bitBeatRange] {
+                    const auto range = canvas->selectedTimeRange();
+                    return range
+                        && *range == bitBeatRange
+                        && canvas->selectedSegmentId().isEmpty();
+                };
+                if (!requestLane
+                    || valueAt(*requestLane, 65'000) != "0"
+                    || !hasBeatScopedSelection()) {
+                    qCritical().noquote()
+                        << "0 key did not keep the selected Bit beat scoped to one beat";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                bool bitSetMenuHandled = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&application, &bitSetMenuHandled] {
+                        auto* menu = qobject_cast<QMenu*>(
+                            QApplication::activePopupWidget());
+                        QAction* setX = nullptr;
+                        if (menu
+                            && menu->objectName()
+                                == QStringLiteral("WaveformContextMenu")) {
+                            for (auto* action : menu->actions()) {
+                                if (action
+                                    && action->text()
+                                        == QStringLiteral("Set beat to X")) {
+                                    setX = action;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!menu || !setX) {
+                            qCritical().noquote()
+                                << "Bit context menu does not expose one-beat X";
+                            if (menu) menu->close();
+                            application.exit(4);
+                            return;
+                        }
+                        menu->setActiveAction(setX);
+                        bitSetMenuHandled = true;
+                        QKeyEvent enter(
+                            QEvent::KeyPress,
+                            Qt::Key_Return,
+                            Qt::NoModifier);
+                        QCoreApplication::sendEvent(menu, &enter);
+                    });
+                const QPoint bitContextPoint(xAtTick(65'000), requestY);
+                QContextMenuEvent bitSetContext(
+                    QContextMenuEvent::Mouse,
+                    bitContextPoint,
+                    canvas->viewport()->mapToGlobal(bitContextPoint));
+                QCoreApplication::sendEvent(canvas->viewport(), &bitSetContext);
+                settleLayouts();
+                requestLane = wave::findLane(scenario, "lane-request");
+                if (!bitSetMenuHandled
+                    || !requestLane
+                    || valueAt(*requestLane, 55'000) != "0"
+                    || valueAt(*requestLane, 65'000) != "X"
+                    || valueAt(*requestLane, 75'000) != "0"
+                    || !hasBeatScopedSelection()) {
+                    qCritical().noquote()
+                        << "Bit context value expanded one beat to a merged Segment";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto bitBeatScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix = bitBeatScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        bitBeatScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-bit-beat-selection"));
+                    } else {
+                        bitBeatScreenshotPath.append(
+                            QStringLiteral("-bit-beat-selection.png"));
+                    }
+                    if (!window.grab().save(bitBeatScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save Bit beat selection screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+
+                const auto beforeBitBeatClear = scenario;
+                bool bitClearMenuHandled = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&application, &bitClearMenuHandled] {
+                        auto* menu = qobject_cast<QMenu*>(
+                            QApplication::activePopupWidget());
+                        QAction* clearBeat = nullptr;
+                        if (menu
+                            && menu->objectName()
+                                == QStringLiteral("WaveformContextMenu")) {
+                            for (auto* action : menu->actions()) {
+                                if (action
+                                    && action->text()
+                                        == QStringLiteral("Clear beat to implicit 0")) {
+                                    clearBeat = action;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!menu || !clearBeat) {
+                            qCritical().noquote()
+                                << "Bit context menu does not expose one-beat Clear";
+                            if (menu) menu->close();
+                            application.exit(4);
+                            return;
+                        }
+                        menu->setActiveAction(clearBeat);
+                        bitClearMenuHandled = true;
+                        QKeyEvent enter(
+                            QEvent::KeyPress,
+                            Qt::Key_Return,
+                            Qt::NoModifier);
+                        QCoreApplication::sendEvent(menu, &enter);
+                    });
+                QContextMenuEvent bitClearContext(
+                    QContextMenuEvent::Mouse,
+                    bitContextPoint,
+                    canvas->viewport()->mapToGlobal(bitContextPoint));
+                QCoreApplication::sendEvent(canvas->viewport(), &bitClearContext);
+                settleLayouts();
+                requestLane = wave::findLane(scenario, "lane-request");
+                if (!bitClearMenuHandled
+                    || !requestLane
+                    || valueAt(*requestLane, 55'000) != "0"
+                    || !valueAt(*requestLane, 65'000).empty()
+                    || valueAt(*requestLane, 75'000) != "0"
+                    || !hasBeatScopedSelection()
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("implicit 0"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Bit context Clear did not clear exactly one selected beat";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto afterBitBeatClear = scenario;
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeBitBeatClear
+                    || !hasBeatScopedSelection()) {
+                    qCritical().noquote()
+                        << "One-beat Bit Clear undo did not preserve selection";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || scenario != afterBitBeatClear
+                    || !hasBeatScopedSelection()) {
+                    qCritical().noquote() << "One-beat Bit Clear redo failed";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_X);
+                sendKey(Qt::Key_Delete);
+                requestLane = wave::findLane(scenario, "lane-request");
+                if (!requestLane
+                    || !valueAt(*requestLane, 65'000).empty()
+                    || !hasBeatScopedSelection()
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Delete did not clear exactly the selected Bit beat";
                     window.hide();
                     application.exit(4);
                     return;
