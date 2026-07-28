@@ -1840,7 +1840,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
             : tr("Selected signal %1 · Delete removes signal · F2 renames")
                   .arg(QString::fromStdString(lane->name));
         if (tool_ == Tool::WaveEdit && lane->kind != LaneKind::Group) {
-            selectionMessage.append(tr(" · Ctrl+Left/Right jumps edges"));
+            selectionMessage.append(tr(" · Up/Down selects signals · Ctrl+Left/Right jumps edges"));
         }
         if (lockedMarkerDeselected) {
             selectionMessage.append(tr(" · locked cursor/range deselected"));
@@ -2158,6 +2158,26 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                     restoredViewport
                         ? tr("Waveform drag cancelled · view restored")
                         : tr("Waveform drag cancelled"));
+            }
+            event->accept();
+            return;
+        }
+        if ((event->key() == Qt::Key_Up || event->key() == Qt::Key_Down)
+            && event->modifiers() == Qt::NoModifier) {
+            const auto* focusedEditor = qobject_cast<QLineEdit*>(
+                QApplication::focusWidget());
+            if (focusedEditor && isAncestorOf(focusedEditor)) {
+                event->accept();
+                return;
+            }
+            if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
+                emit statusMessage(
+                    tr("Finish or cancel the current drag before changing signals"));
+            } else if (explicitRangeSelection_) {
+                emit statusMessage(
+                    tr("Esc clears the selected range before changing signals"));
+            } else {
+                selectAdjacentLane(event->key() == Qt::Key_Down);
             }
             event->accept();
             return;
@@ -2638,7 +2658,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             : tr("Selected signal %1 · Delete removes signal · F2 renames")
                   .arg(QString::fromStdString(lane->name));
         if (tool_ == Tool::WaveEdit && lane->kind != LaneKind::Group) {
-            selectionMessage.append(tr(" · Ctrl+Left/Right jumps edges"));
+            selectionMessage.append(tr(" · Up/Down selects signals · Ctrl+Left/Right jumps edges"));
         }
         if (lockedMarkerDeselected) {
             selectionMessage.append(tr(" · locked cursor/range deselected"));
@@ -5322,6 +5342,108 @@ std::optional<Tick> WaveCanvas::adjacentEdgeTick(
         }
     }
     return result;
+}
+
+void WaveCanvas::selectAdjacentLane(const bool downward)
+{
+    if (!scenario_) return;
+    const auto selectable = [](const Lane& lane) {
+        return lane.visible && lane.kind != LaneKind::Group;
+    };
+    const auto current = std::find_if(
+        scenario_->lanes.begin(),
+        scenario_->lanes.end(),
+        [this](const Lane& lane) { return lane.id == selectedLaneId_; });
+    auto target = scenario_->lanes.end();
+    if (downward) {
+        const auto first = current == scenario_->lanes.end()
+            ? scenario_->lanes.begin()
+            : std::next(current);
+        target = std::find_if(first, scenario_->lanes.end(), selectable);
+    } else {
+        const auto first = current == scenario_->lanes.end()
+            ? scenario_->lanes.rbegin()
+            : std::make_reverse_iterator(current);
+        const auto reverseTarget = std::find_if(
+            first,
+            scenario_->lanes.rend(),
+            selectable);
+        if (reverseTarget != scenario_->lanes.rend()) {
+            target = std::prev(reverseTarget.base());
+        }
+    }
+
+    if (target == scenario_->lanes.end()) {
+        const auto* currentLane = current == scenario_->lanes.end()
+            ? nullptr
+            : &*current;
+        const auto visibleSignalCount = std::count_if(
+            scenario_->lanes.begin(),
+            scenario_->lanes.end(),
+            selectable);
+        if (visibleSignalCount == 0) {
+            emit statusMessage(tr("No visible signals to select"));
+        } else if (!currentLane) {
+            emit statusMessage(
+                downward
+                    ? tr("No signal selected · Down starts at the first visible signal")
+                    : tr("No signal selected · Up starts at the last visible signal"));
+        } else {
+            emit statusMessage(
+                downward
+                    ? tr("No signal below %1 · Up selects the previous signal")
+                          .arg(QString::fromStdString(currentLane->name))
+                    : tr("No signal above %1 · Down selects the next signal")
+                          .arg(QString::fromStdString(currentLane->name)));
+        }
+        return;
+    }
+
+    clearWaveEditState();
+    hideBusPresetPalette();
+    selectedLaneId_ = target->id;
+    selectedLaneIds_ = {target->id};
+    laneHeaderSelectionActive_ = false;
+    snapGuideTick_.reset();
+    ensureLaneVisible(target->id);
+    const auto ordinal = std::count_if(
+        scenario_->lanes.begin(),
+        std::next(target),
+        selectable);
+    const auto total = std::count_if(
+        scenario_->lanes.begin(),
+        scenario_->lanes.end(),
+        selectable);
+    emit selectionChanged(QString::fromStdString(target->id), cursorTick_);
+    emit statusMessage(
+        tr("Selected signal %1 · %2 of %3 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
+            .arg(QString::fromStdString(target->name))
+            .arg(ordinal)
+            .arg(total));
+    viewport()->setCursor(Qt::PointingHandCursor);
+    viewport()->update();
+}
+
+void WaveCanvas::ensureLaneVisible(const std::string& laneId)
+{
+    if (!scenario_) return;
+    const auto layout = std::find_if(
+        laneLayout_.begin(),
+        laneLayout_.end(),
+        [this, &laneId](const LaneLayout& candidate) {
+            return scenario_->lanes.at(candidate.laneIndex).id == laneId;
+        });
+    if (layout == laneLayout_.end()) return;
+    const auto visibleHeight = std::max(0, viewport()->height() - RulerHeight);
+    if (visibleHeight <= 0) return;
+    const auto currentTop = verticalScrollBar()->value();
+    const auto currentBottom = currentTop + visibleHeight;
+    if (layout->top < currentTop) {
+        verticalScrollBar()->setValue(layout->top);
+    } else if (layout->top + layout->height > currentBottom) {
+        verticalScrollBar()->setValue(
+            layout->top + layout->height - visibleHeight);
+    }
 }
 
 QString WaveCanvas::cursorValue(const Lane& lane) const

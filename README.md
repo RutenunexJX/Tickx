@@ -143,6 +143,7 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
 - 建立显式时间范围后，现有单个 `Fit scenario` 动作会就地改为 `Fit selection`；点击后让范围左右端点准确占满波形视口，同时保留选区、固定范围栏和编辑能力。状态栏说明 Esc 可清除选区；清除后同一动作恢复为 `Fit scenario`，再次点击返回完整概览。缩放过程不修改模型、Undo 或 Saved 状态，也不增加第二个 Fit 按钮。
 - Wave Edit 画布获得焦点且未在拖动时，`Home` / `End`（也接受 `Ctrl+Home` / `Ctrl+End`）直接把编辑光标和水平视图跳到 0 或场景 End；当前缩放、信号目标和显式范围均保留，状态栏显示到达的边界及反向快捷键。内联 End、重命名、Bus/范围值等文本框继续自行处理 Home/End，不会触发时间轴跳转；导航不修改模型、Undo 或 Saved 状态。
 - 单击信号名选中当前信号后，状态栏直接提示边沿导航；Wave Edit 画布获得焦点时，`Ctrl+Left` / `Ctrl+Right` 严格跳到当前时间之前/之后的最近真实边沿，不会停在当前位置。Bit、Bus 与 Enum 使用 Segment 起止边界，Clock 同时使用周期上升/下降沿和覆盖区段边界；没有相邻边沿时光标保持原位，并提示使用 Home 或 End。该导航保留缩放和信号目标，不修改模型、Undo 或 Saved 状态。
+- Wave Edit 画布获得焦点时，`Up` / `Down` 选择当前行上方/下方的可见信号并跳过 Group；无选择时分别从末条/首条信号开始。时间光标、水平位置和模型保持不变，长列表只滚动到足以完整显示目标行，不额外滚到末尾添加区。到达首末信号时保持原目标并说明反向键；键盘选中不会武装整条信号 Delete。显式范围或拖动期间先提示完成/按 Esc，不隐式清除操作；End、重命名及其他画布内文本框获得焦点时 Up/Down 不会冒泡为信号导航。`Alt+Up` / `Alt+Down` 的可撤销重排语义不变。
 - Clock 波形右键可对一拍执行 Gate、Drive X 或 Run。Run 清除该拍覆盖后保持拍级选择，并显示
   `restored normal clock waveform` 与撤销提示；已正常运行时显示 `no values changed`，不新增
   Undo 或清除 Redo。
@@ -317,8 +318,8 @@ exports/
   无效新增阻止删除/Bus 控件/Segment 双击并可 Esc 恢复、有效新增先提交再删除、两步 Undo 顺序、
   多个交错命令逐次恢复、右键参数真实结果/原值确认/Undo/Redo、无效时间/颜色原位纠错与草稿/焦点保留、Marker 模式标题拖动 Esc 取消、
   跨位置/原位拖放结果以及 Undo/Redo 恢复提示均具有专项 offscreen 覆盖。
-  长列表专项另覆盖上下边缘持续滚动、真实插入位置、Esc 复原视口与顺序，以及跨视口移动的一步 Undo。
-  Wave Edit 长时间轴专项覆盖右向 Segment 模型外预览、Esc 视图复原、释放单命令提交、Undo 回到 Saved、释放后计时器停止、左向 Shift 范围持续扩展、同一 Fit 动作的 selection/scenario 切换与全局恢复、放大状态下 End→末端、End 文本框 Home 焦点隔离、Ctrl+Home→起点和缩放保持，以及 Bus Segment/Clock 周期边沿的 Ctrl+Left/Right 相邻跳转、边界反馈和信号选中提示。
+  长列表专项另覆盖上下边缘持续滚动、真实插入位置、Esc 复原视口与顺序、跨视口移动的一步 Undo，以及 Up/Down 从无选择进入首条、跳过 Group、首末边界、最小垂直滚动、End 文本框焦点隔离和键盘选择 Delete 安全。
+  Wave Edit 长时间轴专项覆盖右向 Segment 模型外预览、Esc 视图复原、释放单命令提交、Undo 回到 Saved、释放后计时器停止、左向 Shift 范围持续扩展、同一 Fit 动作的 selection/scenario 切换与全局恢复、放大状态下 End→末端、End 文本框 Home 焦点隔离、Ctrl+Home→起点和缩放保持，以及 Bus Segment/Clock 周期边沿的 Ctrl+Left/Right 相邻跳转、边界反馈、信号选中提示和显式范围期间 Up/Down 的无损阻断。
 - Measure 离屏回归覆盖活动/临时光标、持久锁定点/区间、精确 `Δ`、创建/选择/拖动/方向键/删除
   结果、活动光标单击与方向键最终值、Shift 参考点、正负拖动的 Reference/Cursor/Δ、边界无效果
   反馈、一次 Undo 直达前一真实移动、Delete 的 Undo/Redo 恢复提示、删除较早点后的名称冲突规避、

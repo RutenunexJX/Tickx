@@ -358,7 +358,10 @@ int main(int argc, char* argv[])
             wave::Lane lane;
             lane.id = "lane-scroll-" + suffix;
             lane.name = "signal_" + suffix;
-            lane.kind = wave::LaneKind::Bit;
+            lane.kind = index == 5
+                ? wave::LaneKind::Group
+                : wave::LaneKind::Bit;
+            if (index == 5) lane.name = "group_05";
             lane.color = colors.at(static_cast<std::size_t>(index) % colors.size());
             lane.height = 56;
             scenario.lanes.push_back(std::move(lane));
@@ -2521,6 +2524,27 @@ int main(int argc, char* argv[])
                     }
                 }
 
+                const auto rangeSignalIds = canvas->selectedLaneIds();
+                const auto rangeVerticalScroll =
+                    canvas->verticalScrollBar()->value();
+                sendKey(canvas, Qt::Key_Down);
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != committedRange
+                    || canvas->selectedLaneIds() != rangeSignalIds
+                    || canvas->verticalScrollBar()->value()
+                        != rangeVerticalScroll
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || fitAction->text() != QStringLiteral("Fit selection")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral(
+                            "Esc clears the selected range before changing signals"))) {
+                    fail(QStringLiteral(
+                        "Signal Down discarded or changed an explicit range"));
+                    return;
+                }
+
                 sendKey(canvas, Qt::Key_Escape);
                 if (canvas->hasExplicitRangeSelection()
                     || canvas->selectedTimeRange()
@@ -2773,12 +2797,14 @@ int main(int argc, char* argv[])
                 auto* canvas = window.findChild<wave::WaveCanvas*>();
                 auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
                 auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+                auto* durationEdit = window.findChild<QLineEdit*>(
+                    QStringLiteral("TimelineDurationEdit"));
                 auto fail = [&application, &window](const QString& message) {
                     qCritical().noquote() << message;
                     window.hide();
                     application.exit(4);
                 };
-                if (!canvas || !undoAction || !saveState
+                if (!canvas || !undoAction || !saveState || !durationEdit
                     || window.project().scenarios.empty()) {
                     fail(QStringLiteral("Lane autoscroll smoke prerequisites are missing"));
                     return;
@@ -2967,6 +2993,139 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                const auto originalHorizontalScroll =
+                    canvas->horizontalScrollBar()->value();
+                sendKey(canvas, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (!canvas->selectedLaneId().isEmpty()
+                    || canvas->verticalScrollBar()->value() != 0
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Keyboard signal navigation did not start from a clean selection"));
+                    return;
+                }
+
+                durationEdit->setFocus(Qt::OtherFocusReason);
+                sendKey(durationEdit, Qt::Key_Down);
+                QCoreApplication::processEvents();
+                if (!canvas->selectedLaneId().isEmpty()
+                    || canvas->verticalScrollBar()->value() != 0
+                    || canvas->horizontalScrollBar()->value()
+                        != originalHorizontalScroll
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()) {
+                    fail(QStringLiteral(
+                        "Signal Down intercepted the timeline End text field"));
+                    return;
+                }
+
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Down);
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-00")
+                    || canvas->verticalScrollBar()->value() != 0
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("1 of 19"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Up/Down selects signals"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Left/Right jumps edges"))) {
+                    fail(QStringLiteral(
+                        "Down without a selection did not select the first visible signal"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Up);
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-00")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("No signal above signal_00"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Down selects the next signal"))) {
+                    fail(QStringLiteral(
+                        "Up at the first signal did not keep the target and explain the boundary"));
+                    return;
+                }
+
+                for (auto index = 0; index < 5; ++index) {
+                    sendKey(canvas, Qt::Key_Down);
+                }
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-06")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("6 of 19"))) {
+                    fail(QStringLiteral(
+                        "Down did not skip the Group while preserving visible-signal order"));
+                    return;
+                }
+                for (auto index = 0; index < 13; ++index) {
+                    sendKey(canvas, Qt::Key_Down);
+                }
+                QCoreApplication::processEvents();
+                const auto lastSignalScroll =
+                    canvas->verticalScrollBar()->value();
+                const auto lastSignalY = laneCenter("lane-scroll-19");
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-19")
+                    || lastSignalScroll <= 0
+                    || lastSignalScroll >= canvas->verticalScrollBar()->maximum()
+                    || lastSignalY < 40
+                    || lastSignalY >= canvas->viewport()->height()
+                    || canvas->horizontalScrollBar()->value()
+                        != originalHorizontalScroll
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("19 of 19"))) {
+                    fail(QStringLiteral(
+                        "Repeated Down did not minimally reveal the last visible signal"));
+                    return;
+                }
+                if (!laneAutoScrollScreenshotPath.isEmpty()) {
+                    auto navigationScreenshotPath = laneAutoScrollScreenshotPath;
+                    const auto suffix = navigationScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        navigationScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-keyboard-navigation"));
+                    } else {
+                        navigationScreenshotPath.append(
+                            QStringLiteral("-keyboard-navigation.png"));
+                    }
+                    if (!window.grab().save(navigationScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save keyboard signal navigation screenshot"));
+                        return;
+                    }
+                }
+
+                sendKey(canvas, Qt::Key_Down);
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-19")
+                    || canvas->verticalScrollBar()->value() != lastSignalScroll
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("No signal below signal_19"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Up selects the previous signal"))) {
+                    fail(QStringLiteral(
+                        "Down at the last signal did not keep the target and explain the boundary"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Up);
+                sendKey(canvas, Qt::Key_Delete);
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-18")
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || window.windowTitle().contains(QStringLiteral(" *"))) {
+                    fail(QStringLiteral(
+                        "Keyboard signal navigation armed an unintended signal deletion"));
+                    return;
+                }
                 window.hide();
                 application.exit(0);
             });

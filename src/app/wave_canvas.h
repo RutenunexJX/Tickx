@@ -272,6 +272,8 @@ private:
         const Lane& lane,
         Tick from,
         bool forward) const;
+    void selectAdjacentLane(bool downward);
+    void ensureLaneVisible(const std::string& laneId);
     [[nodiscard]] QString cursorValue(const Lane& lane) const;
     [[nodiscard]] QString cursorDeltaText(Tick from, Tick to) const;
     [[nodiscard]] QString cursorMeasurementText() const;

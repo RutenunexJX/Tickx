@@ -4058,6 +4058,60 @@ Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-next-edge.
 Desktop interaction: none
 ```
 
+## 持续迭代 72：纵向信号键盘导航
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Wave Edit 已拦截左右方向键、Home/End 和 Ctrl+Left/Right，但普通 Up/Down 仍落入 `QAbstractScrollArea` 默认滚动。它只能移动视口，不能建立下一条信号目标，后续边沿跳转、拍级写值和 F2 均无法形成连续键盘路径。
+- 用户视角在固定时间逐行核对信号：原路径要求每一行都重新移动鼠标并点击，长列表还要手工滚动。用户需要保持当前 tick 和水平缩放，只把目标移动到视觉上的上一条或下一条信号；Group 不是可采样信号，应自动跳过。
+- Wave Edit 画布获得焦点时，普通 Up/Down 选择上一条/下一条可见非 Group Lane；无选择时 Up 从末条、Down 从首条进入。导航清理旧的单拍/Segment 选择但不修改模型，保留时间光标和水平视图，并仅在目标行离开视口时调整最少的垂直滚动量。
+- 首末边界保持当前目标并说明反向键；成功反馈显示信号名、可见序号/总数，以及 Up/Down 和 Ctrl+Left/Right 的后续路径。信号标题选择反馈也直接公开 Up/Down；`Alt+Up` / `Alt+Down` 的可撤销重排未被拦截。
+- 键盘选择明确不设置标题删除状态，因此随后 Delete 不会误删整条信号。拖动期间要求先完成或 Esc；显式范围期间保持范围并提示 Esc，不隐式丢弃用户操作。
+- 首次专项运行暴露 QLineEdit 忽略 Up/Down 后向父画布冒泡的问题；现在检测画布内获得焦点的 `QLineEdit` 并在父级消费冒泡事件。End、重命名、快速参数及其他内联文本编辑不再触发信号切换。
+- 扩展 `wave-lane-autoscroll-smoke`：20 项夹具含 19 条信号和 1 个 Group，覆盖 End 文本框焦点隔离、无选择 Down→首条、首端 Up 原位、连续 Down 跳过 Group、末条最小滚动、末端 Down 原位、反向 Up、Delete 安全、模型/Undo/Saved/水平视图隔离及第二张离屏截图。`wave-wave-edit-autoscroll-smoke` 另覆盖显式范围期间 Down 无损阻断。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 20 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 15.47 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.22 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-(lane-autoscroll|wave-edit-autoscroll)-smoke$" --output-on-failure
+2/2 passed
+Total Test time: 4.27 sec
+
+Automated QA: End 文本框中的 Down 不改变选择或视口；画布 Down 从 signal_00 开始，Up 在首条原位提示；
+              连续 Down 从 signal_04 跳过 group_05 到 signal_06，最终选择 19/19 的 signal_19，目标完整可见但滚动值小于最大值；
+              末端 Down 原位提示，Up 返回 signal_18，随后 Delete 不删除 Lane。显式时间范围中的 Down 保持范围、信号、Fit selection、模型、Undo 与 Saved，并提示 Esc。
+Offscreen visual QA: build/qtcreator-debug/lane-autoscroll-smoke-keyboard-navigation.png
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
