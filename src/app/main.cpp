@@ -2029,8 +2029,16 @@ int main(int argc, char* argv[])
                                 if (dialog) dialog->reject();
                                 return;
                             }
+                            auto* buttons = dialog->findChild<QDialogButtonBox*>();
+                            auto* ok = buttons
+                                ? buttons->button(QDialogButtonBox::Ok)
+                                : nullptr;
+                            if (!ok) {
+                                dialog->reject();
+                                return;
+                            }
                             dialogHandled = true;
-                            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+                            ok->click();
                         });
                         action->trigger();
                         menuHandled = true;
@@ -2131,6 +2139,72 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            bool invalidBitColorRetained = false;
+            if (!editFromContext(
+                    quickBit.id,
+                    [&application, &invalidBitColorRetained](QDialog* dialog) {
+                        auto* color = dialog->findChild<QLineEdit*>(
+                            QStringLiteral("LaneColorEdit"));
+                        if (!color
+                            || dialog->objectName()
+                                != QStringLiteral("QuickLaneParametersDialog")) {
+                            return false;
+                        }
+                        color->setText(QStringLiteral("not-a-color"));
+                        QTimer::singleShot(
+                            0,
+                            &application,
+                            [dialog, &invalidBitColorRetained] {
+                                auto* active = QApplication::activeModalWidget();
+                                if (auto* warning = qobject_cast<QMessageBox*>(active)) {
+                                    warning->accept();
+                                    return;
+                                }
+                                auto* color = dialog->findChild<QLineEdit*>(
+                                    QStringLiteral("LaneColorEdit"));
+                                auto* height = dialog->findChild<QSpinBox*>(
+                                    QStringLiteral("LaneHeightSpin"));
+                                auto* error = dialog->findChild<QLabel*>(
+                                    QStringLiteral("QuickLaneParameterError"));
+                                auto* buttons = dialog->findChild<QDialogButtonBox*>();
+                                auto* ok = buttons
+                                    ? buttons->button(QDialogButtonBox::Ok)
+                                    : nullptr;
+                                if (active != dialog
+                                    || !color
+                                    || !height
+                                    || !error
+                                    || !ok
+                                    || !error->isVisible()
+                                    || !error->text().contains(QStringLiteral("valid HTML color"))
+                                    || color->text() != QStringLiteral("not-a-color")
+                                    || !color->hasFocus()
+                                    || height->value() != 64) {
+                                    dialog->reject();
+                                    return;
+                                }
+                                invalidBitColorRetained = true;
+                                color->setText(QStringLiteral("#123456"));
+                                ok->click();
+                            });
+                        return true;
+                    })) {
+                fail(QStringLiteral("Invalid Bit color editor did not open"));
+                return;
+            }
+            renamedBit = wave::findLane(window.project().scenarios.front(), quickBit.id);
+            if (!invalidBitColorRetained
+                || !renamedBit
+                || renamedBit->color != "#123456"
+                || renamedBit->height != 64
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("color #123456"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Invalid Bit color was not recoverable in place"));
+                return;
+            }
+
             const auto* clockBeforeEdit = wave::findClock(
                 window.project(), quickClock.clockDomainId);
             if (!clockBeforeEdit) {
@@ -2138,26 +2212,68 @@ int main(int argc, char* argv[])
                 return;
             }
             const auto clockPeriodBeforeEdit = clockBeforeEdit->period;
-            if (!editFromContext(quickClock.id, [](QDialog* dialog) {
-                    auto* mode = dialog->findChild<QComboBox*>(
-                        QStringLiteral("ClockRateMode"));
-                    auto* value = dialog->findChild<QLineEdit*>(
-                        QStringLiteral("ClockRateValue"));
-                    if (dialog->objectName() != QStringLiteral("QuickClockParametersDialog")
-                        || !mode
-                        || !value) {
-                        return false;
-                    }
-                    mode->setCurrentIndex(mode->findData(QStringLiteral("period")));
-                    value->setText(QStringLiteral("12000 ticks"));
-                    return true;
-                })) {
+            bool invalidClockRateRetained = false;
+            if (!editFromContext(
+                    quickClock.id,
+                    [&application, &invalidClockRateRetained](QDialog* dialog) {
+                        auto* mode = dialog->findChild<QComboBox*>(
+                            QStringLiteral("ClockRateMode"));
+                        auto* value = dialog->findChild<QLineEdit*>(
+                            QStringLiteral("ClockRateValue"));
+                        if (dialog->objectName()
+                                != QStringLiteral("QuickClockParametersDialog")
+                            || !mode
+                            || !value) {
+                            return false;
+                        }
+                        mode->setCurrentIndex(mode->findData(QStringLiteral("period")));
+                        value->setText(QStringLiteral("not-a-time"));
+                        QTimer::singleShot(
+                            0,
+                            &application,
+                            [dialog, &invalidClockRateRetained] {
+                                auto* active = QApplication::activeModalWidget();
+                                if (auto* warning = qobject_cast<QMessageBox*>(active)) {
+                                    warning->accept();
+                                    return;
+                                }
+                                auto* mode = dialog->findChild<QComboBox*>(
+                                    QStringLiteral("ClockRateMode"));
+                                auto* value = dialog->findChild<QLineEdit*>(
+                                    QStringLiteral("ClockRateValue"));
+                                auto* error = dialog->findChild<QLabel*>(
+                                    QStringLiteral("QuickLaneParameterError"));
+                                auto* buttons = dialog->findChild<QDialogButtonBox*>();
+                                auto* ok = buttons
+                                    ? buttons->button(QDialogButtonBox::Ok)
+                                    : nullptr;
+                                if (active != dialog
+                                    || !mode
+                                    || !value
+                                    || !error
+                                    || !ok
+                                    || !error->isVisible()
+                                    || error->text().isEmpty()
+                                    || value->text() != QStringLiteral("not-a-time")
+                                    || !value->hasFocus()
+                                    || mode->currentData().toString()
+                                        != QStringLiteral("period")) {
+                                    dialog->reject();
+                                    return;
+                                }
+                                invalidClockRateRetained = true;
+                                value->setText(QStringLiteral("12000 ticks"));
+                                ok->click();
+                            });
+                        return true;
+                    })) {
                 fail(QStringLiteral("Clock right-click frequency/period editor did not open"));
                 return;
             }
             const auto* editedClock = wave::findClock(
                 window.project(), quickClock.clockDomainId);
-            if (!editedClock
+            if (!invalidClockRateRetained
+                || !editedClock
                 || editedClock->period != 12'000
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("period 12 ns"))

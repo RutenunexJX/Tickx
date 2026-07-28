@@ -2782,6 +2782,61 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 49：轻量参数原位校验与纠错
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Clock 与 Bit/Bus 轻量参数窗口在点击 OK 后才校验时间、频率或颜色。无效值会先关闭窗口，
+  再显示独立警告；用户刚输入的其他参数、错误字段焦点与选择范围全部丢失，只能重新打开并重复输入。
+- 用户视角验收确认该路径属于高频纠错阻塞：输入格式错误本应在原处修正一次，旧流程需要关闭警告、重新定位
+  信号、再次打开参数窗口并恢复所有字段，且无法确认哪些输入被保留。
+- Clock 参数窗口现于 OK 提交前解析 period/frequency；Bit/Bus 参数窗口于提交前校验 HTML 颜色。错误信息直接
+  显示在同一窗口，完整保留其他字段，聚焦并选中错误输入；修正后可在同一次对话中提交。模式或字段改变会清除旧错误。
+- `wave-canvas-add-lane-smoke` 改为真实点击对话框 OK，分别输入无效 Clock 时间和 Bit 颜色，断言窗口未关闭、
+  草稿/模式/焦点均保留，再纠正并验证模型、状态反馈、Undo。全部 GUI 路径使用 offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.03 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.80 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-canvas-add-lane-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.96 sec
+
+Automated QA: Bit 参数输入无效颜色后窗口、颜色文本、Height=64 与颜色字段焦点保留；纠正颜色后一次提交成功。
+              Clock 选择 period 并输入无效时间后窗口、period 模式、文本与焦点保留；纠正为 12000 ticks 后提交成功。
+              两次提交均显示真实结果并可 Undo；原值确认与已有快速添加、重命名、删除、重排路径无回归。
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

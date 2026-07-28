@@ -1676,51 +1676,80 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         value->setObjectName(QStringLiteral("ClockRateValue"));
         layout->addRow(tr("Edit as"), mode);
         layout->addRow(tr("Value"), value);
+        auto* error = new QLabel;
+        error->setObjectName(QStringLiteral("QuickLaneParameterError"));
+        error->setWordWrap(true);
+        error->setStyleSheet(QStringLiteral("color: #ff9d9a;"));
+        error->hide();
+        layout->addRow(error);
         auto* buttons = new QDialogButtonBox(
             QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         layout->addRow(buttons);
-        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         const auto ticksPerSecond = 1.0e12
             / static_cast<double>(std::max<std::int64_t>(
                 1, project_.timeBase.picosecondsPerTick));
-        connect(mode, &QComboBox::currentIndexChanged, &dialog, [this, mode, value, original, ticksPerSecond](int) {
-            value->setText(mode->currentData().toString() == QStringLiteral("frequency")
-                ? QString::number(ticksPerSecond / static_cast<double>(original->period), 'g', 12)
-                : QString::fromStdString(formatTick(original->period, project_.timeBase)));
-        });
-        if (dialog.exec() != QDialog::Accepted) return;
-
         std::optional<Tick> period;
-        QString parseError;
-        if (mode->currentData().toString() == QStringLiteral("frequency")) {
-            bool valid = false;
-            const auto frequency = value->text().trimmed().toDouble(&valid);
-            const auto computed = valid && std::isfinite(frequency) && frequency > 0.0
-                ? ticksPerSecond / frequency
-                : 0.0;
-            if (computed >= 1.0
-                && computed <= static_cast<double>(std::numeric_limits<Tick>::max())) {
-                period = static_cast<Tick>(std::llround(computed));
-            }
-        } else {
-            std::optional<std::int64_t> unusedCycle;
-            period = parseTimeText(
-                value->text(),
-                project_.timeBase,
-                nullptr,
-                unusedCycle,
-                parseError);
-        }
-        if (!period || *period <= 0) {
-            QMessageBox::warning(
-                this,
-                tr("Invalid clock rate"),
-                parseError.isEmpty()
-                    ? tr("Enter a positive period or a frequency that maps to at least one tick.")
-                    : parseError);
-            return;
-        }
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        connect(
+            buttons,
+            &QDialogButtonBox::accepted,
+            &dialog,
+            [this, mode, value, error, ticksPerSecond, &dialog, &period] {
+                QString parseError;
+                std::optional<Tick> candidate;
+                if (mode->currentData().toString() == QStringLiteral("frequency")) {
+                    bool valid = false;
+                    const auto frequency = value->text().trimmed().toDouble(&valid);
+                    const auto computed = valid
+                            && std::isfinite(frequency)
+                            && frequency > 0.0
+                        ? ticksPerSecond / frequency
+                        : 0.0;
+                    if (computed >= 1.0
+                        && computed
+                            <= static_cast<double>(std::numeric_limits<Tick>::max())) {
+                        candidate = static_cast<Tick>(std::llround(computed));
+                    }
+                } else {
+                    std::optional<std::int64_t> unusedCycle;
+                    candidate = parseTimeText(
+                        value->text(),
+                        project_.timeBase,
+                        nullptr,
+                        unusedCycle,
+                        parseError);
+                }
+                if (!candidate || *candidate <= 0) {
+                    error->setText(
+                        parseError.isEmpty()
+                            ? tr("Enter a positive period or a frequency that maps to at least one tick.")
+                            : parseError);
+                    error->show();
+                    value->setFocus(Qt::OtherFocusReason);
+                    value->selectAll();
+                    return;
+                }
+                period = candidate;
+                error->hide();
+                dialog.accept();
+            });
+        connect(value, &QLineEdit::textEdited, error, &QWidget::hide);
+        connect(
+            mode,
+            &QComboBox::currentIndexChanged,
+            &dialog,
+            [this, mode, value, error, original, ticksPerSecond](int) {
+                error->hide();
+                value->setText(
+                    mode->currentData().toString() == QStringLiteral("frequency")
+                        ? QString::number(
+                              ticksPerSecond / static_cast<double>(original->period),
+                              'g',
+                              12)
+                        : QString::fromStdString(
+                              formatTick(original->period, project_.timeBase)));
+            });
+        if (dialog.exec() != QDialog::Accepted || !period) return;
         auto replacement = *original;
         replacement.period = *period;
         const auto periodLabel = QString::fromStdString(
@@ -1783,18 +1812,37 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
             layout->addRow(signedValue);
             layout->addRow(tr("Radix"), radix);
         }
+        auto* error = new QLabel;
+        error->setObjectName(QStringLiteral("QuickLaneParameterError"));
+        error->setWordWrap(true);
+        error->setStyleSheet(QStringLiteral("color: #ff9d9a;"));
+        error->hide();
+        layout->addRow(error);
         auto* buttons = new QDialogButtonBox(
             QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         layout->addRow(buttons);
-        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        QColor parsedColor;
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-        if (dialog.exec() != QDialog::Accepted) return;
-
-        const QColor parsedColor(color->text().trimmed());
-        if (!parsedColor.isValid()) {
-            QMessageBox::warning(this, tr("Invalid color"), tr("Enter a valid HTML color, such as #4fc3f7."));
-            return;
-        }
+        connect(
+            buttons,
+            &QDialogButtonBox::accepted,
+            &dialog,
+            [color, error, &dialog, &parsedColor] {
+                const QColor candidate(color->text().trimmed());
+                if (!candidate.isValid()) {
+                    error->setText(
+                        tr("Enter a valid HTML color, such as #4fc3f7."));
+                    error->show();
+                    color->setFocus(Qt::OtherFocusReason);
+                    color->selectAll();
+                    return;
+                }
+                parsedColor = candidate;
+                error->hide();
+                dialog.accept();
+            });
+        connect(color, &QLineEdit::textEdited, error, &QWidget::hide);
+        if (dialog.exec() != QDialog::Accepted || !parsedColor.isValid()) return;
         auto replacement = *lane;
         replacement.color = parsedColor.name(QColor::HexRgb).toStdString();
         replacement.height = height->value();
