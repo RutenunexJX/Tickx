@@ -187,7 +187,8 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   在当前场景内保持唯一。
 - 活动光标存在时，每个可见信号在左侧名称区域显示该时刻的采样值。再次点击 `Measure` 或按
   Esc 返回直接波形编辑，活动、临时和选中状态清除，持久锁定光标保留。进入 Measure 会关闭
-  Bus 直接编辑面板；退出时会取消尚未释放的平移、空格手势与吸附提示，避免状态串入直接编辑。
+  Bus 直接编辑面板，测量 Bus 时也不会重新弹出；波形右键只提示返回直接编辑，不提供写值命令。
+  退出时取消尚未释放的平移、空格手势与吸附提示；选择信号标题会取消锁定 Marker 选中。
 - Undo/Redo 位于 Edit 菜单，并保留 `Ctrl+Z` / `Ctrl+Y`；工具栏不重复显示按钮。执行后状态栏
   显示 `Undid` / `Redid`、具体命令及相反快捷键，明确本次恢复结果和下一步。
 - 状态栏常驻显示 `Not saved`、`Unsaved changes`、`Saved` 或 `Recovery loaded · Save required`；
@@ -289,7 +290,8 @@ exports/
 - Measure 离屏回归覆盖活动/临时光标、持久锁定点/区间、精确 `Δ`、创建/选择/拖动/方向键/删除
   结果、活动光标单击与方向键最终值、Shift 参考点、正负拖动的 Reference/Cursor/Δ、边界无效果
   反馈、一次 Undo 直达前一真实移动、Delete 的 Undo/Redo 恢复提示、删除较早点后的名称冲突规避、
-  进入模式时关闭 Bus 直接编辑面板，以及按钮/Esc 中断平移后的状态隔离。
+  进入模式时关闭 Bus 直接编辑面板、Measure 内 Bus 点击/波形右键隔离、标题/Marker 选择互斥，以及
+  按钮/Esc 中断平移后的状态隔离。
 - 无模式直接编辑的 Segment 选择、整体移动、边界缩放、双击改值、Delete 清除、Relation 清理提示
   与 Undo/Redo 确认，Bit
   单拍/多拍翻转、0/1/X/Z 键盘与右键写值后的拍级选择、拍级 Clear/Delete、Undo/Redo 和中键

@@ -2758,6 +2758,48 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                const QPoint busMeasurePoint(point1.x(), dataY);
+                click(busMeasurePoint);
+                QCoreApplication::processEvents();
+                if (!canvas->movableCursorTick() || busPresetPalette->isVisible()) {
+                    qCritical().noquote()
+                        << "Measuring a Bus reopened its direct-value controls";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                bool measureWaveformMenuShown = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&measureWaveformMenuShown] {
+                        auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                        if (menu
+                            && menu->objectName()
+                                == QStringLiteral("WaveformContextMenu")) {
+                            measureWaveformMenuShown = true;
+                            menu->close();
+                        }
+                    });
+                QContextMenuEvent measureContext(
+                    QContextMenuEvent::Mouse,
+                    busMeasurePoint,
+                    canvas->viewport()->mapToGlobal(busMeasurePoint));
+                QCoreApplication::sendEvent(canvas->viewport(), &measureContext);
+                QCoreApplication::processEvents();
+                if (measureWaveformMenuShown
+                    || busPresetPalette->isVisible()
+                    || canvas->tool() != wave::WaveCanvas::Tool::Marker
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Measure active"))) {
+                    qCritical().noquote()
+                        << "Measure exposed waveform editing through the context menu";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
                 click(point1);
                 const auto clickStatus = window.statusBar()->currentMessage();
                 if (!canvas->movableCursorTick()
@@ -2887,6 +2929,24 @@ int main(int argc, char* argv[])
                     qCritical().noquote()
                         << "Locked cursor creation result or recovery feedback is missing"
                         << createdStatus;
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                click(QPoint(80, dataY));
+                QCoreApplication::processEvents();
+                if (!canvas->selectedMarkerId().isEmpty()
+                    || busPresetPalette->isVisible()) {
+                    qCritical().noquote()
+                        << "Selecting a signal header left the locked cursor selected";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                click(point3);
+                if (canvas->selectedMarkerId().toStdString() != lockedId) {
+                    qCritical().noquote()
+                        << "Locked cursor could not be reselected after the signal header";
                     window.hide();
                     application.exit(4);
                     return;

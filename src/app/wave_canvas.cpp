@@ -1675,10 +1675,14 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         return;
     }
     setFocus(Qt::MouseFocusReason);
-    selectedLaneId_ = lane->id;
-    selectedLaneIds_ = {lane->id};
-
     if (event->pos().x() < HeaderWidth) {
+        selectedLaneId_ = lane->id;
+        selectedLaneIds_ = {lane->id};
+        if (tool_ == Tool::Marker) {
+            selectedMarkerId_.clear();
+            cursorInteraction_ = CursorInteraction::None;
+            lockedMarkerOriginalRange_.reset();
+        }
         if (tool_ == Tool::WaveEdit) clearWaveEditState();
         laneHeaderSelectionActive_ = true;
         emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
@@ -1689,7 +1693,15 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         event->accept();
         return;
     }
+    if (tool_ == Tool::Marker) {
+        emit statusMessage(
+            tr("Measure active · waveform actions are unavailable · press Esc to edit"));
+        event->accept();
+        return;
+    }
 
+    selectedLaneId_ = lane->id;
+    selectedLaneIds_ = {lane->id};
     laneHeaderSelectionActive_ = false;
     const auto rawTick = scenario_->duration > 0
         ? std::clamp<Tick>(tickAtX(event->pos().x()), 0, scenario_->duration - 1)
@@ -2303,7 +2315,10 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
     bypassSnap_ = event->modifiers().testFlag(Qt::AltModifier);
     const auto startingExplicitRange = tool_ == Tool::WaveEdit
         && event->modifiers().testFlag(Qt::ShiftModifier);
-    if (lane && lane->kind == LaneKind::Bus && !startingExplicitRange) {
+    if (tool_ == Tool::WaveEdit
+        && lane
+        && lane->kind == LaneKind::Bus
+        && !startingExplicitRange) {
         showBusPresetPalette(*lane, position);
     } else {
         hideBusPresetPalette();
@@ -2314,6 +2329,11 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         if (tool_ == Tool::WaveEdit) clearWaveEditState();
         selectedLaneId_ = lane->id;
         selectedLaneIds_ = {lane->id};
+        if (tool_ == Tool::Marker) {
+            selectedMarkerId_.clear();
+            cursorInteraction_ = CursorInteraction::None;
+            lockedMarkerOriginalRange_.reset();
+        }
         laneHeaderSelectionActive_ = true;
         laneHeaderPressed_ = true;
         laneHeaderDragging_ = false;
@@ -2994,6 +3014,11 @@ void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
         if (lane && lane->kind != LaneKind::Group) {
             selectedLaneId_ = lane->id;
             selectedLaneIds_ = {lane->id};
+            if (tool_ == Tool::Marker) {
+                selectedMarkerId_.clear();
+                cursorInteraction_ = CursorInteraction::None;
+                lockedMarkerOriginalRange_.reset();
+            }
             laneHeaderSelectionActive_ = true;
             laneHeaderPressed_ = false;
             laneHeaderDragging_ = false;

@@ -2606,6 +2606,65 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 46：Measure 只测量边界与选择归属
+
+状态：完成
+
+已交付：
+
+- 开发审计确认第 45 轮只关闭了进入 Measure 前已有的 Bus 面板；`mousePressEvent()` 仍对所有工具
+  响应 Bus 点击并重新打开赋值控件，`contextMenuEvent()` 也未限制工具，Measure 内仍可执行写值、
+  Clear、Pulse、Clock override 和 Paste 等直接编辑命令。
+- 用户进入 Measure 后真正需要的是读取时间和值。测量 Bus 时出现赋值控件会遮挡波形，右键仍可改值
+  会造成模式含义不可靠；锁定 Marker 选中后再点击信号标题，两种高亮并存且 Delete 实际优先删除信号。
+- Bus 直接编辑面板现在只在 Wave Edit 中响应点击。Measure 内波形右键不创建编辑菜单，仅在状态栏提示
+  按 Esc 返回直接编辑；标题左键、右键或双击会明确取消锁定 Marker 选中和其拖动上下文。
+- `wave-cursor-mode-smoke` 在 Measure 内真实点击 Bus、发送右键上下文事件并侦测任何弹出菜单，随后
+  创建锁定点、切换到 Bus 标题并重新选择该点；断言无编辑浮层、无波形菜单、选择互斥且 Marker 可继续编辑。
+  全部 GUI offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 19 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.18 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.95 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-cursor-mode-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.68 sec
+
+Screenshot generated:
+  build/qtcreator-debug/cursor-mode-smoke.png
+Automated QA: Measure 内点击 Bus 只更新活动光标，Bus 赋值面板保持隐藏；波形右键不出现编辑菜单，
+              状态栏指明 Esc 返回编辑；点击信号标题取消锁定 Marker 选择，重新单击可继续编辑；
+              活动/临时/锁定光标、退出与中断平移流程无回归
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
