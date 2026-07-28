@@ -1840,7 +1840,9 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
             : tr("Selected signal %1 · Delete removes signal · F2 renames")
                   .arg(QString::fromStdString(lane->name));
         if (tool_ == Tool::WaveEdit && lane->kind != LaneKind::Group) {
-            selectionMessage.append(tr(" · Up/Down selects signals · Ctrl+Left/Right jumps edges"));
+            selectionMessage.append(
+                tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
+                    .arg(laneValueAt(*lane, cursorTick_)));
         }
         if (lockedMarkerDeselected) {
             selectionMessage.append(tr(" · locked cursor/range deselected"));
@@ -2227,16 +2229,18 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                 snapGuideTick_.reset();
                 emit statusMessage(
                     forward
-                        ? tr("Next edge on %1 · %2 · Ctrl+Left goes back")
+                        ? tr("Next edge on %1 · %2 · value %3 · Ctrl+Left goes back")
                               .arg(QString::fromStdString(lane->name))
                               .arg(QString::fromStdString(formatTick(
                                   cursorTick_,
                                   project_->timeBase)))
-                        : tr("Previous edge on %1 · %2 · Ctrl+Right goes forward")
+                              .arg(laneValueAt(*lane, cursorTick_))
+                        : tr("Previous edge on %1 · %2 · value %3 · Ctrl+Right goes forward")
                               .arg(QString::fromStdString(lane->name))
                               .arg(QString::fromStdString(formatTick(
                                   cursorTick_,
-                                  project_->timeBase))));
+                                  project_->timeBase)))
+                              .arg(laneValueAt(*lane, cursorTick_)));
                 viewport()->update();
             } else {
                 emit statusMessage(
@@ -2658,7 +2662,9 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             : tr("Selected signal %1 · Delete removes signal · F2 renames")
                   .arg(QString::fromStdString(lane->name));
         if (tool_ == Tool::WaveEdit && lane->kind != LaneKind::Group) {
-            selectionMessage.append(tr(" · Up/Down selects signals · Ctrl+Left/Right jumps edges"));
+            selectionMessage.append(
+                tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
+                    .arg(laneValueAt(*lane, cursorTick_)));
         }
         if (lockedMarkerDeselected) {
             selectionMessage.append(tr(" · locked cursor/range deselected"));
@@ -5416,10 +5422,11 @@ void WaveCanvas::selectAdjacentLane(const bool downward)
         selectable);
     emit selectionChanged(QString::fromStdString(target->id), cursorTick_);
     emit statusMessage(
-        tr("Selected signal %1 · %2 of %3 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
+        tr("Selected signal %1 · %2 of %3 · value %4 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
             .arg(QString::fromStdString(target->name))
             .arg(ordinal)
-            .arg(total));
+            .arg(total)
+            .arg(laneValueAt(*target, cursorTick_)));
     viewport()->setCursor(Qt::PointingHandCursor);
     viewport()->update();
 }
@@ -5446,12 +5453,9 @@ void WaveCanvas::ensureLaneVisible(const std::string& laneId)
     }
 }
 
-QString WaveCanvas::cursorValue(const Lane& lane) const
+QString WaveCanvas::laneValueAt(const Lane& lane, const Tick tick) const
 {
-    if (!project_ || !movableCursorTick_ || lane.kind == LaneKind::Group) {
-        return {};
-    }
-    const auto tick = *movableCursorTick_;
+    if (!project_ || lane.kind == LaneKind::Group) return {};
     if (lane.kind == LaneKind::Clock) {
         const auto* clock = findClock(*project_, lane.clockDomainId);
         return clock && clock->isValid()
@@ -5467,6 +5471,7 @@ QString WaveCanvas::cursorValue(const Lane& lane) const
             return value < candidate.start;
         });
     const auto undefinedValue = lane.kind == LaneKind::Bus
+        || lane.kind == LaneKind::Enum
         ? QStringLiteral("X")
         : lane.kind == LaneKind::Bit
             ? QStringLiteral("0")
@@ -5476,6 +5481,13 @@ QString WaveCanvas::cursorValue(const Lane& lane) const
     return candidate.start <= tick && tick < candidate.end
         ? QString::fromStdString(candidate.value)
         : undefinedValue;
+}
+
+QString WaveCanvas::cursorValue(const Lane& lane) const
+{
+    return movableCursorTick_
+        ? laneValueAt(lane, *movableCursorTick_)
+        : QString{};
 }
 
 QString WaveCanvas::cursorDeltaText(const Tick from, const Tick to) const
@@ -6541,7 +6553,9 @@ void WaveCanvas::drawLane(
     painter.setFont(nameFont);
     const auto sampledValue = tool_ == Tool::Marker
         ? cursorValue(lane)
-        : QString{};
+        : tool_ == Tool::WaveEdit && selected && !drawing_
+            ? laneValueAt(lane, cursorTick_)
+            : QString{};
     const auto valueWidth = sampledValue.isEmpty() ? 0 : 78;
     const QRect nameRect(
         14,

@@ -2669,7 +2669,9 @@ int main(int argc, char* argv[])
                 };
                 clickSignalHeader(laneY);
                 if (!window.statusBar()->currentMessage().contains(
-                        QStringLiteral("Ctrl+Left/Right jumps edges"))) {
+                        QStringLiteral("Ctrl+Left/Right jumps edges"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("value X"))) {
                     fail(QStringLiteral(
                         "Signal selection did not disclose adjacent edge navigation"));
                     return;
@@ -2683,9 +2685,11 @@ int main(int argc, char* argv[])
                     || undoAction->isEnabled()
                     || saveState->text() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
-                        QStringLiteral("Next edge on data[7:0]"))) {
+                        QStringLiteral("Next edge on data[7:0]"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("value 0x35"))) {
                     fail(QStringLiteral(
-                        "Ctrl+Right did not jump to the Bus segment start"));
+                        "Ctrl+Right did not jump to the Bus segment start with its value"));
                     return;
                 }
                 sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);
@@ -2696,9 +2700,11 @@ int main(int argc, char* argv[])
                     || undoAction->isEnabled()
                     || saveState->text() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
-                        QStringLiteral("Next edge on data[7:0]"))) {
+                        QStringLiteral("Next edge on data[7:0]"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("value X"))) {
                     fail(QStringLiteral(
-                        "Ctrl+Right did not jump to the Bus segment end"));
+                        "Ctrl+Right did not jump to the Bus segment end with its implicit value"));
                     return;
                 }
                 sendKey(canvas, Qt::Key_Left, Qt::ControlModifier);
@@ -2706,9 +2712,11 @@ int main(int argc, char* argv[])
                     || canvas->selectedLaneId()
                         != QStringLiteral("lane-wave-edit-scroll")
                     || !window.statusBar()->currentMessage().contains(
-                        QStringLiteral("Previous edge on data[7:0]"))) {
+                        QStringLiteral("Previous edge on data[7:0]"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("value 0x35"))) {
                     fail(QStringLiteral(
-                        "Ctrl+Left did not return to the Bus segment start"));
+                        "Ctrl+Left did not return to the Bus segment start with its value"));
                     return;
                 }
                 sendKey(canvas, Qt::Key_Left, Qt::ControlModifier);
@@ -2739,9 +2747,11 @@ int main(int argc, char* argv[])
                     || undoAction->isEnabled()
                     || saveState->text() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
-                        QStringLiteral("Next edge on clk"))) {
+                        QStringLiteral("Next edge on clk"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("value 0"))) {
                     fail(QStringLiteral(
-                        "Ctrl+Right did not jump to the Clock falling edge"));
+                        "Ctrl+Right did not jump to the Clock falling edge with value 0"));
                     return;
                 }
                 sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);
@@ -2749,9 +2759,11 @@ int main(int argc, char* argv[])
                     || canvas->selectedLaneId()
                         != QStringLiteral("lane-wave-edit-clock")
                     || !window.statusBar()->currentMessage().contains(
-                        QStringLiteral("Next edge on clk"))) {
+                        QStringLiteral("Next edge on clk"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("value 1"))) {
                     fail(QStringLiteral(
-                        "Ctrl+Right did not jump to the next Clock rising edge"));
+                        "Ctrl+Right did not jump to the next Clock rising edge with value 1"));
                     return;
                 }
                 sendKey(canvas, Qt::Key_Left, Qt::ControlModifier);
@@ -2763,9 +2775,11 @@ int main(int argc, char* argv[])
                     || undoAction->isEnabled()
                     || saveState->text() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
-                        QStringLiteral("Previous edge on clk"))) {
+                        QStringLiteral("Previous edge on clk"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("value 0"))) {
                     fail(QStringLiteral(
-                        "Ctrl+Left did not return to the Clock falling edge"));
+                        "Ctrl+Left did not return to the Clock falling edge with value 0"));
                     return;
                 }
                 if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
@@ -3029,6 +3043,8 @@ int main(int argc, char* argv[])
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("1 of 19"))
                     || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("value 0"))
+                    || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Up/Down selects signals"))
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Ctrl+Left/Right jumps edges"))) {
@@ -3078,7 +3094,9 @@ int main(int argc, char* argv[])
                     || undoAction->isEnabled()
                     || saveState->text() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
-                        QStringLiteral("19 of 19"))) {
+                        QStringLiteral("19 of 19"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("value 0"))) {
                     fail(QStringLiteral(
                         "Repeated Down did not minimally reveal the last visible signal"));
                     return;

@@ -4112,6 +4112,59 @@ Offscreen visual QA: build/qtcreator-debug/lane-autoscroll-smoke-keyboard-naviga
 Desktop interaction: none
 ```
 
+## 持续迭代 73：所选信号即时采样值
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `drawLane()` 仅在 Measure 模式通过活动光标为所有 Lane 绘制值；Wave Edit 已有全高编辑光标、上下信号导航和相邻边沿导航，但左侧标题仍只显示名称/类型，导航状态也只说明时间。用户到达目标后必须重新目测波形或区段文字。
+- 用户视角的完整键盘路径是“Up/Down 选信号→Ctrl+Left/Right 到边沿→立即读出该信号值”。如果仍需把视线移回波形并判断高低电平，前两轮导航只减少了定位操作，没有消除确认成本；Clock 边沿处的精确前后语义尤其容易误判。
+- 抽取统一 `laneValueAt(lane, tick)`：Clock 复用周期与 Gate/Drive X 覆盖采样，Bit 隐式值为 `0`，Bus/Enum 隐式值为 `X`，其余类型保留既有 `?` 语义；Measure 的 `cursorValue()` 继续委托该函数，避免两套取值规则分叉。
+- Wave Edit 仅对当前 `selectedLaneIds` 中的非 Group Lane，在标题第一行右端绘制当前 `cursorTick` 值，颜色沿用编辑光标青色并预留固定 78 px；名称继续中间省略，未选行不预留空间。拖动期间不绘制该值，因为预览尚未提交且模型值可能与预览结果不同。
+- 信号标题选择、Up/Down 成功选择以及 Ctrl+Left/Right 到达边沿的状态反馈同步包含采样值。没有边沿、范围阻断和文本焦点路径保持原反馈；取值与显示不修改 Scenario、Undo、autosave 或 Saved 状态。
+- 扩展 `wave-wave-edit-autoscroll-smoke`，验证 Bus 选择时隐式 `X`、50 ns 起点 `0x35`、100 ns 终点 `X`、返回起点 `0x35`，以及 Clock 5 ns 下降沿 `0`、10 ns 上升沿 `1`、返回下降沿 `0`；最终离屏截图验证左侧 clk 的青色 `0` 标签。`wave-lane-autoscroll-smoke` 验证隐式 Bit `0`；`wave-cursor-mode-smoke` 继续通过，确认 Measure 全 Lane 值显示未回归。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 19 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 15.97 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.40 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-(lane-autoscroll|cursor-mode|wave-edit-autoscroll)-smoke$" --output-on-failure
+3/3 passed
+Total Test time: 4.59 sec
+
+Automated QA: 选中 data[7:0] 时先显示隐式 X，Ctrl+Right 到 50 ns 后显示 0x35，再到 100 ns 显示 X，Ctrl+Left 返回时恢复 0x35；
+              选中 clk 后，5 ns/10 ns/5 ns 导航分别显示 0/1/0。长列表选择 signal_00 和 signal_19 时显示隐式 0；Measure 专项保持通过。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-next-edge.png
+                     build/qtcreator-debug/lane-autoscroll-smoke-keyboard-navigation.png
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
