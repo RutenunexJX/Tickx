@@ -577,7 +577,9 @@ void WaveCanvas::beginLaneRename(const QString& laneId, const QString& name)
             laneRenameEdit_->selectAll();
         }
     });
-    emit statusMessage(tr("Rename signal · Enter or click elsewhere to apply · Esc to cancel"));
+    emit statusMessage(
+        tr("Rename signal %1 · Enter or click elsewhere to apply · Esc to cancel")
+            .arg(name));
     viewport()->update();
 }
 
@@ -791,8 +793,18 @@ void WaveCanvas::submitLaneRename()
 void WaveCanvas::cancelLaneRename()
 {
     if (!hasLaneRename()) return;
+    QString laneName;
+    if (scenario_) {
+        if (const auto* lane = findLane(*scenario_, laneRenameLaneId_.toStdString())) {
+            laneName = QString::fromStdString(lane->name);
+        }
+    }
     finishLaneRename();
-    emit statusMessage(tr("Rename cancelled"));
+    emit statusMessage(
+        laneName.isEmpty()
+            ? tr("Rename cancelled")
+            : tr("Rename cancelled · Selected signal %1 · Delete removes signal · F2 renames")
+                  .arg(laneName));
 }
 
 void WaveCanvas::submitDurationEdit(const bool preserveMouseFocusTarget)
@@ -1665,6 +1677,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         event->accept();
         return;
     }
+    const auto rangeClearedForRetarget = explicitRangeSelection_;
     if (explicitRangeSelection_) {
         clearExplicitRangeSelection();
         emit statusMessage(tr("Range selection cleared"));
@@ -1678,6 +1691,8 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     if (event->pos().x() < HeaderWidth) {
         selectedLaneId_ = lane->id;
         selectedLaneIds_ = {lane->id};
+        const auto lockedMarkerDeselected =
+            tool_ == Tool::Marker && !selectedMarkerId_.empty();
         if (tool_ == Tool::Marker) {
             selectedMarkerId_.clear();
             cursorInteraction_ = CursorInteraction::None;
@@ -1686,6 +1701,15 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         if (tool_ == Tool::WaveEdit) clearWaveEditState();
         laneHeaderSelectionActive_ = true;
         emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+        auto selectionMessage = tr("Selected signal %1 · Delete removes signal · F2 renames")
+                                    .arg(QString::fromStdString(lane->name));
+        if (lockedMarkerDeselected) {
+            selectionMessage.append(tr(" · locked cursor/range deselected"));
+        }
+        if (rangeClearedForRetarget) {
+            selectionMessage.append(tr(" · range cleared"));
+        }
+        emit statusMessage(selectionMessage);
         emit editLaneParametersRequested(
             QString::fromStdString(lane->id),
             event->globalPos());

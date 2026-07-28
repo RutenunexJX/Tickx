@@ -1844,15 +1844,29 @@ int main(int argc, char* argv[])
                          .arg(focus ? focus->objectName() : QStringLiteral("<none>")));
                 return;
             }
+            const auto renameEntryStatus = window.statusBar()->currentMessage();
+            if (!renameEntryStatus.contains(QStringLiteral("Rename signal"))
+                || !renameEntryStatus.contains(QString::fromStdString(quickBit.name))
+                || !renameEntryStatus.contains(QStringLiteral("Enter"))
+                || !renameEntryStatus.contains(QStringLiteral("Esc"))) {
+                fail(QStringLiteral("Inline rename entry did not identify its signal and recovery keys"));
+                return;
+            }
             renameEdit->setText(QStringLiteral("cancelled_bit"));
             sendKey(renameEdit, Qt::Key_Escape);
             QCoreApplication::processEvents();
             auto* renamedBit = wave::findLane(
                 window.project().scenarios.front(), quickBit.id);
+            const auto renameCancelStatus = window.statusBar()->currentMessage();
             if (renameEdit->isVisible()
                 || !renamedBit
-                || renamedBit->name != quickBit.name) {
-                fail(QStringLiteral("Escape did not cancel inline signal rename"));
+                || renamedBit->name != quickBit.name
+                || !renameCancelStatus.contains(QStringLiteral("Rename cancelled"))
+                || !renameCancelStatus.contains(QStringLiteral("Selected signal"))
+                || !renameCancelStatus.contains(QString::fromStdString(quickBit.name))
+                || !renameCancelStatus.contains(QStringLiteral("Delete removes signal"))
+                || !renameCancelStatus.contains(QStringLiteral("F2 renames"))) {
+                fail(QStringLiteral("Escape did not cancel rename and restore the signal target"));
                 return;
             }
 
@@ -2976,6 +2990,53 @@ int main(int argc, char* argv[])
                 if (canvas->selectedMarkerId().toStdString() != lockedId) {
                     qCritical().noquote()
                         << "Locked cursor could not be reselected after the signal header";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                bool laneHeaderMenuShown = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&laneHeaderMenuShown] {
+                        auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                        if (menu
+                            && menu->objectName()
+                                == QStringLiteral("LaneHeaderContextMenu")) {
+                            laneHeaderMenuShown = true;
+                            menu->close();
+                        }
+                    });
+                const QPoint dataHeaderPoint(80, dataY);
+                QContextMenuEvent laneHeaderContext(
+                    QContextMenuEvent::Mouse,
+                    dataHeaderPoint,
+                    canvas->viewport()->mapToGlobal(dataHeaderPoint));
+                QCoreApplication::sendEvent(canvas->viewport(), &laneHeaderContext);
+                QCoreApplication::processEvents();
+                const auto contextRetargetStatus = window.statusBar()->currentMessage();
+                if (!laneHeaderMenuShown
+                    || !canvas->selectedMarkerId().isEmpty()
+                    || !contextRetargetStatus.contains(QStringLiteral("Selected signal"))
+                    || !contextRetargetStatus.contains(
+                        QString::fromStdString(selectedDataLane->name))
+                    || !contextRetargetStatus.contains(
+                        QStringLiteral("Delete removes signal"))
+                    || !contextRetargetStatus.contains(QStringLiteral("F2 renames"))
+                    || !contextRetargetStatus.contains(
+                        QStringLiteral("locked cursor/range deselected"))) {
+                    qCritical().noquote()
+                        << "Cancelling the lane context menu did not restore its target feedback"
+                        << contextRetargetStatus;
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                click(point3);
+                if (canvas->selectedMarkerId().toStdString() != lockedId) {
+                    qCritical().noquote()
+                        << "Locked cursor could not be reselected after cancelling the lane menu";
                     window.hide();
                     application.exit(4);
                     return;

@@ -2724,6 +2724,64 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 48：标题右键与重命名取消的目标恢复
+
+状态：完成
+
+已交付：
+
+- 开发审计确认第 47 轮只覆盖了标题左键。标题右键会取消锁定 Marker 并同步打开参数菜单，但菜单
+  或后续参数对话框取消时没有新状态，仍显示旧 Marker 的 `Selected … Delete`；目标已经变为信号。
+- 双击/F2 重命名入口只显示通用 `Rename signal`，多个相邻信号时无法从状态确认对象；Esc 取消只显示
+  `Rename cancelled`，随后信号仍选中且 Delete/F2 有效，但恢复后的目标与可用动作未说明。
+- 标题右键现在在打开参数菜单前报告当前信号、Delete/F2 目标，以及同次取消的 Marker/范围状态；
+  若菜单或参数对话框取消，该反馈保持。重命名入口显示信号名，Esc 取消后恢复当前信号和 Delete/F2。
+- `wave-canvas-add-lane-smoke` 断言双击入口包含信号名、Enter/Esc，并在 Esc 后确认原名未改且目标反馈恢复；
+  `wave-cursor-mode-smoke` 从选中锁定点右键 Bus 标题，真实打开并取消参数菜单，断言 Marker 取消、
+  新信号名与 Delete/F2 目标保留，随后可重新选择原 Marker。全部 GUI offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 19 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.01 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.83 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-canvas-add-lane-smoke|wave-cursor-mode-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 1.20 sec
+
+Screenshot generated:
+  build/qtcreator-debug/cursor-mode-smoke.png
+Automated QA: 双击重命名入口显示目标信号名与 Enter/Esc，Esc 后恢复原名和信号 Delete/F2 目标；
+              Marker→右键 Bus 标题→取消菜单后，状态保留新信号目标及 Marker 已取消说明；
+              原 Marker 可重新选择，后续移动、删除、Undo/Redo 与 Measure 退出无回归
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
