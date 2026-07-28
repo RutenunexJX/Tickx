@@ -2848,13 +2848,186 @@ int main(int argc, char* argv[])
                     QCoreApplication::processEvents();
                     return canvas->cursorTick();
                 };
+                const auto chooseWaveformAction =
+                    [&application, canvas, &settleLayouts](
+                        const QPoint& position,
+                        const QString& actionText) {
+                    bool handled = false;
+                    QTimer::singleShot(
+                        0,
+                        &application,
+                        [&application, &handled, actionText] {
+                            auto* menu = qobject_cast<QMenu*>(
+                                QApplication::activePopupWidget());
+                            QAction* target = nullptr;
+                            if (menu
+                                && menu->objectName()
+                                    == QStringLiteral("WaveformContextMenu")) {
+                                for (auto* action : menu->actions()) {
+                                    if (action && action->text() == actionText) {
+                                        target = action;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!menu || !target) {
+                                if (menu) menu->close();
+                                return;
+                            }
+                            menu->setActiveAction(target);
+                            handled = true;
+                            QKeyEvent enter(
+                                QEvent::KeyPress,
+                                Qt::Key_Return,
+                                Qt::NoModifier);
+                            QCoreApplication::sendEvent(menu, &enter);
+                        });
+                    QContextMenuEvent context(
+                        QContextMenuEvent::Mouse,
+                        position,
+                        canvas->viewport()->mapToGlobal(position));
+                    QCoreApplication::sendEvent(canvas->viewport(), &context);
+                    settleLayouts();
+                    return handled;
+                };
 
+                const auto clockY = laneCenterY("lane-clk");
                 const auto dataY = laneCenterY("lane-data");
                 const auto resetY = laneCenterY("lane-reset");
                 const auto requestY = laneCenterY("lane-request");
                 const auto acknowledgeY = laneCenterY("lane-ack");
-                if (dataY < 0 || resetY < 0 || requestY < 0 || acknowledgeY < 0) {
+                if (clockY < 0 || dataY < 0 || resetY < 0
+                    || requestY < 0 || acknowledgeY < 0) {
                     qCritical().noquote() << "Wave Edit smoke lanes are missing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                const auto beforeClockRunWorkflow = scenario;
+                const QPoint clockContextPoint(xAtTick(65'000), clockY);
+                if (!chooseWaveformAction(
+                        clockContextPoint,
+                        QStringLiteral("Gate for one period"))) {
+                    qCritical().noquote()
+                        << "Clock context menu does not expose one-period Gate";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                auto* clockLane = wave::findLane(scenario, "lane-clk");
+                if (!clockLane
+                    || valueAt(*clockLane, 65'000) != "gated"
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("= gated"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Clock one-period Gate did not report its exact result";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto afterClockGate = scenario;
+
+                if (!chooseWaveformAction(
+                        clockContextPoint,
+                        QStringLiteral("Run for one period"))) {
+                    qCritical().noquote()
+                        << "Clock context menu does not expose one-period Run";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                clockLane = wave::findLane(scenario, "lane-clk");
+                const auto clockRunRange = canvas->selectedTimeRange();
+                if (!clockLane
+                    || !valueAt(*clockLane, 65'000).empty()
+                    || !clockRunRange
+                    || *clockRunRange
+                        != std::pair<wave::Tick, wave::Tick>{60'000, 70'000}
+                    || !canvas->selectedSegmentId().isEmpty()
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("restored normal clock waveform"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Clock Run did not clear, select, and report one period";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto afterClockRun = scenario;
+
+                if (!chooseWaveformAction(
+                        clockContextPoint,
+                        QStringLiteral("Run for one period"))) {
+                    qCritical().noquote()
+                        << "Clock no-effect Run action was not invoked";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto repeatedClockRunMessage =
+                    window.statusBar()->currentMessage();
+                if (scenario != afterClockRun
+                    || canvas->selectedTimeRange()
+                        != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                            std::pair<wave::Tick, wave::Tick>{60'000, 70'000}}
+                    || !canvas->selectedSegmentId().isEmpty()
+                    || !repeatedClockRunMessage.contains(
+                        QStringLiteral("already uses normal clock waveform"))
+                    || !repeatedClockRunMessage.contains(
+                        QStringLiteral("no values changed"))
+                    || repeatedClockRunMessage.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Repeated Clock Run created a false edit or misleading feedback";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto clockRunScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix =
+                        clockRunScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        clockRunScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-clock-run-no-effect-feedback"));
+                    } else {
+                        clockRunScreenshotPath.append(
+                            QStringLiteral("-clock-run-no-effect-feedback.png"));
+                    }
+                    if (!window.grab().save(clockRunScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save Clock Run feedback screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != afterClockGate) {
+                    qCritical().noquote()
+                        << "Repeated Clock Run inserted an empty Undo entry";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || scenario != afterClockRun) {
+                    qCritical().noquote()
+                        << "Repeated Clock Run damaged the real Redo entry";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != afterClockGate
+                    || !QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeClockRunWorkflow) {
+                    qCritical().noquote()
+                        << "Clock Run workflow did not restore its initial Scenario";
                     window.hide();
                     application.exit(4);
                     return;

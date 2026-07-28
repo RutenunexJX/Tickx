@@ -823,6 +823,51 @@ void testUndoRedo()
         "identical multi-lane write changed the Scenario");
     expectEqual(noEffectStack.size(), std::size_t{0}, "identical batch write polluted history");
 
+    expect(
+        !noEffectStack.execute(std::make_unique<wave::ClearLaneRangeCommand>(
+            noEffectScenario,
+            "lane-clk",
+            60'000,
+            70'000)),
+        "clearing a normal Clock period reported an effect");
+    expectEqual(
+        noEffectScenario,
+        noEffectBefore,
+        "clearing a normal Clock period changed the Scenario");
+    expectEqual(noEffectStack.size(), std::size_t{0}, "empty Clock clear polluted history");
+    expect(
+        !noEffectStack.execute(std::make_unique<wave::ClearLaneRangesCommand>(
+            noEffectScenario,
+            60'000,
+            70'000,
+            std::vector<std::string>{"lane-clk"})),
+        "empty multi-lane clear reported an effect");
+    expectEqual(noEffectStack.size(), std::size_t{0}, "empty batch clear polluted history");
+
+    wave::CommandStack clearRedoStack;
+    auto clearRedoScenario = wave::makeDemonstrationProject().scenarios.front();
+    const auto clearRedoBefore = clearRedoScenario;
+    expect(
+        clearRedoStack.execute(std::make_unique<wave::ClearLaneRangeCommand>(
+            clearRedoScenario,
+            "lane-clk",
+            170'000,
+            180'000)),
+        "Clock override clear did not report a real effect");
+    const auto clearRedoAfter = clearRedoScenario;
+    expect(clearRedoStack.undo(), "Clock override clear undo failed");
+    expectEqual(clearRedoScenario, clearRedoBefore, "Clock clear undo was not exact");
+    expect(
+        !clearRedoStack.execute(std::make_unique<wave::ClearLaneRangeCommand>(
+            clearRedoScenario,
+            "lane-clk",
+            60'000,
+            70'000)),
+        "empty Clock clear after Undo reported an effect");
+    expect(clearRedoStack.canRedo(), "empty Clock clear discarded the redo branch");
+    expect(clearRedoStack.redo(), "Clock clear redo was unavailable after empty clear");
+    expectEqual(clearRedoScenario, clearRedoAfter, "Clock clear redo changed after empty clear");
+
     wave::CommandStack redoPreservationStack;
     auto redoPreservationScenario = wave::makeDemonstrationProject().scenarios.front();
     const auto redoPreservationBefore = redoPreservationScenario;

@@ -126,6 +126,7 @@ public:
     void redo() override;
     void undo() override;
     [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
     Scenario* scenario_;
@@ -147,6 +148,7 @@ public:
     void redo() override;
     void undo() override;
     [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
     Scenario* scenario_;

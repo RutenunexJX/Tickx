@@ -121,6 +121,9 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   双击改值会显示信号、时间范围、规范化后的结果与撤销提示；输入未改变时明确说明未修改且不新增
   Undo。Pulse 与单击/悬浮共用同一拍范围，插入后保持该拍选中并显示实际结果。若任一单信号写值
   同步移除引用消失边沿的 Relation，会说明数量，撤销会原子恢复波形、Event 与关系。
+- Clock 波形右键可对一拍执行 Gate、Drive X 或 Run。Run 清除该拍覆盖后保持拍级选择，并显示
+  `restored normal clock waveform` 与撤销提示；已正常运行时显示 `no values changed`，不新增
+  Undo 或清除 Redo。
 - Bit lane 悬浮时高亮当前拍并显示将变为 `0` 或 `1`；单击只翻转这一拍，横向拖动逐拍翻转
   覆盖范围。选中 Bit 后可直接按 `0`、`1`、`X`、`Z` 写入当前拍，也可从右键菜单选择四态值；
   写值后仍保持原拍级选择，不会扩大到相邻同电平 Segment。`Delete` / `Backspace` 或右键
@@ -275,6 +278,8 @@ exports/
   标题/标尺同次清除并重定向、波形正文防误触、单步 Undo 后选择保留、混合类型无效控件
   隐藏和零修改、缩放/刷新定位以及 Esc/外部点击清除。
 - Event 菱形局部虚线预览期间模型不变，释放、Undo 与 Redo 后 Event/Segment 保持同步。
+- Clock 真实右键 Gate→Run→重复 Run、拍级选择、无效果反馈、一次 Undo/Redo 及基线恢复具有专项
+  offscreen 覆盖。
 - Bus 浮层覆盖直接值、非法值纠错、0/X/Z/Don't care 单击与拖放以及波形右键；未提交值的
   点击别处提交、隐藏草稿恢复、Save/New/Open/Close/Export 门禁、Bus/End 冲突顺序、鼠标失焦
   坐标保护及 Undo 后越界草稿的 End 延长恢复均有专项离屏回归。

@@ -1622,15 +1622,58 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     } else if (chosen == clockDisabled) {
         setLaneRangeValue(lane->id, beatStart, beatEnd, "disabled");
     } else if (chosen == clockRun) {
+        const auto laneId = lane->id;
+        const auto laneName = lane->name;
+        const auto relationCountBefore = scenario_->relations.size();
+        bool changed = false;
         try {
-            commandStack_->execute(std::make_unique<ClearLaneRangeCommand>(
-                *scenario_, lane->id, beatStart, beatEnd));
+            changed = commandStack_->execute(
+                std::make_unique<ClearLaneRangeCommand>(
+                    *scenario_, laneId, beatStart, beatEnd));
+        } catch (const std::exception& exception) {
+            emit statusMessage(
+                tr("Clock not changed · %1")
+                    .arg(QString::fromUtf8(exception.what())));
+            event->accept();
+            return;
+        }
+        selectedLaneId_ = laneId;
+        selectedLaneIds_ = {laneId};
+        laneHeaderSelectionActive_ = false;
+        selectedSegmentLaneId_.clear();
+        selectedSegmentId_.clear();
+        selectionRange_ = std::pair{beatStart, beatEnd};
+        cursorTick_ = beatStart;
+        if (changed) {
             emit modelEdited();
             emit commandAvailabilityChanged();
-            refreshModel();
-        } catch (const std::exception& exception) {
-            emit statusMessage(QString::fromUtf8(exception.what()));
         }
+        emit selectionChanged(QString::fromStdString(laneId), beatStart);
+        refreshModel();
+        const auto message = changed
+            ? tr("%1 · %2–%3 restored normal clock waveform")
+                  .arg(QString::fromStdString(laneName))
+                  .arg(QString::fromStdString(formatTick(
+                      beatStart,
+                      project_->timeBase)))
+                  .arg(QString::fromStdString(formatTick(
+                      beatEnd,
+                      project_->timeBase)))
+            : tr("%1 · %2–%3 already uses normal clock waveform · no values changed")
+                  .arg(QString::fromStdString(laneName))
+                  .arg(QString::fromStdString(formatTick(
+                      beatStart,
+                      project_->timeBase)))
+                  .arg(QString::fromStdString(formatTick(
+                      beatEnd,
+                      project_->timeBase)));
+        emit statusMessage(
+            changed
+                ? appendRelationAwareUndo(
+                      message,
+                      relationCountBefore,
+                      scenario_->relations.size())
+                : message);
     }
     event->accept();
 }

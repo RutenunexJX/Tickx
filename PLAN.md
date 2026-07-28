@@ -1893,6 +1893,67 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 34：Clock Run 的结果反馈与空清除收口
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `ClearLaneRangeCommand` 与 `ClearLaneRangesCommand` 始终被命令栈视为有效；
+  Clock 右键 `Run for one period` 在本来没有覆盖的拍上也会加入空 Undo。该入口只刷新模型，
+  不显示目标范围、恢复结果或无变化原因。
+- 用户主流程中，选择 Run 后菜单直接消失，用户无法确认 gated/disabled 覆盖是否清除；再次选择
+  Run 会得到不可见历史项，第一次撤销看不到任何波形变化。
+- 单/批量 Clear 命令现在按完整 Scenario 前后快照报告真实效果；空清除不入栈并保留已有 Redo。
+  Clock Run 成功时显示信号、精确一拍范围、`restored normal clock waveform` 与 `Ctrl+Z`；
+  已正常时显示 `already uses normal clock waveform · no values changed`。
+- Run 后清空 Segment 选择并保持所操作的一拍选中；成功路径才标记模型修改。Gate、Drive X、
+  轻吸附和现有 Clock override 语义不变。
+- 核心回归覆盖单/批量正常 Clock 空清除、覆盖清除、完整 Undo/Redo 及空清除后的 Redo 保留；
+  Wave Edit smoke 真实执行右键 Gate→Run→重复 Run、一次 Undo/Redo、两次 Undo 恢复基线。
+  全部 GUI 路径使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.70 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.32 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 1.01 sec
+
+Screenshot generated:
+  build/qtcreator-debug/wave-edit-smoke-clock-run-no-effect-feedback.png
+Automated QA: clk 的 60–70 ns 保持拍级选择且无覆盖；状态栏显示 already uses normal clock waveform/
+              no values changed；一次 Undo 直接恢复 gated，Redo 精确返回 normal
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

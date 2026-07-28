@@ -602,6 +602,11 @@ std::string ClearLaneRangesCommand::description() const
     return "Clear selected ranges";
 }
 
+bool ClearLaneRangesCommand::hasEffect() const noexcept
+{
+    return before_ && after_ && *before_ != *after_;
+}
+
 ClearLaneRangeCommand::ClearLaneRangeCommand(
     Scenario& scenario,
     std::string laneId,
@@ -649,6 +654,11 @@ void ClearLaneRangeCommand::undo()
 std::string ClearLaneRangeCommand::description() const
 {
     return "Clear lane range";
+}
+
+bool ClearLaneRangeCommand::hasEffect() const noexcept
+{
+    return before_ && after_ && *before_ != *after_;
 }
 
 EditSegmentCommand::EditSegmentCommand(
