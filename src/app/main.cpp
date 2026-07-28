@@ -2630,16 +2630,6 @@ int main(int argc, char* argv[])
                     return;
                 }
 
-                canvas->fitScenario();
-                measureAction->trigger();
-                if (!measureAction->isChecked()
-                    || canvas->tool() != wave::WaveCanvas::Tool::Marker) {
-                    qCritical().noquote() << "Measure mode did not activate";
-                    window.hide();
-                    application.exit(4);
-                    return;
-                }
-
                 const auto sendMouse = [canvas](
                                            const QEvent::Type type,
                                            const QPoint position,
@@ -2725,6 +2715,48 @@ int main(int argc, char* argv[])
                         tick,
                         window.project().timeBase));
                 };
+                const auto laneCenter = [&window, canvas](const std::string& laneId) {
+                    auto y = 40 - canvas->verticalScrollBar()->value();
+                    for (const auto& lane : window.project().scenarios.front().lanes) {
+                        if (!lane.visible) continue;
+                        const auto height = std::clamp(lane.height, 30, 240);
+                        if (lane.id == laneId) return y + height / 2;
+                        y += height;
+                    }
+                    return -1;
+                };
+
+                canvas->fitScenario();
+                canvas->verticalScrollBar()->setValue(0);
+                QCoreApplication::processEvents();
+                const auto dataY = laneCenter("lane-data");
+                auto* busPresetPalette = canvas->findChild<QWidget*>(
+                    QStringLiteral("BusPresetPalette"));
+                if (dataY < 0 || !busPresetPalette) {
+                    qCritical().noquote() << "Measure isolation controls are missing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                click(QPoint(point2.x(), dataY));
+                QCoreApplication::processEvents();
+                if (!busPresetPalette->isVisible()) {
+                    qCritical().noquote() << "Bus direct controls could not be exposed before Measure";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                measureAction->trigger();
+                QCoreApplication::processEvents();
+                if (!measureAction->isChecked()
+                    || canvas->tool() != wave::WaveCanvas::Tool::Marker
+                    || busPresetPalette->isVisible()) {
+                    qCritical().noquote()
+                        << "Measure mode did not activate with direct-edit overlays isolated";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
 
                 click(point1);
                 const auto clickStatus = window.statusBar()->currentMessage();
@@ -3194,6 +3226,66 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
+
+                const auto interruptedPanIsolated = [&](const bool exitWithEscape) {
+                    canvas->fitScenario();
+                    canvas->zoomIn();
+                    canvas->zoomIn();
+                    canvas->zoomIn();
+                    const auto maximum = canvas->horizontalScrollBar()->maximum();
+                    if (maximum <= 0) return false;
+                    canvas->horizontalScrollBar()->setValue(maximum / 2);
+                    measureAction->trigger();
+                    QCoreApplication::processEvents();
+                    if (!measureAction->isChecked()
+                        || canvas->tool() != wave::WaveCanvas::Tool::Marker) {
+                        return false;
+                    }
+                    sendMouse(
+                        QEvent::MouseButtonPress,
+                        point2,
+                        Qt::MiddleButton,
+                        Qt::MiddleButton,
+                        Qt::NoModifier);
+                    if (exitWithEscape) {
+                        sendKey(Qt::Key_Escape);
+                    } else {
+                        measureAction->trigger();
+                    }
+                    QCoreApplication::processEvents();
+                    const auto positionAfterExit = canvas->horizontalScrollBar()->value();
+                    sendMouse(
+                        QEvent::MouseMove,
+                        point4,
+                        Qt::NoButton,
+                        Qt::MiddleButton,
+                        Qt::NoModifier);
+                    sendMouse(
+                        QEvent::MouseButtonRelease,
+                        point4,
+                        Qt::MiddleButton,
+                        Qt::NoButton,
+                        Qt::NoModifier);
+                    QCoreApplication::processEvents();
+                    return !measureAction->isChecked()
+                        && canvas->tool() == wave::WaveCanvas::Tool::WaveEdit
+                        && canvas->horizontalScrollBar()->value() == positionAfterExit;
+                };
+                if (!interruptedPanIsolated(false)) {
+                    qCritical().noquote()
+                        << "Measure toggle left an interrupted pan active in direct editing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!interruptedPanIsolated(true)) {
+                    qCritical().noquote()
+                        << "Measure Escape left an interrupted pan active in direct editing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                canvas->fitScenario();
                 window.hide();
                 application.exit(0);
             });

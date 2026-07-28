@@ -931,6 +931,10 @@ void WaveCanvas::setTool(const Tool tool)
     const auto previousTool = tool_;
     tool_ = tool;
     drawing_ = false;
+    panning_ = false;
+    spaceHeld_ = false;
+    bypassSnap_ = false;
+    snapGuideTick_.reset();
     cursorInteraction_ = CursorInteraction::None;
     lockedMarkerOriginalRange_.reset();
     laneHeaderPressed_ = false;
@@ -946,6 +950,7 @@ void WaveCanvas::setTool(const Tool tool)
     }
     if (previousTool == Tool::WaveEdit && tool != Tool::WaveEdit) {
         clearWaveEditState();
+        hideBusPresetPalette();
     }
     viewport()->setCursor([tool] {
         if (tool == Tool::Selection) return QCursor(Qt::ArrowCursor);

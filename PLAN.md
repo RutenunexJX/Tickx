@@ -2550,6 +2550,62 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 45：Measure 模式切换状态隔离
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `setTool()` 只清理了光标、标题拖动与波形编辑状态，未取消进行中的时间轴平移、
+  空格手势、临时吸附绕过和吸附引导；Wave Edit 中打开的 Bus 直接编辑面板也会残留到 Measure。
+- 用户从 Bus 就地赋值切换到测量时，只需要新的测量画布，不应继续看到上一任务的编辑控件；若在
+  中键平移尚未释放时通过 Measure 按钮或 Esc 退出，返回直接编辑后的首次移动也不应继续滚动时间轴。
+- 工具切换现在统一终止平移、空格手势、临时吸附绕过和吸附引导。由 Wave Edit 进入其他工具时，
+  同步关闭 Bus 直接编辑面板；无效未提交草稿仍由既有门禁原处阻止切换，不会被静默丢弃。
+- `wave-cursor-mode-smoke` 先打开 Bus 面板再进入 Measure，断言浮层隔离；随后分别在中键按下后通过
+  Measure 按钮和 Esc 退出，继续发送移动/释放事件，断言直接编辑模式与滚动位置保持稳定。全部 GUI offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.99 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.94 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-cursor-mode-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.73 sec
+
+Screenshot generated:
+  build/qtcreator-debug/cursor-mode-smoke.png
+Automated QA: Bus 直接编辑面板不会进入 Measure；按钮和 Esc 均在鼠标释放前终止平移；
+              返回直接编辑后额外移动不改变滚动位置；全部活动/临时/锁定光标流程无回归
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
