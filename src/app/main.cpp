@@ -18,6 +18,7 @@
 #include <QDockWidget>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -387,10 +388,76 @@ int main(int argc, char* argv[])
                         fail(QStringLiteral("An invalid recovery snapshot replaced the saved project"));
                         return;
                     }
-                    if (!QFile::remove(snapshotPath)) {
-                        fail(QStringLiteral("Cannot clean the autosave smoke recovery snapshot"));
+
+                    QString restoredRecoveryError;
+                    if (!wave::saveProjectFileAtomic(
+                            recoveryProject,
+                            snapshotPath,
+                            &restoredRecoveryError)) {
+                        fail(QStringLiteral("Cannot restore the recovery snapshot for discard testing: %1")
+                                 .arg(restoredRecoveryError));
                         return;
                     }
+                    QFile restoredRecovery(snapshotPath);
+                    if (!restoredRecovery.open(QIODevice::ReadWrite)
+                        || !restoredRecovery.setFileTime(
+                            newerTime.addSecs(4),
+                            QFileDevice::FileModificationTime)) {
+                        fail(QStringLiteral("Cannot timestamp the discard recovery snapshot"));
+                        return;
+                    }
+                    restoredRecovery.close();
+
+                    recoveredWindow.show();
+                    if (!QMetaObject::invokeMethod(
+                            &recoveredWindow,
+                            "startAutosave",
+                            Qt::DirectConnection)) {
+                        fail(QStringLiteral("Cannot start the discard race autosave"));
+                        return;
+                    }
+                    bool discardHandled = false;
+                    QTimer::singleShot(
+                        0,
+                        &application,
+                        [&discardHandled] {
+                            auto* box = qobject_cast<QMessageBox*>(
+                                QApplication::activeModalWidget());
+                            auto* discard = box
+                                ? box->button(QMessageBox::Discard)
+                                : nullptr;
+                            if (!discard) return;
+                            discardHandled = true;
+                            discard->click();
+                        });
+                    if (!QMetaObject::invokeMethod(
+                            &recoveredWindow,
+                            "newProject",
+                            Qt::DirectConnection)) {
+                        fail(QStringLiteral("Cannot trigger recovery discard through New"));
+                        return;
+                    }
+                    QEventLoop settleLoop;
+                    QTimer::singleShot(100, &settleLoop, &QEventLoop::quit);
+                    settleLoop.exec();
+                    auto* discardedState = recoveredWindow.findChild<QLabel*>(
+                        QStringLiteral("SaveStateLabel"));
+                    if (!discardHandled
+                        || QApplication::activeModalWidget()
+                        || QFileInfo::exists(snapshotPath)
+                        || wave::preferredProjectLoadPath(autosaveSmokePath)
+                            != autosaveSmokePath
+                        || !discardedState
+                        || discardedState->text() != QStringLiteral("Not saved")
+                        || recoveredWindow.project().name != "Untitled"
+                        || recoveredWindow.project().scenarios.size() != 1
+                        || !recoveredWindow.project().scenarios.front().lanes.empty()
+                        || recoveredWindow.windowTitle().contains(QStringLiteral(" *"))) {
+                        fail(QStringLiteral(
+                            "Discard did not durably remove recovered and in-flight changes"));
+                        return;
+                    }
+                    recoveredWindow.hide();
                     application.exit(0);
                 });
         });

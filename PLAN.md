@@ -3347,6 +3347,60 @@ Automated QA: 正式工程旁的有效更新快照被自动选中，恢复后的
 Desktop interaction: none
 ```
 
+## 持续迭代 59：恢复内容 Discard 的持久语义
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 New/Open/Close 的未保存提示在选择 Discard 时只返回 `true`，不停止 autosave 或删除 `<project>.autosave`。第 58 轮自动发现更新快照后，
+  用户明确放弃的内容会在下一次打开时再次恢复；若后台 worker 尚未完成，它还可能在 Discard 后重新创建文件。
+- 用户从恢复状态选择 Discard，表达的是永久放弃这份恢复内容，而非仅关闭当前内存视图。再次看到同一内容会使 Discard 失去可信度，也可能促使用户误保存本已放弃的旧状态。
+- `discardRecoverySnapshots()` 现在停止防抖定时器、递增 generation、清除 pending 标志，收集当前正式工程和在途 worker 对应的确切快照路径；若 worker 在运行，
+  先等待其完成，再删除所有相关文件。New/Open/Close 共享的 `confirmDiscardChanges()` 只有清理成功才继续。
+- 在途路径登记为显式放弃；其 queued `finished` 到达后会再次尝试删除，但不会显示 autosave 成功、不会重新调度。若文件删除失败，Discard 被取消，当前修改保持打开，
+  提示具体残留路径并恢复 autosave；Open 在后续加载失败时也为仍在内存中的脏工程恢复 autosave。
+- `wave-autosave-smoke` 在自动恢复窗口中重新创建更新快照并直接启动后台写入，随后调用 New、真实点击 QMessageBox 的 Discard；断言 worker 已完成、快照不存在、
+  `preferredProjectLoadPath()` 回到正式工程，窗口变为无星号的 Untitled/Not saved 且空 lane，等待 100 ms 后仍无重新写入。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 9.13 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 8.81 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-autosave-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 3.57 sec
+
+Automated QA: Recovery loaded 窗口存在有效更新快照且 autosave worker 在途时执行 New，未保存提示真实点击 Discard。
+              worker 完成后 .autosave 未重现，自动选择回到正式工程；当前窗口为 Untitled、Not saved、无标题星号和空 lane。
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

@@ -129,6 +129,7 @@ private:
     void updateWindowTitle();
     bool loadFromPath(const QString& path);
     bool writeToPath(const QString& path);
+    bool discardRecoverySnapshots();
     bool confirmDiscardChanges();
     [[nodiscard]] Scenario* activeScenario() noexcept;
     [[nodiscard]] const Scenario* activeScenario() const noexcept;
@@ -210,6 +211,7 @@ private:
     QFutureWatcher<QPair<quint64, QString>>* autosaveWatcher_{nullptr};
     quint64 autosaveGeneration_{0};
     QString autosaveInFlightPath_;
+    std::set<QString> discardedAutosavePaths_;
     bool autosavePending_{false};
     bool reloadTraceAfterCurrent_{false};
     bool compareModeRequested_{false};

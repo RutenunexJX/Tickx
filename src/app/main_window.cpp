@@ -1027,7 +1027,7 @@ void MainWindow::openProject()
         QFileInfo(projectFile_).absolutePath(),
         tr("Wave Workbench project (*.wave.json);;Recovery snapshot (*.autosave);;JSON files (*.json)"));
     if (path.isEmpty() || !confirmDiscardChanges()) return;
-    loadFromPath(path);
+    if (!loadFromPath(path) && dirty_) scheduleAutosave();
 }
 
 void MainWindow::saveProject()
@@ -3368,14 +3368,14 @@ void MainWindow::finishAutosave()
     const auto result = autosaveWatcher_->result();
     const auto path = std::exchange(autosaveInFlightPath_, QString{});
     const auto stale = result.first != autosaveGeneration_;
+    const auto explicitlyDiscarded = discardedAutosavePaths_.erase(path) > 0;
     if (stale) {
-        if (!dirty_
+        if ((explicitlyDiscarded || !dirty_)
             && !path.isEmpty()
             && QFileInfo::exists(path)
             && !QFile::remove(path)) {
             statusBar()->showMessage(
-                tr("Saved project, but stale recovery snapshot could not be removed: %1")
-                    .arg(path),
+                tr("Recovery snapshot could not be removed: %1").arg(path),
                 10'000);
         }
     } else if (!result.second.isEmpty()) {
@@ -3385,13 +3385,15 @@ void MainWindow::finishAutosave()
     } else {
         statusBar()->showMessage(tr("Autosaved recovery snapshot"), 3'000);
     }
-    if (autosavePending_ || stale) {
+    if ((autosavePending_ || stale) && !explicitlyDiscarded) {
         if (!pendingQuickLaneId_.isEmpty()) {
             autosavePending_ = dirty_ && !projectFile_.isEmpty();
             return;
         }
         autosavePending_ = false;
         if (dirty_ && !projectFile_.isEmpty()) autosaveTimer_->start(0);
+    } else if (explicitlyDiscarded) {
+        autosavePending_ = false;
     }
 }
 
@@ -4443,6 +4445,38 @@ bool MainWindow::writeToPath(const QString& path)
     return true;
 }
 
+bool MainWindow::discardRecoverySnapshots()
+{
+    if (autosaveTimer_) autosaveTimer_->stop();
+    ++autosaveGeneration_;
+    autosavePending_ = false;
+
+    std::set<QString> paths;
+    const auto currentPath = autosavePathForProject(projectFile_);
+    if (!currentPath.isEmpty()) paths.insert(currentPath);
+    const auto inFlightPath = autosaveInFlightPath_;
+    if (!inFlightPath.isEmpty()) {
+        paths.insert(inFlightPath);
+        discardedAutosavePaths_.insert(inFlightPath);
+        if (autosaveWatcher_) autosaveWatcher_->waitForFinished();
+    }
+
+    QStringList failures;
+    for (const auto& path : paths) {
+        if (QFileInfo::exists(path) && !QFile::remove(path)) failures.push_back(path);
+    }
+    if (failures.isEmpty()) return true;
+
+    if (!inFlightPath.isEmpty()) discardedAutosavePaths_.erase(inFlightPath);
+    scheduleAutosave();
+    QMessageBox::warning(
+        this,
+        tr("Cannot discard recovery snapshot"),
+        tr("The unsaved changes remain open because these recovery snapshots could not be removed:\n%1")
+            .arg(failures.join(QLatin1Char('\n'))));
+    return false;
+}
+
 bool MainWindow::confirmDiscardChanges()
 {
     if (!dirty_) return true;
@@ -4453,7 +4487,7 @@ bool MainWindow::confirmDiscardChanges()
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
         QMessageBox::Save);
     if (choice == QMessageBox::Cancel) return false;
-    if (choice == QMessageBox::Discard) return true;
+    if (choice == QMessageBox::Discard) return discardRecoverySnapshots();
     saveProject();
     return !dirty_;
 }
