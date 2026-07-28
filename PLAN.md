@@ -3687,6 +3687,60 @@ Automated QA: 示例工程初始有 1 个隐藏 group，画布末尾和 Edit 菜
               点击画布按钮后 group 与 req 同时恢复且显示 Ctrl+Z；Undo 后两者重新隐藏，Redo 后重新恢复；再 Undo 两次回到 req 可见、group 隐藏的 Saved 基线，无标题星号。
 Desktop interaction: none
 ```
+
+## 持续迭代 65：Group 画布管理闭环
+
+状态：完成
+
+已交付：
+
+- 开发审计确认纯波形工作区会渲染可见 Group 行，但标题单击、右键、双击和 F2 均显式排除 `LaneKind::Group`。从第 64 轮入口恢复隐藏 Group 或通过 Edit 添加后，用户能看到空白 Group 行，却无法从唯一工作区选中、重命名、删除、重排或再次进入属性，形成不可管理对象。
+- 用户真正需要的是把 Group 当作信号列表中的可操作分隔项：看到后直接点击即可知道目标，沿用已经学会的 F2、双击、拖动和 Delete，不应为 Group 猜测另一套隐藏入口。
+- Group 标题现与信号标题共用单击选择和拖动状态机；选择反馈明确显示 Group 名称、Delete 目标及 F2。Marker/范围选择清理、Esc 中断拖动、插入位置反馈继续沿用既有规则。
+- F2 与双击打开同一个非模态就地重命名框，辅助名称、入口、取消、空名/重名纠错、提交结果均区分 Group；名称修改仍通过 `ChangeLaneCommand` 保持 stable ID 和成员引用。右键 Group 标题提供 `Group properties…`，进入现有完整属性对话框。
+- Delete/Backspace 复用依赖感知删除，确认框说明成员信号将保留并解组；完成反馈显示实际解组数量。`AddLaneCommand`、`ChangeLaneCommand`、`MoveLaneCommand`、`RemoveLaneCommand` 对 Group 返回 Add/Change/Move/Remove group 描述，使 Undo/Redo 不再误称 lane。
+- 新增 `wave-group-header-smoke`：从示例工程的隐藏 Group 恢复开始，真实点击选择、F2 重命名、Undo/Redo、双击与 Esc、右键属性并取消、拖动重排与 Undo、Delete 确认 5 个成员解组及 Undo，最后逐步回到原始隐藏 Group 的 Saved 基线。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+23/23 tests passed
+Total Test time: 11.63 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+23/23 tests passed
+Total Test time: 11.55 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-group-header-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.23 sec
+
+Automated QA: Show 1 hidden item 恢复 Group 后，标题单击立即显示 Group/Delete/F2 目标；
+              F2 与双击均打开 Group 就地重命名，Esc 恢复目标，右键可进入并取消 Group properties；
+              标题拖动显示插入位置并以 Move group 单步撤销；Delete 前说明 5 个成员将解组，完成后成员保留且 Group 消失，Undo 原子恢复；
+              再撤销重命名与显示命令后回到原始隐藏 Group、Saved、无标题星号和 Show 1 hidden item。
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

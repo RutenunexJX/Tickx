@@ -911,7 +911,7 @@ void AddLaneCommand::undo()
 
 std::string AddLaneCommand::description() const
 {
-    return "Add lane";
+    return lane_.kind == LaneKind::Group ? "Add group" : "Add lane";
 }
 
 RemoveLaneCommand::RemoveLaneCommand(
@@ -935,6 +935,7 @@ RemoveLaneCommand::RemoveLaneCommand(
     }
     const auto* lane = findLane(scenario, laneId_);
     if (!lane) throw std::invalid_argument("lane does not exist");
+    removesGroup_ = lane->kind == LaneKind::Group;
 
     std::vector<std::string> removedEventIds;
     for (const auto& event : afterScenario_.events) {
@@ -1017,7 +1018,7 @@ void RemoveLaneCommand::undo()
 
 std::string RemoveLaneCommand::description() const
 {
-    return "Remove lane";
+    return removesGroup_ ? "Remove group" : "Remove lane";
 }
 
 MoveLaneCommand::MoveLaneCommand(
@@ -1038,6 +1039,7 @@ MoveLaneCommand::MoveLaneCommand(
     if (iterator == scenario.lanes.end()) {
         throw std::invalid_argument("lane does not exist");
     }
+    movesGroup_ = iterator->kind == LaneKind::Group;
     if (destinationIndex >= scenario.lanes.size()) {
         throw std::invalid_argument("lane destination index is outside the scenario");
     }
@@ -1060,7 +1062,7 @@ void MoveLaneCommand::undo()
 
 std::string MoveLaneCommand::description() const
 {
-    return "Move lane";
+    return movesGroup_ ? "Move group" : "Move lane";
 }
 
 ChangeLaneCommand::ChangeLaneCommand(
@@ -1171,7 +1173,7 @@ void ChangeLaneCommand::undo()
 
 std::string ChangeLaneCommand::description() const
 {
-    return "Change lane";
+    return before_.kind == LaneKind::Group ? "Change group" : "Change lane";
 }
 
 bool ChangeLaneCommand::hasEffect() const noexcept

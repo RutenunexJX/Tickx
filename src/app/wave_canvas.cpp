@@ -580,7 +580,13 @@ bool WaveCanvas::commitPendingInlineEdits()
 void WaveCanvas::beginLaneRename(const QString& laneId, const QString& name)
 {
     if (!laneRenameEdit_ || laneId.isEmpty() || hasQuickLaneSetup() || hasLaneRename()) return;
+    const auto* lane = scenario_ ? findLane(*scenario_, laneId.toStdString()) : nullptr;
+    const auto renamingGroup = lane && lane->kind == LaneKind::Group;
     laneRenameLaneId_ = laneId;
+    laneRenameEdit_->setAccessibleName(
+        renamingGroup ? tr("Group name") : tr("Signal name"));
+    laneRenameEdit_->setPlaceholderText(
+        renamingGroup ? tr("Group name") : tr("Signal name"));
     laneRenameEdit_->setText(name);
     laneRenameEdit_->setModified(false);
     laneRenameEdit_->setToolTip(tr("Enter or click elsewhere to apply · Esc to cancel"));
@@ -600,8 +606,11 @@ void WaveCanvas::beginLaneRename(const QString& laneId, const QString& name)
         }
     });
     emit statusMessage(
-        tr("Rename signal %1 · Enter or click elsewhere to apply · Esc to cancel")
-            .arg(name));
+        renamingGroup
+            ? tr("Rename group %1 · Enter or click elsewhere to apply · Esc to cancel")
+                  .arg(name)
+            : tr("Rename signal %1 · Enter or click elsewhere to apply · Esc to cancel")
+                  .arg(name));
     viewport()->update();
 }
 
@@ -816,17 +825,22 @@ void WaveCanvas::cancelLaneRename()
 {
     if (!hasLaneRename()) return;
     QString laneName;
+    auto renamingGroup = false;
     if (scenario_) {
         if (const auto* lane = findLane(*scenario_, laneRenameLaneId_.toStdString())) {
             laneName = QString::fromStdString(lane->name);
+            renamingGroup = lane->kind == LaneKind::Group;
         }
     }
     finishLaneRename();
     emit statusMessage(
         laneName.isEmpty()
             ? tr("Rename cancelled")
-            : tr("Rename cancelled · Selected signal %1 · Delete removes signal · F2 renames")
-                  .arg(laneName));
+            : renamingGroup
+                ? tr("Rename cancelled · Selected group %1 · Delete removes group · F2 renames")
+                      .arg(laneName)
+                : tr("Rename cancelled · Selected signal %1 · Delete removes signal · F2 renames")
+                      .arg(laneName));
 }
 
 void WaveCanvas::submitDurationEdit(const bool preserveMouseFocusTarget)
@@ -1724,7 +1738,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         emit statusMessage(tr("Range selection cleared"));
     }
     auto* lane = laneAtY(event->pos().y());
-    if (!lane || lane->kind == LaneKind::Group) {
+    if (!lane) {
         QAbstractScrollArea::contextMenuEvent(event);
         return;
     }
@@ -1742,8 +1756,11 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         if (tool_ == Tool::WaveEdit) clearWaveEditState();
         laneHeaderSelectionActive_ = true;
         emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
-        auto selectionMessage = tr("Selected signal %1 · Delete removes signal · F2 renames")
-                                    .arg(QString::fromStdString(lane->name));
+        auto selectionMessage = lane->kind == LaneKind::Group
+            ? tr("Selected group %1 · Delete removes group · F2 renames")
+                  .arg(QString::fromStdString(lane->name))
+            : tr("Selected signal %1 · Delete removes signal · F2 renames")
+                  .arg(QString::fromStdString(lane->name));
         if (lockedMarkerDeselected) {
             selectionMessage.append(tr(" · locked cursor/range deselected"));
         }
@@ -1755,6 +1772,10 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
             QString::fromStdString(lane->id),
             event->globalPos());
         viewport()->update();
+        event->accept();
+        return;
+    }
+    if (lane->kind == LaneKind::Group) {
         event->accept();
         return;
     }
@@ -1971,7 +1992,7 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
 
     if (scenario_ && event->key() == Qt::Key_F2 && !selectedLaneId_.empty()) {
         const auto* lane = findLane(*scenario_, selectedLaneId_);
-        if (lane && lane->kind != LaneKind::Group) {
+        if (lane) {
             emit renameLaneRequested(QString::fromStdString(lane->id));
             event->accept();
             return;
@@ -2389,7 +2410,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         hideBusPresetPalette();
     }
 
-    if (position.x() < HeaderWidth && lane && lane->kind != LaneKind::Group) {
+    if (position.x() < HeaderWidth && lane) {
         setFocus(Qt::MouseFocusReason);
         if (tool_ == Tool::WaveEdit) clearWaveEditState();
         selectedLaneId_ = lane->id;
@@ -2409,8 +2430,11 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         laneDropDestinationIndex_.reset();
         laneDropIndicatorY_.reset();
         emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
-        auto selectionMessage = tr("Selected signal %1 · Delete removes signal · F2 renames")
-                                    .arg(QString::fromStdString(lane->name));
+        auto selectionMessage = lane->kind == LaneKind::Group
+            ? tr("Selected group %1 · Delete removes group · F2 renames")
+                  .arg(QString::fromStdString(lane->name))
+            : tr("Selected signal %1 · Delete removes signal · F2 renames")
+                  .arg(QString::fromStdString(lane->name));
         if (lockedMarkerDeselected) {
             selectionMessage.append(tr(" · locked cursor/range deselected"));
         }
@@ -3082,7 +3106,7 @@ void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
     const auto position = event->position().toPoint();
     if (event->button() == Qt::LeftButton && position.x() < HeaderWidth) {
         const auto* lane = laneAtY(position.y());
-        if (lane && lane->kind != LaneKind::Group) {
+        if (lane) {
             selectedLaneId_ = lane->id;
             selectedLaneIds_ = {lane->id};
             if (tool_ == Tool::Marker) {

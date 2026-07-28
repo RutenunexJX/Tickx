@@ -251,6 +251,7 @@ private:
     Scenario beforeScenario_;
     Scenario afterScenario_;
     std::vector<TraceMapping> removedTraceMappings_;
+    bool removesGroup_{false};
 };
 
 class MoveLaneCommand final : public EditCommand {
@@ -269,6 +270,7 @@ private:
     std::string laneId_;
     std::size_t beforeIndex_;
     std::size_t afterIndex_;
+    bool movesGroup_{false};
 };
 
 class ChangeLaneCommand final : public EditCommand {

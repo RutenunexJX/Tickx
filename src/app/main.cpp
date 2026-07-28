@@ -99,6 +99,7 @@ int main(int argc, char* argv[])
     bool laneRemovalSmoke = false;
     bool laneReorderSmoke = false;
     bool hiddenLaneSmoke = false;
+    bool groupHeaderSmoke = false;
     bool canvasAddLaneSmoke = false;
     QString canvasAddLaneScreenshotPath;
     bool userJourneySmoke = false;
@@ -129,6 +130,8 @@ int main(int argc, char* argv[])
             laneReorderSmoke = true;
         } else if (argument == QStringLiteral("--hidden-lane-smoke")) {
             hiddenLaneSmoke = true;
+        } else if (argument == QStringLiteral("--group-header-smoke")) {
+            groupHeaderSmoke = true;
         } else if (argument.startsWith(QStringLiteral("--canvas-add-lane-smoke="))) {
             canvasAddLaneSmoke = true;
             canvasAddLaneScreenshotPath = argument.mid(
@@ -191,6 +194,7 @@ int main(int argc, char* argv[])
         || laneRemovalSmoke
         || laneReorderSmoke
         || hiddenLaneSmoke
+        || groupHeaderSmoke
         || canvasAddLaneSmoke
         || !screenshotPath.isEmpty()
         || !laneDialogScreenshotPath.isEmpty()
@@ -2294,7 +2298,394 @@ int main(int argc, char* argv[])
             window.hide();
             application.exit(0);
         });
-    } else if (canvasAddLaneSmoke) {
+    } else if (groupHeaderSmoke) {
+        QTimer::singleShot(0, &window, [&application, &window] {
+            auto* canvas = window.findChild<wave::WaveCanvas*>();
+            auto* showButton = window.findChild<QToolButton*>(
+                QStringLiteral("CanvasShowHiddenLanesButton"));
+            auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
+            auto* redoAction = window.findChild<QAction*>(QStringLiteral("RedoAction"));
+            auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+            auto fail = [&application, &window](const QString& message) {
+                qCritical().noquote() << message;
+                if (auto* popup = QApplication::activePopupWidget()) popup->close();
+                if (auto* modal = QApplication::activeModalWidget()) modal->close();
+                window.hide();
+                application.exit(4);
+            };
+            const auto* initialGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!canvas || !showButton || !undoAction || !redoAction || !saveState
+                || !initialGroup || initialGroup->visible
+                || !showButton->isVisible()
+                || showButton->text() != QStringLiteral("Show 1 hidden item")) {
+                fail(QStringLiteral(
+                    "Group header smoke could not find the hidden example group recovery path"));
+                return;
+            }
+
+            showButton->click();
+            QCoreApplication::processEvents();
+            const auto* shownGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!shownGroup || !shownGroup->visible || showButton->isVisible()
+                || saveState->text() != QStringLiteral("Unsaved changes")) {
+                fail(QStringLiteral("The example group could not be restored for header interaction"));
+                return;
+            }
+
+            const auto sendKey = [](QObject* target,
+                                    const int key,
+                                    const Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+                QKeyEvent press(QEvent::KeyPress, key, modifiers);
+                QCoreApplication::sendEvent(target, &press);
+                QKeyEvent release(QEvent::KeyRelease, key, modifiers);
+                QCoreApplication::sendEvent(target, &release);
+            };
+            const auto sendMouse = [canvas](
+                                       const QEvent::Type type,
+                                       const QPoint position,
+                                       const Qt::MouseButton button,
+                                       const Qt::MouseButtons buttons) {
+                QMouseEvent event(
+                    type,
+                    QPointF(position),
+                    QPointF(canvas->viewport()->mapToGlobal(position)),
+                    button,
+                    buttons,
+                    Qt::NoModifier);
+                QCoreApplication::sendEvent(canvas->viewport(), &event);
+            };
+            const auto clickHeader = [&sendMouse](const QPoint position) {
+                sendMouse(
+                    QEvent::MouseButtonPress,
+                    position,
+                    Qt::LeftButton,
+                    Qt::LeftButton);
+                sendMouse(
+                    QEvent::MouseButtonRelease,
+                    position,
+                    Qt::LeftButton,
+                    Qt::NoButton);
+            };
+            const auto laneScreenTop = [canvas, &window](const std::string& laneId) {
+                auto y = 40 - canvas->verticalScrollBar()->value();
+                for (const auto& lane : window.project().scenarios.front().lanes) {
+                    if (!lane.visible) continue;
+                    const auto height = std::clamp(lane.height, 30, 240);
+                    if (lane.id == laneId) return y;
+                    y += height;
+                }
+                return std::numeric_limits<int>::min();
+            };
+            const auto laneCenter = [&laneScreenTop, &window](const std::string& laneId) {
+                const auto top = laneScreenTop(laneId);
+                const auto* lane = wave::findLane(
+                    window.project().scenarios.front(), laneId);
+                return !lane || top == std::numeric_limits<int>::min()
+                    ? -1
+                    : top + std::clamp(lane->height, 30, 240) / 2;
+            };
+            const auto laneOrder = [&window] {
+                std::vector<std::string> ids;
+                for (const auto& lane : window.project().scenarios.front().lanes) {
+                    ids.push_back(lane.id);
+                }
+                return ids;
+            };
+            const auto groupedMemberCount = [&window] {
+                return static_cast<std::size_t>(std::count_if(
+                    window.project().scenarios.front().lanes.begin(),
+                    window.project().scenarios.front().lanes.end(),
+                    [](const wave::Lane& lane) {
+                        return lane.groupId == "group-handshake";
+                    }));
+            };
+
+            canvas->verticalScrollBar()->setValue(0);
+            QCoreApplication::processEvents();
+            auto groupY = laneCenter("group-handshake");
+            if (groupY < 40 || groupY >= canvas->viewport()->height()) {
+                fail(QStringLiteral("The restored group header is outside the visible canvas"));
+                return;
+            }
+            window.activateWindow();
+            canvas->setFocus(Qt::OtherFocusReason);
+            clickHeader(QPoint(80, groupY));
+            QCoreApplication::processEvents();
+            const auto selectedStatus = window.statusBar()->currentMessage();
+            if (canvas->selectedLaneId() != QStringLiteral("group-handshake")
+                || !selectedStatus.contains(QStringLiteral("Selected group Handshake signals"))
+                || !selectedStatus.contains(QStringLiteral("Delete removes group"))
+                || !selectedStatus.contains(QStringLiteral("F2 renames"))) {
+                fail(QStringLiteral("Clicking a visible Group header did not select it with clear actions"));
+                return;
+            }
+
+            sendKey(canvas, Qt::Key_F2);
+            QCoreApplication::processEvents();
+            QCoreApplication::processEvents();
+            auto* renameEdit = canvas->findChild<QLineEdit*>(
+                QStringLiteral("LaneRenameEdit"));
+            if (!renameEdit || !renameEdit->isVisible() || !renameEdit->hasFocus()
+                || renameEdit->accessibleName() != QStringLiteral("Group name")
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Rename group Handshake signals"))) {
+                fail(QStringLiteral("F2 did not open an identified inline Group rename editor"));
+                return;
+            }
+            renameEdit->setText(QStringLiteral("Handshake I/O"));
+            sendKey(renameEdit, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            auto* renamedGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (renameEdit->isVisible() || !renamedGroup
+                || renamedGroup->name != "Handshake I/O"
+                || groupedMemberCount() != 5
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Renamed group Handshake signals to Handshake I/O"))
+                || !window.statusBar()->currentMessage().contains(QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Inline Group rename changed the wrong data or lacked recovery feedback"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            renamedGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!renamedGroup || renamedGroup->name != "Handshake signals"
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Undid Change group"))) {
+                fail(QStringLiteral("Group rename Undo was not explicit or complete"));
+                return;
+            }
+            redoAction->trigger();
+            QCoreApplication::processEvents();
+            renamedGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!renamedGroup || renamedGroup->name != "Handshake I/O"
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Redid Change group"))) {
+                fail(QStringLiteral("Group rename Redo was not explicit or complete"));
+                return;
+            }
+
+            groupY = laneCenter("group-handshake");
+            sendMouse(
+                QEvent::MouseButtonDblClick,
+                QPoint(80, groupY),
+                Qt::LeftButton,
+                Qt::LeftButton);
+            QCoreApplication::processEvents();
+            if (!renameEdit->isVisible()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Rename group Handshake I/O"))) {
+                fail(QStringLiteral("Double-click did not start inline Group rename"));
+                return;
+            }
+            sendKey(renameEdit, Qt::Key_Escape);
+            QCoreApplication::processEvents();
+            if (renameEdit->isVisible()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Rename cancelled · Selected group Handshake I/O"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Delete removes group"))) {
+                fail(QStringLiteral("Escape did not cancel Group rename and restore its target"));
+                return;
+            }
+
+            groupY = laneCenter("group-handshake");
+            bool contextMenuHandled = false;
+            bool propertiesDialogHandled = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&application, &contextMenuHandled, &propertiesDialogHandled] {
+                    auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                    auto* action = menu
+                        ? menu->findChild<QAction*>(QStringLiteral("GroupPropertiesAction"))
+                        : nullptr;
+                    if (!menu
+                        || menu->objectName() != QStringLiteral("LaneHeaderContextMenu")
+                        || !action
+                        || action->text() != QStringLiteral("Group properties…")) {
+                        if (menu) menu->close();
+                        return;
+                    }
+                    contextMenuHandled = true;
+                    QTimer::singleShot(
+                        0,
+                        &application,
+                        [&propertiesDialogHandled] {
+                            auto* dialog = qobject_cast<QDialog*>(
+                                QApplication::activeModalWidget());
+                            auto* name = dialog
+                                ? dialog->findChild<QLineEdit*>(
+                                      QStringLiteral("LanePropertiesNameEdit"))
+                                : nullptr;
+                            if (dialog
+                                && dialog->objectName() == QStringLiteral("LanePropertiesDialog")
+                                && name
+                                && name->text() == QStringLiteral("Handshake I/O")) {
+                                propertiesDialogHandled = true;
+                            }
+                            if (dialog) dialog->reject();
+                        });
+                    action->trigger();
+                    menu->close();
+                });
+            const QPoint contextPoint(80, groupY);
+            QContextMenuEvent contextEvent(
+                QContextMenuEvent::Mouse,
+                contextPoint,
+                canvas->viewport()->mapToGlobal(contextPoint));
+            QCoreApplication::sendEvent(canvas->viewport(), &contextEvent);
+            QCoreApplication::processEvents();
+            renamedGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!contextMenuHandled || !propertiesDialogHandled
+                || !renamedGroup || renamedGroup->name != "Handshake I/O") {
+                fail(QStringLiteral("Group right-click did not expose a cancellable properties entry"));
+                return;
+            }
+
+            const auto orderBeforeMove = laneOrder();
+            groupY = laneCenter("group-handshake");
+            const auto acknowledgeTop = laneScreenTop("lane-ack");
+            if (groupY < 40 || acknowledgeTop < 40) {
+                fail(QStringLiteral("Group reorder targets are outside the visible canvas"));
+                return;
+            }
+            sendMouse(
+                QEvent::MouseButtonPress,
+                QPoint(80, groupY),
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseMove,
+                QPoint(80, acknowledgeTop + 3),
+                Qt::NoButton,
+                Qt::LeftButton);
+            QCoreApplication::processEvents();
+            if (!canvas->laneDropDestinationIndex()
+                || *canvas->laneDropDestinationIndex() != 3) {
+                sendMouse(
+                    QEvent::MouseButtonRelease,
+                    QPoint(80, acknowledgeTop + 3),
+                    Qt::LeftButton,
+                    Qt::NoButton);
+                fail(QStringLiteral("Dragging a Group header did not expose the expected insertion target"));
+                return;
+            }
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                QPoint(80, acknowledgeTop + 3),
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            const auto orderAfterMove = laneOrder();
+            if (orderAfterMove.size() != orderBeforeMove.size()
+                || orderAfterMove.at(3) != "group-handshake"
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Moved Handshake I/O: position 3 -> 4"))) {
+                fail(QStringLiteral("Group header drag committed the wrong order or feedback"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (laneOrder() != orderBeforeMove
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Undid Move group"))
+                || !window.statusBar()->currentMessage().contains(QStringLiteral("Ctrl+Y"))) {
+                fail(QStringLiteral("Group reorder Undo did not restore order with accurate feedback"));
+                return;
+            }
+
+            groupY = laneCenter("group-handshake");
+            clickHeader(QPoint(80, groupY));
+            canvas->setFocus(Qt::OtherFocusReason);
+            bool removalConfirmed = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&removalConfirmed] {
+                    auto* confirmation = qobject_cast<QMessageBox*>(
+                        QApplication::activeModalWidget());
+                    auto* yes = confirmation
+                        ? confirmation->button(QMessageBox::Yes)
+                        : nullptr;
+                    if (!confirmation || !yes) {
+                        if (confirmation) confirmation->reject();
+                        return;
+                    }
+                    const auto text = confirmation->text();
+                    removalConfirmed = text.contains(
+                                           QStringLiteral("Remove group \"Handshake I/O\""))
+                        && text.contains(QStringLiteral("5 member signals"))
+                        && text.contains(QStringLiteral("become ungrouped"))
+                        && text.contains(QStringLiteral("Ctrl+Z"));
+                    if (removalConfirmed) {
+                        yes->click();
+                    } else {
+                        confirmation->reject();
+                    }
+                });
+            sendKey(canvas, Qt::Key_Delete);
+            QCoreApplication::processEvents();
+            const auto* removedGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!removalConfirmed || removedGroup || groupedMemberCount() != 0
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Removed group Handshake I/O"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("5 member signals ungrouped"))
+                || !window.statusBar()->currentMessage().contains(QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Delete did not remove the selected Group with dependency feedback"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* restoredGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!restoredGroup || !restoredGroup->visible
+                || restoredGroup->name != "Handshake I/O"
+                || groupedMemberCount() != 5
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Undid Remove group"))
+                || !window.statusBar()->currentMessage().contains(QStringLiteral("Ctrl+Y"))) {
+                fail(QStringLiteral("Group delete Undo did not restore membership and feedback"));
+                return;
+            }
+
+            undoAction->trigger();
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* baselineGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!baselineGroup || baselineGroup->visible
+                || baselineGroup->name != "Handshake signals"
+                || groupedMemberCount() != 5
+                || !showButton->isVisible()
+                || showButton->text() != QStringLiteral("Show 1 hidden item")
+                || saveState->text() != QStringLiteral("Saved")
+                || window.windowTitle().contains(QStringLiteral(" *"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("back to saved version"))) {
+                fail(QStringLiteral("Group workflow did not return to the exact Saved baseline"));
+                return;
+            }
+
+            window.hide();
+            application.exit(0);
+        });    } else if (canvasAddLaneSmoke) {
         QTimer::singleShot(0, &window, [&application, &window, canvasAddLaneScreenshotPath] {
             auto* canvas = window.findChild<wave::WaveCanvas*>();
             const std::array<QToolButton*, 3> addButtons{

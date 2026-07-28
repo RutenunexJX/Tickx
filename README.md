@@ -126,6 +126,9 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
 - 在高级 Lane/Group 属性中关闭 `Visible` 后，画布末尾和 Edit 菜单会显示
   `Show N hidden items`；一次操作恢复当前场景的全部隐藏项，并作为单个命令支持 Undo/Redo。
   被隐藏信号的标题选择、波形选择和 Bus 便携面板会立即清除，状态栏同时说明恢复入口。
+- 可见 Group 标题与信号标题使用同一套直接操作：单击选择、拖动重排、双击或 `F2` 就地重命名、
+  `Delete` / `Backspace` 删除；右键进入完整 Group 属性。选择、取消、完成及 Add/Change/Move/Remove
+  的 Undo/Redo 均明确使用 group 名称；删除前说明成员将被解组，Undo 原子恢复 Group 和成员关系。
 - 单击非 Bit Segment 进行选择；拖动主体整体移动，拖动左右手柄修改边界，双击修改现有值，
   `Delete` / `Backspace` 清除为该信号的隐式值。右键波形可设置常用值、插入一拍 Pulse、编辑
   完整 Segment 或清除 Segment。清除后状态栏显示信号、时间范围、隐式结果和 `Ctrl+Z` 提示；
@@ -363,7 +366,7 @@ exports/
   状态立即恢复为 `Saved`、窗口星号消失且不再产生关闭保存提示。Redo 离开保存点后重新显示
   `Unsaved changes`。若 Undo 发生在 autosave 正在写入或已经完成之后，过期恢复快照会在后台结果
   返回后或当场删除；新分支不会因与旧分支栈深度相同而被误判为 Saved。
-最近一次验证结果：22 个 CTest 入口均通过，其中核心入口包含 26 组细分测试；Qt Creator
+最近一次验证结果：23 个 CTest 入口均通过，其中核心入口包含 26 组细分测试；Qt Creator
 Debug 与 Release 构建均已验证。完整验收记录见 [PLAN.md](PLAN.md)。
 
 ## 当前限制

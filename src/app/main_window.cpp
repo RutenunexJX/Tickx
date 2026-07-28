@@ -1977,7 +1977,7 @@ void MainWindow::renameLaneById(const QString& laneId)
     if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
-    if (!lane || lane->kind == LaneKind::Group) return;
+    if (!lane) return;
     if (!pendingQuickLaneId_.isEmpty()) {
         canvas_->showQuickLaneSetupError(tr("Press Enter or Esc before renaming another signal."));
         return;
@@ -1989,15 +1989,19 @@ void MainWindow::completeLaneRename(const QString& laneId, const QString& reques
 {
     auto* scenario = activeScenario();
     auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
-    if (!lane || lane->kind == LaneKind::Group) {
+    if (!lane) {
         canvas_->finishLaneRename();
-        statusBar()->showMessage(tr("The signal being renamed is no longer available."), 4'000);
+        statusBar()->showMessage(tr("The item being renamed is no longer available."), 4'000);
         return;
     }
+    const auto renamingGroup = lane->kind == LaneKind::Group;
 
     const auto name = requestedName.trimmed();
     if (name.isEmpty()) {
-        canvas_->showLaneRenameError(tr("Signal name cannot be empty."));
+        canvas_->showLaneRenameError(
+            renamingGroup
+                ? tr("Group name cannot be empty.")
+                : tr("Signal name cannot be empty."));
         return;
     }
     const auto duplicate = std::any_of(
@@ -2012,14 +2016,19 @@ void MainWindow::completeLaneRename(const QString& laneId, const QString& reques
                     == 0;
         });
     if (duplicate) {
-        canvas_->showLaneRenameError(tr("Another signal already uses this name."));
+        canvas_->showLaneRenameError(
+            renamingGroup
+                ? tr("Another lane or group already uses this name.")
+                : tr("Another signal already uses this name."));
         return;
     }
 
     const auto previousName = QString::fromStdString(lane->name);
     if (name == previousName) {
         canvas_->finishLaneRename();
-        statusBar()->showMessage(tr("Signal name unchanged"), 3'000);
+        statusBar()->showMessage(
+            renamingGroup ? tr("Group name unchanged") : tr("Signal name unchanged"),
+            3'000);
         return;
     }
 
@@ -2037,7 +2046,9 @@ void MainWindow::completeLaneRename(const QString& laneId, const QString& reques
     canvas_->refreshModel();
     markEdited();
     statusBar()->showMessage(
-        tr("Renamed %1 to %2 · Ctrl+Z to undo").arg(previousName, name),
+        renamingGroup
+            ? tr("Renamed group %1 to %2 · Ctrl+Z to undo").arg(previousName, name)
+            : tr("Renamed %1 to %2 · Ctrl+Z to undo").arg(previousName, name),
         5'000);
 }
 
@@ -2181,10 +2192,19 @@ void MainWindow::showLaneContextMenu(
 {
     const auto* scenario = activeScenario();
     const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
-    if (!lane || lane->kind == LaneKind::Group) return;
+    if (!lane) return;
 
     QMenu menu(this);
     menu.setObjectName(QStringLiteral("LaneHeaderContextMenu"));
+    if (lane->kind == LaneKind::Group) {
+        auto* properties = menu.addAction(tr("Group properties…"));
+        properties->setObjectName(QStringLiteral("GroupPropertiesAction"));
+        connect(properties, &QAction::triggered, this, [this, laneId] {
+            editLaneById(laneId);
+        });
+        menu.exec(globalPosition);
+        return;
+    }
     const auto label = lane->kind == LaneKind::Clock
         ? tr("Clock frequency / period...")
         : lane->kind == LaneKind::Bus
