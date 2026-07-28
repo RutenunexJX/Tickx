@@ -2583,7 +2583,23 @@ int main(int argc, char* argv[])
             canvas->revealLocation(QString::fromStdString(quickBit.id), 0);
             QCoreApplication::processEvents();
             bitY = laneCenter(quickBit.id);
+            const auto* selectedDeleteLane = wave::findLane(
+                window.project().scenarios.front(), quickBit.id);
+            if (!selectedDeleteLane) {
+                fail(QStringLiteral("Signal for selected-header Delete is missing"));
+                return;
+            }
+            const auto selectedDeleteName = QString::fromStdString(
+                selectedDeleteLane->name);
             clickHeader(QPoint(80, bitY));
+            const auto selectedHeaderStatus = window.statusBar()->currentMessage();
+            if (!selectedHeaderStatus.contains(QStringLiteral("Selected signal"))
+                || !selectedHeaderStatus.contains(selectedDeleteName)
+                || !selectedHeaderStatus.contains(QStringLiteral("Delete removes signal"))
+                || !selectedHeaderStatus.contains(QStringLiteral("F2 renames"))) {
+                fail(QStringLiteral("Signal header selection did not identify the target and keys"));
+                return;
+            }
             bool selectedDeleteConfirmed = false;
             QTimer::singleShot(0, &application, [&selectedDeleteConfirmed] {
                 auto* confirmation = qobject_cast<QMessageBox*>(
@@ -2935,10 +2951,23 @@ int main(int argc, char* argv[])
                 }
                 click(QPoint(80, dataY));
                 QCoreApplication::processEvents();
+                const auto* selectedDataLane = wave::findLane(
+                    window.project().scenarios.front(), "lane-data");
+                const auto markerRetargetStatus = window.statusBar()->currentMessage();
                 if (!canvas->selectedMarkerId().isEmpty()
-                    || busPresetPalette->isVisible()) {
+                    || busPresetPalette->isVisible()
+                    || !selectedDataLane
+                    || !markerRetargetStatus.contains(QStringLiteral("Selected signal"))
+                    || !markerRetargetStatus.contains(
+                        QString::fromStdString(selectedDataLane->name))
+                    || !markerRetargetStatus.contains(
+                        QStringLiteral("Delete removes signal"))
+                    || !markerRetargetStatus.contains(QStringLiteral("F2 renames"))
+                    || !markerRetargetStatus.contains(
+                        QStringLiteral("locked cursor/range deselected"))) {
                     qCritical().noquote()
-                        << "Selecting a signal header left the locked cursor selected";
+                        << "Signal header did not replace the locked-cursor target and feedback"
+                        << markerRetargetStatus;
                     window.hide();
                     application.exit(4);
                     return;

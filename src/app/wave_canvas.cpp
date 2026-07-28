@@ -2329,6 +2329,8 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         if (tool_ == Tool::WaveEdit) clearWaveEditState();
         selectedLaneId_ = lane->id;
         selectedLaneIds_ = {lane->id};
+        const auto lockedMarkerDeselected =
+            tool_ == Tool::Marker && !selectedMarkerId_.empty();
         if (tool_ == Tool::Marker) {
             selectedMarkerId_.clear();
             cursorInteraction_ = CursorInteraction::None;
@@ -2342,11 +2344,15 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         laneDropDestinationIndex_.reset();
         laneDropIndicatorY_.reset();
         emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
-        if (rangeClearedForRetarget) {
-            emit statusMessage(
-                tr("Selected %1 · range cleared")
-                    .arg(QString::fromStdString(lane->name)));
+        auto selectionMessage = tr("Selected signal %1 · Delete removes signal · F2 renames")
+                                    .arg(QString::fromStdString(lane->name));
+        if (lockedMarkerDeselected) {
+            selectionMessage.append(tr(" · locked cursor/range deselected"));
         }
+        if (rangeClearedForRetarget) {
+            selectionMessage.append(tr(" · range cleared"));
+        }
+        emit statusMessage(selectionMessage);
         viewport()->setCursor(Qt::OpenHandCursor);
         viewport()->update();
         return;

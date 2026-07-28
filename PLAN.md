@@ -2665,6 +2665,65 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 47：信号标题选择目标反馈
+
+状态：完成
+
+已交付：
+
+- 开发审计确认标题左键只发出 `selectionChanged`，而主窗口处理函数仅更新排序动作，不更新状态栏。
+  因此标题选中后会继续显示上一项波形、Marker 或 Undo 结果，实际键盘目标已经变化但文字未变化。
+- 用户在 Measure 中选中锁定光标时会看到“Selected … Delete”；随后点击信号标题虽然取消了 Marker
+  高亮，旧提示仍声称 Delete 操作该光标，而按键实际进入信号删除确认。这是高风险的目标反馈错位。
+- 每次左键信号标题选择现在统一报告 `Selected signal <name>`、`Delete removes signal` 和 `F2 renames`。
+  若同次取消锁定光标/区间或持久范围，状态末尾追加 `locked cursor/range deselected` / `range cleared`，
+  当前目标和被替换目标在一条结果中可确认。
+- `wave-canvas-add-lane-smoke` 断言普通编辑中标题选择先报告名称与两个按键目标，再执行 Delete；
+  `wave-cursor-mode-smoke` 断言从锁定 Marker 切到 Bus 标题时 Marker 取消、名称/按键目标和取消原因同步更新，
+  随后仍可重新选择并编辑原 Marker。全部 GUI offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.39 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 8.83 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-canvas-add-lane-smoke|wave-cursor-mode-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 1.20 sec
+
+Screenshot generated:
+  build/qtcreator-debug/cursor-mode-smoke.png
+Automated QA: 普通信号标题选择报告当前名称、Delete 与 F2 目标后再允许删除；
+              Marker→Bus 标题切换同步报告新信号目标和 locked cursor/range deselected；
+              Marker 可重新选择，删除、Undo/Redo、Measure 退出与平移隔离无回归
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
