@@ -1022,6 +1022,65 @@ Visual QA: 持久选择范围、同类型批量操作面板、波形与网格均
            用户旅程的创建、编辑、保存状态无视觉回归
 Desktop interaction: none
 ```
+## 持续迭代 19：波形 Event 与 Relation 一致性
+
+状态：完成
+
+已交付：
+
+- `synchronizeLaneEventsFromSegments` 不再先删除全部失配 Event。重分段时依次按 Segment ID、
+  同 tick/value、同 tick 复用原 waveform-linked Event；边沿仍存在时稳定 Event ID 和 Relation
+  端点保持不变，只更新新的 linked Segment ID、值与时间。
+- 仅当波形边沿确实消失时，精确删除 source 或 target 引用该 Event 的 Relation；同一 Relation
+  两端同时失效也只删除一次，无关 Relation 原对象保留。linked Event 和普通 Event 的显式删除
+  同样清理依赖关系，所有路径均由场景快照支持完整 Undo/Redo。
+- 批量范围赋值若删除依赖 Relation，状态栏明确显示 Relation 数量、删除原因以及 `Ctrl+Z` 会同时
+  恢复波形和关系；未删除关系时保留原成功提示。
+- 核心回归使用非真空夹具覆盖 source 消失、target 消失、同 tick 重映射、无关 Relation 保留、
+  Event ID 唯一、linked Event 与 Lane/Segment/tick/value 一致，以及 linked/普通 Event 删除。
+  `wave-wave-edit-smoke` 覆盖真实 Shift 范围赋值、状态提示、Relation 清理和 Undo。
+  全部 GUI 路径使用 `QT_QPA_PLATFORM=offscreen`，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 19 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.44 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.06 sec
+
+git diff --check
+Result: clean
+Desktop interaction: none
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.60 sec
+
+Screenshots:
+  build/qtcreator-debug/wave-edit-smoke-relation-cleanup.png
+  build/qtcreator-debug/user-journey-smoke.png
+Visual QA: 80–150 ns 批量赋值、选择范围与波形清晰；状态栏明确显示删除 1 个 Relation、
+           原因及 Ctrl+Z 恢复波形和关系；完整用户旅程无视觉回归
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

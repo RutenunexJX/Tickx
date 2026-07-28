@@ -124,8 +124,10 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   面板。Bit 可用面板或 `0`、`1`、`X`、`Z` 键一次写入完整范围；Bus 可直接输入值或选择
   `0`、`X`、`Z`、`Don't care`，每条 lane 按自身位宽生成值。混合类型只保留复制入口，
   不允许产生部分写入。一次批量赋值对应一个 Undo/Redo，Esc 清除选择，第一次点击范围外只
-  清除选择而不修改波形。Edit 菜单的 Copy/Paste range 按稳定 lane ID 和相对整数 tick 复制，
-  粘贴作为一个可撤销命令。左右方向键移动直接编辑时间光标。
+  清除选择而不修改波形。同一时间边沿仍存在时复用稳定 Event ID，Relation 保持不变；边沿确实
+  消失时仅删除引用它的 Relation，状态栏说明删除数量、原因以及 `Ctrl+Z` 会同时恢复波形和关系。
+  Edit 菜单的 Copy/Paste range 按稳定 lane ID 和相对整数 tick 复制，粘贴作为一个可撤销命令。
+  左右方向键移动直接编辑时间光标。
 - Bit Event 菱形无需切换模式即可直接拖动。预览期间模型不变，虚线只覆盖原/新边沿中较早位置
   到后继 Segment 结束的局部范围；释放后以一个命令同步更新 Segment 与 Event。
 - 单击 Bus 波形会在附近显示上下文、直接值输入框以及 `0`、`X`、`Z`、`Don't care`。预设可
@@ -221,7 +223,9 @@ exports/
 - 单命令撤销/重做，以及快速创建命令的原子替换、取消和场景时长 Undo/Redo。
 - 多 lane 范围复制/粘贴、同类型 Bit/Bus 原子批量赋值、不同 Bus 位宽值生成、失败零部分写入及
   完整撤销/重做。
-- Event 时间和值与关联 Segment 的双向同步。
+- Event 时间和值与关联 Segment 的双向同步；重分段时按 Segment ID/tick 复用稳定 Event ID，
+  source/target 边沿消失时精确清理依赖 Relation，无关关系保持原样。linked 与普通 Event 删除均
+  覆盖依赖清理及完整 Undo/Redo。
 - 画布式区间编辑到步骤表 Event 的同步。
 - Marker command、Relation min/max delay、满足、违反、缺失目标和未定义区间。
 - Relation condition 的运算符优先级、括号、稳定 ID/唯一名称、引号、四态值归一化、

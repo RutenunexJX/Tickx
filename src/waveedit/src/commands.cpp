@@ -15,6 +15,18 @@ bool actionControlsWaveform(const EventAction action)
         || action == EventAction::Toggle;
 }
 
+void removeRelationsReferencingEvent(
+    Scenario& scenario,
+    const std::string_view eventId)
+{
+    std::erase_if(
+        scenario.relations,
+        [eventId](const Relation& relation) {
+            return relation.sourceEventId == eventId
+                || relation.targetEventId == eventId;
+        });
+}
+
 Segment* findLinkedSegment(Lane& lane, const std::string_view segmentId)
 {
     const auto iterator = std::find_if(
@@ -155,10 +167,12 @@ void applyRemovedEventToWaveform(Scenario& scenario, const std::string_view even
     if (iterator == scenario.events.end()) {
         throw std::invalid_argument("event does not exist");
     }
+    const auto removedEventId = iterator->id;
     const auto laneId = iterator->laneId;
     const auto linkedSegmentId = iterator->linkedSegmentId;
     const auto linked = iterator->waveformLinked;
     scenario.events.erase(iterator);
+    removeRelationsReferencingEvent(scenario, removedEventId);
     if (!linked) return;
 
     auto* lane = findLane(scenario, laneId);

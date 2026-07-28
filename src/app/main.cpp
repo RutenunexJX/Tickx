@@ -3115,6 +3115,105 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
+
+                const auto* relationFixture = wave::findRelation(
+                    scenario,
+                    "relation-req-ack");
+                if (!relationFixture) {
+                    qCritical().noquote() << "Range relation fixture is missing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto relationSourceId = relationFixture->sourceEventId;
+                const auto relationTargetId = relationFixture->targetEventId;
+                dragModified(
+                    QPoint(xAtTick(110'000), requestY),
+                    QPoint(xAtTick(120'000), acknowledgeY),
+                    Qt::ShiftModifier);
+                rangeXButton->click();
+                QCoreApplication::processEvents();
+                relationFixture = wave::findRelation(scenario, "relation-req-ack");
+                if (!relationFixture
+                    || relationFixture->sourceEventId != relationSourceId
+                    || relationFixture->targetEventId != relationTargetId
+                    || !wave::findEvent(scenario, relationFixture->sourceEventId)
+                    || !wave::findEvent(scenario, relationFixture->targetEventId)) {
+                    qCritical().noquote()
+                        << "Range edit did not preserve a relation whose edges remain";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeBitRangeAssignment) {
+                    qCritical().noquote()
+                        << "Relation-preserving range edit undo was not exact";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                dragModified(
+                    QPoint(xAtTick(80'000), requestY),
+                    QPoint(xAtTick(150'000), acknowledgeY),
+                    Qt::ShiftModifier);
+                rangeXButton->click();
+                QCoreApplication::processEvents();
+                const auto relationCleanupMessage = window.statusBar()->currentMessage();
+                if (wave::findRelation(scenario, "relation-req-ack")
+                    || !relationCleanupMessage.contains(
+                        QStringLiteral("removed 1 relation"),
+                        Qt::CaseInsensitive)
+                    || !relationCleanupMessage.contains(
+                        QStringLiteral("Ctrl+Z restores waveform and relations"),
+                        Qt::CaseInsensitive)) {
+                    qCritical().noquote()
+                        << "Removed waveform edge did not clean and report its relation";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                for (const auto& relation : scenario.relations) {
+                    if (!wave::findEvent(scenario, relation.sourceEventId)
+                        || (!relation.targetEventId.empty()
+                            && !wave::findEvent(scenario, relation.targetEventId))) {
+                        qCritical().noquote()
+                            << "Range edit left a dangling relation";
+                        window.hide();
+                        application.exit(4);
+                        return;
+                    }
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto cleanupScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix = cleanupScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        cleanupScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-relation-cleanup"));
+                    } else {
+                        cleanupScreenshotPath.append(
+                            QStringLiteral("-relation-cleanup.png"));
+                    }
+                    if (!window.grab().save(cleanupScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save relation cleanup screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeBitRangeAssignment
+                    || !wave::findRelation(scenario, "relation-req-ack")) {
+                    qCritical().noquote()
+                        << "Dependent relation cleanup was not undoable";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
                 const auto beforeRangeDismissClick = scenario;
                 click(QPoint(xAtTick(65'000), requestY));
                 if (scenario != beforeRangeDismissClick

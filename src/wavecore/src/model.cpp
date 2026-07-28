@@ -642,48 +642,69 @@ void synchronizeLaneEventsFromSegments(
         return;
     }
 
-    std::unordered_set<std::string> segmentIds;
-    segmentIds.reserve(lane->segments.size());
-    for (const auto& segment : lane->segments) {
-        segmentIds.insert(segment.id);
+    std::vector<Event> linkedEvents;
+    std::vector<Event> retainedEvents;
+    linkedEvents.reserve(lane->segments.size());
+    retainedEvents.reserve(scenario.events.size() + lane->segments.size());
+    for (auto& event : scenario.events) {
+        if (event.waveformLinked && event.laneId == laneId) {
+            linkedEvents.push_back(std::move(event));
+        } else {
+            retainedEvents.push_back(std::move(event));
+        }
     }
 
-    scenario.events.erase(
-        std::remove_if(
-            scenario.events.begin(),
-            scenario.events.end(),
-            [laneId, &segmentIds](const Event& event) {
-                return event.waveformLinked
-                    && event.laneId == laneId
-                    && !segmentIds.contains(event.linkedSegmentId);
-            }),
-        scenario.events.end());
-
-    for (const auto& segment : lane->segments) {
-        auto iterator = std::find_if(
-            scenario.events.begin(),
-            scenario.events.end(),
-            [&segment, laneId](const Event& event) {
-                return event.waveformLinked
-                    && event.laneId == laneId
-                    && event.linkedSegmentId == segment.id;
-            });
-        if (iterator == scenario.events.end()) {
-            Event event;
-            event.id = makeStableId("event");
-            event.laneId = std::string(laneId);
-            event.tick = segment.start;
-            event.action = action;
-            event.value = segment.value;
-            event.description = "Waveform segment";
-            event.linkedSegmentId = segment.id;
-            event.waveformLinked = true;
-            scenario.events.push_back(std::move(event));
-        } else {
-            iterator->tick = segment.start;
-            iterator->value = segment.value;
-            iterator->linkedSegmentId = segment.id;
+    std::vector<bool> reused(linkedEvents.size(), false);
+    const auto reusable = [&linkedEvents, &reused](const auto& predicate) {
+        for (std::size_t index = 0; index < linkedEvents.size(); ++index) {
+            if (!reused[index] && predicate(linkedEvents[index])) return index;
         }
+        return linkedEvents.size();
+    };
+    for (const auto& segment : lane->segments) {
+        auto index = reusable([&segment](const Event& event) {
+            return event.linkedSegmentId == segment.id;
+        });
+        if (index == linkedEvents.size()) {
+            index = reusable([&segment](const Event& event) {
+                return event.tick == segment.start && event.value == segment.value;
+            });
+        }
+        if (index == linkedEvents.size()) {
+            index = reusable([&segment](const Event& event) {
+                return event.tick == segment.start;
+            });
+        }
+
+        Event event;
+        if (index != linkedEvents.size()) {
+            reused[index] = true;
+            event = std::move(linkedEvents[index]);
+        } else {
+            event.id = makeStableId("event");
+            event.action = action;
+            event.description = "Waveform segment";
+        }
+        event.laneId = std::string(laneId);
+        event.tick = segment.start;
+        event.value = segment.value;
+        event.linkedSegmentId = segment.id;
+        event.waveformLinked = true;
+        retainedEvents.push_back(std::move(event));
+    }
+
+    std::unordered_set<std::string> removedEventIds;
+    for (std::size_t index = 0; index < linkedEvents.size(); ++index) {
+        if (!reused[index]) removedEventIds.insert(linkedEvents[index].id);
+    }
+    scenario.events = std::move(retainedEvents);
+    if (!removedEventIds.empty()) {
+        std::erase_if(
+            scenario.relations,
+            [&removedEventIds](const Relation& relation) {
+                return removedEventIds.contains(relation.sourceEventId)
+                    || removedEventIds.contains(relation.targetEventId);
+            });
     }
 
     std::stable_sort(

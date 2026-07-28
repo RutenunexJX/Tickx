@@ -3159,6 +3159,7 @@ bool WaveCanvas::applyExplicitRangeValue(
     }
 
     const auto [start, end] = *selectionRange_;
+    const auto relationCountBefore = scenario_->relations.size();
     try {
         commandStack_->execute(std::make_unique<SetLaneRangesCommand>(
             *scenario_,
@@ -3191,12 +3192,21 @@ bool WaveCanvas::applyExplicitRangeValue(
     const auto displayValue = !presetId.empty()
         ? busPresetDisplayLabel(presetId)
         : QString::fromStdString(value);
-    emit statusMessage(
-        tr("%1 signals · %2–%3 = %4 · Ctrl+Z to undo")
-            .arg(static_cast<qulonglong>(selectedLaneIds_.size()))
-            .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
-            .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
-            .arg(displayValue));
+    auto message = tr("%1 signals · %2–%3 = %4")
+                       .arg(static_cast<qulonglong>(selectedLaneIds_.size()))
+                       .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+                       .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
+                       .arg(displayValue);
+    const auto removedRelationCount = relationCountBefore
+        - std::min(relationCountBefore, scenario_->relations.size());
+    if (removedRelationCount > 0) {
+        message += tr(" · removed %1 relation(s) because referenced edges disappeared")
+                       .arg(static_cast<qulonglong>(removedRelationCount));
+        message += tr(" · Ctrl+Z restores waveform and relations");
+    } else {
+        message += tr(" · Ctrl+Z to undo");
+    }
+    emit statusMessage(message);
     return true;
 }
 

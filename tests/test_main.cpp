@@ -873,6 +873,43 @@ void testMultiLaneRangeAssignmentCommand()
     auto project = wave::makeDemonstrationProject();
     auto& scenario = project.scenarios.front();
     const auto before = scenario;
+    expectEqual(
+        before.relations.size(),
+        std::size_t{1},
+        "demonstration scenario relation fixture is missing");
+    const auto expectEventRelationIntegrity = [](const wave::Scenario& candidate) {
+        std::vector<std::string> eventIds;
+        eventIds.reserve(candidate.events.size());
+        for (const auto& event : candidate.events) {
+            expect(
+                std::find(eventIds.begin(), eventIds.end(), event.id) == eventIds.end(),
+                "scenario contains duplicate Event IDs");
+            eventIds.push_back(event.id);
+            if (!event.waveformLinked) continue;
+            const auto* lane = wave::findLane(candidate, event.laneId);
+            expect(lane != nullptr, "waveform Event references a missing lane");
+            const auto segment = std::find_if(
+                lane->segments.begin(),
+                lane->segments.end(),
+                [&event](const wave::Segment& candidateSegment) {
+                    return candidateSegment.id == event.linkedSegmentId;
+                });
+            expect(
+                segment != lane->segments.end(),
+                "waveform Event references a missing Segment");
+            expect(
+                event.tick == segment->start && event.value == segment->value,
+                "waveform Event is out of sync with its Segment");
+        }
+        for (const auto& relation : candidate.relations) {
+            expect(
+                wave::findEvent(candidate, relation.sourceEventId)
+                    && (relation.targetEventId.empty()
+                        || wave::findEvent(candidate, relation.targetEventId)),
+                "Relation references a missing Event");
+        }
+    };
+    expectEventRelationIntegrity(before);
 
     wave::CommandStack stack;
     stack.execute(std::make_unique<wave::SetLaneRangesCommand>(
@@ -906,6 +943,122 @@ void testMultiLaneRangeAssignmentCommand()
     expectEqual(scenario, before, "one undo did not restore every assigned lane");
     expect(stack.redo(), "multi-lane range assignment redo failed");
     expectEqual(scenario, after, "one redo did not restore every assigned lane");
+
+    auto preservedRelationScenario = before;
+    const auto relationBefore = preservedRelationScenario.relations.front();
+    const auto* targetEventBefore = wave::findEvent(
+        preservedRelationScenario,
+        relationBefore.targetEventId);
+    expect(targetEventBefore != nullptr, "relation target fixture is missing");
+    const auto targetSegmentBefore = targetEventBefore->linkedSegmentId;
+    wave::CommandStack preservedRelationStack;
+    preservedRelationStack.execute(std::make_unique<wave::SetLaneRangesCommand>(
+        preservedRelationScenario,
+        110'000,
+        120'000,
+        std::vector<wave::LaneRangeAssignment>{
+            {"lane-request", "X", {}},
+            {"lane-ack", "X", {}},
+        }));
+    const auto* preservedRelation = wave::findRelation(
+        preservedRelationScenario,
+        relationBefore.id);
+    const auto* preservedSource = preservedRelation
+        ? wave::findEvent(preservedRelationScenario, preservedRelation->sourceEventId)
+        : nullptr;
+    const auto* preservedTarget = preservedRelation
+        ? wave::findEvent(preservedRelationScenario, preservedRelation->targetEventId)
+        : nullptr;
+    expect(
+        preservedRelation && preservedSource && preservedTarget,
+        "range assignment did not preserve a relation whose edge ticks still exist");
+    expectEqual(
+        *preservedRelation,
+        relationBefore,
+        "range assignment changed an unaffected Relation object");
+    expectEventRelationIntegrity(preservedRelationScenario);
+    expect(
+        preservedTarget->linkedSegmentId != targetSegmentBefore
+            && preservedTarget->tick == 110'000,
+        "relation target event was not remapped to the replacement segment");
+    const auto preservedRelationAfter = preservedRelationScenario;
+    expect(
+        preservedRelationStack.undo(),
+        "relation-preserving range assignment undo failed");
+    expectEqual(
+        preservedRelationScenario,
+        before,
+        "relation-preserving range assignment undo was not exact");
+    expect(
+        preservedRelationStack.redo(),
+        "relation-preserving range assignment redo failed");
+    expectEqual(
+        preservedRelationScenario,
+        preservedRelationAfter,
+        "relation-preserving range assignment redo was not exact");
+
+    auto removedEdgeScenario = before;
+    const auto eventForSegment = [](const wave::Scenario& candidate, const std::string_view id) {
+        const auto iterator = std::find_if(
+            candidate.events.begin(),
+            candidate.events.end(),
+            [id](const wave::Event& event) { return event.linkedSegmentId == id; });
+        return iterator == candidate.events.end() ? nullptr : &*iterator;
+    };
+    const auto* resetEvent = eventForSegment(removedEdgeScenario, "segment-reset-high");
+    const auto* dataEvent = eventForSegment(removedEdgeScenario, "segment-data-payload");
+    expect(resetEvent && dataEvent, "unaffected relation Event fixtures are missing");
+    auto sourceRemovedRelation = relationBefore;
+    sourceRemovedRelation.id = "relation-source-removed";
+    sourceRemovedRelation.sourceEventId = relationBefore.targetEventId;
+    sourceRemovedRelation.targetEventId = resetEvent->id;
+    auto unaffectedRelation = relationBefore;
+    unaffectedRelation.id = "relation-unaffected";
+    unaffectedRelation.sourceEventId = resetEvent->id;
+    unaffectedRelation.targetEventId = dataEvent->id;
+    removedEdgeScenario.relations.push_back(sourceRemovedRelation);
+    removedEdgeScenario.relations.push_back(unaffectedRelation);
+    const auto removedEdgeBefore = removedEdgeScenario;
+
+    wave::CommandStack removedEdgeStack;
+    removedEdgeStack.execute(std::make_unique<wave::SetLaneRangesCommand>(
+        removedEdgeScenario,
+        80'000,
+        150'000,
+        std::vector<wave::LaneRangeAssignment>{
+            {"lane-request", "X", {}},
+            {"lane-ack", "X", {}},
+        }));
+    expect(
+        !wave::findRelation(removedEdgeScenario, relationBefore.id),
+        "relation survived after its target waveform edge was removed");
+    expect(
+        !wave::findRelation(removedEdgeScenario, sourceRemovedRelation.id),
+        "relation survived after its source waveform edge was removed");
+    const auto* unaffectedAfter = wave::findRelation(
+        removedEdgeScenario,
+        unaffectedRelation.id);
+    expect(unaffectedAfter != nullptr, "unrelated Relation was removed");
+    expectEqual(
+        *unaffectedAfter,
+        unaffectedRelation,
+        "unrelated Relation was modified");
+    expectEqual(
+        removedEdgeScenario.relations.size(),
+        std::size_t{1},
+        "range assignment removed the wrong number of Relations");
+    expectEventRelationIntegrity(removedEdgeScenario);
+    const auto removedEdgeAfter = removedEdgeScenario;
+    expect(removedEdgeStack.undo(), "removed-edge relation cleanup undo failed");
+    expectEqual(
+        removedEdgeScenario,
+        removedEdgeBefore,
+        "removed-edge relation cleanup undo was not exact");
+    expect(removedEdgeStack.redo(), "removed-edge relation cleanup redo failed");
+    expectEqual(
+        removedEdgeScenario,
+        removedEdgeAfter,
+        "removed-edge relation cleanup redo was not exact");
 
     auto busScenario = before;
     auto* wideBus = wave::findLane(busScenario, "lane-data");
@@ -1375,6 +1528,63 @@ void testEventSegmentSynchronization()
         scenario.events,
         eventsBeforeCanvasEdit,
         "canvas range undo did not restore the event table model");
+
+    const auto linkedRemovalBefore = scenario;
+    expect(
+        wave::findRelation(scenario, "relation-req-ack") != nullptr,
+        "linked Event relation fixture is missing");
+    stack.clear();
+    stack.execute(std::make_unique<wave::RemoveEventCommand>(scenario, eventId));
+    expect(!wave::findEvent(scenario, eventId), "linked Event was not removed");
+    expect(
+        !wave::findRelation(scenario, "relation-req-ack"),
+        "linked Event removal left its Relation dangling");
+    const auto linkedRemovalAfter = scenario;
+    expect(stack.undo(), "linked Event removal undo failed");
+    expectEqual(
+        scenario,
+        linkedRemovalBefore,
+        "linked Event removal undo did not restore waveform and Relation");
+    expect(stack.redo(), "linked Event removal redo failed");
+    expectEqual(
+        scenario,
+        linkedRemovalAfter,
+        "linked Event removal redo did not restore dependency cleanup");
+
+    auto ordinaryScenario = linkedRemovalBefore;
+    wave::Event noteEvent;
+    noteEvent.id = "event-note";
+    noteEvent.tick = 10'000;
+    noteEvent.action = wave::EventAction::Note;
+    noteEvent.description = "Manual note";
+    ordinaryScenario.events.push_back(noteEvent);
+    auto noteRelation = ordinaryScenario.relations.front();
+    noteRelation.id = "relation-note";
+    noteRelation.sourceEventId = noteEvent.id;
+    ordinaryScenario.relations.push_back(noteRelation);
+    const auto ordinaryRemovalBefore = ordinaryScenario;
+    wave::CommandStack ordinaryStack;
+    ordinaryStack.execute(std::make_unique<wave::RemoveEventCommand>(
+        ordinaryScenario,
+        noteEvent.id));
+    expect(!wave::findEvent(ordinaryScenario, noteEvent.id), "ordinary Event was not removed");
+    expect(
+        !wave::findRelation(ordinaryScenario, noteRelation.id),
+        "ordinary Event removal left its Relation dangling");
+    expect(
+        wave::findRelation(ordinaryScenario, "relation-req-ack") != nullptr,
+        "ordinary Event removal deleted an unrelated Relation");
+    const auto ordinaryRemovalAfter = ordinaryScenario;
+    expect(ordinaryStack.undo(), "ordinary Event removal undo failed");
+    expectEqual(
+        ordinaryScenario,
+        ordinaryRemovalBefore,
+        "ordinary Event removal undo was not exact");
+    expect(ordinaryStack.redo(), "ordinary Event removal redo failed");
+    expectEqual(
+        ordinaryScenario,
+        ordinaryRemovalAfter,
+        "ordinary Event removal redo was not exact");
 }
 
 void testMarkersRelationsAndValidation()
