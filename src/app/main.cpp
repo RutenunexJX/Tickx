@@ -24,6 +24,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
+#include <QHelpEvent>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -45,6 +46,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QToolTip>
 #include <QUrl>
 
 #include <algorithm>
@@ -100,6 +102,7 @@ int main(int argc, char* argv[])
     bool laneReorderSmoke = false;
     bool hiddenLaneSmoke = false;
     bool groupHeaderSmoke = false;
+    bool signalHeaderSmoke = false;
     bool canvasAddLaneSmoke = false;
     QString canvasAddLaneScreenshotPath;
     bool userJourneySmoke = false;
@@ -132,6 +135,8 @@ int main(int argc, char* argv[])
             hiddenLaneSmoke = true;
         } else if (argument == QStringLiteral("--group-header-smoke")) {
             groupHeaderSmoke = true;
+        } else if (argument == QStringLiteral("--signal-header-smoke")) {
+            signalHeaderSmoke = true;
         } else if (argument.startsWith(QStringLiteral("--canvas-add-lane-smoke="))) {
             canvasAddLaneSmoke = true;
             canvasAddLaneScreenshotPath = argument.mid(
@@ -195,6 +200,7 @@ int main(int argc, char* argv[])
         || laneReorderSmoke
         || hiddenLaneSmoke
         || groupHeaderSmoke
+        || signalHeaderSmoke
         || canvasAddLaneSmoke
         || !screenshotPath.isEmpty()
         || !laneDialogScreenshotPath.isEmpty()
@@ -262,6 +268,15 @@ int main(int argc, char* argv[])
     }
     if (!autosaveSmokePath.isEmpty()) {
         project.importedTraces.clear();
+    }
+    if (signalHeaderSmoke && !project.scenarios.empty()) {
+        for (auto& lane : project.scenarios.front().lanes) {
+            if (lane.id == "lane-request") {
+                lane.name = "soc_top.peripheral_cluster.handshake_controller.request_valid__distinguishing_suffix";
+            } else if (lane.id == "lane-ack") {
+                lane.name = "soc_top.peripheral_cluster.handshake_controller.acknowledge_ready__distinguishing_suffix";
+            }
+        }
     }
 
     wave::MainWindow window(
@@ -2685,7 +2700,223 @@ int main(int argc, char* argv[])
 
             window.hide();
             application.exit(0);
-        });    } else if (canvasAddLaneSmoke) {
+        });
+    } else if (signalHeaderSmoke) {
+        QTimer::singleShot(0, &window, [&application, &window] {
+            auto* canvas = window.findChild<wave::WaveCanvas*>();
+            auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
+            auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+            auto fail = [&application, &window](const QString& message) {
+                qCritical().noquote() << message;
+                QToolTip::hideText();
+                window.hide();
+                application.exit(4);
+            };
+            if (!canvas || !undoAction || !saveState
+                || window.project().scenarios.empty()) {
+                fail(QStringLiteral("Signal header smoke prerequisites are missing"));
+                return;
+            }
+
+            auto& scenario = window.project().scenarios.front();
+            const auto* requestLane = wave::findLane(scenario, "lane-request");
+            if (!requestLane
+                || requestLane->name.find("distinguishing_suffix") == std::string::npos
+                || canvas->signalHeaderWidth() != 190
+                || saveState->text() != QStringLiteral("Saved")
+                || undoAction->isEnabled()
+                || window.windowTitle().contains(QStringLiteral(" *"))) {
+                fail(QStringLiteral("Signal header smoke did not start from the expected Saved baseline"));
+                return;
+            }
+
+            const auto sendMouse = [canvas](
+                                       const QEvent::Type type,
+                                       const QPoint position,
+                                       const Qt::MouseButton button,
+                                       const Qt::MouseButtons buttons) {
+                QMouseEvent event(
+                    type,
+                    QPointF(position),
+                    QPointF(canvas->viewport()->mapToGlobal(position)),
+                    button,
+                    buttons,
+                    Qt::NoModifier);
+                QCoreApplication::sendEvent(canvas->viewport(), &event);
+            };
+            const auto sendKey = [](QObject* target, const int key) {
+                QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier);
+                QCoreApplication::sendEvent(target, &press);
+                QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier);
+                QCoreApplication::sendEvent(target, &release);
+            };
+            const auto laneCenter = [canvas, &scenario](const std::string& laneId) {
+                auto y = 40 - canvas->verticalScrollBar()->value();
+                for (const auto& lane : scenario.lanes) {
+                    if (!lane.visible) continue;
+                    const auto height = std::clamp(lane.height, 30, 240);
+                    if (lane.id == laneId) return y + height / 2;
+                    y += height;
+                }
+                return -1;
+            };
+
+            canvas->verticalScrollBar()->setValue(0);
+            QCoreApplication::processEvents();
+            const auto requestY = laneCenter("lane-request");
+            const auto fullName = QString::fromStdString(requestLane->name);
+            if (requestY < 40 || requestY >= canvas->viewport()->height()) {
+                fail(QStringLiteral("Long-name signal is outside the visible canvas"));
+                return;
+            }
+
+            QHelpEvent nameTip(
+                QEvent::ToolTip,
+                QPoint(40, requestY),
+                canvas->viewport()->mapToGlobal(QPoint(40, requestY)));
+            QCoreApplication::sendEvent(canvas->viewport(), &nameTip);
+            QCoreApplication::processEvents();
+            if (QToolTip::text() != fullName) {
+                fail(QStringLiteral("Signal header tooltip did not expose the complete long name"));
+                return;
+            }
+            QToolTip::hideText();
+
+            sendMouse(
+                QEvent::MouseMove,
+                QPoint(190, 20),
+                Qt::NoButton,
+                Qt::NoButton);
+            if (canvas->viewport()->cursor().shape() != Qt::SplitHCursor) {
+                fail(QStringLiteral("Signal header divider did not advertise horizontal resizing"));
+                return;
+            }
+            QHelpEvent dividerTip(
+                QEvent::ToolTip,
+                QPoint(190, 20),
+                canvas->viewport()->mapToGlobal(QPoint(190, 20)));
+            QCoreApplication::sendEvent(canvas->viewport(), &dividerTip);
+            QCoreApplication::processEvents();
+            if (!QToolTip::text().contains(QStringLiteral("Drag to resize"))
+                || !QToolTip::text().contains(QStringLiteral("double-click to fit"))) {
+                fail(QStringLiteral("Signal header divider tooltip did not explain both direct actions"));
+                return;
+            }
+            QToolTip::hideText();
+
+            sendMouse(
+                QEvent::MouseButtonPress,
+                QPoint(190, 20),
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseMove,
+                QPoint(300, 20),
+                Qt::NoButton,
+                Qt::LeftButton);
+            if (canvas->signalHeaderWidth() != 300) {
+                fail(QStringLiteral("Dragging the signal header divider did not resize live"));
+                return;
+            }
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                QPoint(300, 20),
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            if (canvas->signalHeaderWidth() != 300
+                || QSettings{}.value(QStringLiteral("canvas/signalHeaderWidth")).toInt() != 300
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Signal names width 300 px"))
+                || saveState->text() != QStringLiteral("Saved")
+                || undoAction->isEnabled()
+                || window.windowTitle().contains(QStringLiteral(" *"))) {
+                fail(QStringLiteral("Committed signal header width was not persisted as a UI-only preference"));
+                return;
+            }
+
+            sendMouse(
+                QEvent::MouseButtonPress,
+                QPoint(300, 20),
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseMove,
+                QPoint(360, 20),
+                Qt::NoButton,
+                Qt::LeftButton);
+            if (canvas->signalHeaderWidth() != 360) {
+                fail(QStringLiteral("Second signal header drag did not preview the new width"));
+                return;
+            }
+            sendKey(canvas, Qt::Key_Escape);
+            QCoreApplication::processEvents();
+            if (canvas->signalHeaderWidth() != 300
+                || QSettings{}.value(QStringLiteral("canvas/signalHeaderWidth")).toInt() != 300
+                || canvas->viewport()->cursor().shape() != Qt::PointingHandCursor
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Signal names resize cancelled"))) {
+                fail(QStringLiteral("Escape did not restore the last committed signal header width"));
+                return;
+            }
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                QPoint(360, 20),
+                Qt::LeftButton,
+                Qt::NoButton);
+
+            sendMouse(
+                QEvent::MouseButtonDblClick,
+                QPoint(300, 20),
+                Qt::LeftButton,
+                Qt::LeftButton);
+            QCoreApplication::processEvents();
+            if (canvas->signalHeaderWidth() != 480
+                || QSettings{}.value(QStringLiteral("canvas/signalHeaderWidth")).toInt() != 480
+                || canvas->viewport()->cursor().shape() != Qt::PointingHandCursor
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Signal names fitted to 480 px"))
+                || saveState->text() != QStringLiteral("Saved")
+                || undoAction->isEnabled()) {
+                fail(QStringLiteral("Double-click did not auto-fit and persist the long-name column"));
+                return;
+            }
+
+            QHelpEvent resizedNameTip(
+                QEvent::ToolTip,
+                QPoint(40, requestY),
+                canvas->viewport()->mapToGlobal(QPoint(40, requestY)));
+            QCoreApplication::sendEvent(canvas->viewport(), &resizedNameTip);
+            QCoreApplication::processEvents();
+            if (QToolTip::text() != fullName) {
+                fail(QStringLiteral("Long-name tooltip was lost after signal header resizing"));
+                return;
+            }
+            QToolTip::hideText();
+
+            wave::MainWindow reopened(window.project(), QString{});
+            reopened.show();
+            QCoreApplication::processEvents();
+            auto* reopenedCanvas = reopened.findChild<wave::WaveCanvas*>();
+            if (!reopenedCanvas
+                || reopenedCanvas->signalHeaderWidth() != 480
+                || reopenedCanvas->horizontalScrollBar()->maximum() != 0) {
+                reopened.hide();
+                fail(QStringLiteral("A new window did not restore the committed signal header width"));
+                return;
+            }
+            reopened.hide();
+
+            if (saveState->text() != QStringLiteral("Saved")
+                || undoAction->isEnabled()
+                || window.windowTitle().contains(QStringLiteral(" *"))) {
+                fail(QStringLiteral("Signal header interactions altered project history or dirty state"));
+                return;
+            }
+            window.hide();
+            application.exit(0);
+        });
+    } else if (canvasAddLaneSmoke) {
         QTimer::singleShot(0, &window, [&application, &window, canvasAddLaneScreenshotPath] {
             auto* canvas = window.findChild<wave::WaveCanvas*>();
             const std::array<QToolButton*, 3> addButtons{

@@ -68,6 +68,7 @@ public:
     waveEditTransitionPreviewRange() const noexcept;
     [[nodiscard]] bool hasQuickLaneSetup() const noexcept;
     [[nodiscard]] bool hasLaneRename() const noexcept;
+    [[nodiscard]] int signalHeaderWidth() const noexcept;
     [[nodiscard]] bool commitLaneRename();
     [[nodiscard]] bool commitPendingInlineEdits();
     [[nodiscard]] QWidget* rangeEditPaletteWidget() const noexcept;
@@ -86,6 +87,7 @@ public:
     void finishLaneRename();
     void showLaneRenameError(const QString& message);
     void showDurationEditError(const QString& message);
+    void setSignalHeaderWidth(int width);
 
 public slots:
     void zoomIn();
@@ -120,6 +122,7 @@ signals:
     void durationEditRequested(const QString& value);
     void measureModeExitRequested();
     void rangeEditPaletteVisibilityChanged(bool visible);
+    void signalHeaderWidthCommitted(int width);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -180,7 +183,9 @@ private:
     };
 
 
-    static constexpr int HeaderWidth = 190;
+    static constexpr int DefaultHeaderWidth = 190;
+    static constexpr int MinimumHeaderWidth = 140;
+    static constexpr int MaximumHeaderWidth = 480;
     static constexpr int RulerHeight = 40;
     static constexpr int AddLaneRowHeight = 48;
 
@@ -188,6 +193,8 @@ private:
     void rebuildSnapIndex();
     void updateScrollBars();
     void updateAddLaneButtonGeometry();
+    [[nodiscard]] bool signalHeaderDividerAt(const QPoint& position) const noexcept;
+    [[nodiscard]] int fittedSignalHeaderWidth() const;
     void positionQuickLaneSetup();
     void positionLaneRename();
     void positionDurationEditor();
@@ -385,6 +392,10 @@ private:
     std::string laneDragId_;
     std::optional<std::size_t> laneDropDestinationIndex_;
     std::optional<int> laneDropIndicatorY_;
+    int headerWidth_{DefaultHeaderWidth};
+    bool headerResizing_{false};
+    int headerResizePressX_{0};
+    int headerResizeOriginalWidth_{DefaultHeaderWidth};
 
 
     std::vector<std::string> selectedLaneIds_;

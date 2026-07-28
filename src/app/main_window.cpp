@@ -974,7 +974,18 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     canvas_->viewport()->installEventFilter(this);
     compareTraceCanvas_ = new TraceCanvas(this);
     compareTraceCanvas_->hide();
+    canvas_->setSignalHeaderWidth(QSettings{}.value(
+        QStringLiteral("canvas/signalHeaderWidth"),
+        canvas_->signalHeaderWidth()).toInt());
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
+    connect(
+        canvas_,
+        &WaveCanvas::signalHeaderWidthCommitted,
+        this,
+        [](const int width) {
+            QSettings settings;
+            settings.setValue(QStringLiteral("canvas/signalHeaderWidth"), width);
+        });
     connect(canvas_, &WaveCanvas::addLaneRequested, this, [this](const LaneKind kind) {
         addQuickLane(kind);
     });

@@ -3741,6 +3741,61 @@ Automated QA: Show 1 hidden item 恢复 Group 后，标题单击立即显示 Gro
 Desktop interaction: none
 ```
 
+## 持续迭代 66：长层级信号名可辨识性与列宽直接调整
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Signals 列仍固定为 190 px，名称只做右侧省略；两个共享长层级前缀、仅后缀不同的信号会显示为近似相同文本，且标题没有完整名称提示或列宽调整入口。该问题不改变模型，但会直接导致用户选错信号。
+- 用户视角从打开长层级工程开始复现：首先需要在左侧确认具体信号，再编辑对应波形；原界面要求依赖记忆或逐行猜测，无法确认省略部分。用户真正需要的是在原位置辨认名称并立即扩展空间，而不是打开属性窗口。
+- 名称渲染改为中间省略，保留层级前缀与区分后缀；悬浮信号或 Group 标题显示完整名称。离屏视觉复核中，默认 190 px 列宽已能分别显示 `request_valid` 与 `acknowledge_ready` 的差异，波形和网格边界保持连续。
+- Signals 与波形之间增加 11 px 命中带：悬浮显示水平分隔鼠标并提示“拖动调整、双击适配”；拖动在 140–480 px 范围内实时更新标尺、波形、底部添加按钮、内联输入框、End 输入和 Bus 面板位置，释放后给出当前像素宽度。
+- 双击分隔线按当前可见 Lane/Group 的名称与类型说明自动适配；超长名称安全限制到 480 px。拖动期间按 Esc 恢复上次提交宽度，恢复当前编辑工具对应的鼠标形态。
+- 确认后的列宽写入应用级界面偏好，新窗口启动时先恢复列宽再执行时间轴自动适配。列宽调整不修改 Project、不进入命令栈、不触发 autosave，也不改变 Saved/标题星号状态。
+- 新增 `wave-signal-header-smoke`：构造共享长前缀的 `request`/`ack` 名称，覆盖完整名称提示、分隔线提示与鼠标形态、190→300 px 实时拖动和提交、300→360 px 后 Esc 恢复、双击自动适配到 480 px、QSettings 跨窗口恢复、启动时间轴重新适配，以及全过程 Saved/Undo 隔离。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure -j 4
+24/24 tests passed
+Total Test time: 3.74 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure -j 4
+24/24 tests passed
+Total Test time: 3.73 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-signal-header-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.23 sec
+
+Automated QA: 默认 190 px 下，两个共享长前缀的名称均可悬浮读取完整文本，并以中间省略保留不同后缀；
+              分隔线悬浮明确显示可拖动/双击，拖至 300 px 后立即提交并持久化且仍为 Saved；
+              第二次拖至 360 px 后 Esc 恢复 300 px；双击按可见名称适配至 480 px，新窗口恢复同一宽度并重新适配完整时间轴；
+              全过程 Undo 保持不可用、无标题星号、无工程 dirty。
+Offscreen visual QA: build/round66-long-names-after-fonts.png
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
