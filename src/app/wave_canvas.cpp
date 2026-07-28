@@ -3824,6 +3824,7 @@ bool WaveCanvas::clearSelectedBitRange()
 
     const auto laneId = lane->id;
     const auto laneName = lane->name;
+    const auto relationCountBefore = scenario_->relations.size();
     try {
         commandStack_->execute(std::make_unique<ClearLaneRangeCommand>(
             *scenario_,
@@ -3847,11 +3848,13 @@ bool WaveCanvas::clearSelectedBitRange()
     emit commandAvailabilityChanged();
     emit selectionChanged(QString::fromStdString(laneId), cursorTick_);
     refreshModel();
-    emit statusMessage(
-        tr("%1 · %2–%3 cleared to implicit 0 · Ctrl+Z to undo")
+    emit statusMessage(appendRelationAwareUndo(
+        tr("%1 · %2–%3 cleared to implicit 0")
             .arg(QString::fromStdString(laneName))
             .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
-            .arg(QString::fromStdString(formatTick(end, project_->timeBase))));
+            .arg(QString::fromStdString(formatTick(end, project_->timeBase))),
+        relationCountBefore,
+        scenario_->relations.size()));
     return true;
 }
 
@@ -3901,21 +3904,14 @@ void WaveCanvas::clearSelectedSegment()
         : laneKind == LaneKind::Bit
             ? tr("implicit 0")
             : tr("implicit X");
-    auto message = tr("%1 · %2–%3 cleared to %4")
-                       .arg(QString::fromStdString(laneName))
-                       .arg(formatTime(start))
-                       .arg(formatTime(end))
-                       .arg(result);
-    const auto removedRelationCount = relationCountBefore
-        - std::min(relationCountBefore, scenario_->relations.size());
-    if (removedRelationCount > 0) {
-        message += tr(" · removed %1 relation(s) · "
-                      "Ctrl+Z restores waveform and relations")
-                       .arg(static_cast<qulonglong>(removedRelationCount));
-    } else {
-        message += tr(" · Ctrl+Z to undo");
-    }
-    emit statusMessage(message);
+    emit statusMessage(appendRelationAwareUndo(
+        tr("%1 · %2–%3 cleared to %4")
+            .arg(QString::fromStdString(laneName))
+            .arg(formatTime(start))
+            .arg(formatTime(end))
+            .arg(result),
+        relationCountBefore,
+        scenario_->relations.size()));
 }
 void WaveCanvas::updateLaneDropTarget(const int y)
 {
@@ -4803,6 +4799,7 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
     const auto editedLaneId = lane->id;
     const auto editedLaneName = lane->name;
     if (start != segment->start || end != segment->end) {
+        const auto relationCountBefore = scenario_->relations.size();
         try {
             commandStack_->execute(std::make_unique<EditSegmentCommand>(
                 *scenario_,
@@ -4832,12 +4829,14 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
                 selectionRange_ = std::pair{refreshed->start, refreshed->end};
             }
         }
-        emit statusMessage(
-            tr("%1 segment %2 to %3–%4 · Ctrl+Z to undo")
+        emit statusMessage(appendRelationAwareUndo(
+            tr("%1 segment %2 to %3–%4")
                 .arg(QString::fromStdString(editedLaneName))
                 .arg(interaction == WaveEditInteraction::MoveSegment ? tr("moved") : tr("resized"))
                 .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
-                .arg(QString::fromStdString(formatTick(end, project_->timeBase))));
+                .arg(QString::fromStdString(formatTick(end, project_->timeBase))),
+            relationCountBefore,
+            scenario_->relations.size()));
     }
     waveEditOriginalRange_.reset();
     waveEditPreviewRange_.reset();
@@ -4856,6 +4855,7 @@ void WaveCanvas::commitBitToggle(
     const auto* originalLane = findLane(*scenario_, drawLaneId_);
     if (!originalLane) return;
     const auto laneName = originalLane->name;
+    const auto relationCountBefore = scenario_->relations.size();
     QString beforeValue = QStringLiteral("0");
     QString afterValue = QStringLiteral("1");
     if (beats.size() == 1) {
@@ -4896,19 +4896,23 @@ void WaveCanvas::commitBitToggle(
     }
     viewport()->update();
     if (beats.size() == 1) {
-        emit statusMessage(
-            tr("%1 · %2–%3: %4 → %5 · Ctrl+Z to undo")
+        emit statusMessage(appendRelationAwareUndo(
+            tr("%1 · %2–%3: %4 → %5")
                 .arg(QString::fromStdString(laneName))
                 .arg(QString::fromStdString(formatTick(beats.front().first, project_->timeBase)))
                 .arg(QString::fromStdString(formatTick(beats.front().second, project_->timeBase)))
-                .arg(beforeValue, afterValue));
+                .arg(beforeValue, afterValue),
+            relationCountBefore,
+            scenario_->relations.size()));
     } else {
-        emit statusMessage(
-            tr("%1 · toggled %2 beats from %3 to %4 · Ctrl+Z to undo")
+        emit statusMessage(appendRelationAwareUndo(
+            tr("%1 · toggled %2 beats from %3 to %4")
                 .arg(QString::fromStdString(laneName))
                 .arg(beats.size())
                 .arg(QString::fromStdString(formatTick(beats.front().first, project_->timeBase)))
-                .arg(QString::fromStdString(formatTick(beats.back().second, project_->timeBase))));
+                .arg(QString::fromStdString(formatTick(beats.back().second, project_->timeBase))),
+            relationCountBefore,
+            scenario_->relations.size()));
     }
 }
 

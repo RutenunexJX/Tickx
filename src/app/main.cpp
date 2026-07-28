@@ -3225,9 +3225,38 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                const auto toggleDependencyEvent = std::find_if(
+                    scenario.events.begin(),
+                    scenario.events.end(),
+                    [](const wave::Event& event) {
+                        return event.waveformLinked
+                            && event.laneId == "lane-request"
+                            && event.tick == 60'000;
+                    });
+                const auto* toggleRelationTemplate = wave::findRelation(
+                    scenario,
+                    "relation-req-ack");
+                if (toggleDependencyEvent == scenario.events.end()
+                    || !toggleRelationTemplate) {
+                    qCritical().noquote()
+                        << "One-beat toggle dependency fixture is missing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                auto toggleDependencyRelation = *toggleRelationTemplate;
+                toggleDependencyRelation.id = "relation-bit-toggle-feedback";
+                toggleDependencyRelation.sourceEventId = toggleDependencyEvent->id;
+                toggleDependencyRelation.description =
+                    "temporary one-beat toggle feedback relation";
+                segmentClearScenario.relations.push_back(toggleDependencyRelation);
+                const auto beforeDependencyToggle = scenario;
+
                 click(QPoint(xAtTick(65'000), requestY));
                 requestLane = wave::findLane(scenario, "lane-request");
                 const auto secondClickRange = canvas->selectedTimeRange();
+                const auto dependencyToggleMessage =
+                    window.statusBar()->currentMessage();
                 if (!requestLane
                     || valueAt(*requestLane, 55'000) != "0"
                     || valueAt(*requestLane, 65'000) != "0"
@@ -3235,9 +3264,39 @@ int main(int argc, char* argv[])
                     || !canvas->selectedSegmentId().isEmpty()
                     || !secondClickRange
                     || *secondClickRange
-                        != std::pair<wave::Tick, wave::Tick>{60'000, 70'000}) {
+                        != std::pair<wave::Tick, wave::Tick>{60'000, 70'000}
+                    || wave::findRelation(
+                        scenario,
+                        "relation-bit-toggle-feedback")
+                    || !dependencyToggleMessage.contains(
+                        QStringLiteral("removed 1 relation"))
+                    || !dependencyToggleMessage.contains(
+                        QStringLiteral("Ctrl+Z restores waveform and relations"))) {
                     qCritical().noquote()
-                        << "Repeated click selected a merged bit segment instead of one beat";
+                        << "Repeated click did not report its dependent Relation cleanup";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto afterDependencyToggle = scenario;
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeDependencyToggle
+                    || !wave::findRelation(
+                        scenario,
+                        "relation-bit-toggle-feedback")) {
+                    qCritical().noquote()
+                        << "One-beat toggle did not restore its dependent Relation";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || scenario != afterDependencyToggle
+                    || wave::findRelation(
+                        scenario,
+                        "relation-bit-toggle-feedback")) {
+                    qCritical().noquote()
+                        << "One-beat toggle did not reproduce dependency cleanup";
                     window.hide();
                     application.exit(4);
                     return;
@@ -3388,6 +3447,31 @@ int main(int argc, char* argv[])
                     }
                 }
 
+                const auto clearDependencyEvent = std::find_if(
+                    scenario.events.begin(),
+                    scenario.events.end(),
+                    [](const wave::Event& event) {
+                        return event.waveformLinked
+                            && event.laneId == "lane-request"
+                            && event.tick == 60'000;
+                    });
+                const auto* clearRelationTemplate = wave::findRelation(
+                    scenario,
+                    "relation-req-ack");
+                if (clearDependencyEvent == scenario.events.end()
+                    || !clearRelationTemplate) {
+                    qCritical().noquote()
+                        << "One-beat Clear dependency fixture is missing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                auto clearDependencyRelation = *clearRelationTemplate;
+                clearDependencyRelation.id = "relation-bit-clear-feedback";
+                clearDependencyRelation.sourceEventId = clearDependencyEvent->id;
+                clearDependencyRelation.description =
+                    "temporary one-beat Clear feedback relation";
+                segmentClearScenario.relations.push_back(clearDependencyRelation);
                 const auto beforeBitBeatClear = scenario;
                 bool bitClearMenuHandled = false;
                 QTimer::singleShot(
@@ -3440,12 +3524,37 @@ int main(int argc, char* argv[])
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("implicit 0"))
                     || !window.statusBar()->currentMessage().contains(
-                        QStringLiteral("Ctrl+Z"))) {
+                        QStringLiteral("removed 1 relation"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z restores waveform and relations"))
+                    || wave::findRelation(
+                        scenario,
+                        "relation-bit-clear-feedback")) {
                     qCritical().noquote()
-                        << "Bit context Clear did not clear exactly one selected beat";
+                        << "Bit context Clear did not report its dependent Relation cleanup";
                     window.hide();
                     application.exit(4);
                     return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto dependencyFeedbackScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix =
+                        dependencyFeedbackScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        dependencyFeedbackScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-bit-dependency-feedback"));
+                    } else {
+                        dependencyFeedbackScreenshotPath.append(
+                            QStringLiteral("-bit-dependency-feedback.png"));
+                    }
+                    if (!window.grab().save(dependencyFeedbackScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save Bit dependency feedback screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
                 }
                 const auto afterBitBeatClear = scenario;
                 if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)

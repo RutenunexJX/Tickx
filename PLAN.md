@@ -1774,6 +1774,66 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 32：拍级翻转与清除的依赖反馈闭环
+
+状态：完成
+
+已交付：
+
+- 开发审计确认单拍/多拍 `ToggleBitRangeCommand` 与拍级 `ClearLaneRangeCommand` 已保存完整
+  Scenario，因边沿消失而删除的 Relation 可以 Undo；但 `commitBitToggle` 与
+  `clearSelectedBitRange` 只显示波形值或隐式 0，不说明依赖同步变化。Segment 移动/缩放也存在
+  同类反馈分叉。
+- 用户主流程中，单击一拍后依赖线可能直接消失。原状态栏只显示 `0 → 1` 或 `cleared to implicit 0`，
+  用户无法判断是依赖清理还是误删。本轮统一复用 relation-aware 反馈：显示删除数量、边沿消失原因，
+  并明确 `Ctrl+Z` 同时恢复波形与 Relation，不增加确认框或额外操作。
+- 单拍/多拍翻转、拍级 Clear/Delete、Segment 清除及主体/边界编辑现在共用一致反馈；原有拍级选择、
+  悬浮、相邻拍隔离和命令语义不变。
+- 核心回归验证一拍 Toggle 删除 `relation-req-ack` 后完整 Scenario Undo/Redo；Wave Edit smoke
+  通过真实单击、真实右键 Clear、临时 Relation 和 MainWindow Undo/Redo 验证两条高频路径。
+  全部 GUI 路径使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 24 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.38 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.34 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 1.35 sec
+
+Screenshot generated:
+  build/qtcreator-debug/wave-edit-smoke-bit-dependency-feedback.png
+Automated QA: req 的 60–70 ns 拍级 Clear 保持精确选中且相邻拍不变；状态栏显示隐式 0、
+              删除 1 条 Relation 及 Ctrl+Z 同步恢复说明；Toggle 与 Clear 均精确 Undo/Redo
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

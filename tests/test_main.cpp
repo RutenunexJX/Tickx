@@ -816,6 +816,28 @@ void testUndoRedo()
         relationAfter,
         "single-lane range redo did not reproduce relation cleanup exactly");
 
+    auto toggleRelationScenario = wave::makeDemonstrationProject().scenarios.front();
+    const auto toggleRelationBefore = toggleRelationScenario;
+    wave::CommandStack toggleRelationStack;
+    toggleRelationStack.execute(std::make_unique<wave::ToggleBitRangeCommand>(
+        toggleRelationScenario,
+        "lane-request",
+        std::vector<std::pair<wave::Tick, wave::Tick>>{{80'000, 90'000}}));
+    expect(
+        !wave::findRelation(toggleRelationScenario, "relation-req-ack"),
+        "one-beat toggle left a Relation whose source edge disappeared");
+    const auto toggleRelationAfter = toggleRelationScenario;
+    expect(toggleRelationStack.undo(), "one-beat relation cleanup undo failed");
+    expectEqual(
+        toggleRelationScenario,
+        toggleRelationBefore,
+        "one-beat toggle undo did not restore waveform, events, and relations");
+    expect(toggleRelationStack.redo(), "one-beat relation cleanup redo failed");
+    expectEqual(
+        toggleRelationScenario,
+        toggleRelationAfter,
+        "one-beat toggle redo did not reproduce relation cleanup exactly");
+
     auto* bus = wave::findLane(scenario, "lane-data");
     expect(bus != nullptr, "demonstration bus lane is missing");
     const auto busBefore = bus->segments;
