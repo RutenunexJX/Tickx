@@ -513,15 +513,19 @@ std::optional<Lane> promptLaneProperties(
     const bool lockKind)
 {
     QDialog dialog(parent);
+    dialog.setObjectName(QStringLiteral("LanePropertiesDialog"));
     dialog.setWindowTitle(
         initial.kind == LaneKind::Group
             ? QObject::tr("Group properties")
             : QObject::tr("Lane properties"));
     auto* layout = new QFormLayout(&dialog);
     auto* stableId = new QLineEdit(QString::fromStdString(initial.id));
+    stableId->setObjectName(QStringLiteral("LanePropertiesStableId"));
     stableId->setReadOnly(true);
     auto* name = new QLineEdit(QString::fromStdString(initial.name));
+    name->setObjectName(QStringLiteral("LanePropertiesNameEdit"));
     auto* kind = new QComboBox;
+    kind->setObjectName(QStringLiteral("LanePropertiesKindCombo"));
     for (const auto candidate : {
              LaneKind::Clock,
              LaneKind::Bit,
@@ -538,9 +542,12 @@ std::optional<Lane> promptLaneProperties(
     kind->setCurrentIndex(kind->findData(static_cast<int>(initial.kind)));
     kind->setEnabled(!lockKind);
     auto* width = new QLineEdit(QString::number(initial.width));
+    width->setObjectName(QStringLiteral("LanePropertiesWidthEdit"));
     auto* signedValue = new QCheckBox;
+    signedValue->setObjectName(QStringLiteral("LanePropertiesSignedCheck"));
     signedValue->setChecked(initial.isSigned);
     auto* radix = new QComboBox;
+    radix->setObjectName(QStringLiteral("LanePropertiesRadixCombo"));
     for (const auto candidate : {
              Radix::Binary,
              Radix::Octal,
@@ -554,8 +561,10 @@ std::optional<Lane> promptLaneProperties(
     }
     radix->setCurrentIndex(radix->findData(static_cast<int>(initial.radix)));
     auto* enumMap = new QLineEdit(enumMapText(initial.enumMap));
+    enumMap->setObjectName(QStringLiteral("LanePropertiesEnumMapEdit"));
     enumMap->setPlaceholderText(QObject::tr("IDLE=0; BUSY=1"));
     auto* clock = new QComboBox;
+    clock->setObjectName(QStringLiteral("LanePropertiesClockCombo"));
     clock->addItem(QObject::tr("<none>"), QString{});
     for (const auto& domain : project.clockDomains) {
         clock->addItem(
@@ -576,6 +585,7 @@ std::optional<Lane> promptLaneProperties(
         0,
         clock->findData(QString::fromStdString(initial.clockDomainId))));
     auto* group = new QComboBox;
+    group->setObjectName(QStringLiteral("LanePropertiesGroupCombo"));
     group->addItem(QObject::tr("<none>"), QString{});
     for (const auto& candidate : scenario.lanes) {
         if (candidate.kind != LaneKind::Group || candidate.id == initial.id) continue;
@@ -597,10 +607,13 @@ std::optional<Lane> promptLaneProperties(
         0,
         group->findData(QString::fromStdString(initial.groupId))));
     auto* color = new QLineEdit(QString::fromStdString(initial.color));
+    color->setObjectName(QStringLiteral("LanePropertiesColorEdit"));
     auto* height = new QSpinBox;
+    height->setObjectName(QStringLiteral("LanePropertiesHeightSpin"));
     height->setRange(30, 240);
     height->setValue(std::clamp(initial.height, 30, 240));
     auto* visible = new QCheckBox;
+    visible->setObjectName(QStringLiteral("LanePropertiesVisibleCheck"));
     visible->setChecked(initial.visible);
     auto* compatibility = new QLabel(QObject::tr(
         "Stable ID and waveform data are preserved. Incompatible type or width changes are rejected."));
@@ -619,10 +632,15 @@ std::optional<Lane> promptLaneProperties(
     layout->addRow(QObject::tr("Height"), height);
     layout->addRow(QObject::tr("Visible"), visible);
     layout->addRow(compatibility);
+    auto* error = new QLabel;
+    error->setObjectName(QStringLiteral("LanePropertiesError"));
+    error->setWordWrap(true);
+    error->setStyleSheet(QStringLiteral("color: #ff9d9a;"));
+    error->hide();
+    layout->addRow(error);
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     layout->addRow(buttons);
-    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
     const auto updateControls = [=] {
@@ -638,72 +656,114 @@ std::optional<Lane> promptLaneProperties(
         group->setEnabled(!groupValue);
     };
     QObject::connect(kind, &QComboBox::currentIndexChanged, &dialog, [=](int) {
+        error->hide();
         updateControls();
     });
+    QObject::connect(name, &QLineEdit::textEdited, error, &QWidget::hide);
+    QObject::connect(width, &QLineEdit::textEdited, error, &QWidget::hide);
+    QObject::connect(enumMap, &QLineEdit::textEdited, error, &QWidget::hide);
+    QObject::connect(color, &QLineEdit::textEdited, error, &QWidget::hide);
+    QObject::connect(clock, &QComboBox::currentIndexChanged, error, &QWidget::hide);
+    QObject::connect(group, &QComboBox::currentIndexChanged, error, &QWidget::hide);
     updateControls();
 
-    if (dialog.exec() != QDialog::Accepted) return std::nullopt;
-    Lane result = initial;
-    result.name = name->text().trimmed().toStdString();
-    if (result.name.empty()) {
-        QMessageBox::warning(
-            parent,
-            QObject::tr("Invalid lane"),
-            QObject::tr("Lane name cannot be empty."));
+    std::optional<Lane> acceptedLane;
+    const auto showError = [error](const QString& message, QWidget* field) {
+        error->setText(message);
+        error->show();
+        if (!field) return;
+        field->setFocus(Qt::OtherFocusReason);
+        if (auto* edit = qobject_cast<QLineEdit*>(field)) edit->selectAll();
+    };
+    QObject::connect(
+        buttons,
+        &QDialogButtonBox::accepted,
+        &dialog,
+        [&] {
+            Lane result = initial;
+            result.name = name->text().trimmed().toStdString();
+            if (result.name.empty()) {
+                showError(QObject::tr("Lane name cannot be empty."), name);
+                return;
+            }
+
+            result.kind = static_cast<LaneKind>(kind->currentData().toInt());
+            if (result.kind == LaneKind::Bus || result.kind == LaneKind::Enum) {
+                bool widthOk = false;
+                const auto parsedWidth = width->text().trimmed().toULongLong(&widthOk);
+                if (!widthOk
+                    || parsedWidth == 0
+                    || parsedWidth > std::numeric_limits<std::uint32_t>::max()) {
+                    showError(
+                        QObject::tr("Width must be an integer from 1 to 4294967295."),
+                        width);
+                    return;
+                }
+                result.width = static_cast<std::uint32_t>(parsedWidth);
+                result.isSigned = signedValue->isChecked();
+            } else {
+                result.width = 1;
+                result.isSigned = false;
+            }
+            result.radix = static_cast<Radix>(radix->currentData().toInt());
+
+            if (result.kind == LaneKind::Enum) {
+                QString enumError;
+                const auto parsedMap = parseEnumMapText(enumMap->text(), enumError);
+                if (!parsedMap) {
+                    showError(enumError, enumMap);
+                    return;
+                }
+                result.enumMap = *parsedMap;
+            } else {
+                result.enumMap.clear();
+            }
+
+            result.clockDomainId = result.kind == LaneKind::Group
+                ? std::string{}
+                : clock->currentData().toString().toStdString();
+            if (!result.clockDomainId.empty()
+                && !findClock(project, result.clockDomainId)) {
+                showError(QObject::tr("Select an existing clock domain."), clock);
+                return;
+            }
+            if (result.kind == LaneKind::Clock && result.clockDomainId.empty()) {
+                showError(QObject::tr("A clock lane must reference a clock domain."), clock);
+                return;
+            }
+
+            result.groupId = result.kind == LaneKind::Group
+                ? std::string{}
+                : group->currentData().toString().toStdString();
+            if (!result.groupId.empty()) {
+                const auto* selectedGroup = findLane(scenario, result.groupId);
+                if (!selectedGroup
+                    || selectedGroup->kind != LaneKind::Group
+                    || selectedGroup->id == initial.id) {
+                    showError(QObject::tr("Select an existing signal group."), group);
+                    return;
+                }
+            }
+
+            const QColor parsedColor(color->text().trimmed());
+            if (!parsedColor.isValid()) {
+                showError(
+                    QObject::tr("Color must be a valid Qt color such as #42A5F5."),
+                    color);
+                return;
+            }
+            result.color = parsedColor.name(QColor::HexRgb).toStdString();
+            result.height = height->value();
+            result.visible = visible->isChecked();
+            acceptedLane = std::move(result);
+            error->hide();
+            dialog.accept();
+        });
+
+    if (dialog.exec() != QDialog::Accepted || !acceptedLane) {
         return std::nullopt;
     }
-    result.kind = static_cast<LaneKind>(kind->currentData().toInt());
-    if (result.kind == LaneKind::Bus || result.kind == LaneKind::Enum) {
-        bool widthOk = false;
-        const auto parsedWidth = width->text().trimmed().toULongLong(&widthOk);
-        if (!widthOk
-            || parsedWidth == 0
-            || parsedWidth > std::numeric_limits<std::uint32_t>::max()) {
-            QMessageBox::warning(
-                parent,
-                QObject::tr("Invalid lane"),
-                QObject::tr("Width must be an integer from 1 to 4294967295."));
-            return std::nullopt;
-        }
-        result.width = static_cast<std::uint32_t>(parsedWidth);
-        result.isSigned = signedValue->isChecked();
-    } else {
-        result.width = 1;
-        result.isSigned = false;
-    }
-    result.radix = static_cast<Radix>(radix->currentData().toInt());
-    if (result.kind == LaneKind::Enum) {
-        QString enumError;
-        const auto parsedMap = parseEnumMapText(enumMap->text(), enumError);
-        if (!parsedMap) {
-            QMessageBox::warning(
-                parent,
-                QObject::tr("Invalid enum map"),
-                enumError);
-            return std::nullopt;
-        }
-        result.enumMap = *parsedMap;
-    } else {
-        result.enumMap.clear();
-    }
-    result.clockDomainId = result.kind == LaneKind::Group
-        ? std::string{}
-        : clock->currentData().toString().toStdString();
-    result.groupId = result.kind == LaneKind::Group
-        ? std::string{}
-        : group->currentData().toString().toStdString();
-    const QColor parsedColor(color->text().trimmed());
-    if (!parsedColor.isValid()) {
-        QMessageBox::warning(
-            parent,
-            QObject::tr("Invalid lane"),
-            QObject::tr("Color must be a valid Qt color such as #42A5F5."));
-        return std::nullopt;
-    }
-    result.color = parsedColor.name(QColor::HexRgb).toStdString();
-    result.height = height->value();
-    result.visible = visible->isChecked();
-    return result;
+    return acceptedLane;
 }
 
 void selectLaneItem(QTreeWidget* tree, const QString& laneId)
@@ -2049,8 +2109,10 @@ void MainWindow::editLaneById(const QString& laneId)
         *lane,
         false);
     if (!replacement) return;
+    const auto replacementName = QString::fromStdString(replacement->name);
+    bool changed = false;
     try {
-        commandStack_.execute(std::make_unique<ChangeLaneCommand>(
+        changed = commandStack_.execute(std::make_unique<ChangeLaneCommand>(
             project_,
             *scenario,
             lane->id,
@@ -2062,13 +2124,24 @@ void MainWindow::editLaneById(const QString& laneId)
             QString::fromUtf8(exception.what()));
         return;
     }
+    if (!changed) {
+        statusBar()->showMessage(
+            tr("No properties changed for %1").arg(replacementName),
+            3'000);
+        canvas_->revealLocation(laneId, canvas_->cursorTick());
+        selectLaneItem(signalTree_, laneId);
+        selectLaneItem(groupTree_, laneId);
+        return;
+    }
     canvas_->refreshModel();
     markEdited();
     canvas_->revealLocation(laneId, canvas_->cursorTick());
     selectLaneItem(signalTree_, laneId);
     selectLaneItem(groupTree_, laneId);
+    statusBar()->showMessage(
+        tr("Changed properties for %1 · Ctrl+Z to undo").arg(replacementName),
+        5'000);
 }
-
 void MainWindow::editSelectedClock()
 {
     if (!commitPendingEdits()) return;

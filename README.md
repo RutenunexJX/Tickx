@@ -203,7 +203,8 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   目标后才询问 Save/Discard/Cancel。修改后 1.5 秒启动 Qt Concurrent 后台恢复快照。
 - File > Export 导出 SystemVerilog/SVA/cocotb 和文档图。VCD/CSV 导入、Expected/Actual 对比、报告和
   跨应用桥接由 `wave-compare`、`wave-bridge` 等 CLI 提供，不占用桌面工作区。
-- 特殊 lane 或 group 仍可从 Edit 菜单创建并编辑完整结构属性；属性变更、依赖感知删除和显示顺序
+- 特殊 lane 或 group 仍可从 Edit 菜单创建并编辑完整结构属性；无效名称、位宽、Enum 映射、时钟/分组引用或颜色
+  会在窗口内原位提示并保留全部草稿与焦点，原值确认不会产生脏状态或撤销项。属性变更、依赖感知删除和显示顺序
   调整均保留 stable ID，并以单个命令撤销/重做。
 - `waveworkbench://open` 按 Project/Scenario/Lane 稳定 ID 和整数 tick 打开或定位。
 所有时间均以整数 tick 持久化。画布中的浮点数只用于时间到像素的视图变换，不作为工程
@@ -286,9 +287,9 @@ exports/
   false 守卫、错误定位及 Expected/Actual 采样。
 - JSON 往返、未知字段保留、schema 0 到 1 迁移。
 - 整个工程目录移动后的相对路径恢复。
-- Qt 桌面应用及磁盘示例工程的离屏启动；Lane 属性对话框截图及确认删除/Undo
-  交互通过离屏回归；`req` 删除前显示 3 个 Event、1 条 Relation 和恢复方式，完成及 Undo 状态
-  均有专项断言。
+- Qt 桌面应用及磁盘示例工程的离屏启动；Lane 属性对话框以真实 OK 点击连续验证无效名称、位宽、Enum 映射与颜色
+  原位纠错、草稿/焦点保留，以及恢复原值后保持 Saved、无 Undo 项和明确无变化反馈；确认删除/Undo 交互也通过离屏回归，
+  `req` 删除前显示 3 个 Event、1 条 Relation 和恢复方式，完成及 Undo 状态均有专项断言。
 - 画布快速添加 CLK/Bit/Bus、唯一命名、随机颜色、默认时钟域、信号名拖动重排、右键轻量参数、
   标题选中与右键取消后的信号名/Delete/F2 目标反馈、Delete 删除以及菜单快捷键均通过离屏回归；
   双击/F2 无模态重命名、入口信号名、Esc 取消目标恢复、原处校验、真实失焦提交、

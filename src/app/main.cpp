@@ -49,6 +49,7 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <vector>
 
 int main(int argc, char* argv[])
@@ -7126,28 +7127,279 @@ int main(int argc, char* argv[])
                 application.exit(0);
             });
     } else if (!laneDialogScreenshotPath.isEmpty()) {
+        struct LaneDialogSmokeState {
+            QDialog* dialog{};
+            QLineEdit* name{};
+            QComboBox* kind{};
+            QLineEdit* width{};
+            QCheckBox* signedValue{};
+            QComboBox* radix{};
+            QLineEdit* enumMap{};
+            QComboBox* clock{};
+            QComboBox* group{};
+            QLineEdit* color{};
+            QSpinBox* height{};
+            QCheckBox* visible{};
+            QLabel* error{};
+            QLabel* saveState{};
+            QAction* undoAction{};
+            QAbstractButton* ok{};
+            wave::Lane originalLane;
+            QString originalName;
+            QString originalWidth;
+            QString originalEnumMap;
+            QString originalColor;
+            int originalKindIndex{-1};
+            int originalRadixIndex{-1};
+            int originalClockIndex{-1};
+            int originalGroupIndex{-1};
+            int originalHeight{};
+            bool originalSigned{};
+            bool originalVisible{};
+            int stage{};
+        };
+        const auto state = std::make_shared<LaneDialogSmokeState>();
         QTimer::singleShot(0, &window, [&window] {
             window.openLanePropertiesPreview(QStringLiteral("lane-request"));
         });
         QTimer::singleShot(
             350,
             &application,
-            [&application, &window, laneDialogScreenshotPath] {
-                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-                if (!dialog || !dialog->grab().save(laneDialogScreenshotPath)) {
-                    qCritical().noquote()
-                        << "Cannot capture lane properties dialog:"
-                        << laneDialogScreenshotPath;
-                    if (dialog) dialog->reject();
+            [&application, &window, laneDialogScreenshotPath, state] {
+                state->dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                state->name = state->dialog
+                    ? state->dialog->findChild<QLineEdit*>(
+                          QStringLiteral("LanePropertiesNameEdit"))
+                    : nullptr;
+                state->kind = state->dialog
+                    ? state->dialog->findChild<QComboBox*>(
+                          QStringLiteral("LanePropertiesKindCombo"))
+                    : nullptr;
+                state->width = state->dialog
+                    ? state->dialog->findChild<QLineEdit*>(
+                          QStringLiteral("LanePropertiesWidthEdit"))
+                    : nullptr;
+                state->signedValue = state->dialog
+                    ? state->dialog->findChild<QCheckBox*>(
+                          QStringLiteral("LanePropertiesSignedCheck"))
+                    : nullptr;
+                state->radix = state->dialog
+                    ? state->dialog->findChild<QComboBox*>(
+                          QStringLiteral("LanePropertiesRadixCombo"))
+                    : nullptr;
+                state->enumMap = state->dialog
+                    ? state->dialog->findChild<QLineEdit*>(
+                          QStringLiteral("LanePropertiesEnumMapEdit"))
+                    : nullptr;
+                state->clock = state->dialog
+                    ? state->dialog->findChild<QComboBox*>(
+                          QStringLiteral("LanePropertiesClockCombo"))
+                    : nullptr;
+                state->group = state->dialog
+                    ? state->dialog->findChild<QComboBox*>(
+                          QStringLiteral("LanePropertiesGroupCombo"))
+                    : nullptr;
+                state->color = state->dialog
+                    ? state->dialog->findChild<QLineEdit*>(
+                          QStringLiteral("LanePropertiesColorEdit"))
+                    : nullptr;
+                state->height = state->dialog
+                    ? state->dialog->findChild<QSpinBox*>(
+                          QStringLiteral("LanePropertiesHeightSpin"))
+                    : nullptr;
+                state->visible = state->dialog
+                    ? state->dialog->findChild<QCheckBox*>(
+                          QStringLiteral("LanePropertiesVisibleCheck"))
+                    : nullptr;
+                state->error = state->dialog
+                    ? state->dialog->findChild<QLabel*>(
+                          QStringLiteral("LanePropertiesError"))
+                    : nullptr;
+                state->saveState = window.findChild<QLabel*>(
+                    QStringLiteral("SaveStateLabel"));
+                state->undoAction = window.findChild<QAction*>(
+                    QStringLiteral("UndoAction"));
+                const auto* buttons = state->dialog
+                    ? state->dialog->findChild<QDialogButtonBox*>()
+                    : nullptr;
+                state->ok = buttons ? buttons->button(QDialogButtonBox::Ok) : nullptr;
+                const auto* original = !window.project().scenarios.empty()
+                    ? wave::findLane(
+                          window.project().scenarios.front(),
+                          "lane-request")
+                    : nullptr;
+                const auto fail = [&application, &window](const QString& message) {
+                    qCritical().noquote() << message;
+                    if (auto* modal = QApplication::activeModalWidget()) modal->close();
                     window.hide();
-                    application.exit(3);
+                    application.exit(4);
+                };
+                if (!state->dialog
+                    || state->dialog->objectName() != QStringLiteral("LanePropertiesDialog")
+                    || !state->name
+                    || !state->kind
+                    || !state->width
+                    || !state->signedValue
+                    || !state->radix
+                    || !state->enumMap
+                    || !state->clock
+                    || !state->group
+                    || !state->color
+                    || !state->height
+                    || !state->visible
+                    || !state->error
+                    || !state->saveState
+                    || !state->undoAction
+                    || !state->ok
+                    || !original
+                    || state->saveState->text() != QStringLiteral("Saved")
+                    || state->undoAction->isEnabled()) {
+                    fail(QStringLiteral("Lane properties smoke did not start from a saved, editable dialog"));
                     return;
                 }
-                dialog->reject();
-                window.hide();
-                application.exit(0);
-            });
-    } else if (waveformOnlySmoke) {
+
+                state->originalLane = *original;
+                state->originalName = state->name->text();
+                state->originalKindIndex = state->kind->currentIndex();
+                state->originalWidth = state->width->text();
+                state->originalSigned = state->signedValue->isChecked();
+                state->originalRadixIndex = state->radix->currentIndex();
+                state->originalEnumMap = state->enumMap->text();
+                state->originalClockIndex = state->clock->currentIndex();
+                state->originalGroupIndex = state->group->currentIndex();
+                state->originalColor = state->color->text();
+                state->originalHeight = state->height->value();
+                state->originalVisible = state->visible->isChecked();
+
+                const auto runner = std::make_shared<std::function<void()>>();
+                *runner = [
+                              &application,
+                              &window,
+                              laneDialogScreenshotPath,
+                              state,
+                              runner,
+                              fail] {
+                    const auto submitAndCheckNext = [&application, state, runner] {
+                        QTimer::singleShot(0, &application, [runner] {
+                            (*runner)();
+                        });
+                        state->ok->click();
+                    };
+                    const auto dialogStillOpen = [state] {
+                        return QApplication::activeModalWidget() == state->dialog
+                            && state->dialog->isVisible();
+                    };
+                    if (state->stage < 4 && !dialogStillOpen()) {
+                        fail(QStringLiteral("Invalid lane properties closed the editor or opened a warning dialog"));
+                        return;
+                    }
+
+                    if (state->stage == 0) {
+                        if (!state->error->isVisible()
+                            || !state->error->text().contains(
+                                QStringLiteral("cannot be empty"),
+                                Qt::CaseInsensitive)
+                            || QApplication::focusWidget() != state->name
+                            || state->kind->currentIndex() != state->originalKindIndex
+                            || state->color->text() != state->originalColor) {
+                            fail(QStringLiteral("Invalid lane name was not corrected inline with the draft retained"));
+                            return;
+                        }
+                        state->name->setText(state->originalName);
+                        state->kind->setCurrentIndex(state->kind->findData(
+                            static_cast<int>(wave::LaneKind::Bus)));
+                        state->width->setText(QStringLiteral("0"));
+                        state->stage = 1;
+                        submitAndCheckNext();
+                        return;
+                    }
+                    if (state->stage == 1) {
+                        if (!state->error->isVisible()
+                            || !state->error->text().contains(
+                                QStringLiteral("Width must"),
+                                Qt::CaseInsensitive)
+                            || QApplication::focusWidget() != state->width
+                            || state->name->text() != state->originalName) {
+                            fail(QStringLiteral("Invalid lane width was not corrected inline with the draft retained"));
+                            return;
+                        }
+                        state->kind->setCurrentIndex(state->kind->findData(
+                            static_cast<int>(wave::LaneKind::Enum)));
+                        state->width->setText(QStringLiteral("8"));
+                        state->enumMap->setText(QStringLiteral("BROKEN"));
+                        state->stage = 2;
+                        submitAndCheckNext();
+                        return;
+                    }
+                    if (state->stage == 2) {
+                        if (!state->error->isVisible()
+                            || !state->error->text().contains(
+                                QStringLiteral("NAME=VALUE"),
+                                Qt::CaseInsensitive)
+                            || QApplication::focusWidget() != state->enumMap
+                            || state->width->text() != QStringLiteral("8")) {
+                            fail(QStringLiteral("Invalid Enum map was not corrected inline with the draft retained"));
+                            return;
+                        }
+                        state->name->setText(state->originalName);
+                        state->kind->setCurrentIndex(state->originalKindIndex);
+                        state->width->setText(state->originalWidth);
+                        state->signedValue->setChecked(state->originalSigned);
+                        state->radix->setCurrentIndex(state->originalRadixIndex);
+                        state->enumMap->setText(state->originalEnumMap);
+                        state->clock->setCurrentIndex(state->originalClockIndex);
+                        state->group->setCurrentIndex(state->originalGroupIndex);
+                        state->color->setText(QStringLiteral("not-a-color"));
+                        state->height->setValue(state->originalHeight);
+                        state->visible->setChecked(state->originalVisible);
+                        state->stage = 3;
+                        submitAndCheckNext();
+                        return;
+                    }
+                    if (state->stage == 3) {
+                        if (!state->error->isVisible()
+                            || !state->error->text().contains(
+                                QStringLiteral("valid Qt color"),
+                                Qt::CaseInsensitive)
+                            || QApplication::focusWidget() != state->color
+                            || state->name->text() != state->originalName
+                            || state->kind->currentIndex() != state->originalKindIndex
+                            || !state->dialog->grab().save(laneDialogScreenshotPath)) {
+                            fail(QStringLiteral("Invalid lane color was not corrected inline or captured"));
+                            return;
+                        }
+                        state->color->setText(state->originalColor);
+                        state->stage = 4;
+                        submitAndCheckNext();
+                        return;
+                    }
+
+                    const auto* lane = !window.project().scenarios.empty()
+                        ? wave::findLane(
+                              window.project().scenarios.front(),
+                              "lane-request")
+                        : nullptr;
+                    if (QApplication::activeModalWidget()
+                        || !lane
+                        || *lane != state->originalLane
+                        || state->saveState->text() != QStringLiteral("Saved")
+                        || state->undoAction->isEnabled()
+                        || !window.statusBar()->currentMessage().contains(
+                            QStringLiteral("No properties changed for req"))) {
+                        fail(QStringLiteral("Unchanged lane properties created an edit or lacked clear feedback"));
+                        return;
+                    }
+                    window.hide();
+                    application.exit(0);
+                };
+
+                state->name->setText(QStringLiteral(" "));
+                state->stage = 0;
+                QTimer::singleShot(0, &application, [runner] {
+                    (*runner)();
+                });
+                state->ok->click();
+            });    } else if (waveformOnlySmoke) {
         QTimer::singleShot(
             0,
             &application,

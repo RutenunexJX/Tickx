@@ -3065,6 +3065,64 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 54：高级 Lane/Group 属性原位纠错与空提交收口
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Edit 菜单的完整 Lane/Group 属性窗口在名称、Bus/Enum 位宽、Enum 映射或颜色无效时，会先关闭编辑窗口再弹出警告；
+  Clock domain 与 Group 引用错误也会在命令执行后才拒绝。用户必须重新打开窗口并恢复全部字段，纠错成本与低频入口不匹配。
+- 用户从特殊 lane 或 group 的完整属性窗口修改多个字段时，真正需要的是在当前字段附近修正错误并保留其余草稿；确认原值则只应退出，不能把工程改为
+  Unsaved changes，也不能生成一个无意义的 Undo 项。
+- 完整属性窗口新增稳定对象标识和窗口内错误区。名称、1..4294967295 位宽、`NAME=VALUE` Enum 映射、现有 clock/group 引用及 Qt 颜色
+  均在 OK 时原位校验；失败时窗口保持打开、其他字段不回滚，错误字段获得焦点并全选，修改相关字段后错误提示自动清除。
+- `editLaneById()` 使用命令栈的真实执行结果区分属性变更与空确认。无变化时不刷新模型、不标记 dirty、不安排 autosave、不改变 Undo/Redo，
+  仅恢复目标选择并显示 `No properties changed for <name>`；真实变更显示结果和 `Ctrl+Z`。
+- `wave-lane-dialog-smoke` 通过真实 OK 点击连续提交空名称、零位宽、错误 Enum 映射和非法颜色，断言每次均原位纠错、草稿与焦点保留；
+  最后恢复全部原值并确认，断言模型不变、SaveState 仍为 Saved、Undo 不可用且状态栏给出无变化反馈。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.37 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 8.04 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-lane-dialog-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.56 sec
+
+Screenshot generated:
+  build/qtcreator-debug/lane-dialog-smoke.png
+Automated QA: 空名称、零位宽、错误 Enum 映射和非法颜色均不关闭窗口，错误字段获得焦点，其余字段草稿保持。
+              恢复原始 req 属性后点击 OK，模型与 Saved 状态不变，Undo 仍不可用，并显示明确的无变化反馈。
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
