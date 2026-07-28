@@ -9,7 +9,7 @@ Project、Inspector、Scenario Dock 或模式切换栏。它提供整数 tick
 时间模型、clock/bit/bus/enum/transaction/event/group lane、自绘可滚动画布、光标锚定
 缩放、多 lane 框选、区间绘制、时钟局部门控/禁用、时钟参数编辑与周期
 事件重定时、Lane/Group 创建、属性编辑、显示重排与事务化删除、复制/粘贴、撤销/重做、
-Event/Segment 双向同步、Marker、Relation、版本化 JSON 工程安全保存与迁移、后台恢复快照，
+Event/Segment 双向同步、Marker、Relation、版本化 JSON 工程安全保存与迁移、包含未命名工程的后台恢复快照，
 以及由共享行为语义生成的 SystemVerilog、SVA、cocotb、SVG、PNG、PDF 和 WaveDrom
 JSON。VCD/CSV 导入、Expected/Actual 比较、报告生成及跨应用桥接能力保留在独立 CLI 和
 领域模块中，不再占用桌面编辑界面。验收证据见
@@ -200,9 +200,10 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   保存 Untitled 工程时从文件名推断项目名。Open/Save As 默认显示 `*.wave.json`；Save As 只输入工程名时
   自动补全 `.wave.json`，显式扩展名保持不变。普通工程成功打开后状态栏显示 `Opened <path>`；恢复快照
   和迁移警告仍显示各自说明。Open 先选择目标文件；取消选择不会触发未保存确认或改变当前工程，只有选定
-  目标后才询问 Save/Discard/Cancel。修改后 1.5 秒启动 Qt Concurrent 后台恢复快照；启动或 Open 正式工程时会自动采用有效且更新的快照，
-  较旧或损坏快照不替代正式文件。正式保存成功后清除已完成的快照，保存期间仍在途的过期写入完成后也会再次清除；
-  在未保存提示中选择 Discard 同样等待并清除在途快照，下一次打开不会恢复已明确放弃的修改。
+  目标后才询问 Save/Discard/Cancel。修改后 1.5 秒启动 Qt Concurrent 后台恢复快照；首次 Save As 前的 Untitled 波形同样写入应用恢复目录，
+  无参数启动时自动恢复有效快照，并明确显示 `Recovery loaded · Save required`；此时 Save 仍打开 Save As，要求选择正式工程文件。
+  启动或 Open 正式工程时会自动采用有效且更新的快照，较旧或损坏快照不替代正式文件。正式保存成功后清除已完成的快照，
+  保存期间仍在途的过期写入完成后也会再次清除；在未保存提示中选择 Discard 同样等待并清除在途快照，下一次打开不会恢复已明确放弃的修改。
 - File > Export 导出 SystemVerilog/SVA/cocotb 和文档图。VCD/CSV 导入、Expected/Actual 对比、报告和
   跨应用桥接由 `wave-compare`、`wave-bridge` 等 CLI 提供，不占用桌面工作区。
 - 特殊 lane 或 group 仍可从 Edit 菜单创建并编辑完整结构属性；空名称、与现有信号或 group 重复的名称、无效位宽、Enum 映射、时钟/分组引用或颜色，
@@ -349,7 +350,7 @@ exports/
 - first mismatch、缺失 signal、width mismatch、condition evaluation error、诊断可见性
   以及 JSON/CSV/HTML 报告。
 - ZeroSlack signal-list、Private Frame sample、Pinloom entry 和 Wave Workbench URI。
-- 主窗口后台 autosave 生成可由正式加载器读取的恢复快照；启动/Open 自动采用有效且更新的快照并显示 Save required，较旧或损坏快照回退正式工程；正式保存清除已完成/在途快照并保留 Saved 反馈；New/Open/Close 的 Discard 也等待在途 worker、永久清除快照且不重新调度。
+- 主窗口后台 autosave 生成可由正式加载器读取的恢复快照；首次保存前的 Untitled 编辑也写入隔离恢复目录，无参数重启自动恢复且 Save 仍要求正式位置；启动/Open 已保存工程自动采用有效且更新的快照并显示 Save required，较旧或损坏快照回退正式工程；正式保存清除已完成/在途快照并保留 Saved 反馈；New/Open/Close 的 Discard 也等待在途 worker、永久清除快照且不重新调度。
 
 最近一次验证结果：21 个 CTest 入口均通过，其中核心入口包含 26 组细分测试；Qt Creator
 Debug 与 Release 构建均已验证。完整验收记录见 [PLAN.md](PLAN.md)。

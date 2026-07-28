@@ -37,6 +37,7 @@
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QSpinBox>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
@@ -457,11 +458,20 @@ bool checkedSum(const Tick left, const Tick right, Tick& result)
 
 QString autosavePathForProject(const QString& projectPath)
 {
-    return projectPath.isEmpty() ? QString{} : projectPath + QStringLiteral(".autosave");
+    return projectPath.isEmpty()
+        ? untitledRecoveryPath()
+        : projectPath + QStringLiteral(".autosave");
 }
 
 QString projectPathForLoadedFile(const QString& loadedPath)
 {
+    if (QString::compare(
+            QFileInfo(loadedPath).absoluteFilePath(),
+            QFileInfo(untitledRecoveryPath()).absoluteFilePath(),
+            Qt::CaseInsensitive)
+        == 0) {
+        return {};
+    }
     const auto suffix = QStringLiteral(".autosave");
     return loadedPath.endsWith(suffix, Qt::CaseInsensitive)
         ? loadedPath.first(loadedPath.size() - suffix.size())
@@ -831,10 +841,33 @@ void selectLaneItem(QTreeWidget* tree, const QString& laneId)
 
 } // namespace
 
+QString untitledRecoveryPath()
+{
+    auto directory = qEnvironmentVariable("WAVEWORKBENCH_RECOVERY_DIR");
+    if (directory.isEmpty()) {
+        directory = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation);
+        if (!directory.isEmpty()) directory += QStringLiteral("/recovery");
+    }
+    if (directory.isEmpty()) {
+        directory = QDir::tempPath() + QStringLiteral("/WaveWorkbench/recovery");
+    }
+    return QDir::cleanPath(
+        directory + QStringLiteral("/untitled.wave.json.autosave"));
+}
+
 QString preferredProjectLoadPath(const QString& requestedPath)
 {
-    if (requestedPath.isEmpty()
-        || requestedPath.endsWith(
+    if (requestedPath.isEmpty()) {
+        const auto recoveryPath = untitledRecoveryPath();
+        const QFileInfo recoveryInfo(recoveryPath);
+        return recoveryInfo.exists()
+                && recoveryInfo.isFile()
+                && loadProjectFile(recoveryPath).ok()
+            ? recoveryPath
+            : QString{};
+    }
+    if (requestedPath.endsWith(
             QStringLiteral(".autosave"),
             Qt::CaseInsensitive)) {
         return requestedPath;
@@ -953,7 +986,9 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     updateWindowTitle();
     statusBar()->showMessage(
         recoveredSnapshot
-            ? tr("Recovery snapshot loaded; save to commit it to %1").arg(projectFile_)
+            ? (projectFile_.isEmpty()
+                   ? tr("Untitled recovery snapshot loaded; use Save to choose a project file")
+                   : tr("Recovery snapshot loaded; save to commit it to %1").arg(projectFile_))
             : tr("Ready"));
 }
 
@@ -3324,10 +3359,10 @@ void MainWindow::scheduleAutosave()
 {
     ++autosaveGeneration_;
     if (!pendingQuickLaneId_.isEmpty()) {
-        autosavePending_ = dirty_ && !projectFile_.isEmpty();
+        autosavePending_ = dirty_;
         return;
     }
-    if (!dirty_ || projectFile_.isEmpty() || !autosaveTimer_) return;
+    if (!dirty_ || !autosaveTimer_) return;
     if (autosaveWatcher_
         && (autosaveWatcher_->isRunning() || !autosaveInFlightPath_.isEmpty())) {
         autosavePending_ = true;
@@ -3339,10 +3374,10 @@ void MainWindow::scheduleAutosave()
 void MainWindow::startAutosave()
 {
     if (!pendingQuickLaneId_.isEmpty()) {
-        autosavePending_ = dirty_ && !projectFile_.isEmpty();
+        autosavePending_ = dirty_;
         return;
     }
-    if (!dirty_ || projectFile_.isEmpty() || !autosaveWatcher_) return;
+    if (!dirty_ || !autosaveWatcher_) return;
     if (autosaveWatcher_->isRunning() || !autosaveInFlightPath_.isEmpty()) {
         autosavePending_ = true;
         return;
@@ -3351,6 +3386,13 @@ void MainWindow::startAutosave()
     const auto generation = autosaveGeneration_;
     auto snapshot = project_;
     const auto path = autosavePathForProject(projectFile_);
+    const auto directory = QFileInfo(path).absolutePath();
+    if (!QDir().mkpath(directory)) {
+        statusBar()->showMessage(
+            tr("Autosave recovery directory could not be created: %1").arg(directory),
+            10'000);
+        return;
+    }
     autosaveInFlightPath_ = path;
     const auto future = QtConcurrent::run(
         [snapshot = std::move(snapshot), path, generation]() mutable {
@@ -3387,11 +3429,11 @@ void MainWindow::finishAutosave()
     }
     if ((autosavePending_ || stale) && !explicitlyDiscarded) {
         if (!pendingQuickLaneId_.isEmpty()) {
-            autosavePending_ = dirty_ && !projectFile_.isEmpty();
+            autosavePending_ = dirty_;
             return;
         }
         autosavePending_ = false;
-        if (dirty_ && !projectFile_.isEmpty()) autosaveTimer_->start(0);
+        if (dirty_) autosaveTimer_->start(0);
     } else if (explicitlyDiscarded) {
         autosavePending_ = false;
     }
@@ -4373,7 +4415,9 @@ bool MainWindow::loadFromPath(const QString& path)
     updateWindowTitle();
     if (recoveredSnapshot) {
         statusBar()->showMessage(
-            tr("Recovery snapshot loaded; save to commit it to %1").arg(projectFile_),
+            projectFile_.isEmpty()
+                ? tr("Untitled recovery snapshot loaded; use Save to choose a project file")
+                : tr("Recovery snapshot loaded; save to commit it to %1").arg(projectFile_),
             10'000);
     } else if (!result.warnings.isEmpty()) {
         statusBar()->showMessage(result.warnings.join(QStringLiteral("; ")), 10'000);

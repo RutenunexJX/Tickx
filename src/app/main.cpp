@@ -179,6 +179,12 @@ int main(int argc, char* argv[])
         || !laneDialogScreenshotPath.isEmpty()
         || !editMenuScreenshotPath.isEmpty()
         || !autosaveSmokePath.isEmpty();
+    if (projectPath.isEmpty()
+        && uriText.isEmpty()
+        && !compareMode
+        && !automationMode) {
+        projectPath = wave::preferredProjectLoadPath({});
+    }
     auto project = wave::makeDemonstrationProject();
     if (projectPath.isEmpty()
         && uriText.isEmpty()
@@ -462,7 +468,15 @@ int main(int argc, char* argv[])
                 });
         });
     } else if (newProjectSmoke) {
-        QTimer::singleShot(0, &window, [&application, &window] {
+        const auto recoveryPath = wave::untitledRecoveryPath();
+        QFile::remove(recoveryPath);
+        QTimer::singleShot(0, &window, [&application, &window, recoveryPath] {
+            const auto fail = [&application, &window](const QString& message) {
+                qCritical().noquote() << message;
+                if (auto* modal = QApplication::activeModalWidget()) modal->close();
+                window.hide();
+                application.exit(4);
+            };
             auto* action = window.findChild<QAction*>(QStringLiteral("NewProjectAction"));
             auto* canvas = window.findChild<wave::WaveCanvas*>();
             auto* durationEdit = window.findChild<QLineEdit*>(
@@ -473,9 +487,8 @@ int main(int argc, char* argv[])
             if (!action || !canvas || !durationEdit || !saveState || !addClock
                 || action->shortcut().matches(QKeySequence::New) != QKeySequence::ExactMatch
                 || action->text().contains(QChar(0x2026))) {
-                qCritical().noquote() << "New project direct action or blank-state controls are missing";
-                window.hide();
-                application.exit(4);
+                fail(QStringLiteral(
+                    "New project direct action or blank-state controls are missing"));
                 return;
             }
 
@@ -493,9 +506,8 @@ int main(int argc, char* argv[])
                     && addClock->geometry().left() > 190;
             };
             if (!verifyBlank()) {
-                qCritical().noquote() << "Default startup did not expose the direct 200 ns blank waveform";
-                window.hide();
-                application.exit(4);
+                fail(QStringLiteral(
+                    "Default startup did not expose the direct 200 ns blank waveform"));
                 return;
             }
 
@@ -506,9 +518,7 @@ int main(int argc, char* argv[])
             QCoreApplication::sendEvent(durationEdit, &cancelDuration);
             QCoreApplication::processEvents();
             if (!verifyBlank()) {
-                qCritical().noquote() << "Escape did not cancel the direct timeline edit";
-                window.hide();
-                application.exit(4);
+                fail(QStringLiteral("Escape did not cancel the direct timeline edit"));
                 return;
             }
 
@@ -519,18 +529,14 @@ int main(int argc, char* argv[])
             auto* quickName = canvas->findChild<QLineEdit*>(
                 QStringLiteral("QuickLaneNameEdit"));
             if (!setupPanel || !setupPanel->isVisible() || !quickName) {
-                qCritical().noquote() << "Blank-state quick creation did not start inline";
-                window.hide();
-                application.exit(4);
+                fail(QStringLiteral("Blank-state quick creation did not start inline"));
                 return;
             }
             QKeyEvent cancelQuick(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
             QCoreApplication::sendEvent(quickName, &cancelQuick);
             QCoreApplication::processEvents();
             if (setupPanel->isVisible() || !verifyBlank()) {
-                qCritical().noquote() << "Escape did not atomically cancel the quick signal";
-                window.hide();
-                application.exit(4);
+                fail(QStringLiteral("Escape did not atomically cancel the quick signal"));
                 return;
             }
 
@@ -539,13 +545,141 @@ int main(int argc, char* argv[])
             if (QApplication::activeModalWidget()
                 || window.findChild<QDialog*>(QStringLiteral("NewProjectDialog"))
                 || !verifyBlank()) {
-                qCritical().noquote() << "New unexpectedly opened configuration or changed defaults";
-                if (auto* dialog = QApplication::activeModalWidget()) dialog->close();
-                window.hide();
-                application.exit(4);
+                fail(QStringLiteral(
+                    "New unexpectedly opened configuration or changed defaults"));
                 return;
             }
+
+            durationEdit->setFocus(Qt::OtherFocusReason);
+            durationEdit->setText(QStringLiteral("300 ns"));
+            durationEdit->setModified(true);
+            QKeyEvent commitDuration(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+            QCoreApplication::sendEvent(durationEdit, &commitDuration);
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front().duration != 300'000
+                || saveState->text() != QStringLiteral("Not saved · changes")) {
+                fail(QStringLiteral(
+                    "An untitled waveform edit did not enter the unsaved state"));
+                return;
+            }
+
+            QEventLoop autosaveWait;
+            QTimer autosavePoll;
+            autosavePoll.setInterval(25);
+            QObject::connect(
+                &autosavePoll,
+                &QTimer::timeout,
+                &autosaveWait,
+                [&autosaveWait, recoveryPath] {
+                    if (!QFileInfo::exists(recoveryPath)) return;
+                    if (wave::loadProjectFile(recoveryPath).ok()) autosaveWait.quit();
+                });
+            QTimer::singleShot(4'000, &autosaveWait, &QEventLoop::quit);
+            autosavePoll.start();
+            autosaveWait.exec();
+            autosavePoll.stop();
+
+            const auto selectedPath = wave::preferredProjectLoadPath({});
+            const auto recoveryLoad = wave::loadProjectFile(selectedPath);
+            if (selectedPath != recoveryPath
+                || !recoveryLoad.ok()
+                || recoveryLoad.project->scenarios.front().duration != 300'000) {
+                fail(QStringLiteral(
+                    "The first unsaved waveform was not captured as an untitled recovery"));
+                return;
+            }
+
             window.hide();
+            wave::MainWindow recoveredWindow(*recoveryLoad.project, selectedPath);
+            recoveredWindow.show();
+            QCoreApplication::processEvents();
+            auto* recoveredState = recoveredWindow.findChild<QLabel*>(
+                QStringLiteral("SaveStateLabel"));
+            auto* recoveredDuration = recoveredWindow.findChild<QLineEdit*>(
+                QStringLiteral("TimelineDurationEdit"));
+            if (!recoveredState
+                || !recoveredDuration
+                || recoveredState->text()
+                    != QStringLiteral("Recovery loaded · Save required")
+                || !recoveredState->toolTip().contains(
+                    QStringLiteral("not been saved"), Qt::CaseInsensitive)
+                || recoveredDuration->text() != QStringLiteral("300 ns")
+                || !recoveredWindow.windowTitle().contains(QStringLiteral(" *"))
+                || !recoveredWindow.statusBar()->currentMessage().contains(
+                    QStringLiteral("Untitled recovery snapshot loaded"))) {
+                fail(QStringLiteral(
+                    "No-argument restart did not expose the untitled recovery safely"));
+                return;
+            }
+
+            bool saveAsPresented = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&saveAsPresented] {
+                    auto* dialog = qobject_cast<QFileDialog*>(
+                        QApplication::activeModalWidget());
+                    if (!dialog) return;
+                    saveAsPresented = true;
+                    dialog->reject();
+                });
+            if (!QMetaObject::invokeMethod(
+                    &recoveredWindow,
+                    "saveProject",
+                    Qt::DirectConnection)) {
+                fail(QStringLiteral("Cannot invoke Save for the untitled recovery"));
+                return;
+            }
+            QCoreApplication::processEvents();
+            if (!saveAsPresented
+                || !QFileInfo::exists(recoveryPath)
+                || recoveredState->text()
+                    != QStringLiteral("Recovery loaded · Save required")) {
+                fail(QStringLiteral(
+                    "Recovered Untitled did not require a formal Save As destination"));
+                return;
+            }
+
+            bool discardHandled = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&discardHandled] {
+                    auto* box = qobject_cast<QMessageBox*>(
+                        QApplication::activeModalWidget());
+                    auto* discard = box ? box->button(QMessageBox::Discard) : nullptr;
+                    if (!discard) return;
+                    discardHandled = true;
+                    discard->click();
+                });
+            if (!QMetaObject::invokeMethod(
+                    &recoveredWindow,
+                    "newProject",
+                    Qt::DirectConnection)) {
+                fail(QStringLiteral("Cannot discard the untitled recovery through New"));
+                return;
+            }
+            QEventLoop settleLoop;
+            QTimer::singleShot(100, &settleLoop, &QEventLoop::quit);
+            settleLoop.exec();
+            auto* discardedState = recoveredWindow.findChild<QLabel*>(
+                QStringLiteral("SaveStateLabel"));
+            if (!discardHandled
+                || QApplication::activeModalWidget()
+                || QFileInfo::exists(recoveryPath)
+                || !wave::preferredProjectLoadPath({}).isEmpty()
+                || !discardedState
+                || discardedState->text() != QStringLiteral("Not saved")
+                || recoveredWindow.project().name != "Untitled"
+                || recoveredWindow.project().scenarios.size() != 1
+                || recoveredWindow.project().scenarios.front().duration != 200'000
+                || !recoveredWindow.project().scenarios.front().lanes.empty()
+                || recoveredWindow.windowTitle().contains(QStringLiteral(" *"))) {
+                fail(QStringLiteral(
+                    "Discard did not durably remove the untitled recovery"));
+                return;
+            }
+            recoveredWindow.hide();
             application.exit(0);
         });
     } else if (userJourneySmoke) {

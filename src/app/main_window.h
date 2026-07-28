@@ -37,6 +37,7 @@ class WaveCanvas;
 class TraceCanvas;
 
 [[nodiscard]] QString preferredProjectLoadPath(const QString& requestedPath);
+[[nodiscard]] QString untitledRecoveryPath();
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT

@@ -3401,6 +3401,62 @@ Automated QA: Recovery loaded 窗口存在有效更新快照且 autosave worker 
 Desktop interaction: none
 ```
 
+## 持续迭代 60：首次保存前的 Untitled 自动恢复
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 autosave 路径由 `projectFile_` 派生，未命名工程因路径为空在调度、启动和连续写入三个位置被直接跳过。用户首次打开应用后即使已经绘制波形，
+  在第一次 Save As 前异常退出仍没有恢复入口；这是新用户最早遇到的数据安全缺口。
+- 用户在空白页的真实顺序是先添加信号和修改波形，再决定工程名与保存目录。要求先保存才能获得崩溃保护会增加一次无关决策，也无法从界面得知当前编辑不受保护。
+- 新增稳定的 Untitled 恢复路径：测试可通过 `WAVEWORKBENCH_RECOVERY_DIR` 隔离，正常运行使用应用本地数据目录下的 `recovery/untitled.wave.json.autosave`；
+  autosave 在首次写入前创建目录，继续使用原子保存、generation 和单 worker 串行语义。各 GUI CTest 使用独立恢复子目录，允许并行执行且不触碰真实用户恢复数据。
+- 未命名工程不再被 autosave 调度条件排除。无参数正常启动会先检查该快照，仅在文件存在、是普通文件且能由正式加载器完整解析时采用；无有效快照仍直接显示 200 ns 空白页。
+  自动化入口保持显式输入与确定性，不会意外采用其他测试留下的快照。
+- 从 Untitled 快照恢复后，窗口保留空正式路径，常驻状态显示 `Recovery loaded · Save required`，状态栏说明使用 Save 选择工程文件，Save 继续进入 Save As；
+  正式保存会同时清理 Untitled 快照，Discard 会等待在途 worker 并永久清理该路径。
+- `wave-new-project-smoke` 真实提交 300 ns 时间轴修改，等待 1.5 秒防抖与后台原子写入，按无参数启动顺序选择并加载快照，再构造恢复窗口；
+  断言内容、标题星号、未正式保存 tooltip 和恢复状态，随后真实取消 Save As、执行 New 并点击 Discard，确认快照不再存在且窗口回到干净 200 ns 空白页。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 10.99 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 10.51 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-new-project-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 1.91 sec
+
+Automated QA: Untitled 的 300 ns 修改在首次 Save As 前生成可读取的隔离快照；按无参数启动顺序恢复后显示 Recovery loaded · Save required、标题星号和未正式保存说明。
+              Save 仍打开 Save As；取消后快照保留。New→Discard 后快照永久消失，窗口恢复 Untitled、Not saved、200 ns、无 lane。
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
