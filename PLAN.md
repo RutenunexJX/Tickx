@@ -1434,6 +1434,63 @@ Visual QA: 固定范围栏按 Copy / Cut / Clear 排列，三项动作均可见�
 Desktop interaction: none
 ```
 
+## 持续迭代 26：持久范围端点就地修正
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Shift 拖动建立范围后没有可操作的端点；边界偏差一拍时只能重新跨时间和 lane
+  框选，普通点击还会先清除整个选择。用户需要重复定位两个时间点和两条信号。
+- 持久范围的左右边界新增可见手柄。任一已选 lane 上都可直接拖动端点；拖动期间显示虚线预览，
+  释放后保持原 lane 集合、固定范围工具栏与上下文。端点调整只修改选择状态，不写 Scenario，
+  不新增 Undo 历史。
+- 端点拖动复用无设置项的 7 像素轻吸附，可对齐刻度、Clock 边沿和信号边沿；按住 `Alt` 临时
+  绕过。状态栏实时显示范围，并在释放后明确报告起点、终点、宽度及信号数量。
+- `wave-wave-edit-smoke` 通过真实鼠标事件分别拖动左右手柄，验证精确范围、lane 集合、工具栏、
+  状态反馈和 Scenario 完全不变，再恢复原范围供后续批量编辑。全部 GUI 路径继续使用 offscreen，
+  未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.42 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.02 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.71 sec
+
+Screenshot:
+  build/qtcreator-debug/wave-edit-smoke-range-selection.png
+Visual QA: 两路范围的左右手柄清晰可见；范围高亮保持低透明度，刻度、波形与固定操作栏无遮挡；
+           边界修正后无需重新选择信号或重开工具栏
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

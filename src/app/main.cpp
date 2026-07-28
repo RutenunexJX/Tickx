@@ -3162,6 +3162,60 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
+                const auto beforeRangeBoundaryAdjustment = scenario;
+                drag(
+                    QPoint(xAtTick(multiLaneRange->first), requestY),
+                    QPoint(xAtTick(30'000), requestY));
+                settleLayouts();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange()
+                        != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                            std::pair<wave::Tick, wave::Tick>{30'000, 40'000}}
+                    || canvas->selectedLaneIds() != multiLaneIds
+                    || !rangePalette->isVisibleTo(&window)
+                    || scenario != beforeRangeBoundaryAdjustment
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Adjusted range"))) {
+                    qCritical().noquote()
+                        << "Dragging the left range handle did not preserve context and model";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                drag(
+                    QPoint(xAtTick(40'000), acknowledgeY),
+                    QPoint(xAtTick(50'000), acknowledgeY));
+                settleLayouts();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange()
+                        != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                            std::pair<wave::Tick, wave::Tick>{30'000, 50'000}}
+                    || canvas->selectedLaneIds() != multiLaneIds
+                    || !rangePalette->isVisibleTo(&window)
+                    || scenario != beforeRangeBoundaryAdjustment
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Adjusted range"))) {
+                    qCritical().noquote()
+                        << "Dragging the right range handle did not preserve context and model";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                dragModified(
+                    QPoint(xAtTick(20'000), requestY),
+                    QPoint(xAtTick(40'000), acknowledgeY),
+                    Qt::ShiftModifier);
+                settleLayouts();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != multiLaneRange
+                    || canvas->selectedLaneIds() != multiLaneIds
+                    || scenario != beforeRangeBoundaryAdjustment) {
+                    qCritical().noquote()
+                        << "Re-selecting the original range after handle adjustment failed";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
                 if (!waveEditScreenshotPath.isEmpty()) {
                     auto rangeScreenshotPath = waveEditScreenshotPath;
                     const auto suffix = rangeScreenshotPath.lastIndexOf(QLatin1Char('.'));

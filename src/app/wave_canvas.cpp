@@ -1921,6 +1921,34 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         && explicitRangeSelection_
         && !spaceHeld_
         && !event->modifiers().testFlag(Qt::ShiftModifier)) {
+        const auto boundary = explicitRangeBoundaryAt(position);
+        const auto* rangeLane = laneAtY(position.y());
+        if (boundary != SegmentBoundary::None && selectionRange_ && rangeLane) {
+            bypassSnap_ = event->modifiers().testFlag(Qt::AltModifier);
+            viewport()->setFocus(Qt::MouseFocusReason);
+            selectedSegmentLaneId_.clear();
+            selectedSegmentId_.clear();
+            waveEditHoverLaneId_.clear();
+            waveEditHoverRange_.reset();
+            waveEditOriginalRange_ = selectionRange_;
+            waveEditPreviewRange_ = selectionRange_;
+            waveEditInteraction_ = boundary == SegmentBoundary::Start
+                ? WaveEditInteraction::ResizeRangeStart
+                : WaveEditInteraction::ResizeRangeEnd;
+            drawLaneId_ = rangeLane->id;
+            drawStart_ = boundary == SegmentBoundary::Start
+                ? selectionRange_->first
+                : selectionRange_->second;
+            drawCurrent_ = drawStart_;
+            waveEditPressPosition_ = position;
+            drawing_ = true;
+            cursorTick_ = drawStart_;
+            snapGuideTick_.reset();
+            viewport()->setCursor(Qt::SplitHCursor);
+            viewport()->update();
+            event->accept();
+            return;
+        }
         clearExplicitRangeSelection();
         snapGuideTick_.reset();
         viewport()->setFocus(Qt::MouseFocusReason);
@@ -2325,6 +2353,24 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
                     std::max(drawStart_, drawCurrent_),
                 };
                 interactionCurrent_ = position;
+            } else if (waveEditOriginalRange_
+                       && (waveEditInteraction_ == WaveEditInteraction::ResizeRangeStart
+                           || waveEditInteraction_ == WaveEditInteraction::ResizeRangeEnd)) {
+                const auto [originalStart, originalEnd] = *waveEditOriginalRange_;
+                const auto snapped = snappedTick(rawTick, editLane);
+                if (waveEditInteraction_ == WaveEditInteraction::ResizeRangeStart) {
+                    const auto start = std::clamp<Tick>(snapped, 0, originalEnd - 1);
+                    waveEditPreviewRange_ = std::pair{start, originalEnd};
+                    cursorTick_ = start;
+                } else {
+                    const auto end = std::clamp<Tick>(
+                        snapped,
+                        originalStart + 1,
+                        scenario_->duration);
+                    waveEditPreviewRange_ = std::pair{originalStart, end};
+                    cursorTick_ = end;
+                }
+                selectionRange_ = waveEditPreviewRange_;
             } else if (editLane
                        && waveEditInteraction_ == WaveEditInteraction::MoveSegment
                        && waveEditOriginalRange_) {
@@ -2418,6 +2464,14 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
                 }
             }
             viewport()->update();
+        } else if (explicitRangeSelection_
+                   && explicitRangeBoundaryAt(position) != SegmentBoundary::None) {
+            const auto hadHover = waveEditHoverRange_.has_value()
+                || !waveEditHoverLaneId_.empty();
+            waveEditHoverLaneId_.clear();
+            waveEditHoverRange_.reset();
+            viewport()->setCursor(Qt::SplitHCursor);
+            if (hadHover) viewport()->update();
         } else if (position.x() >= HeaderWidth
                    && lane
                    && lane->kind == LaneKind::Bit) {
@@ -3040,6 +3094,38 @@ std::optional<LaneKind> WaveCanvas::explicitRangeKind() const
         }
     }
     return kind;
+}
+
+WaveCanvas::SegmentBoundary WaveCanvas::explicitRangeBoundaryAt(
+    const QPoint& position) const
+{
+    if (!scenario_ || !explicitRangeSelection_ || !selectionRange_
+        || position.x() < HeaderWidth) {
+        return SegmentBoundary::None;
+    }
+    const auto selectedLane = std::any_of(
+        laneLayout_.begin(),
+        laneLayout_.end(),
+        [this, &position](const LaneLayout& layout) {
+            const auto& lane = scenario_->lanes.at(layout.laneIndex);
+            if (std::find(selectedLaneIds_.begin(), selectedLaneIds_.end(), lane.id)
+                == selectedLaneIds_.end()) {
+                return false;
+            }
+            const auto top = RulerHeight + layout.top - verticalScrollBar()->value();
+            return position.y() >= top && position.y() < top + layout.height;
+        });
+    if (!selectedLane) return SegmentBoundary::None;
+
+    const auto startDistance = std::abs(position.x() - xAtTick(selectionRange_->first));
+    const auto endDistance = std::abs(position.x() - xAtTick(selectionRange_->second));
+    if (startDistance > kSoftSnapRadiusPixels
+        && endDistance > kSoftSnapRadiusPixels) {
+        return SegmentBoundary::None;
+    }
+    return startDistance <= endDistance
+        ? SegmentBoundary::Start
+        : SegmentBoundary::End;
 }
 
 void WaveCanvas::showRangeEditPalette()
@@ -4375,6 +4461,37 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
         return;
     }
 
+    if (interaction == WaveEditInteraction::ResizeRangeStart
+        || interaction == WaveEditInteraction::ResizeRangeEnd) {
+        if (waveEditPreviewRange_
+            && waveEditPreviewRange_->second > waveEditPreviewRange_->first) {
+            selectionRange_ = waveEditPreviewRange_;
+            explicitRangeSelection_ = true;
+            cursorTick_ = interaction == WaveEditInteraction::ResizeRangeStart
+                ? selectionRange_->first
+                : selectionRange_->second;
+            showRangeEditPalette();
+            emit selectionChanged(
+                QString::fromStdString(selectedLaneId_),
+                cursorTick_);
+            emit statusMessage(
+                tr("Adjusted range to %1–%2 · %3 · %4 signals")
+                    .arg(QString::fromStdString(
+                        formatTick(selectionRange_->first, project_->timeBase)))
+                    .arg(QString::fromStdString(
+                        formatTick(selectionRange_->second, project_->timeBase)))
+                    .arg(QString::fromStdString(formatTick(
+                        selectionRange_->second - selectionRange_->first,
+                        project_->timeBase)))
+                    .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
+        }
+        waveEditOriginalRange_.reset();
+        waveEditPreviewRange_.reset();
+        viewport()->setCursor(Qt::SplitHCursor);
+        viewport()->update();
+        return;
+    }
+
     if (interaction == WaveEditInteraction::SelectRange) {
         drawCurrent_ = snappedTick(rawTick, lane);
         selectionRange_ = std::pair{
@@ -5420,8 +5537,12 @@ void WaveCanvas::drawWaveEditOverlay(QPainter& painter)
         viewport()->height() - RulerHeight));
     drawWaveEditTransitionPreview(painter);
     if (explicitRangeSelection_ && selectionRange_) {
-        for (const auto& laneId : selectedLaneIds_) {
-            drawRange(laneId, *selectionRange_, false, false);
+        const auto resizing = drawing_
+            && (waveEditInteraction_ == WaveEditInteraction::ResizeRangeStart
+                || waveEditInteraction_ == WaveEditInteraction::ResizeRangeEnd);
+        for (std::size_t index = 0; index < selectedLaneIds_.size(); ++index) {
+            const auto handles = index == 0 || index + 1 == selectedLaneIds_.size();
+            drawRange(selectedLaneIds_[index], *selectionRange_, handles, resizing);
         }
     }
     if (!drawing_

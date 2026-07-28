@@ -173,6 +173,8 @@ private:
         ToggleBitRange,
         ResizeStart,
         ResizeEnd,
+        ResizeRangeStart,
+        ResizeRangeEnd,
         SelectRange,
     };
 
@@ -206,6 +208,7 @@ private:
     void hideRangeEditPalette();
     void clearExplicitRangeSelection(bool clearLanes = true);
     [[nodiscard]] std::optional<LaneKind> explicitRangeKind() const;
+    [[nodiscard]] SegmentBoundary explicitRangeBoundaryAt(const QPoint& position) const;
     bool applyExplicitRangeValue(
         const std::string& value,
         const std::string& presetId = {});
