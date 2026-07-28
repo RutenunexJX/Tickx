@@ -1430,6 +1430,78 @@ int main(int argc, char* argv[])
                         "User journey could not create a dirty project before Open"));
                     return;
                 }
+
+                auto* autosaveWatcher = window.findChild<QFutureWatcherBase*>(
+                    QStringLiteral("AutosaveWatcher"));
+                QEventLoop savepointWait;
+                bool autosaveFinished = false;
+                if (autosaveWatcher) {
+                    QObject::connect(
+                        autosaveWatcher,
+                        &QFutureWatcherBase::finished,
+                        &savepointWait,
+                        [&savepointWait, &autosaveFinished] {
+                            autosaveFinished = true;
+                            savepointWait.quit();
+                        });
+                }
+                auto* savepointUndoAction = window.findChild<QAction*>(
+                    QStringLiteral("UndoAction"));
+                const auto autosaveStarted = QMetaObject::invokeMethod(
+                    &window,
+                    "startAutosave",
+                    Qt::DirectConnection);
+                if (savepointUndoAction) savepointUndoAction->trigger();
+                if (autosaveWatcher && autosaveWatcher->isRunning()) {
+                    QTimer::singleShot(4'000, &savepointWait, &QEventLoop::quit);
+                    savepointWait.exec();
+                } else if (autosaveWatcher) {
+                    QCoreApplication::processEvents();
+                    autosaveFinished = true;
+                }
+                if (!autosaveWatcher
+                    || !savepointUndoAction
+                    || !autosaveStarted
+                    || !autosaveFinished
+                    || autosaveWatcher->isRunning()
+                    || window.project().scenarios.front().duration != 650'000
+                    || saveState->text() != QStringLiteral("Saved")
+                    || window.windowTitle().contains(QStringLiteral(" *"))
+                    || QFileInfo::exists(
+                        userJourneySavePath + QStringLiteral(".autosave"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("back to saved version"))) {
+                    qCritical().noquote()
+                        << "Savepoint diagnostic: watcher=" << (autosaveWatcher != nullptr)
+                        << "started=" << autosaveStarted
+                        << "finished=" << autosaveFinished
+                        << "running=" << (autosaveWatcher && autosaveWatcher->isRunning())
+                        << "duration=" << window.project().scenarios.front().duration
+                        << "state=" << saveState->text()
+                        << "title=" << window.windowTitle()
+                        << "snapshot=" << QFileInfo::exists(
+                            userJourneySavePath + QStringLiteral(".autosave"))
+                        << "status=" << window.statusBar()->currentMessage();
+                    fail(QStringLiteral(
+                        "Undo did not return to Saved or clear the stale recovery snapshot"));
+                    return;
+                }
+
+                auto* savepointRedoAction = window.findChild<QAction*>(
+                    QStringLiteral("RedoAction"));
+                if (savepointRedoAction) savepointRedoAction->trigger();
+                QCoreApplication::processEvents();
+                if (!savepointRedoAction
+                    || window.project().scenarios.front().duration != 660'000
+                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || !window.windowTitle().contains(QStringLiteral(" *"))
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Redid "))) {
+                    fail(QStringLiteral(
+                        "Redo did not restore the edit and Unsaved changes state"));
+                    return;
+                }
+
                 auto* currentRecentAction = window.findChild<QAction*>(
                     QStringLiteral("RecentProjectAction1"));
                 if (!currentRecentAction) {

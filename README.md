@@ -356,6 +356,10 @@ exports/
 - 文件对话框、最近工程和工程拖放通过完整用户旅程验收：首次 Save As 位于 Documents/Home；保存后最近工程立即出现；New 后 Open 保持最近目录；当前脏工程的最近项为安全无操作；New 后最近项一键恢复 650 ns/3 lane 工程；再将独立 700 ns 工程拖入画布，断言加载、Saved/Opened 和 Recent 置顶。所有 GUI 测试的设置目录相互隔离且不触碰真实用户设置；既有 Bus `Don't care` MIME 拖放继续通过专项回归。
 - 主窗口后台 autosave 生成可由正式加载器读取的恢复快照；首次保存前的 Untitled 编辑也写入隔离恢复目录，无参数重启自动恢复且 Save 仍要求正式位置；启动/Open 已保存工程自动采用有效且更新的快照并显示 Save required，较旧或损坏快照回退正式工程；正式保存清除已完成/在途快照并保留 Saved 反馈；New/Open/Close 的 Discard 也等待在途 worker、永久清除快照且不重新调度。
 
+- 命令历史为每个真实状态保留稳定保存点标识；正式保存后继续编辑，再用 Undo 回到保存版本时，
+  状态立即恢复为 `Saved`、窗口星号消失且不再产生关闭保存提示。Redo 离开保存点后重新显示
+  `Unsaved changes`。若 Undo 发生在 autosave 正在写入或已经完成之后，过期恢复快照会在后台结果
+  返回后或当场删除；新分支不会因与旧分支栈深度相同而被误判为 Saved。
 最近一次验证结果：21 个 CTest 入口均通过，其中核心入口包含 26 组细分测试；Qt Creator
 Debug 与 Release 构建均已验证。完整验收记录见 [PLAN.md](PLAN.md)。
 

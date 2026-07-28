@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <set>
@@ -129,6 +130,8 @@ private:
     void editLaneById(const QString& laneId);
     void invalidateCompareResult();
     void scheduleAutosave();
+    [[nodiscard]] QString synchronizeDirtyState();
+    void resetEditTracking(bool clean);
     void updateWindowTitle();
     void updateRecentProjectsMenu();
     void rememberProjectPath(const QString& path);
@@ -161,6 +164,10 @@ private:
     std::size_t pendingQuickCommandSize_{0};
     QString pendingQuickLaneId_;
     CommandStack commandStack_;
+    std::optional<std::uint64_t> cleanCommandStateId_;
+    std::uint64_t observedCommandStateId_{0};
+    std::uint64_t externalRevision_{0};
+    std::uint64_t cleanExternalRevision_{0};
     WaveCanvas* canvas_{nullptr};
     QTreeWidget* signalTree_{nullptr};
     QTreeWidget* clockTree_{nullptr};

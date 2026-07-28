@@ -3577,6 +3577,65 @@ Automated QA: 一个本地 user-journey-dropped.wave.json 拖到 canvas viewport
 Desktop interaction: none
 ```
 
+## 持续迭代 63：Undo/Redo 正式保存点
+
+状态：完成
+
+已交付：
+
+- 开发审计确认普通 `undo()` / `redo()` 无条件把工程设为 dirty。用户在正式保存后修改一个值，再 Ctrl+Z 回到完全相同的磁盘版本，界面仍显示
+  `Unsaved changes`、窗口仍带星号、关闭仍会要求保存，已完成或在途 autosave 还可能作为下一次启动的过期恢复来源。
+- 用户真正需要的是明确知道“当前内容是否等于正式保存版本”。回到保存版本应立即显示 Saved 且无需再次保存；离开保存点才应显示 Unsaved changes，
+  不应要求用户记忆自己执行过几次编辑或手工覆盖同一文件。
+- `CommandStack` 为每个历史位置分配稳定状态 ID。Undo 返回原状态会恢复原 ID，Redo 恢复对应 ID；Undo 后新建分支、替换快速新增命令、取消命令、
+  截断后续历史和清空文档均维护独立状态，避免仅按栈深度判断造成同深度分支误报 Saved。无效果命令不改变状态 ID。
+- MainWindow 记录最近一次正式保存/加载/新建的命令状态和直接模型修改版本。命令式编辑与 trace 等非命令修改均纳入 dirty 判定；正式保存会更新保存点，
+  恢复快照或迁移结果在保存前仍保持 dirty。快速新增信号的临时命令取消后也重新同步保存点，不污染后续直接修改识别。
+- Undo/Redo 每次都根据当前状态与保存点重新计算 dirty。回到保存版本时 SaveState 变为 `Saved`、标题星号消失，并显示 `back to saved version`；
+  Redo 离开保存点时恢复 `Unsaved changes`。未命名工程撤销全部修改时使用 `all changes undone` 反馈。
+- 回到保存点会停止待执行 autosave、递增快照代次并删除已完成快照；若 worker 正在写入，完成回调将其识别为过期并删除。删除失败时状态栏保留准确路径，
+  不以模态窗口中断操作。
+- 核心回归覆盖初始/编辑/Undo/Redo 状态 ID、Undo 后分支 ID 唯一、clear 新根状态以及无效果命令不改变状态。用户旅程在 650 ns 正式保存版本上改为
+  660 ns、启动真实异步 autosave、Undo 回到 650 ns/Saved 并等待在途快照删除，再 Redo 回 660 ns/Unsaved changes；同一旅程前段继续验证 Ctrl+Z/Ctrl+Y 快捷键。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 19 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 11.26 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 10.91 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-user-journey-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.59 sec
+
+Automated QA: 650 ns 正式保存版本改为 660 ns 后显示 Unsaved changes；真实异步恢复快照启动后 Undo 返回 650 ns、Saved、无标题星号，
+              在途 .autosave 完成后被清除并显示 back to saved version；Redo 返回 660 ns 和 Unsaved changes。
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

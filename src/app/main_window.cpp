@@ -963,6 +963,7 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
         projectFile_ = projectPathForLoadedFile(projectFile_);
         dirty_ = true;
     }
+    resetEditTracking(!recoveredSnapshot);
     setObjectName(QStringLiteral("WaveWorkbenchMainWindow"));
     setMinimumSize(960, 620);
     resize(1440, 900);
@@ -1043,6 +1044,7 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     autosaveTimer_->setInterval(1'500);
     connect(autosaveTimer_, &QTimer::timeout, this, &MainWindow::startAutosave);
     autosaveWatcher_ = new QFutureWatcher<QPair<quint64, QString>>(this);
+    autosaveWatcher_->setObjectName(QStringLiteral("AutosaveWatcher"));
     connect(
         autosaveWatcher_,
         &QFutureWatcher<QPair<quint64, QString>>::finished,
@@ -1319,6 +1321,7 @@ void MainWindow::undo()
         && commandStack_.size() > pendingQuickCommandSize_) {
         if (commandStack_.undoLastAfter(pendingQuickCommandSize_)) {
             invalidateCompareResult();
+            observedCommandStateId_ = commandStack_.stateId();
             dirty_ = commandStack_.size() > pendingQuickCommandSize_
                 ? true
                 : quickLaneDirtyBefore_;
@@ -1344,14 +1347,20 @@ void MainWindow::undo()
         QString::fromStdString(commandStack_.undoDescription());
     if (commandStack_.undo()) {
         invalidateCompareResult();
-        dirty_ = true;
-        scheduleAutosave();
+        observedCommandStateId_ = commandStack_.stateId();
+        const auto cleanupFailure = synchronizeDirtyState();
         canvas_->refreshModel();
         updateCommandActions();
         updateWindowTitle();
-        statusBar()->showMessage(
-            tr("Undid %1 · Ctrl+Y to redo").arg(description),
-            5'000);
+        auto message = dirty_
+            ? tr("Undid %1 · Ctrl+Y to redo").arg(description)
+            : projectFile_.isEmpty()
+                ? tr("Undid %1 · all changes undone · Ctrl+Y to redo").arg(description)
+                : tr("Undid %1 · back to saved version · Ctrl+Y to redo").arg(description);
+        if (!cleanupFailure.isEmpty()) {
+            message += tr(" · recovery snapshot remains: %1").arg(cleanupFailure);
+        }
+        statusBar()->showMessage(message, cleanupFailure.isEmpty() ? 5'000 : 10'000);
     }
 }
 
@@ -1365,24 +1374,70 @@ void MainWindow::redo()
         QString::fromStdString(commandStack_.redoDescription());
     if (commandStack_.redo()) {
         invalidateCompareResult();
-        dirty_ = true;
-        scheduleAutosave();
+        observedCommandStateId_ = commandStack_.stateId();
+        const auto cleanupFailure = synchronizeDirtyState();
         canvas_->refreshModel();
         updateCommandActions();
         updateWindowTitle();
-        statusBar()->showMessage(
-            tr("Redid %1 · Ctrl+Z to undo").arg(description),
-            5'000);
+        auto message = dirty_
+            ? tr("Redid %1 · Ctrl+Z to undo").arg(description)
+            : projectFile_.isEmpty()
+                ? tr("Redid %1 · all changes undone · Ctrl+Z to undo").arg(description)
+                : tr("Redid %1 · back to saved version · Ctrl+Z to undo").arg(description);
+        if (!cleanupFailure.isEmpty()) {
+            message += tr(" · recovery snapshot remains: %1").arg(cleanupFailure);
+        }
+        statusBar()->showMessage(message, cleanupFailure.isEmpty() ? 5'000 : 10'000);
     }
 }
 
 void MainWindow::markEdited()
 {
     invalidateCompareResult();
-    dirty_ = true;
-    scheduleAutosave();
+    const auto currentStateId = commandStack_.stateId();
+    if (currentStateId == observedCommandStateId_) ++externalRevision_;
+    observedCommandStateId_ = currentStateId;
+    (void)synchronizeDirtyState();
     updateCommandActions();
     updateWindowTitle();
+}
+
+QString MainWindow::synchronizeDirtyState()
+{
+    const auto currentStateId = commandStack_.stateId();
+    dirty_ = !cleanCommandStateId_.has_value()
+        || currentStateId != *cleanCommandStateId_
+        || externalRevision_ != cleanExternalRevision_;
+    if (dirty_) {
+        scheduleAutosave();
+        return {};
+    }
+
+    if (autosaveTimer_) autosaveTimer_->stop();
+    ++autosaveGeneration_;
+    autosavePending_ = false;
+    const auto snapshotPath = autosavePathForProject(projectFile_);
+    if (snapshotPath.isEmpty()
+        || snapshotPath == autosaveInFlightPath_
+        || !QFileInfo::exists(snapshotPath)
+        || QFile::remove(snapshotPath)) {
+        return {};
+    }
+    return snapshotPath;
+}
+
+void MainWindow::resetEditTracking(const bool clean)
+{
+    observedCommandStateId_ = commandStack_.stateId();
+    externalRevision_ = 0;
+    cleanExternalRevision_ = 0;
+    if (clean) {
+        cleanCommandStateId_ = observedCommandStateId_;
+        dirty_ = false;
+    } else {
+        cleanCommandStateId_.reset();
+        dirty_ = true;
+    }
 }
 
 void MainWindow::updateSelection(const QString& laneId, const qint64 tick)
@@ -1443,7 +1498,7 @@ void MainWindow::newProject()
     projectFile_.clear();
     recoveryLoaded_ = false;
     commandStack_.clear();
-    dirty_ = false;
+    resetEditTracking(true);
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
     canvas_->setTool(WaveCanvas::Tool::WaveEdit);
     if (markerAction_) markerAction_->setChecked(false);
@@ -1729,18 +1784,21 @@ void MainWindow::cancelQuickLaneSetup(const QString& laneId)
         canvas_->showQuickLaneSetupError(QString::fromUtf8(exception.what()));
         return;
     }
-    const auto restoreDirty = quickLaneDirtyBefore_;
     pendingQuickLaneId_.clear();
     pendingQuickCommandSize_ = 0;
     quickLaneDirtyBefore_ = false;
-    dirty_ = restoreDirty;
+    observedCommandStateId_ = commandStack_.stateId();
+    const auto cleanupFailure = synchronizeDirtyState();
     canvas_->finishQuickLaneSetup();
     canvas_->refreshModel();
     updateCommandActions();
     updateWindowTitle();
-    if (dirty_) scheduleAutosave();
-    else autosavePending_ = false;
-    statusBar()->showMessage(tr("Signal creation canceled"), 3'000);
+    statusBar()->showMessage(
+        cleanupFailure.isEmpty()
+            ? tr("Signal creation canceled")
+            : tr("Signal creation canceled · recovery snapshot remains: %1")
+                  .arg(cleanupFailure),
+        cleanupFailure.isEmpty() ? 3'000 : 10'000);
 }
 
 Tick MainWindow::latestContentTick(const Scenario& scenario) const noexcept
@@ -3244,9 +3302,7 @@ void MainWindow::finishTraceImport()
             reference.signalMapping = suggestSignalMapping(*scenario, *parsed->index);
         }
         project_.importedTraces.push_back(std::move(reference));
-        dirty_ = true;
-        scheduleAutosave();
-        updateWindowTitle();
+        markEdited();
     } else if (!activeTraceReference()) {
         statusBar()->showMessage(tr("Imported trace reference no longer exists"), 5'000);
         reloadIfNeeded();
@@ -4632,7 +4688,7 @@ bool MainWindow::loadFromPath(const QString& path)
         rememberProjectPath(projectFile_);
     }
     commandStack_.clear();
-    dirty_ = result.migrated || recoveredSnapshot;
+    resetEditTracking(!result.migrated && !recoveredSnapshot);
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
     updateCommandActions();
     updateWindowTitle();
@@ -4680,6 +4736,9 @@ bool MainWindow::writeToPath(const QString& path)
     projectFile_ = path;
     rememberProjectPath(projectFile_);
     recoveryLoaded_ = false;
+    observedCommandStateId_ = commandStack_.stateId();
+    cleanCommandStateId_ = observedCommandStateId_;
+    cleanExternalRevision_ = externalRevision_;
     dirty_ = false;
     if (autosaveTimer_) autosaveTimer_->stop();
     ++autosaveGeneration_;

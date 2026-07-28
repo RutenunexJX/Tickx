@@ -3,6 +3,7 @@
 #include "wave/model.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -36,10 +37,13 @@ public:
     [[nodiscard]] std::string undoDescription() const;
     [[nodiscard]] std::string redoDescription() const;
     [[nodiscard]] std::size_t size() const noexcept;
+    [[nodiscard]] std::uint64_t stateId() const noexcept;
 
 private:
     std::vector<std::unique_ptr<EditCommand>> commands_;
+    std::vector<std::uint64_t> stateIds_{0};
     std::size_t cursor_{0};
+    std::uint64_t nextStateId_{1};
 };
 
 class ChangeScenarioDurationCommand final : public EditCommand {

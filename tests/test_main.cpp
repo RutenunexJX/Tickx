@@ -815,24 +815,46 @@ void testUndoRedo()
     const auto before = lane->segments;
 
     wave::CommandStack stack;
+    const auto initialStateId = stack.stateId();
     stack.execute(std::make_unique<wave::SetLaneRangeCommand>(
         scenario,
         lane->id,
         10'000,
         20'000,
         "1"));
+    const auto editedStateId = stack.stateId();
+    expect(editedStateId != initialStateId, "executed command did not create a new history state");
     expect(stack.canUndo(), "executed command must be undoable");
     expect(lane->segments != before, "command did not change the model");
     const auto after = lane->segments;
     expect(stack.undo(), "undo failed");
+    expectEqual(stack.stateId(), initialStateId, "undo did not return to the initial history state");
     expectEqual(lane->segments, before, "undo did not restore the exact model");
     expect(stack.redo(), "redo failed");
+    expectEqual(stack.stateId(), editedStateId, "redo did not restore the edited history state");
     expectEqual(lane->segments, after, "redo did not restore the exact edit");
     expectEqual(stack.size(), std::size_t{1}, "one drag-style command must make one history entry");
+
+    expect(stack.undo(), "undo before branch edit failed");
+    expect(stack.execute(std::make_unique<wave::SetLaneRangeCommand>(
+        scenario,
+        lane->id,
+        30'000,
+        40'000,
+        "1")), "branch edit had no effect");
+    const auto branchStateId = stack.stateId();
+    expect(
+        branchStateId != editedStateId,
+        "a replacement history branch reused the discarded redo state");
+    stack.clear();
+    expect(
+        stack.stateId() != branchStateId,
+        "clearing history did not create a distinct document root state");
 
     auto noEffectScenario = wave::makeDemonstrationProject().scenarios.front();
     const auto noEffectBefore = noEffectScenario;
     wave::CommandStack noEffectStack;
+    const auto noEffectStateId = noEffectStack.stateId();
     const auto singleRangeChanged = noEffectStack.execute(
         std::make_unique<wave::SetLaneRangeCommand>(
             noEffectScenario,
@@ -846,6 +868,10 @@ void testUndoRedo()
         noEffectBefore,
         "identical single-lane write replaced stable Segment or Event IDs");
     expectEqual(noEffectStack.size(), std::size_t{0}, "identical write polluted history");
+    expectEqual(
+        noEffectStack.stateId(),
+        noEffectStateId,
+        "an identical write changed the history state");
     expect(!noEffectStack.canUndo(), "identical write became undoable");
 
     const auto batchRangeChanged = noEffectStack.execute(

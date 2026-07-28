@@ -240,8 +240,12 @@ bool CommandStack::execute(std::unique_ptr<EditCommand> command)
     if (!command->hasEffect()) return false;
     if (cursor_ < commands_.size()) {
         commands_.erase(commands_.begin() + static_cast<std::ptrdiff_t>(cursor_), commands_.end());
+        stateIds_.erase(
+            stateIds_.begin() + static_cast<std::ptrdiff_t>(cursor_ + 1),
+            stateIds_.end());
     }
     commands_.push_back(std::move(command));
+    stateIds_.push_back(nextStateId_++);
     cursor_ = commands_.size();
     return true;
 }
@@ -254,7 +258,9 @@ void CommandStack::replaceLast(std::unique_ptr<EditCommand> command)
     }
 
     auto previous = std::move(commands_.back());
+    const auto previousStateId = stateIds_.back();
     commands_.pop_back();
+    stateIds_.pop_back();
     --cursor_;
     previous->undo();
     try {
@@ -262,10 +268,12 @@ void CommandStack::replaceLast(std::unique_ptr<EditCommand> command)
     } catch (...) {
         previous->redo();
         commands_.push_back(std::move(previous));
+        stateIds_.push_back(previousStateId);
         cursor_ = commands_.size();
         throw;
     }
     commands_.push_back(std::move(command));
+    stateIds_.push_back(nextStateId_++);
     cursor_ = commands_.size();
 }
 
@@ -274,6 +282,7 @@ bool CommandStack::discardLast()
     if (commands_.empty() || cursor_ != commands_.size()) return false;
     commands_.back()->undo();
     commands_.pop_back();
+    stateIds_.pop_back();
     cursor_ = commands_.size();
     return true;
 }
@@ -286,6 +295,9 @@ bool CommandStack::undoLastAfter(const std::size_t baseline)
     commands_.erase(
         commands_.begin() + static_cast<std::ptrdiff_t>(cursor_),
         commands_.end());
+    stateIds_.erase(
+        stateIds_.begin() + static_cast<std::ptrdiff_t>(cursor_ + 1),
+        stateIds_.end());
     return true;
 }
 
@@ -313,6 +325,8 @@ void CommandStack::clear() noexcept
 {
     commands_.clear();
     cursor_ = 0;
+    stateIds_.resize(1);
+    stateIds_.front() = nextStateId_++;
 }
 
 bool CommandStack::canUndo() const noexcept
@@ -338,6 +352,11 @@ std::string CommandStack::redoDescription() const
 std::size_t CommandStack::size() const noexcept
 {
     return commands_.size();
+}
+
+std::uint64_t CommandStack::stateId() const noexcept
+{
+    return stateIds_[cursor_];
 }
 
 ChangeScenarioDurationCommand::ChangeScenarioDurationCommand(
