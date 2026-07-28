@@ -1307,6 +1307,7 @@ void WaveCanvas::pasteAtCursor()
         pasteStart,
         pasteStart + std::min<Tick>(duration, scenario_->duration - pasteStart),
     };
+    explicitRangeSelection_ = true;
     emit modelEdited();
     emit commandAvailabilityChanged();
     refreshModel();

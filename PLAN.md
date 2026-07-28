@@ -1259,6 +1259,64 @@ Screenshots:
 Desktop interaction: none
 ```
 
+## 持续迭代 23：粘贴结果持续可见
+
+状态：完成
+
+已交付：
+
+- 用户审计确认 Paste 已修改模型，但 `pasteAtCursor` 随即关闭显式范围选择；多 lane 粘贴结果没有
+  持续高亮，固定范围栏消失，用户只能依赖短暂状态消息确认是否生效。
+- 粘贴完成后将目标时间范围和实际存在的 lane 保持为显式选择；刷新后自动显示固定范围栏。
+  同类型结果可立即批量编辑，混合结果保持 Copy-only，用户无需重新框选。
+- Undo 后目标选择继续保留，便于比较粘贴前后或 Redo；Esc 仍统一清除选择和范围栏。粘贴状态栏
+  的 lane 数、目标时间、宽度和 Undo 提示保持不变。
+- `wave-wave-edit-smoke` 验证 Paste 后范围、工具栏、上下文和纵向布局持续可见，Undo 完整恢复模型
+  且不丢选择，Esc 最终收口；新增 `wave-edit-smoke-pasted-range.png`。全部 GUI 路径继续使用
+  `QT_QPA_PLATFORM=offscreen`，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.33 sec
+
+cmake --build build/qtcreator-release --parallel
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.15 sec
+
+git diff --check
+Result: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.71 sec
+
+Screenshots:
+  build/qtcreator-debug/wave-edit-smoke-pasted-range.png
+  build/qtcreator-debug/user-journey-smoke.png
+Visual QA: 粘贴目标范围持续高亮，Copy-only 范围栏保持可见；
+           波形、刻度和状态反馈均清晰，无画布遮挡或纵向跳动
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

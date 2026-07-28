@@ -3828,9 +3828,11 @@ int main(int argc, char* argv[])
                 const auto pastedRange = canvas->selectedTimeRange();
                 if (!pasteMenuHandled
                     || scenario == beforeMixedAssignment
-                    || canvas->hasExplicitRangeSelection()
-                    || rangePalette->isVisibleTo(&window)
-                    || rangeToolbarAction->isVisible()
+                    || !canvas->hasExplicitRangeSelection()
+                    || !rangePalette->isVisibleTo(&window)
+                    || !rangeToolbarAction->isVisible()
+                    || !stableVerticalLayout()
+                    || !rangeContext->text().contains(QStringLiteral("Copy only"))
                     || !pastedRange
                     || pastedRange->first <= mixedRange->second
                     || pastedRange->second - pastedRange->first != copiedDuration
@@ -3842,8 +3844,29 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto pastedRangeScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix = pastedRangeScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        pastedRangeScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-pasted-range"));
+                    } else {
+                        pastedRangeScreenshotPath.append(QStringLiteral("-pasted-range.png"));
+                    }
+                    if (!window.grab().save(pastedRangeScreenshotPath)) {
+                        qCritical().noquote() << "Cannot save pasted range screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
                 if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
-                    || scenario != beforeMixedAssignment) {
+                    || scenario != beforeMixedAssignment
+                    || !canvas->hasExplicitRangeSelection()
+                    || !rangePalette->isVisibleTo(&window)
+                    || !rangeToolbarAction->isVisible()
+                    || canvas->selectedTimeRange() != pastedRange) {
                     qCritical().noquote() << "Context-menu Paste here was not one atomic undo";
                     window.hide();
                     application.exit(4);
