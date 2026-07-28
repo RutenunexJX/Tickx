@@ -348,12 +348,19 @@ int main(int argc, char* argv[])
             application.exit(0);
         });
     } else if (userJourneySmoke) {
+        auto userJourneyBareSavePath = userJourneySavePath;
+        if (userJourneyBareSavePath.endsWith(
+                QStringLiteral(".wave.json"),
+                Qt::CaseInsensitive)) {
+            userJourneyBareSavePath.chop(QStringLiteral(".wave.json").size());
+        }
         QFile::remove(userJourneySavePath);
+        QFile::remove(userJourneyBareSavePath);
         QFile::remove(userJourneySavePath + QStringLiteral(".autosave"));
         QTimer::singleShot(
             0,
             &window,
-            [&application, &window, userJourneySavePath] {
+            [&application, &window, userJourneySavePath, userJourneyBareSavePath] {
                 const auto fail = [&application, &window](const QString& message) {
                     qCritical().noquote() << message;
                     if (auto* modal = QApplication::activeModalWidget()) modal->close();
@@ -865,10 +872,14 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
 
                 bool saveDialogHandled = false;
+                bool saveDialogUsedWildcardFilter = false;
                 QTimer::singleShot(
                     0,
                     &window,
-                    [&application, &saveDialogHandled, userJourneySavePath] {
+                    [&application,
+                     &saveDialogHandled,
+                     &saveDialogUsedWildcardFilter,
+                     userJourneySavePath] {
                         auto* dialog = qobject_cast<QFileDialog*>(
                             QApplication::activeModalWidget());
                         if (!dialog) {
@@ -877,7 +888,16 @@ int main(int argc, char* argv[])
                             return;
                         }
                         dialog->setDirectory(QFileInfo(userJourneySavePath).absolutePath());
-                        dialog->selectFile(QFileInfo(userJourneySavePath).fileName());
+                        auto selectedName = QFileInfo(userJourneySavePath).fileName();
+                        if (selectedName.endsWith(
+                                QStringLiteral(".wave.json"),
+                                Qt::CaseInsensitive)) {
+                            selectedName.chop(QStringLiteral(".wave.json").size());
+                        }
+                        dialog->selectFile(selectedName);
+                        saveDialogUsedWildcardFilter =
+                            dialog->nameFilters().value(0).contains(
+                                QStringLiteral("*.wave.json"));
                         saveDialogHandled = true;
                         QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
                     });
@@ -891,7 +911,9 @@ int main(int argc, char* argv[])
                     ? wave::findLane(saved.project->scenarios.front(), busLaneId)
                     : nullptr;
                 if (!saveDialogHandled
+                    || !saveDialogUsedWildcardFilter
                     || !QFileInfo::exists(userJourneySavePath)
+                    || QFileInfo::exists(userJourneyBareSavePath)
                     || !saved.ok()
                     || !savedRenamedBit
                     || savedRenamedBit->name != "req_valid"
@@ -902,6 +924,39 @@ int main(int argc, char* argv[])
                     || saveState->text() != QStringLiteral("Saved")
                     || window.project().name == "Untitled") {
                     fail(QStringLiteral("Save did not produce a valid file and unambiguous Saved state"));
+                    return;
+                }
+
+                bool openDialogUsedWildcardFilter = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&application, &openDialogUsedWildcardFilter] {
+                        auto* dialog = qobject_cast<QFileDialog*>(
+                            QApplication::activeModalWidget());
+                        if (!dialog) {
+                            qCritical().noquote()
+                                << "Open dialog did not appear in user journey";
+                            application.exit(4);
+                            return;
+                        }
+                        openDialogUsedWildcardFilter =
+                            dialog->nameFilters().value(0).contains(
+                                QStringLiteral("*.wave.json"));
+                        dialog->reject();
+                    });
+                const auto openInvoked = QMetaObject::invokeMethod(
+                    &window,
+                    "openProject",
+                    Qt::DirectConnection);
+                QCoreApplication::processEvents();
+                if (!openInvoked
+                    || !openDialogUsedWildcardFilter
+                    || QApplication::activeModalWidget()
+                    || window.project().scenarios.front().duration != 650'000
+                    || window.project().scenarios.front().lanes.size() != 3) {
+                    fail(QStringLiteral(
+                        "Open did not expose *.wave.json files or cancel safely"));
                     return;
                 }
 

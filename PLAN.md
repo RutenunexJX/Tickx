@@ -2894,6 +2894,63 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 51：项目文件过滤与保存命名闭环
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 New 已直接创建可编辑的 200 ns 空白波形，首要剩余问题在项目文件入口：Open 与 Save As 的首选
+  name filter 写成字面 `project.wave.json`，而非 `*.wave.json`，因此自定义命名的工程可能在默认过滤器下不可见。
+- 用户从首次创建到再次打开工程时，期望只输入工程名即可保存，并在 Open 中立即看见该文件。旧流程既未保证补全
+  `.wave.json`，又要求用户理解并切换到宽泛 JSON filter，增加一次猜测且可能生成难以识别的无扩展名文件。
+- Open/Save As 首选过滤器现统一为 `*.wave.json`。Save As 返回路径没有扩展名时自动追加 `.wave.json`；用户显式
+  输入其他扩展名时保持原意。窗口取消仍不改变当前工程。
+- `wave-user-journey-smoke` 在真实 Save As 对话框中仅输入 `user-journey`，断言首选 filter 包含通配符、最终只生成
+  `user-journey.wave.json` 并成功回读；随后真实打开 Open 对话框，断言相同通配 filter，取消后 650 ns/3 lane 工程不变。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.24 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.94 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-user-journey-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.42 sec
+
+Screenshot generated:
+  build/qtcreator-debug/user-journey-smoke.png
+Automated QA: Save As 首选 filter 为 *.wave.json，仅输入 user-journey 后保存/回读 user-journey.wave.json，
+              未生成无扩展名旁路文件；Open 使用同一通配 filter，取消后当前 650 ns/3 lane 工程保持。
+              完整创建、编辑、双草稿门禁、测量、导出两级原位纠错与目录交接无回归。
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

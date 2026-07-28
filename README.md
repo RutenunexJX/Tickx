@@ -197,7 +197,8 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   显示 `Undid` / `Redid`、具体命令及相反快捷键，明确本次恢复结果和下一步。
 - 状态栏常驻显示 `Not saved`、`Unsaved changes`、`Saved` 或 `Recovery loaded · Save required`；
   自动恢复快照不会被误报为正式保存。File 菜单使用原子替换方式保存 `project.wave.json`，首次
-  保存 Untitled 工程时从文件名推断项目名。修改后 1.5 秒启动 Qt Concurrent 后台恢复快照。
+  保存 Untitled 工程时从文件名推断项目名。Open/Save As 默认显示 `*.wave.json`；Save As 只输入工程名时
+  自动补全 `.wave.json`，显式扩展名保持不变。修改后 1.5 秒启动 Qt Concurrent 后台恢复快照。
 - File > Export 导出 SystemVerilog/SVA/cocotb 和文档图。VCD/CSV 导入、Expected/Actual 对比、报告和
   跨应用桥接由 `wave-compare`、`wave-bridge` 等 CLI 提供，不占用桌面工作区。
 - 特殊 lane 或 group 仍可从 Edit 菜单创建并编辑完整结构属性；属性变更、依赖感知删除和显示顺序
@@ -323,7 +324,8 @@ exports/
   固定在工具栏中，960 像素宽度下无裁切且显隐不移动画布。不存在 Edit、Transition、Export 与
   Undo/Redo 按钮，菜单快捷键仍存在。
 - 独立用户旅程从空白工程完成三类信号创建、信号就地重命名、波形编辑、Bus/End 双草稿纠错、
-  时间轴延长、测量、Save As、保存结果回读、Export 无效范围/PDF 跨度原位纠错、修正后目录选择和
+  时间轴延长、测量、Save As 无扩展名补全、Open 通配过滤/安全取消、保存结果回读、Export 无效范围/
+  PDF 跨度原位纠错、修正后目录选择和
   1440×900 截图，全程 offscreen。
 - 共享生成计划、确定性 SystemVerilog/cocotb 输出、时钟覆盖调度和严格 SVA 转换；
   独立 assertion 模块及 testbench 均通过 SystemVerilog 语法检查。

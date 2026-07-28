@@ -896,7 +896,7 @@ void MainWindow::openProject()
         this,
         tr("Open Wave Workbench project"),
         QFileInfo(projectFile_).absolutePath(),
-        tr("Wave Workbench project (project.wave.json);;Recovery snapshot (*.autosave);;JSON files (*.json)"));
+        tr("Wave Workbench project (*.wave.json);;Recovery snapshot (*.autosave);;JSON files (*.json)"));
     if (!path.isEmpty()) loadFromPath(path);
 }
 
@@ -924,12 +924,16 @@ void MainWindow::saveProjectAs()
     const auto suggested = projectFile_.isEmpty()
         ? QStringLiteral("project.wave.json")
         : projectFile_;
-    const auto path = QFileDialog::getSaveFileName(
+    auto path = QFileDialog::getSaveFileName(
         this,
         tr("Save Wave Workbench project"),
         suggested,
-        tr("Wave Workbench project (project.wave.json);;JSON files (*.json)"));
-    if (!path.isEmpty()) writeToPath(path);
+        tr("Wave Workbench project (*.wave.json);;JSON files (*.json)"));
+    if (path.isEmpty()) return;
+    if (QFileInfo(path).suffix().isEmpty()) {
+        path += QStringLiteral(".wave.json");
+    }
+    writeToPath(path);
 }
 
 void MainWindow::undo()
