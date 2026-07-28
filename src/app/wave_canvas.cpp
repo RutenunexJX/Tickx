@@ -187,6 +187,13 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     viewport()->setAutoFillBackground(false);
+    laneDragAutoScrollTimer_ = new QTimer(this);
+    laneDragAutoScrollTimer_->setInterval(LaneDragAutoScrollIntervalMs);
+    connect(
+        laneDragAutoScrollTimer_,
+        &QTimer::timeout,
+        this,
+        &WaveCanvas::advanceLaneDragAutoScroll);
     const std::array<LaneKind, 3> quickKinds{
         LaneKind::Clock,
         LaneKind::Bit,
@@ -957,6 +964,7 @@ void WaveCanvas::setDocument(
     Scenario* scenario,
     CommandStack* commandStack)
 {
+    stopLaneDragAutoScroll();
     if (headerResizing_) setSignalHeaderWidth(headerResizeOriginalWidth_);
     if (quickLaneSetupPanel_) quickLaneSetupPanel_->hide();
     quickLaneSetupLaneId_.clear();
@@ -998,6 +1006,10 @@ void WaveCanvas::setDocument(
 
 void WaveCanvas::setTool(const Tool tool)
 {
+    stopLaneDragAutoScroll();
+    if (laneHeaderPressed_ || laneHeaderDragging_) {
+        verticalScrollBar()->setValue(laneDragOriginalVerticalScroll_);
+    }
     if (headerResizing_) setSignalHeaderWidth(headerResizeOriginalWidth_);
     const auto previousTool = tool_;
     tool_ = tool;
@@ -1024,12 +1036,15 @@ void WaveCanvas::setTool(const Tool tool)
         clearWaveEditState();
         hideBusPresetPalette();
     }
-    viewport()->setCursor([tool] {
-        if (tool == Tool::Selection) return QCursor(Qt::ArrowCursor);
-        if (tool == Tool::WaveEdit) return QCursor(Qt::PointingHandCursor);
-        return QCursor(Qt::CrossCursor);
-    }());
+    viewport()->setCursor(defaultCursorShape());
     viewport()->update();
+}
+
+Qt::CursorShape WaveCanvas::defaultCursorShape() const noexcept
+{
+    if (tool_ == Tool::Selection) return Qt::ArrowCursor;
+    if (tool_ == Tool::WaveEdit) return Qt::PointingHandCursor;
+    return Qt::CrossCursor;
 }
 
 WaveCanvas::Tool WaveCanvas::tool() const noexcept
@@ -2028,10 +2043,7 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
     if (event->key() == Qt::Key_Escape && headerResizing_) {
         setSignalHeaderWidth(headerResizeOriginalWidth_);
         headerResizing_ = false;
-        viewport()->setCursor(
-            tool_ == Tool::Selection
-                ? Qt::ArrowCursor
-                : tool_ == Tool::Marker ? Qt::CrossCursor : Qt::PointingHandCursor);
+        viewport()->setCursor(defaultCursorShape());
         emit statusMessage(tr("Signal names resize cancelled"));
         event->accept();
         return;
@@ -2039,13 +2051,28 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
 
     if (event->key() == Qt::Key_Escape
         && (laneHeaderPressed_ || laneHeaderDragging_)) {
+        auto cancellation = tr("Move cancelled");
+        if (scenario_) {
+            const auto lane = std::find_if(
+                scenario_->lanes.begin(),
+                scenario_->lanes.end(),
+                [this](const Lane& candidate) { return candidate.id == laneDragId_; });
+            if (lane != scenario_->lanes.end()) {
+                cancellation = tr("Move cancelled · %1 remains at position %2")
+                    .arg(QString::fromStdString(lane->name))
+                    .arg(std::distance(scenario_->lanes.begin(), lane) + 1);
+            }
+        }
+        stopLaneDragAutoScroll();
+        verticalScrollBar()->setValue(laneDragOriginalVerticalScroll_);
         laneHeaderPressed_ = false;
         laneHeaderDragging_ = false;
         laneDragId_.clear();
         laneDropDestinationIndex_.reset();
         laneDropIndicatorY_.reset();
-        viewport()->setCursor(Qt::OpenHandCursor);
+        viewport()->setCursor(defaultCursorShape());
         viewport()->update();
+        emit statusMessage(cancellation);
         event->accept();
         return;
     }
@@ -2217,8 +2244,7 @@ void WaveCanvas::keyReleaseEvent(QKeyEvent* event)
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         spaceHeld_ = false;
         if (!panning_) {
-            viewport()->setCursor(
-                tool_ == Tool::Marker ? Qt::CrossCursor : Qt::PointingHandCursor);
+            viewport()->setCursor(defaultCursorShape());
         }
         event->accept();
         return;
@@ -2495,6 +2521,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         laneHeaderPressed_ = true;
         laneHeaderDragging_ = false;
         laneHeaderPressPosition_ = position;
+        laneDragOriginalVerticalScroll_ = verticalScrollBar()->value();
         laneDragId_ = lane->id;
         laneDropDestinationIndex_.reset();
         laneDropIndicatorY_.reset();
@@ -2818,12 +2845,14 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
     }
     if (laneHeaderPressed_) {
         if (!event->buttons().testFlag(Qt::LeftButton)) {
+            stopLaneDragAutoScroll();
+            verticalScrollBar()->setValue(laneDragOriginalVerticalScroll_);
             laneHeaderPressed_ = false;
             laneHeaderDragging_ = false;
             laneDragId_.clear();
             laneDropDestinationIndex_.reset();
             laneDropIndicatorY_.reset();
-            viewport()->setCursor(Qt::OpenHandCursor);
+            viewport()->setCursor(defaultCursorShape());
             viewport()->update();
             return;
         }
@@ -2834,6 +2863,7 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
         }
         if (laneHeaderDragging_) {
             updateLaneDropTarget(position.y());
+            updateLaneDragAutoScroll(position.y());
             viewport()->setCursor(Qt::ClosedHandCursor);
             viewport()->update();
         }
@@ -3105,9 +3135,7 @@ void WaveCanvas::mouseReleaseEvent(QMouseEvent* event)
         viewport()->setCursor(
             signalHeaderDividerAt(event->position().toPoint())
                 ? Qt::SplitHCursor
-                : tool_ == Tool::Selection
-                    ? Qt::ArrowCursor
-                    : tool_ == Tool::Marker ? Qt::CrossCursor : Qt::PointingHandCursor);
+                : defaultCursorShape());
         if (changed) emit signalHeaderWidthCommitted(headerWidth_);
         emit statusMessage(
             changed
@@ -3120,19 +3148,19 @@ void WaveCanvas::mouseReleaseEvent(QMouseEvent* event)
         && (event->button() == Qt::MiddleButton || event->button() == Qt::LeftButton)) {
         panning_ = false;
         viewport()->setCursor(
-            spaceHeld_ ? Qt::OpenHandCursor
-                       : tool_ == Tool::Marker ? Qt::CrossCursor : Qt::PointingHandCursor);
+            spaceHeld_ ? Qt::OpenHandCursor : defaultCursorShape());
         event->accept();
         return;
     }
     if (event->button() == Qt::LeftButton && laneHeaderPressed_) {
+        stopLaneDragAutoScroll();
         if (laneHeaderDragging_) commitLaneReorder();
         laneHeaderPressed_ = false;
         laneHeaderDragging_ = false;
         laneDragId_.clear();
         laneDropDestinationIndex_.reset();
         laneDropIndicatorY_.reset();
-        viewport()->setCursor(Qt::OpenHandCursor);
+        viewport()->setCursor(defaultCursorShape());
         viewport()->update();
         event->accept();
         return;
@@ -3216,9 +3244,7 @@ void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
         viewport()->setCursor(
             signalHeaderDividerAt(position)
                 ? Qt::SplitHCursor
-                : tool_ == Tool::Selection
-                    ? Qt::ArrowCursor
-                    : tool_ == Tool::Marker ? Qt::CrossCursor : Qt::PointingHandCursor);
+                : defaultCursorShape());
         if (headerWidth_ != originalWidth) {
             emit signalHeaderWidthCommitted(headerWidth_);
             emit statusMessage(tr("Signal names fitted to %1 px").arg(headerWidth_));
@@ -4519,6 +4545,51 @@ void WaveCanvas::clearSelectedSegment()
         relationCountBefore,
         scenario_->relations.size()));
 }
+
+void WaveCanvas::updateLaneDragAutoScroll(const int pointerY)
+{
+    laneDragAutoScrollPointerY_ = pointerY;
+    auto direction = 0;
+    if (laneHeaderDragging_ && verticalScrollBar()->maximum() > 0) {
+        if (pointerY <= RulerHeight + LaneDragAutoScrollMargin
+            && verticalScrollBar()->value() > verticalScrollBar()->minimum()) {
+            direction = -1;
+        } else if (pointerY >= viewport()->height() - LaneDragAutoScrollMargin
+                   && verticalScrollBar()->value() < verticalScrollBar()->maximum()) {
+            direction = 1;
+        }
+    }
+    laneDragAutoScrollDirection_ = direction;
+    if (direction == 0) {
+        if (laneDragAutoScrollTimer_) laneDragAutoScrollTimer_->stop();
+    } else if (laneDragAutoScrollTimer_ && !laneDragAutoScrollTimer_->isActive()) {
+        laneDragAutoScrollTimer_->start();
+    }
+}
+
+void WaveCanvas::advanceLaneDragAutoScroll()
+{
+    if (!laneHeaderDragging_ || laneDragAutoScrollDirection_ == 0) {
+        stopLaneDragAutoScroll();
+        return;
+    }
+    const auto previous = verticalScrollBar()->value();
+    verticalScrollBar()->setValue(
+        previous + laneDragAutoScrollDirection_ * LaneDragAutoScrollStep);
+    if (verticalScrollBar()->value() == previous) {
+        stopLaneDragAutoScroll();
+        return;
+    }
+    updateLaneDropTarget(laneDragAutoScrollPointerY_);
+    viewport()->update();
+}
+
+void WaveCanvas::stopLaneDragAutoScroll()
+{
+    laneDragAutoScrollDirection_ = 0;
+    if (laneDragAutoScrollTimer_) laneDragAutoScrollTimer_->stop();
+}
+
 void WaveCanvas::updateLaneDropTarget(const int y)
 {
     laneDropDestinationIndex_.reset();

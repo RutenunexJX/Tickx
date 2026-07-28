@@ -37,6 +37,12 @@ add_test(
     COMMAND wave-workbench --lane-reorder-smoke
 )
 add_test(
+    NAME wave-lane-autoscroll-smoke
+    COMMAND wave-workbench
+            "--lane-autoscroll-smoke=${CMAKE_BINARY_DIR}/lane-autoscroll-smoke.png"
+            "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
+)
+add_test(
     NAME wave-hidden-lane-smoke
     COMMAND wave-workbench
             --hidden-lane-smoke
@@ -141,7 +147,7 @@ if(WIN32 AND EXISTS "C:/Windows/Fonts")
     list(APPEND _wave_test_environment "QT_QPA_FONTDIR=C:/Windows/Fonts")
 endif()
 set_tests_properties(
-    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
+    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
     wave-bridge-pinloom-smoke
     PROPERTIES
@@ -149,7 +155,7 @@ set_tests_properties(
         "PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
 )
 set_tests_properties(
-    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
+    wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
     wave-bridge-pinloom-smoke
     PROPERTIES
@@ -157,7 +163,7 @@ set_tests_properties(
 )
 foreach(_wave_gui_test IN ITEMS
     wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke
-    wave-lane-removal-smoke wave-lane-reorder-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke
+    wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke
     wave-cursor-mode-smoke wave-wave-edit-smoke wave-new-project-smoke
     wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke
 )
@@ -165,6 +171,6 @@ foreach(_wave_gui_test IN ITEMS
         "WAVEWORKBENCH_RECOVERY_DIR=${CMAKE_BINARY_DIR}/test-recovery/${_wave_gui_test}"
         "WAVEWORKBENCH_SETTINGS_DIR=${CMAKE_BINARY_DIR}/test-settings/${_wave_gui_test}")
 endforeach()
-set_tests_properties(wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke PROPERTIES
+set_tests_properties(wave-app-smoke wave-example-smoke wave-autosave-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke PROPERTIES
     TIMEOUT 20
 )

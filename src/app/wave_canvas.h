@@ -28,6 +28,7 @@ class QMouseEvent;
 class QPaintEvent;
 class QResizeEvent;
 class QToolButton;
+class QTimer;
 class QWheelEvent;
 
 namespace wave {
@@ -188,7 +189,11 @@ private:
     static constexpr int MaximumHeaderWidth = 480;
     static constexpr int RulerHeight = 40;
     static constexpr int AddLaneRowHeight = 48;
+    static constexpr int LaneDragAutoScrollMargin = 48;
+    static constexpr int LaneDragAutoScrollStep = 28;
+    static constexpr int LaneDragAutoScrollIntervalMs = 30;
 
+    [[nodiscard]] Qt::CursorShape defaultCursorShape() const noexcept;
     void rebuildLaneLayout();
     void rebuildSnapIndex();
     void updateScrollBars();
@@ -234,6 +239,9 @@ private:
     bool clearSelectedBitRange();
     void clearSelectedSegment();
     void updateLaneDropTarget(int y);
+    void updateLaneDragAutoScroll(int pointerY);
+    void advanceLaneDragAutoScroll();
+    void stopLaneDragAutoScroll();
     void commitLaneReorder();
     void setScale(double scale, int anchorX);
     [[nodiscard]] double contentWidth() const;
@@ -389,9 +397,13 @@ private:
     bool laneHeaderDragging_{false};
     bool laneHeaderSelectionActive_{false};
     QPoint laneHeaderPressPosition_;
+    int laneDragOriginalVerticalScroll_{0};
     std::string laneDragId_;
     std::optional<std::size_t> laneDropDestinationIndex_;
     std::optional<int> laneDropIndicatorY_;
+    QTimer* laneDragAutoScrollTimer_{nullptr};
+    int laneDragAutoScrollDirection_{0};
+    int laneDragAutoScrollPointerY_{0};
     int headerWidth_{DefaultHeaderWidth};
     bool headerResizing_{false};
     int headerResizePressX_{0};

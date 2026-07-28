@@ -100,6 +100,8 @@ int main(int argc, char* argv[])
     QString autosaveSmokePath;
     bool laneRemovalSmoke = false;
     bool laneReorderSmoke = false;
+    bool laneAutoScrollSmoke = false;
+    QString laneAutoScrollScreenshotPath;
     bool hiddenLaneSmoke = false;
     bool groupHeaderSmoke = false;
     bool signalHeaderSmoke = false;
@@ -131,6 +133,12 @@ int main(int argc, char* argv[])
             laneRemovalSmoke = true;
         } else if (argument == QStringLiteral("--lane-reorder-smoke")) {
             laneReorderSmoke = true;
+        } else if (argument.startsWith(QStringLiteral("--lane-autoscroll-smoke="))) {
+            laneAutoScrollSmoke = true;
+            laneAutoScrollScreenshotPath = argument.mid(
+                QStringLiteral("--lane-autoscroll-smoke=").size());
+        } else if (argument == QStringLiteral("--lane-autoscroll-smoke")) {
+            laneAutoScrollSmoke = true;
         } else if (argument == QStringLiteral("--hidden-lane-smoke")) {
             hiddenLaneSmoke = true;
         } else if (argument == QStringLiteral("--group-header-smoke")) {
@@ -198,6 +206,7 @@ int main(int argc, char* argv[])
         || userJourneySmoke
         || laneRemovalSmoke
         || laneReorderSmoke
+        || laneAutoScrollSmoke
         || hiddenLaneSmoke
         || groupHeaderSmoke
         || signalHeaderSmoke
@@ -277,6 +286,32 @@ int main(int argc, char* argv[])
                 lane.name = "soc_top.peripheral_cluster.handshake_controller.acknowledge_ready__distinguishing_suffix";
             }
         }
+    }
+    if (laneAutoScrollSmoke && !project.scenarios.empty()) {
+        auto& scenario = project.scenarios.front();
+        scenario.name = "Long signal list";
+        scenario.events.clear();
+        scenario.relations.clear();
+        scenario.markers.clear();
+        scenario.lanes.clear();
+        const std::array<std::string, 4> colors{
+            "#64b5f6", "#81c784", "#ffb74d", "#ce93d8"};
+        for (auto index = 0; index < 20; ++index) {
+            const auto suffix = QStringLiteral("%1")
+                                    .arg(index, 2, 10, QLatin1Char('0'))
+                                    .toStdString();
+            wave::Lane lane;
+            lane.id = "lane-scroll-" + suffix;
+            lane.name = "signal_" + suffix;
+            lane.kind = wave::LaneKind::Bit;
+            lane.color = colors.at(static_cast<std::size_t>(index) % colors.size());
+            lane.height = 56;
+            scenario.lanes.push_back(std::move(lane));
+        }
+        project.name = "Lane autoscroll";
+        project.clockDomains.clear();
+        project.importedTraces.clear();
+        project.linkedResources.clear();
     }
 
     wave::MainWindow window(
@@ -2059,6 +2094,211 @@ int main(int argc, char* argv[])
             window.hide();
             application.exit(0);
         });
+    } else if (laneAutoScrollSmoke) {
+        QTimer::singleShot(
+            0,
+            &window,
+            [&application, &window, laneAutoScrollScreenshotPath] {
+                auto* canvas = window.findChild<wave::WaveCanvas*>();
+                auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
+                auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+                auto fail = [&application, &window](const QString& message) {
+                    qCritical().noquote() << message;
+                    window.hide();
+                    application.exit(4);
+                };
+                if (!canvas || !undoAction || !saveState
+                    || window.project().scenarios.empty()) {
+                    fail(QStringLiteral("Lane autoscroll smoke prerequisites are missing"));
+                    return;
+                }
+                auto& scenario = window.project().scenarios.front();
+                const auto originalLanes = scenario.lanes;
+                if (originalLanes.size() != 20
+                    || originalLanes.front().id != "lane-scroll-00"
+                    || originalLanes.back().id != "lane-scroll-19"
+                    || canvas->verticalScrollBar()->maximum() <= 0
+                    || saveState->text() != QStringLiteral("Saved")
+                    || undoAction->isEnabled()) {
+                    fail(QStringLiteral("Lane autoscroll smoke did not start from a long Saved list"));
+                    return;
+                }
+
+                const auto sendMouse = [canvas](
+                                           const QEvent::Type type,
+                                           const QPoint position,
+                                           const Qt::MouseButton button,
+                                           const Qt::MouseButtons buttons) {
+                    QMouseEvent event(
+                        type,
+                        QPointF(position),
+                        QPointF(canvas->viewport()->mapToGlobal(position)),
+                        button,
+                        buttons,
+                        Qt::NoModifier);
+                    QCoreApplication::sendEvent(canvas->viewport(), &event);
+                };
+                const auto sendKey = [](QObject* target, const int key) {
+                    QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier);
+                    QCoreApplication::sendEvent(target, &press);
+                    QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier);
+                    QCoreApplication::sendEvent(target, &release);
+                };
+                const auto waitForScroll = [](const int milliseconds) {
+                    QEventLoop loop;
+                    QTimer::singleShot(milliseconds, &loop, &QEventLoop::quit);
+                    loop.exec();
+                    QCoreApplication::processEvents();
+                };
+                const auto laneCenter = [canvas, &scenario](const std::string& laneId) {
+                    auto y = 40 - canvas->verticalScrollBar()->value();
+                    for (const auto& lane : scenario.lanes) {
+                        if (!lane.visible) continue;
+                        const auto height = std::clamp(lane.height, 30, 240);
+                        if (lane.id == laneId) return y + height / 2;
+                        y += height;
+                    }
+                    return -1;
+                };
+                const auto beginEdgeDrag = [&sendMouse](
+                                                   const int startY,
+                                                   const int edgeY) {
+                    sendMouse(
+                        QEvent::MouseButtonPress,
+                        QPoint(80, startY),
+                        Qt::LeftButton,
+                        Qt::LeftButton);
+                    sendMouse(
+                        QEvent::MouseMove,
+                        QPoint(80, edgeY),
+                        Qt::NoButton,
+                        Qt::LeftButton);
+                };
+                const auto releaseEdgeDrag = [&sendMouse](const int edgeY) {
+                    sendMouse(
+                        QEvent::MouseButtonRelease,
+                        QPoint(80, edgeY),
+                        Qt::LeftButton,
+                        Qt::NoButton);
+                    QCoreApplication::processEvents();
+                };
+
+                canvas->verticalScrollBar()->setValue(0);
+                canvas->setFocus(Qt::OtherFocusReason);
+                QCoreApplication::processEvents();
+                const auto bottomEdge = canvas->viewport()->height() - 3;
+                auto firstY = laneCenter("lane-scroll-00");
+                if (firstY < 40 || firstY >= canvas->viewport()->height()) {
+                    fail(QStringLiteral("First signal is not visible for downward edge drag"));
+                    return;
+                }
+
+                beginEdgeDrag(firstY, bottomEdge);
+                waitForScroll(180);
+                if (canvas->verticalScrollBar()->value() <= 0
+                    || !canvas->laneDropDestinationIndex()
+                    || canvas->viewport()->cursor().shape() != Qt::ClosedHandCursor) {
+                    fail(QStringLiteral("Holding a lane at the lower edge did not start continuous scrolling"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Escape);
+                waitForScroll(150);
+                releaseEdgeDrag(bottomEdge);
+                if (canvas->verticalScrollBar()->value() != 0
+                    || laneCenter("lane-scroll-00") < 40
+                    || canvas->laneDropDestinationIndex()
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || canvas->viewport()->cursor().shape() != Qt::PointingHandCursor
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Move cancelled · signal_00 remains at position 1"))) {
+                    fail(QStringLiteral("Escape did not stop edge scrolling without committing a move"));
+                    return;
+                }
+
+                canvas->verticalScrollBar()->setValue(0);
+                QCoreApplication::processEvents();
+                firstY = laneCenter("lane-scroll-00");
+                beginEdgeDrag(firstY, bottomEdge);
+                waitForScroll(700);
+                if (canvas->verticalScrollBar()->value()
+                        != canvas->verticalScrollBar()->maximum()
+                    || canvas->laneDropDestinationIndex()
+                        != std::optional<std::size_t>{19}) {
+                    fail(QStringLiteral("Downward edge drag did not reach the real end of the signal list"));
+                    return;
+                }
+                if (!laneAutoScrollScreenshotPath.isEmpty()
+                    && !window.grab().save(laneAutoScrollScreenshotPath)) {
+                    fail(QStringLiteral("Cannot save lane autoscroll smoke screenshot"));
+                    return;
+                }
+                releaseEdgeDrag(bottomEdge);
+                if (scenario.lanes.back().id != "lane-scroll-00"
+                    || !undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || canvas->viewport()->cursor().shape() != Qt::PointingHandCursor
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Moved signal_00: position 1 -> 20"))
+                    || !window.statusBar()->currentMessage().contains(QStringLiteral("Ctrl+Z"))) {
+                    fail(QStringLiteral("Cross-viewport downward drop did not commit one clear move"));
+                    return;
+                }
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+                if (scenario.lanes != originalLanes
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Undid Move lane"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("back to saved version"))) {
+                    fail(QStringLiteral("Undo did not restore the downward cross-viewport move"));
+                    return;
+                }
+
+                canvas->verticalScrollBar()->setValue(
+                    canvas->verticalScrollBar()->maximum());
+                QCoreApplication::processEvents();
+                const auto lastY = laneCenter("lane-scroll-19");
+                const auto topEdge = 42;
+                if (lastY < 40 || lastY >= canvas->viewport()->height()) {
+                    fail(QStringLiteral("Last signal is not visible for upward edge drag"));
+                    return;
+                }
+                beginEdgeDrag(lastY, topEdge);
+                waitForScroll(700);
+                if (canvas->verticalScrollBar()->value() != 0
+                    || canvas->laneDropDestinationIndex()
+                        != std::optional<std::size_t>{0}) {
+                    fail(QStringLiteral("Upward edge drag did not reach the real start of the signal list"));
+                    return;
+                }
+                releaseEdgeDrag(topEdge);
+                if (scenario.lanes.front().id != "lane-scroll-19"
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Moved signal_19: position 20 -> 1"))) {
+                    fail(QStringLiteral("Cross-viewport upward drop committed the wrong signal order"));
+                    return;
+                }
+                const auto stoppedAt = canvas->verticalScrollBar()->value();
+                waitForScroll(120);
+                if (canvas->verticalScrollBar()->value() != stoppedAt) {
+                    fail(QStringLiteral("Lane edge scrolling continued after mouse release"));
+                    return;
+                }
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+                if (scenario.lanes != originalLanes
+                    || saveState->text() != QStringLiteral("Saved")
+                    || window.windowTitle().contains(QStringLiteral(" *"))) {
+                    fail(QStringLiteral("Final Undo did not return to the exact Saved lane order"));
+                    return;
+                }
+
+                window.hide();
+                application.exit(0);
+            });
     } else if (laneReorderSmoke) {
         QTimer::singleShot(0, &window, [&application, &window] {
             window.revealLocation(QStringLiteral("lane-request"), 80'000);

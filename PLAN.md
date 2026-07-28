@@ -3796,6 +3796,59 @@ Offscreen visual QA: build/round66-long-names-after-fonts.png
 Desktop interaction: none
 ```
 
+## 持续迭代 67：长信号列表跨视口拖动重排
+
+状态：完成
+
+已交付：
+
+- 开发审计确认标题拖动只能在当前可见区域内更新放置位置；当信号数量超过画布高度时，拖到上下边缘不会滚动，无法在一次手势中将首行移到末行。键盘重复移动或中断拖动后手动滚动会增加操作次数，并使插入目标难以确认。
+- 用户视角以 20 条 Bit 信号复现：用户要把第一条移动到列表末尾，首先会按住标题向下拖；原行为停在当前视口底部，插入线无法到达真实末行。期望是保持一次拖动，由边缘自动推进列表，并允许随时 Esc 安全取消。
+- 标题拖动进入画布上/下 48 px 边缘后，以 30 ms 间隔、每次 28 px 持续滚动；每个计时周期重新计算真实放置索引，插入线与状态提示同步更新。离开边缘、失去左键、释放、Esc、切换工具或切换文档均立即停止计时器。
+- Esc 或异常失去左键会恢复拖动开始前的垂直视口，不改变模型、Undo 栈或 Saved 状态；状态栏明确显示信号仍处于原位置。成功释放保留目标视口，并继续以单个 `MoveLaneCommand` 提交，Ctrl+Z 一步恢复。
+- 取消、释放和工具切换统一恢复当前工具的默认鼠标形态，Selection、Wave Edit、Measure 及兼容工具不会残留拖动光标。
+- 新增 `wave-lane-autoscroll-smoke`：构造 20 条独立 Bit 信号，覆盖下边缘启动、Esc 停止并恢复首行视口、首行→末行单次拖动、末行→首行单次拖动、真实位置状态、计时器释放停止、一步 Undo、Saved/dirty 隔离及离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure -j 4
+25/25 tests passed
+Total Test time: 3.78 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure -j 4
+25/25 tests passed
+Total Test time: 3.75 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-lane-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 2.09 sec
+
+Automated QA: 按住 signal_00 拖入下边缘后列表持续推进且鼠标为 ClosedHand；
+              Esc 立即停止并恢复首行视口、原始顺序、Saved 与空 Undo，状态显示 signal_00 仍为第 1 位；
+              再以一次拖动将 signal_00 放到第 20 位，释放后停留目标并只产生一个 Undo；
+              从末行反向拖到上边缘同样到达第 1 位，释放停止计时器，Ctrl+Z 一步恢复精确顺序。
+Offscreen visual QA: build/qtcreator-debug/lane-autoscroll-smoke.png
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
