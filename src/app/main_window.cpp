@@ -1520,11 +1520,61 @@ void MainWindow::removeLaneById(const QString& laneId)
     const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
     if (!lane) return;
 
-    const auto message = lane->kind == LaneKind::Group
-        ? tr("Remove group \"%1\"? Member lanes will remain and become ungrouped.")
-              .arg(QString::fromStdString(lane->name))
-        : tr("Remove lane \"%1\"? Its events and related relations will also be removed.")
-              .arg(QString::fromStdString(lane->name));
+    const auto removedLaneId = lane->id;
+    const auto removedLaneName = QString::fromStdString(lane->name);
+    const auto removingGroup = lane->kind == LaneKind::Group;
+    std::vector<std::string> removedEventIds;
+    for (const auto& event : scenario->events) {
+        if (event.laneId == removedLaneId) removedEventIds.push_back(event.id);
+    }
+    const auto removedRelationCount = static_cast<std::size_t>(std::count_if(
+        scenario->relations.begin(),
+        scenario->relations.end(),
+        [&removedEventIds](const Relation& relation) {
+            const auto removed = [&removedEventIds](const std::string& eventId) {
+                return std::find(
+                           removedEventIds.begin(),
+                           removedEventIds.end(),
+                           eventId)
+                    != removedEventIds.end();
+            };
+            return removed(relation.sourceEventId)
+                || removed(relation.targetEventId);
+        }));
+    const auto ungroupedMemberCount = removingGroup
+        ? static_cast<std::size_t>(std::count_if(
+              scenario->lanes.begin(),
+              scenario->lanes.end(),
+              [&removedLaneId](const Lane& candidate) {
+                  return candidate.groupId == removedLaneId;
+              }))
+        : std::size_t{0};
+    const auto quantity = [this](const std::size_t count, const QString& noun) {
+        return tr("%1 %2%3")
+            .arg(static_cast<qulonglong>(count))
+            .arg(noun)
+            .arg(count == 1 ? QString{} : QStringLiteral("s"));
+    };
+    QStringList removedEffects;
+    if (!removedEventIds.empty()) {
+        removedEffects.append(quantity(removedEventIds.size(), tr("event")));
+    }
+    if (removedRelationCount > 0) {
+        removedEffects.append(quantity(removedRelationCount, tr("relation")));
+    }
+
+    auto message = removingGroup
+        ? tr("Remove group \"%1\"?").arg(removedLaneName)
+        : tr("Remove lane \"%1\"?").arg(removedLaneName);
+    if (ungroupedMemberCount > 0) {
+        message += tr(" %1 will remain and become ungrouped.")
+                       .arg(quantity(ungroupedMemberCount, tr("member signal")));
+    }
+    if (!removedEffects.isEmpty()) {
+        message += tr(" This also removes %1.")
+                       .arg(removedEffects.join(QStringLiteral(", ")));
+    }
+    message += tr(" You can undo this with Ctrl+Z.");
     if (QMessageBox::question(
             this,
             tr("Remove lane or group"),
@@ -1538,7 +1588,7 @@ void MainWindow::removeLaneById(const QString& laneId)
         commandStack_.execute(std::make_unique<RemoveLaneCommand>(
             project_,
             *scenario,
-            lane->id));
+            removedLaneId));
     } catch (const std::exception& exception) {
         QMessageBox::warning(
             this,
@@ -1549,6 +1599,23 @@ void MainWindow::removeLaneById(const QString& laneId)
     canvas_->refreshModel();
     updateSelection(QString{}, canvas_->cursorTick());
     markEdited();
+
+    QStringList results;
+    for (const auto& effect : removedEffects) {
+        results.append(tr("%1 removed").arg(effect));
+    }
+    if (ungroupedMemberCount > 0) {
+        results.append(tr("%1 ungrouped").arg(
+            quantity(ungroupedMemberCount, tr("member signal"))));
+    }
+    auto result = removingGroup
+        ? tr("Removed group %1").arg(removedLaneName)
+        : tr("Removed %1").arg(removedLaneName);
+    if (!results.isEmpty()) {
+        result += tr(" · %1").arg(results.join(QStringLiteral(", ")));
+    }
+    result += tr(" · Ctrl+Z to undo");
+    statusBar()->showMessage(result, 5'000);
 }
 
 void MainWindow::showLaneContextMenu(

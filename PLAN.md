@@ -2257,6 +2257,63 @@ Automated QA: 示例 End 220 ns；req 的 10 ns 快照从 215 ns 粘贴后完整
 Manual visual read: not performed because the permission service blocked screenshot access
 Desktop interaction: none
 ```
+## 持续迭代 40：信号删除影响与恢复反馈
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `RemoveLaneCommand` 已原子清理 Lane、所属 Event、引用这些 Event 的 Relation 和
+  trace mapping，但主窗口确认框只给出泛化描述；完成删除后没有新状态消息，可能继续显示上一操作。
+- 用户主流程中，删除信号是高风险操作。用户需要在确认前知道会连带清理多少可见 Event/Relation，
+  完成后确认删除确实生效并知道如何恢复；仅看到波形消失不足以判断关系是否一并清理。
+- 删除前按当前 Scenario 精确收集该 lane 的 Event ID、受影响 Relation 数和 Group 直接成员数。
+  普通信号确认框显示 `N events`、`N relations` 及 `Ctrl+Z`；Group 确认框显示将保留并解除分组的
+  member signal 数，若 Group 自身有 Event/Relation 也同时列出。
+- 提交后状态显示删除的信号或 Group 名称、每类实际影响和 `Ctrl+Z to undo`；无依赖信号保持简短。
+  Undo/Redo 继续使用统一状态反馈，取消确认仍不产生命令或修改。
+- `wave-lane-removal-smoke` 真实选中 `req`、读取确认框、点击 Yes、验证 3 个 Event/1 条 Relation
+  反馈和模型清理，再 Undo 并验证信号/Relation 恢复及 `Ctrl+Y`。快速新增删除、Wave Edit 与用户
+  旅程一并定向回归。全部 GUI 路径使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.83 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.61 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-lane-removal-smoke|wave-canvas-add-lane-smoke|wave-wave-edit-smoke|wave-user-journey-smoke)$" \
+  --output-on-failure
+4/4 passed
+Total Test time: 1.70 sec
+
+Automated QA: req 确认框显示 3 events、1 relation 和 Ctrl+Z；完成状态显示相同清理结果；
+              Undo 恢复 req/Relation 并显示 Ctrl+Y；相关创建、编辑和保存流程无回归
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

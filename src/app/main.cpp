@@ -917,23 +917,40 @@ int main(int argc, char* argv[])
     } else if (laneRemovalSmoke) {
         QTimer::singleShot(0, &window, [&application, &window] {
             window.revealLocation(QStringLiteral("lane-request"), 80'000);
-            QTimer::singleShot(0, &application, [&application] {
-                auto* confirmation = qobject_cast<QMessageBox*>(
-                    QApplication::activeModalWidget());
-                if (!confirmation) {
-                    qCritical().noquote() << "Lane removal confirmation did not open";
-                    application.exit(4);
-                    return;
-                }
-                auto* yes = confirmation->button(QMessageBox::Yes);
-                if (!yes) {
-                    qCritical().noquote() << "Lane removal confirmation has no Yes button";
-                    confirmation->reject();
-                    application.exit(4);
-                    return;
-                }
-                yes->click();
-            });
+            bool confirmationDescribedDependencies = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&application, &confirmationDescribedDependencies] {
+                    auto* confirmation = qobject_cast<QMessageBox*>(
+                        QApplication::activeModalWidget());
+                    if (!confirmation) {
+                        qCritical().noquote() << "Lane removal confirmation did not open";
+                        application.exit(4);
+                        return;
+                    }
+                    auto* yes = confirmation->button(QMessageBox::Yes);
+                    if (!yes) {
+                        qCritical().noquote() << "Lane removal confirmation has no Yes button";
+                        confirmation->reject();
+                        application.exit(4);
+                        return;
+                    }
+                    const auto text = confirmation->text();
+                    confirmationDescribedDependencies =
+                        text.contains(QStringLiteral("3 events"))
+                        && text.contains(QStringLiteral("1 relation"))
+                        && text.contains(QStringLiteral("Ctrl+Z"));
+                    if (!confirmationDescribedDependencies) {
+                        qCritical().noquote()
+                            << "Lane removal confirmation did not describe impact and recovery:"
+                            << text;
+                        confirmation->reject();
+                        application.exit(4);
+                        return;
+                    }
+                    yes->click();
+                });
             if (!QMetaObject::invokeMethod(
                     &window,
                     "removeSelectedLane",
@@ -951,8 +968,14 @@ int main(int argc, char* argv[])
                 [](const wave::Relation& relation) {
                     return relation.id == "relation-req-ack";
                 });
+            const auto removalStatus = window.statusBar()->currentMessage();
             if (wave::findLane(removedScenario, "lane-request")
-                || !relationRemoved) {
+                || !relationRemoved
+                || !confirmationDescribedDependencies
+                || !removalStatus.contains(QStringLiteral("Removed req"))
+                || !removalStatus.contains(QStringLiteral("3 events removed"))
+                || !removalStatus.contains(QStringLiteral("1 relation removed"))
+                || !removalStatus.contains(QStringLiteral("Ctrl+Z"))) {
                 QStringList remainingLanes;
                 for (const auto& lane : removedScenario.lanes) {
                     remainingLanes.append(QString::fromStdString(lane.id));
@@ -962,10 +985,11 @@ int main(int argc, char* argv[])
                     remainingRelations.append(QString::fromStdString(relation.id));
                 }
                 qCritical().noquote()
-                    << "Lane removal did not clean dependent data; lanes:"
+                    << "Lane removal did not clean dependent data or report the result; lanes:"
                     << remainingLanes.join(QLatin1Char(','))
                     << "relations:"
-                    << remainingRelations.join(QLatin1Char(','));
+                    << remainingRelations.join(QLatin1Char(','))
+                    << "status:" << removalStatus;
                 window.hide();
                 application.exit(4);
                 return;
@@ -983,9 +1007,14 @@ int main(int argc, char* argv[])
                 [](const wave::Relation& relation) {
                     return relation.id == "relation-req-ack";
                 });
+            const auto undoStatus = window.statusBar()->currentMessage();
             if (!wave::findLane(restoredScenario, "lane-request")
-                || !relationRestored) {
-                qCritical().noquote() << "Lane removal undo did not restore dependent data";
+                || !relationRestored
+                || !undoStatus.contains(QStringLiteral("Undid Remove lane"))
+                || !undoStatus.contains(QStringLiteral("Ctrl+Y"))) {
+                qCritical().noquote()
+                    << "Lane removal undo did not restore dependent data or report recovery"
+                    << undoStatus;
                 window.hide();
                 application.exit(4);
                 return;
