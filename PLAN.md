@@ -3849,6 +3849,58 @@ Automated QA: 按住 signal_00 拖入下边缘后列表持续推进且鼠标为 
 Offscreen visual QA: build/qtcreator-debug/lane-autoscroll-smoke.png
 Desktop interaction: none
 ```
+## 持续迭代 68：Wave Edit 水平跨视口拖动
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Wave Edit 的拖动位置只在收到鼠标移动事件时按当前水平滚动值计算；放大长时间轴后，Shift 范围、范围端点、Bit 多拍、Bit 边沿以及 Segment 移动/改边界到达视口左右边缘即停止推进，现有实现没有水平边缘计时器。
+- 用户视角从放大后的长时间轴移动一个 Segment：用户会保持鼠标按下并拖到屏幕边缘，期望画布继续向目标方向推进；原行为要求取消、缩小或先平移再重新定位对象，打断一次直接编辑手势，也增加选错时间的风险。
+- 所有 Wave Edit 拖动进入波形区左右 48 px 后，以 30 ms 间隔、每次 28 px 持续水平滚动；每个计时周期重新执行指针到整数 tick 的换算、7 像素轻吸附、约束及预览更新，状态栏显示 `Auto-scroll left/right`。
+- 自动滚动在实际超过系统拖动阈值后才启动，避免靠近边缘的普通单击被误判。离开边缘、到达滚动边界、释放、Esc、异常失去左键、工具切换或文档切换均停止计时器。
+- 释放保留目标视图并沿用原交互的提交语义：Segment/Bit 边沿仍只产生一个可撤销命令，纯范围选择仍不修改模型。Esc 或异常失去左键恢复拖动开始前的水平视图，清除预览且不修改模型、Undo 栈或 Saved 状态。
+- 新增 `wave-wave-edit-autoscroll-smoke`：构造 1 µs 长时间轴并放大约 6 倍，覆盖右边缘 Segment 模型外预览、Esc 停止与视图恢复、再次拖动后的单命令提交、释放后计时器停止、一步 Undo 回到精确 Saved 基线，以及左边缘 Shift 范围持续扩展与可操作选择保留。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure -j 4
+26/26 tests passed
+Total Test time: 4.10 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure -j 4
+26/26 tests passed
+Total Test time: 5.10 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 1.73 sec
+
+Automated QA: 第一次将 data[7:0] Segment 保持在右边缘时，视图持续向右推进、目标范围实时变化而模型/Undo/Saved 不变；
+              Esc 停止滚动并恢复起始视图，随后释放不提交；第二次拖动释放后只提交一个 Segment move，状态提供 Ctrl+Z；
+              释放后滚动值保持稳定，Undo 精确恢复原 Segment 与 Saved；从时间轴中部 Shift 拖向左边缘时持续扩展范围，释放后保留可直接编辑的范围且不产生 Undo。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke.png
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

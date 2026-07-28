@@ -102,6 +102,8 @@ int main(int argc, char* argv[])
     bool laneReorderSmoke = false;
     bool laneAutoScrollSmoke = false;
     QString laneAutoScrollScreenshotPath;
+    bool waveEditAutoScrollSmoke = false;
+    QString waveEditAutoScrollScreenshotPath;
     bool hiddenLaneSmoke = false;
     bool groupHeaderSmoke = false;
     bool signalHeaderSmoke = false;
@@ -139,6 +141,14 @@ int main(int argc, char* argv[])
                 QStringLiteral("--lane-autoscroll-smoke=").size());
         } else if (argument == QStringLiteral("--lane-autoscroll-smoke")) {
             laneAutoScrollSmoke = true;
+        } else if (argument.startsWith(
+                       QStringLiteral("--wave-edit-autoscroll-smoke="))) {
+            waveEditAutoScrollSmoke = true;
+            waveEditAutoScrollScreenshotPath = argument.mid(
+                QStringLiteral("--wave-edit-autoscroll-smoke=").size());
+        } else if (argument == QStringLiteral(
+                       "--wave-edit-autoscroll-smoke")) {
+            waveEditAutoScrollSmoke = true;
         } else if (argument == QStringLiteral("--hidden-lane-smoke")) {
             hiddenLaneSmoke = true;
         } else if (argument == QStringLiteral("--group-header-smoke")) {
@@ -207,6 +217,7 @@ int main(int argc, char* argv[])
         || laneRemovalSmoke
         || laneReorderSmoke
         || laneAutoScrollSmoke
+        || waveEditAutoScrollSmoke
         || hiddenLaneSmoke
         || groupHeaderSmoke
         || signalHeaderSmoke
@@ -286,6 +297,33 @@ int main(int argc, char* argv[])
                 lane.name = "soc_top.peripheral_cluster.handshake_controller.acknowledge_ready__distinguishing_suffix";
             }
         }
+    }
+    if (waveEditAutoScrollSmoke && !project.scenarios.empty()) {
+        auto& scenario = project.scenarios.front();
+        scenario.name = "Long timeline editing";
+        scenario.duration = 1'000'000;
+        scenario.events.clear();
+        scenario.relations.clear();
+        scenario.markers.clear();
+        scenario.lanes.clear();
+        wave::Lane lane;
+        lane.id = "lane-wave-edit-scroll";
+        lane.name = "data[7:0]";
+        lane.kind = wave::LaneKind::Bus;
+        lane.width = 8;
+        lane.color = "#64b5f6";
+        lane.height = 72;
+        wave::Segment segment;
+        segment.id = "segment-wave-edit-scroll";
+        segment.start = 50'000;
+        segment.end = 100'000;
+        segment.value = "0x35";
+        lane.segments.push_back(std::move(segment));
+        scenario.lanes.push_back(std::move(lane));
+        project.name = "Wave Edit autoscroll";
+        project.clockDomains.clear();
+        project.importedTraces.clear();
+        project.linkedResources.clear();
     }
     if (laneAutoScrollSmoke && !project.scenarios.empty()) {
         auto& scenario = project.scenarios.front();
@@ -2094,6 +2132,318 @@ int main(int argc, char* argv[])
             window.hide();
             application.exit(0);
         });
+    } else if (waveEditAutoScrollSmoke) {
+        QTimer::singleShot(
+            0,
+            &window,
+            [&application, &window, waveEditAutoScrollScreenshotPath] {
+                auto* canvas = window.findChild<wave::WaveCanvas*>();
+                auto* undoAction = window.findChild<QAction*>(
+                    QStringLiteral("UndoAction"));
+                auto* saveState = window.findChild<QLabel*>(
+                    QStringLiteral("SaveStateLabel"));
+                auto fail = [&application, &window](const QString& message) {
+                    qCritical().noquote() << message;
+                    window.hide();
+                    application.exit(4);
+                };
+                if (!canvas || !undoAction || !saveState
+                    || window.project().scenarios.empty()) {
+                    fail(QStringLiteral(
+                        "Wave Edit autoscroll smoke prerequisites are missing"));
+                    return;
+                }
+
+                auto& scenario = window.project().scenarios.front();
+                if (scenario.lanes.size() != 1
+                    || scenario.lanes.front().id != "lane-wave-edit-scroll"
+                    || scenario.lanes.front().segments.size() != 1
+                    || saveState->text() != QStringLiteral("Saved")
+                    || undoAction->isEnabled()) {
+                    fail(QStringLiteral(
+                        "Wave Edit autoscroll smoke did not start from its Saved fixture"));
+                    return;
+                }
+                const auto originalScenario = scenario;
+                const auto originalRange = std::pair<wave::Tick, wave::Tick>{
+                    50'000,
+                    100'000,
+                };
+
+                const auto sendMouse = [canvas](
+                                           const QEvent::Type type,
+                                           const QPoint position,
+                                           const Qt::MouseButton button,
+                                           const Qt::MouseButtons buttons,
+                                           const Qt::KeyboardModifiers modifiers) {
+                    QMouseEvent event(
+                        type,
+                        QPointF(position),
+                        QPointF(canvas->viewport()->mapToGlobal(position)),
+                        button,
+                        buttons,
+                        modifiers);
+                    QCoreApplication::sendEvent(canvas->viewport(), &event);
+                };
+                const auto sendKey = [](QObject* target, const int key) {
+                    QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier);
+                    QCoreApplication::sendEvent(target, &press);
+                    QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier);
+                    QCoreApplication::sendEvent(target, &release);
+                };
+                const auto waitForScroll = [](const int milliseconds) {
+                    QEventLoop loop;
+                    QTimer::singleShot(milliseconds, &loop, &QEventLoop::quit);
+                    loop.exec();
+                    QCoreApplication::processEvents();
+                    QCoreApplication::processEvents();
+                };
+                const auto waveWidth = [canvas] {
+                    return std::max(
+                        1,
+                        canvas->viewport()->width()
+                            - canvas->signalHeaderWidth());
+                };
+                const auto contentWidth = [canvas, &waveWidth] {
+                    return static_cast<double>(waveWidth())
+                        + canvas->horizontalScrollBar()->maximum();
+                };
+                const auto xAtTick = [canvas, &scenario, &contentWidth](
+                                         const wave::Tick tick) {
+                    return canvas->signalHeaderWidth()
+                        + static_cast<int>(std::llround(
+                            static_cast<double>(tick) * contentWidth()
+                            / static_cast<double>(scenario.duration)))
+                        - canvas->horizontalScrollBar()->value();
+                };
+                const auto tickAtX = [canvas, &scenario, &contentWidth](
+                                         const int x) {
+                    const auto contentX = canvas->horizontalScrollBar()->value()
+                        + x - canvas->signalHeaderWidth();
+                    return std::clamp<wave::Tick>(
+                        static_cast<wave::Tick>(std::llround(
+                            static_cast<double>(contentX)
+                            * static_cast<double>(scenario.duration)
+                            / contentWidth())),
+                        0,
+                        scenario.duration);
+                };
+                const auto segmentById = [&scenario]() -> const wave::Segment* {
+                    const auto& segments = scenario.lanes.front().segments;
+                    const auto segment = std::find_if(
+                        segments.begin(),
+                        segments.end(),
+                        [](const wave::Segment& candidate) {
+                            return candidate.id == "segment-wave-edit-scroll";
+                        });
+                    return segment == segments.end() ? nullptr : &*segment;
+                };
+
+                canvas->fitScenario();
+                for (auto index = 0; index < 8; ++index) canvas->zoomIn();
+                canvas->horizontalScrollBar()->setValue(0);
+                canvas->setFocus(Qt::OtherFocusReason);
+                QCoreApplication::processEvents();
+                const auto laneY = 40 + scenario.lanes.front().height / 2;
+                const auto rightEdge = canvas->viewport()->width() - 3;
+                const auto leftEdge = canvas->signalHeaderWidth() + 3;
+                if (canvas->horizontalScrollBar()->maximum()
+                        <= waveWidth() * 3
+                    || !canvas->viewport()->rect().contains(
+                        QPoint(xAtTick(75'000), laneY))) {
+                    fail(QStringLiteral(
+                        "Long timeline did not create a stable horizontal viewport"));
+                    return;
+                }
+
+                const auto beginRightEdgeSegmentDrag = [&] {
+                    const QPoint start(xAtTick(75'000), laneY);
+                    sendMouse(
+                        QEvent::MouseButtonPress,
+                        start,
+                        Qt::LeftButton,
+                        Qt::LeftButton,
+                        Qt::NoModifier);
+                    sendMouse(
+                        QEvent::MouseMove,
+                        QPoint(rightEdge, laneY),
+                        Qt::NoButton,
+                        Qt::LeftButton,
+                        Qt::NoModifier);
+                };
+                const auto releaseLeftButton = [&](
+                                                   const QPoint position,
+                                                   const Qt::KeyboardModifiers modifiers) {
+                    sendMouse(
+                        QEvent::MouseButtonRelease,
+                        position,
+                        Qt::LeftButton,
+                        Qt::NoButton,
+                        modifiers);
+                    QCoreApplication::processEvents();
+                };
+
+                beginRightEdgeSegmentDrag();
+                waitForScroll(360);
+                const auto cancelPreview = canvas->selectedTimeRange();
+                if (canvas->horizontalScrollBar()->value() <= 0
+                    || !cancelPreview
+                    || cancelPreview->first <= originalRange.first
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Auto-scroll right"))) {
+                    fail(QStringLiteral(
+                        "Holding a Segment at the right edge did not scroll a model-free preview"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Escape);
+                waitForScroll(120);
+                releaseLeftButton(QPoint(rightEdge, laneY), Qt::NoModifier);
+                if (canvas->horizontalScrollBar()->value() != 0
+                    || canvas->selectedTimeRange()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || canvas->viewport()->cursor().shape()
+                        != Qt::PointingHandCursor
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral(
+                            "Waveform drag cancelled · view restored"))) {
+                    fail(QStringLiteral(
+                        "Escape did not cancel the Segment preview and restore its viewport"));
+                    return;
+                }
+
+                beginRightEdgeSegmentDrag();
+                waitForScroll(360);
+                const auto committedPreview = canvas->selectedTimeRange();
+                if (!committedPreview
+                    || committedPreview->first <= originalRange.first
+                    || scenario != originalScenario) {
+                    fail(QStringLiteral(
+                        "Second right-edge drag did not produce a stable Segment preview"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()
+                    && !window.grab().save(
+                        waveEditAutoScrollScreenshotPath)) {
+                    fail(QStringLiteral(
+                        "Cannot save Wave Edit autoscroll smoke screenshot"));
+                    return;
+                }
+                releaseLeftButton(QPoint(rightEdge, laneY), Qt::NoModifier);
+                const auto* movedSegment = segmentById();
+                if (!movedSegment
+                    || movedSegment->start != committedPreview->first
+                    || movedSegment->end != committedPreview->second
+                    || canvas->horizontalScrollBar()->value() <= 0
+                    || !undoAction->isEnabled()
+                    || saveState->text()
+                        != QStringLiteral("Unsaved changes")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("data[7:0] segment moved"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    fail(QStringLiteral(
+                        "Right-edge Segment release did not commit one visible move"));
+                    return;
+                }
+                const auto stoppedAfterCommit =
+                    canvas->horizontalScrollBar()->value();
+                waitForScroll(140);
+                if (canvas->horizontalScrollBar()->value()
+                    != stoppedAfterCommit) {
+                    fail(QStringLiteral(
+                        "Wave Edit edge scrolling continued after Segment release"));
+                    return;
+                }
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+                if (scenario != originalScenario
+                    || saveState->text() != QStringLiteral("Saved")
+                    || window.windowTitle().contains(QStringLiteral(" *"))) {
+                    fail(QStringLiteral(
+                        "Undo did not restore the exact pre-drag Segment and Saved state"));
+                    return;
+                }
+
+                canvas->horizontalScrollBar()->setValue(
+                    canvas->horizontalScrollBar()->maximum() / 2);
+                QCoreApplication::processEvents();
+                const auto rangeScrollStart =
+                    canvas->horizontalScrollBar()->value();
+                const auto rangeStartX = canvas->signalHeaderWidth()
+                    + waveWidth() * 2 / 3;
+                const auto rangeStartTick = tickAtX(rangeStartX);
+                sendMouse(
+                    QEvent::MouseButtonPress,
+                    QPoint(rangeStartX, laneY),
+                    Qt::LeftButton,
+                    Qt::LeftButton,
+                    Qt::ShiftModifier);
+                sendMouse(
+                    QEvent::MouseMove,
+                    QPoint(leftEdge, laneY),
+                    Qt::NoButton,
+                    Qt::LeftButton,
+                    Qt::ShiftModifier);
+                waitForScroll(300);
+                const auto leftPreview = canvas->selectedTimeRange();
+                if (canvas->horizontalScrollBar()->value()
+                        >= rangeScrollStart
+                    || !leftPreview
+                    || leftPreview->first >= rangeStartTick
+                    || leftPreview->second < rangeStartTick
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Auto-scroll left"))) {
+                    fail(QStringLiteral(
+                        "Shift range selection did not continuously expand across the left edge"));
+                    return;
+                }
+                releaseLeftButton(
+                    QPoint(leftEdge, laneY),
+                    Qt::ShiftModifier);
+                const auto committedRange = canvas->selectedTimeRange();
+                if (!canvas->hasExplicitRangeSelection()
+                    || !committedRange
+                    || committedRange->first >= rangeStartTick
+                    || committedRange->second < rangeStartTick
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Selected "))) {
+                    fail(QStringLiteral(
+                        "Left-edge Shift release did not preserve an actionable range"));
+                    return;
+                }
+                const auto stoppedAfterRange =
+                    canvas->horizontalScrollBar()->value();
+                waitForScroll(140);
+                if (canvas->horizontalScrollBar()->value()
+                    != stoppedAfterRange) {
+                    fail(QStringLiteral(
+                        "Wave Edit edge scrolling continued after range release"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Escape);
+                if (canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Range cleanup altered the Saved waveform after autoscroll"));
+                    return;
+                }
+
+                window.hide();
+                application.exit(0);
+            });
     } else if (laneAutoScrollSmoke) {
         QTimer::singleShot(
             0,

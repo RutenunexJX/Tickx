@@ -192,6 +192,9 @@ private:
     static constexpr int LaneDragAutoScrollMargin = 48;
     static constexpr int LaneDragAutoScrollStep = 28;
     static constexpr int LaneDragAutoScrollIntervalMs = 30;
+    static constexpr int WaveEditDragAutoScrollMargin = 48;
+    static constexpr int WaveEditDragAutoScrollStep = 28;
+    static constexpr int WaveEditDragAutoScrollIntervalMs = 30;
 
     [[nodiscard]] Qt::CursorShape defaultCursorShape() const noexcept;
     void rebuildLaneLayout();
@@ -242,6 +245,11 @@ private:
     void updateLaneDragAutoScroll(int pointerY);
     void advanceLaneDragAutoScroll();
     void stopLaneDragAutoScroll();
+    void updateWaveEditDragAutoScroll(
+        const QPoint& pointerPosition,
+        Qt::KeyboardModifiers modifiers);
+    void advanceWaveEditDragAutoScroll();
+    void stopWaveEditDragAutoScroll();
     void commitLaneReorder();
     void setScale(double scale, int anchorX);
     [[nodiscard]] double contentWidth() const;
@@ -404,6 +412,12 @@ private:
     QTimer* laneDragAutoScrollTimer_{nullptr};
     int laneDragAutoScrollDirection_{0};
     int laneDragAutoScrollPointerY_{0};
+    QTimer* waveEditDragAutoScrollTimer_{nullptr};
+    int waveEditDragAutoScrollDirection_{0};
+    QPoint waveEditDragAutoScrollPointer_;
+    Qt::KeyboardModifiers waveEditDragAutoScrollModifiers_{Qt::NoModifier};
+    int waveEditDragOriginalHorizontalScroll_{0};
+    bool waveEditDragAutoScrolled_{false};
     int headerWidth_{DefaultHeaderWidth};
     bool headerResizing_{false};
     int headerResizePressX_{0};

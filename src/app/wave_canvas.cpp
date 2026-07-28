@@ -194,6 +194,13 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         &QTimer::timeout,
         this,
         &WaveCanvas::advanceLaneDragAutoScroll);
+    waveEditDragAutoScrollTimer_ = new QTimer(this);
+    waveEditDragAutoScrollTimer_->setInterval(WaveEditDragAutoScrollIntervalMs);
+    connect(
+        waveEditDragAutoScrollTimer_,
+        &QTimer::timeout,
+        this,
+        &WaveCanvas::advanceWaveEditDragAutoScroll);
     const std::array<LaneKind, 3> quickKinds{
         LaneKind::Clock,
         LaneKind::Bit,
@@ -965,6 +972,7 @@ void WaveCanvas::setDocument(
     CommandStack* commandStack)
 {
     stopLaneDragAutoScroll();
+    stopWaveEditDragAutoScroll();
     if (headerResizing_) setSignalHeaderWidth(headerResizeOriginalWidth_);
     if (quickLaneSetupPanel_) quickLaneSetupPanel_->hide();
     quickLaneSetupLaneId_.clear();
@@ -1006,9 +1014,16 @@ void WaveCanvas::setDocument(
 
 void WaveCanvas::setTool(const Tool tool)
 {
+    const auto restoreWaveEditViewport = tool_ == Tool::WaveEdit
+        && drawing_
+        && waveEditDragAutoScrolled_;
     stopLaneDragAutoScroll();
+    stopWaveEditDragAutoScroll();
     if (laneHeaderPressed_ || laneHeaderDragging_) {
         verticalScrollBar()->setValue(laneDragOriginalVerticalScroll_);
+    }
+    if (restoreWaveEditViewport) {
+        horizontalScrollBar()->setValue(waveEditDragOriginalHorizontalScroll_);
     }
     if (headerResizing_) setSignalHeaderWidth(headerResizeOriginalWidth_);
     const auto previousTool = tool_;
@@ -2118,6 +2133,14 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             return;
         }
         if (event->key() == Qt::Key_Escape) {
+            const auto cancelledWaveEditDrag = drawing_;
+            const auto restoredViewport = cancelledWaveEditDrag
+                && waveEditDragAutoScrolled_;
+            stopWaveEditDragAutoScroll();
+            if (restoredViewport) {
+                horizontalScrollBar()->setValue(
+                    waveEditDragOriginalHorizontalScroll_);
+            }
             panning_ = false;
             clearWaveEditState();
             selectedLaneId_.clear();
@@ -2127,6 +2150,12 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             snapGuideTick_.reset();
             viewport()->setCursor(Qt::PointingHandCursor);
             viewport()->update();
+            if (cancelledWaveEditDrag) {
+                emit statusMessage(
+                    restoredViewport
+                        ? tr("Waveform drag cancelled · view restored")
+                        : tr("Waveform drag cancelled"));
+            }
             event->accept();
             return;
         }
@@ -2437,6 +2466,10 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
                 : selectionRange_->second;
             drawCurrent_ = drawStart_;
             waveEditPressPosition_ = position;
+            stopWaveEditDragAutoScroll();
+            waveEditDragOriginalHorizontalScroll_ =
+                horizontalScrollBar()->value();
+            waveEditDragAutoScrolled_ = false;
             drawing_ = true;
             cursorTick_ = drawStart_;
             snapGuideTick_.reset();
@@ -2569,6 +2602,10 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             : Tick{0};
         cursorTick_ = snappedTick(rawTick, lane);
         emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+        stopWaveEditDragAutoScroll();
+        waveEditDragOriginalHorizontalScroll_ = horizontalScrollBar()->value();
+        waveEditDragAutoScrolled_ = false;
+        waveEditPressPosition_ = position;
 
         if (event->modifiers().testFlag(Qt::ShiftModifier)) {
             explicitRangeSelection_ = false;
@@ -2869,6 +2906,26 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
         }
         return;
     }
+    if (tool_ == Tool::WaveEdit
+        && drawing_
+        && !event->buttons().testFlag(Qt::LeftButton)) {
+        const auto restoredViewport = waveEditDragAutoScrolled_;
+        stopWaveEditDragAutoScroll();
+        if (restoredViewport) {
+            horizontalScrollBar()->setValue(
+                waveEditDragOriginalHorizontalScroll_);
+        }
+        clearWaveEditState();
+        snapGuideTick_.reset();
+        viewport()->setCursor(defaultCursorShape());
+        viewport()->update();
+        emit statusMessage(
+            restoredViewport
+                ? tr("Waveform drag cancelled · view restored")
+                : tr("Waveform drag cancelled"));
+        event->accept();
+        return;
+    }
     if (event->buttons() == Qt::NoButton && signalHeaderDividerAt(position)) {
         const auto hadHover = waveEditHoverRange_.has_value()
             || !waveEditHoverLaneId_.empty()
@@ -2893,6 +2950,7 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
 
     if (tool_ == Tool::WaveEdit) {
         if (drawing_) {
+            updateWaveEditDragAutoScroll(position, event->modifiers());
             const auto* editLane = findLane(*scenario_, drawLaneId_);
             drawCurrent_ = std::clamp<Tick>(rawTick, 0, scenario_->duration);
             if (waveEditInteraction_ == WaveEditInteraction::MoveTransition) {
@@ -3088,6 +3146,11 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
                 QString::fromStdString(formatTick(displayedRange->first, project_->timeBase)),
                 QString::fromStdString(formatTick(displayedRange->second, project_->timeBase)));
         }
+        if (waveEditDragAutoScrollDirection_ != 0) {
+            message += waveEditDragAutoScrollDirection_ < 0
+                ? tr("  |  Auto-scroll left")
+                : tr("  |  Auto-scroll right");
+        }
         emit statusMessage(message);
         return;
     }
@@ -3173,7 +3236,9 @@ void WaveCanvas::mouseReleaseEvent(QMouseEvent* event)
             commitDraw(event->position().toPoint());
             break;
         case Tool::WaveEdit:
+            stopWaveEditDragAutoScroll();
             commitWaveEdit(event->position().toPoint());
+            waveEditDragAutoScrolled_ = false;
             break;
         case Tool::Marker:
             commitMarker(event->position().toPoint());
@@ -4590,6 +4655,73 @@ void WaveCanvas::stopLaneDragAutoScroll()
     if (laneDragAutoScrollTimer_) laneDragAutoScrollTimer_->stop();
 }
 
+void WaveCanvas::updateWaveEditDragAutoScroll(
+    const QPoint& pointerPosition,
+    const Qt::KeyboardModifiers modifiers)
+{
+    waveEditDragAutoScrollPointer_ = pointerPosition;
+    waveEditDragAutoScrollModifiers_ = modifiers;
+    auto direction = 0;
+    const auto dragStarted =
+        (pointerPosition - waveEditPressPosition_).manhattanLength()
+        >= QApplication::startDragDistance();
+    if (drawing_
+        && tool_ == Tool::WaveEdit
+        && dragStarted
+        && horizontalScrollBar()->maximum() > 0) {
+        if (pointerPosition.x() <= headerWidth_ + WaveEditDragAutoScrollMargin
+            && horizontalScrollBar()->value() > horizontalScrollBar()->minimum()) {
+            direction = -1;
+        } else if (pointerPosition.x()
+                       >= viewport()->width() - WaveEditDragAutoScrollMargin
+                   && horizontalScrollBar()->value()
+                       < horizontalScrollBar()->maximum()) {
+            direction = 1;
+        }
+    }
+    waveEditDragAutoScrollDirection_ = direction;
+    if (direction == 0) {
+        if (waveEditDragAutoScrollTimer_) waveEditDragAutoScrollTimer_->stop();
+    } else if (waveEditDragAutoScrollTimer_
+               && !waveEditDragAutoScrollTimer_->isActive()) {
+        waveEditDragAutoScrollTimer_->start();
+    }
+}
+
+void WaveCanvas::advanceWaveEditDragAutoScroll()
+{
+    if (!drawing_
+        || tool_ != Tool::WaveEdit
+        || waveEditDragAutoScrollDirection_ == 0) {
+        stopWaveEditDragAutoScroll();
+        return;
+    }
+    const auto previous = horizontalScrollBar()->value();
+    horizontalScrollBar()->setValue(
+        previous
+        + waveEditDragAutoScrollDirection_ * WaveEditDragAutoScrollStep);
+    if (horizontalScrollBar()->value() == previous) {
+        stopWaveEditDragAutoScroll();
+        return;
+    }
+    waveEditDragAutoScrolled_ = true;
+    QMouseEvent syntheticMove(
+        QEvent::MouseMove,
+        QPointF(waveEditDragAutoScrollPointer_),
+        QPointF(viewport()->mapToGlobal(waveEditDragAutoScrollPointer_)),
+        Qt::NoButton,
+        Qt::LeftButton,
+        waveEditDragAutoScrollModifiers_);
+    mouseMoveEvent(&syntheticMove);
+}
+
+void WaveCanvas::stopWaveEditDragAutoScroll()
+{
+    waveEditDragAutoScrollDirection_ = 0;
+    waveEditDragAutoScrollModifiers_ = Qt::NoModifier;
+    if (waveEditDragAutoScrollTimer_) waveEditDragAutoScrollTimer_->stop();
+}
+
 void WaveCanvas::updateLaneDropTarget(const int y)
 {
     laneDropDestinationIndex_.reset();
@@ -4942,6 +5074,8 @@ std::vector<std::pair<Tick, Tick>> WaveCanvas::beatRangesBetween(
 
 void WaveCanvas::clearWaveEditState()
 {
+    stopWaveEditDragAutoScroll();
+    waveEditDragAutoScrolled_ = false;
     explicitRangeSelection_ = false;
     hideRangeEditPalette();
     if (rangeValueEdit_) rangeValueEdit_->setModified(false);
