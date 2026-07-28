@@ -2671,6 +2671,8 @@ int main(int argc, char* argv[])
                 if (!window.statusBar()->currentMessage().contains(
                         QStringLiteral("Ctrl+Left/Right jumps edges"))
                     || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Enter edits value"))
+                    || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("value X"))) {
                     fail(QStringLiteral(
                         "Signal selection did not disclose adjacent edge navigation"));
@@ -2733,6 +2735,126 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                sendKey(canvas, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                auto* busPalette = canvas->findChild<QWidget*>(
+                    QStringLiteral("BusPresetPalette"));
+                auto* busValueEdit = canvas->findChild<QLineEdit*>(
+                    QStringLiteral("BusPresetValueEdit"));
+                const auto busEditEntryStatus = window.statusBar()->currentMessage();
+                if (!busPalette
+                    || !busPalette->isVisible()
+                    || !busValueEdit
+                    || !busValueEdit->hasFocus()
+                    || busValueEdit->text() != QStringLiteral("0x35")
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !busEditEntryStatus.contains(
+                        QStringLiteral("Edit data[7:0] at 50 ns"))
+                    || !busEditEntryStatus.contains(
+                        QStringLiteral("current value 0x35"))
+                    || !busEditEntryStatus.contains(QStringLiteral("Enter"))
+                    || !busEditEntryStatus.contains(QStringLiteral("Esc cancels"))) {
+                    qCritical().noquote()
+                        << "Bus keyboard edit diagnostics"
+                        << "palette" << (busPalette && busPalette->isVisible())
+                        << "editor" << static_cast<bool>(busValueEdit)
+                        << "focus" << (busValueEdit && busValueEdit->hasFocus())
+                        << "text" << (busValueEdit
+                                ? busValueEdit->text()
+                                : QStringLiteral("<missing>"))
+                        << "cursor" << canvas->cursorTick()
+                        << "scenarioChanged" << (scenario != originalScenario)
+                        << "undo" << undoAction->isEnabled()
+                        << "save" << saveState->text()
+                        << "status" << busEditEntryStatus;
+                    fail(QStringLiteral(
+                        "Enter did not open the selected Bus value as a reversible inline draft"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto busEditScreenshotPath = waveEditAutoScrollScreenshotPath;
+                    const auto suffix = busEditScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        busEditScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-keyboard-bus-edit"));
+                    } else {
+                        busEditScreenshotPath.append(
+                            QStringLiteral("-keyboard-bus-edit.png"));
+                    }
+                    if (!window.grab().save(busEditScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save keyboard Bus value edit screenshot"));
+                        return;
+                    }
+                }
+
+                sendKey(busValueEdit, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (busPalette->isVisible()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Escape did not discard the keyboard Bus value draft without changes"));
+                    return;
+                }
+
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                if (!busPalette->isVisible() || !busValueEdit->hasFocus()) {
+                    fail(QStringLiteral(
+                        "Enter could not reopen the selected Bus value editor"));
+                    return;
+                }
+                busValueEdit->setText(QStringLiteral("0x5a"));
+                busValueEdit->setModified(true);
+                sendKey(busValueEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                const auto* keyboardEditedBus = wave::findLane(
+                    scenario,
+                    "lane-wave-edit-scroll");
+                const auto keyboardEditedValue = keyboardEditedBus
+                    && std::any_of(
+                        keyboardEditedBus->segments.begin(),
+                        keyboardEditedBus->segments.end(),
+                        [](const wave::Segment& segment) {
+                            return segment.start <= 50'000
+                                && 50'000 < segment.end
+                                && segment.value == "0x5a";
+                        });
+                const auto keyboardSelection = canvas->selectedTimeRange();
+                const auto busEditCommitStatus = window.statusBar()->currentMessage();
+                if (busPalette->isVisible()
+                    || !keyboardEditedValue
+                    || !keyboardSelection
+                    || keyboardSelection->first > 50'000
+                    || keyboardSelection->second <= 50'000
+                    || scenario == originalScenario
+                    || !undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || !window.windowTitle().contains(QStringLiteral(" *"))
+                    || !busEditCommitStatus.contains(QStringLiteral("data[7:0]"))
+                    || !busEditCommitStatus.contains(QStringLiteral("0x5a"))
+                    || !busEditCommitStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    fail(QStringLiteral(
+                        "Keyboard Bus value commit did not change one beat with visible undo feedback"));
+                    return;
+                }
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+                if (scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || window.windowTitle().contains(QStringLiteral(" *"))) {
+                    fail(QStringLiteral(
+                        "Undo did not restore the exact pre-keyboard-edit Bus and Saved state"));
+                    return;
+                }
                 sendKey(canvas, Qt::Key_Home);
                 const auto clockLaneY = 40
                     + scenario.lanes.front().height

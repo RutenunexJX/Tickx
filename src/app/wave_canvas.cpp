@@ -1843,6 +1843,9 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
             selectionMessage.append(
                 tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
                     .arg(laneValueAt(*lane, cursorTick_)));
+            if (lane->kind == LaneKind::Bus) {
+                selectionMessage.append(tr(" · Enter edits value"));
+            }
         }
         if (lockedMarkerDeselected) {
             selectionMessage.append(tr(" · locked cursor/range deselected"));
@@ -2164,6 +2167,41 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         }
+        if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
+            && event->modifiers() == Qt::NoModifier) {
+            const auto* lane = findLane(*scenario_, selectedLaneId_);
+            if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
+                emit statusMessage(
+                    tr("Finish or cancel the current drag before editing a Bus value"));
+            } else if (explicitRangeSelection_) {
+                if (rangeValueEdit_ && rangeValueEdit_->isVisible()) {
+                    rangeValueEdit_->setFocus(Qt::OtherFocusReason);
+                    rangeValueEdit_->selectAll();
+                    emit statusMessage(
+                        tr("Edit selected Bus range · type a value and press Enter · Esc clears the range"));
+                } else {
+                    emit statusMessage(
+                        tr("Esc clears the selected range before editing one Bus beat"));
+                }
+            } else if (!lane || lane->kind != LaneKind::Bus) {
+                emit statusMessage(
+                    tr("Select a Bus signal before pressing Enter to edit its value"));
+            } else if (scenario_->duration <= 0 || cursorTick_ >= scenario_->duration) {
+                emit statusMessage(
+                    tr("Timeline End has no editable beat · press Left or Ctrl+Left first"));
+            } else {
+                promptBusValueAt(lane->id, cursorTick_);
+                emit statusMessage(
+                    tr("Edit %1 at %2 · current value %3 · type a value and press Enter · Esc cancels")
+                        .arg(QString::fromStdString(lane->name))
+                        .arg(QString::fromStdString(formatTick(
+                            cursorTick_,
+                            project_->timeBase)))
+                        .arg(laneValueAt(*lane, cursorTick_)));
+            }
+            event->accept();
+            return;
+        }
         if ((event->key() == Qt::Key_Up || event->key() == Qt::Key_Down)
             && event->modifiers() == Qt::NoModifier) {
             const auto* focusedEditor = qobject_cast<QLineEdit*>(
@@ -2227,7 +2265,7 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                 cursorTick_ = *edge;
                 ensureCursorVisible(cursorTick_);
                 snapGuideTick_.reset();
-                emit statusMessage(
+                auto message =
                     forward
                         ? tr("Next edge on %1 · %2 · value %3 · Ctrl+Left goes back")
                               .arg(QString::fromStdString(lane->name))
@@ -2240,7 +2278,11 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                               .arg(QString::fromStdString(formatTick(
                                   cursorTick_,
                                   project_->timeBase)))
-                              .arg(laneValueAt(*lane, cursorTick_)));
+                              .arg(laneValueAt(*lane, cursorTick_));
+                if (lane->kind == LaneKind::Bus) {
+                    message.append(tr(" · Enter edits value"));
+                }
+                emit statusMessage(message);
                 viewport()->update();
             } else {
                 emit statusMessage(
@@ -2665,6 +2707,9 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             selectionMessage.append(
                 tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
                     .arg(laneValueAt(*lane, cursorTick_)));
+            if (lane->kind == LaneKind::Bus) {
+                selectionMessage.append(tr(" · Enter edits value"));
+            }
         }
         if (lockedMarkerDeselected) {
             selectionMessage.append(tr(" · locked cursor/range deselected"));
@@ -3857,16 +3902,18 @@ void WaveCanvas::positionBusPresetPalette()
     busPresetPalette_->raise();
 }
 
-void WaveCanvas::showBusPresetPalette(const Lane& lane, const QPoint& anchor)
+void WaveCanvas::showBusPresetPalette(
+    const Lane& lane,
+    const QPoint& anchor,
+    const std::optional<Tick> exactTick)
 {
     if (lane.kind != LaneKind::Bus || !scenario_ || scenario_->duration <= 0) {
         hideBusPresetPalette();
         return;
     }
     busPresetLaneId_ = lane.id;
-    const auto requested = anchor.x() >= headerWidth_
-        ? tickAtX(anchor.x())
-        : cursorTick_;
+    const auto requested = exactTick.value_or(
+        anchor.x() >= headerWidth_ ? tickAtX(anchor.x()) : cursorTick_);
     busPresetAnchorTick_ = std::clamp<Tick>(requested, 0, scenario_->duration - 1);
     const auto [start, end] = beatRangeAt(*busPresetAnchorTick_, lane);
     if (busPresetContextLabel_) {
@@ -4503,7 +4550,7 @@ void WaveCanvas::promptBusValueAt(const std::string& laneId, const Tick tick)
     if (!scenario_) return;
     const auto* lane = findLane(*scenario_, laneId);
     if (!lane || lane->kind != LaneKind::Bus) return;
-    showBusPresetPalette(*lane, QPoint(xAtTick(tick), 0));
+    showBusPresetPalette(*lane, QPoint(xAtTick(tick), 0), tick);
     if (busValueEdit_) {
         busValueEdit_->setFocus(Qt::OtherFocusReason);
         busValueEdit_->selectAll();
@@ -5421,12 +5468,16 @@ void WaveCanvas::selectAdjacentLane(const bool downward)
         scenario_->lanes.end(),
         selectable);
     emit selectionChanged(QString::fromStdString(target->id), cursorTick_);
-    emit statusMessage(
-        tr("Selected signal %1 · %2 of %3 · value %4 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
-            .arg(QString::fromStdString(target->name))
-            .arg(ordinal)
-            .arg(total)
-            .arg(laneValueAt(*target, cursorTick_)));
+    auto message = tr(
+        "Selected signal %1 · %2 of %3 · value %4 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
+                       .arg(QString::fromStdString(target->name))
+                       .arg(ordinal)
+                       .arg(total)
+                       .arg(laneValueAt(*target, cursorTick_));
+    if (target->kind == LaneKind::Bus) {
+        message.append(tr(" · Enter edits value"));
+    }
+    emit statusMessage(message);
     viewport()->setCursor(Qt::PointingHandCursor);
     viewport()->update();
 }

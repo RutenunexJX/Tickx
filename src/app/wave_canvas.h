@@ -218,7 +218,10 @@ private:
     [[nodiscard]] bool hasPendingValueEdit() const noexcept;
     void syncDurationEditor();
     void positionBusPresetPalette();
-    void showBusPresetPalette(const Lane& lane, const QPoint& anchor);
+    void showBusPresetPalette(
+        const Lane& lane,
+        const QPoint& anchor,
+        std::optional<Tick> exactTick = std::nullopt);
     void hideBusPresetPalette();
     void showRangeEditPalette();
     void hideRangeEditPalette();

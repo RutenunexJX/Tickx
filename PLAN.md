@@ -1,6 +1,6 @@
 # Wave Workbench 实施计划
 
-更新时间：2026-07-28
+更新时间：2026-07-29
 
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
@@ -4162,6 +4162,59 @@ Automated QA: 选中 data[7:0] 时先显示隐式 X，Ctrl+Right 到 50 ns 后�
               选中 clk 后，5 ns/10 ns/5 ns 导航分别显示 0/1/0。长列表选择 signal_00 和 signal_19 时显示隐式 0；Measure 专项保持通过。
 Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-next-edge.png
                      build/qtcreator-debug/lane-autoscroll-smoke-keyboard-navigation.png
+Desktop interaction: none
+```
+
+## 持续迭代 74：Bus 键盘一拍编辑
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Bus 已有非模态一拍编辑条、值校验和命令栈提交，但 Wave Edit 的键盘路径在“Up/Down 选信号→Ctrl+Left/Right 到边沿→读值”后中断；Enter 未处理，用户仍需重新定位鼠标并双击或点击浮层。
+- 用户视角需要在核对到某个 Bus 边沿后直接修改该拍：目标信号、时间和当前值均已确定，此时再要求鼠标命中同一位置会增加一次定位和一次精度判断。选中反馈、键盘选信号反馈和 Bus 边沿导航反馈现在均公开 `Enter edits value`。
+- Wave Edit 画布获得焦点后，普通 Enter 对当前所选 Bus 打开既有便携编辑条，将当前整数 tick 作为精确目标并预填该处采样值；编辑条内 Enter 提交当前一拍，Esc 取消。提交继续走 `SetLaneRangeCommand`，保持现有值规范化、Event/Relation 一致性、Undo/Redo、autosave 和 Saved 语义。
+- 拖动或标题重排期间 Enter 要求先结束当前手势；没有 Bus 目标时说明先选择 Bus；光标位于 Scenario End 时提示 Left/Ctrl+Left，不把 End 钳到最后一拍。显式 Bus 范围已存在时，Enter 聚焦固定范围值输入框，不将范围静默缩成单拍。
+- 首次目标 smoke 发现精确位于 50 ns Segment 起点时，入口把 tick 转成像素后再反算为 49,999 tick，导致编辑框误显示空值。`showBusPresetPalette()` 现在接受可选精确 tick，键盘与双击入口不再经像素往返；鼠标点击路径仍按真实指针位置换算。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：验证 Bus 选中提示、50 ns 边沿 Enter 打开、`0x35` 精确预填、编辑框可见与获得焦点、上下文/Enter/Esc 反馈、模型/Undo/Saved 零变化、Esc 取消、再次打开并提交 `0x5a`、一拍选择、Unsaved/标题星号/Ctrl+Z 反馈、单步 Undo 精确恢复原 Scenario 与 Saved，以及第五张离屏截图。失败断言保留控件、焦点、值、tick 和状态栏诊断。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 20 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 15.58 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.31 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 2.26 sec
+
+Automated QA: 选中 data[7:0] 后，状态栏公开 Enter；在 50 ns 边沿按 Enter，便携编辑条保持该精确时间并预填 0x35，模型仍为 Saved 且无 Undo；
+              Esc 关闭草稿且零修改。再次 Enter 后输入 0x5a 并提交，只形成一个可撤销写值，显示 Unsaved changes、标题星号和 Ctrl+Z；
+              单步 Undo 恢复原始 50–100 ns 的 0x35 Segment、完整 Scenario 与 Saved 状态。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-keyboard-bus-edit.png
 Desktop interaction: none
 ```
 

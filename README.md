@@ -145,6 +145,11 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
 - 单击信号名选中当前信号后，状态栏直接提示边沿导航；Wave Edit 画布获得焦点时，`Ctrl+Left` / `Ctrl+Right` 严格跳到当前时间之前/之后的最近真实边沿，不会停在当前位置。Bit、Bus 与 Enum 使用 Segment 起止边界，Clock 同时使用周期上升/下降沿和覆盖区段边界；没有相邻边沿时光标保持原位，并提示使用 Home 或 End。该导航保留缩放和信号目标，不修改模型、Undo 或 Saved 状态。
 - Wave Edit 画布获得焦点时，`Up` / `Down` 选择当前行上方/下方的可见信号并跳过 Group；无选择时分别从末条/首条信号开始。时间光标、水平位置和模型保持不变，长列表只滚动到足以完整显示目标行，不额外滚到末尾添加区。到达首末信号时保持原目标并说明反向键；键盘选中不会武装整条信号 Delete。显式范围或拖动期间先提示完成/按 Esc，不隐式清除操作；End、重命名及其他画布内文本框获得焦点时 Up/Down 不会冒泡为信号导航。`Alt+Up` / `Alt+Down` 的可撤销重排语义不变。
 - Wave Edit 中，当前所选非 Group 信号的标题右端显示编辑光标处的采样值，使用与编辑光标一致的青色；Bit 的隐式值显示 `0`，Bus/Enum 的隐式值显示 `X`，Clock 按周期与覆盖状态采样。只为所选信号预留值宽度，名称继续中间省略，未选信号不增加杂讯；拖动预览期间暂时隐藏模型值，避免把未提交预览误认为结果。Up/Down 和 Ctrl+Left/Right 的状态反馈同步携带值；Measure 仍按活动光标显示全部信号值。
+- Wave Edit 选中 Bus 后，状态栏在鼠标选中、Up/Down 切换及 Ctrl+Left/Right 到达边沿时直接提示
+  `Enter edits value`。画布获得焦点后按 Enter，会在当前编辑 tick 附近打开既有一拍编辑条并预填
+  精确采样值；Segment 边沿直接使用整数 tick，不经过像素往返，因此不会误取边沿前的隐式 `X`。
+  编辑条内按 Enter 提交一个可撤销的一拍写值，Esc 放弃草稿且不改变模型、Undo 或 Saved 状态；
+  位于 Scenario End 时明确提示先向左移动，不会静默改写末拍。
 - Clock 波形右键可对一拍执行 Gate、Drive X 或 Run。Run 清除该拍覆盖后保持拍级选择，并显示
   `restored normal clock waveform` 与撤销提示；已正常运行时显示 `no values changed`，不新增
   Undo 或清除 Redo。
@@ -347,7 +352,9 @@ exports/
   offscreen 覆盖。
 - Bus 浮层覆盖直接值、非法值纠错、0/X/Z/Don't care 单击与拖放以及波形右键；未提交值的
   点击别处提交、隐藏草稿恢复、Save/New/Open/Close/Export 门禁、Bus/End 冲突顺序、鼠标失焦
-  坐标保护及 Undo 后越界草稿的 End 延长恢复均有专项离屏回归。
+  坐标保护及 Undo 后越界草稿的 End 延长恢复均有专项离屏回归。长时间轴专项另覆盖选中 Bus 后
+  Enter 在 50 ns Segment 精确预填 `0x35`、焦点与上下文提示、Esc 零修改取消、再次 Enter 提交
+  `0x5a`、单步 Undo 精确恢复 Scenario 与 Saved，以及编辑条离屏截图。
 - Waveform 工具栏离屏检查确认常驻动作仅有临时 Measure、缩放和 Fit；持久选择期间的批量赋值栏
   固定在工具栏中，960 像素宽度下无裁切且显隐不移动画布。不存在 Edit、Transition、Export 与
   Undo/Redo 按钮，菜单快捷键仍存在。
