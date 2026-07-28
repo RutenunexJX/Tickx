@@ -1658,6 +1658,63 @@ Visual QA: 鼠标已离开且无吸附提示线时，req 的 60–70 ns 单拍�
 Desktop interaction: none
 ```
 
+## 持续迭代 30：撤销/重做与 Segment 清除反馈闭环
+
+状态：完成
+
+已交付：
+
+- 用户审计确认普通 `Ctrl+Z` / `Ctrl+Y` 只刷新波形，状态栏仍保留操作前消息，用户无法确认动作
+  是否已经撤销或重做；非 Bit Segment 删除也只显示通用文本，不说明目标、结果或依赖变化。
+- MainWindow 在执行前读取命令栈描述；成功撤销后显示 `Undid <command> · Ctrl+Y to redo`，
+  成功重做后显示 `Redid <command> · Ctrl+Z to undo`。Edit 菜单与键盘快捷键共用同一反馈。
+- Segment 清除反馈包含信号名、精确时间范围和隐式结果：Bit 为 0，Bus/Enum/Transaction/Event
+  为 X，Clock 为正常时钟波形。若边沿消失导致 Relation 被移除，状态栏说明数量并明确
+  `Ctrl+Z` 会同时恢复波形和关系。
+- `wave-user-journey-smoke` 以真实 `Ctrl+Z` / `Ctrl+Y` 往返一拍 Bit 编辑并断言模型与消息；
+  `wave-wave-edit-smoke` 为 Bus Segment 建立临时 Relation，验证 Delete 清除、依赖提示、
+  Undo/Redo 精确往返及最终恢复。全部 GUI 路径继续使用 offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 18 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.44 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.21 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 1.24 sec
+
+Screenshot:
+  build/qtcreator-debug/wave-edit-smoke-segment-clear-feedback.png
+Visual QA: data[7:0] 的 100–170 ns 清除区间显示居中红色虚线 X；状态栏同时显示信号、时间范围、
+           隐式 X、移除 1 条 Relation 及 Ctrl+Z 同步恢复说明，波形和刻度无遮挡
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

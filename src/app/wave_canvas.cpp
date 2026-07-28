@@ -3806,15 +3806,19 @@ void WaveCanvas::clearSelectedSegment()
         || selectedSegmentId_.empty()) {
         return;
     }
+    const auto* lane = findLane(*scenario_, selectedSegmentLaneId_);
     const auto* segment = segmentById(selectedSegmentLaneId_, selectedSegmentId_);
-    if (!segment) {
+    if (!lane || !segment) {
         clearWaveEditState();
         viewport()->update();
         return;
     }
     const auto laneId = selectedSegmentLaneId_;
+    const auto laneName = lane->name;
+    const auto laneKind = lane->kind;
     const auto start = segment->start;
     const auto end = segment->end;
+    const auto relationCountBefore = scenario_->relations.size();
     try {
         commandStack_->execute(std::make_unique<ClearLaneRangeCommand>(
             *scenario_,
@@ -3832,7 +3836,31 @@ void WaveCanvas::clearSelectedSegment()
     emit modelEdited();
     emit commandAvailabilityChanged();
     refreshModel();
-    emit statusMessage(tr("Cleared selected segment"));
+    const auto formatTime = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : QString::number(tick);
+    };
+    const auto result = laneKind == LaneKind::Clock
+        ? tr("normal clock waveform")
+        : laneKind == LaneKind::Bit
+            ? tr("implicit 0")
+            : tr("implicit X");
+    auto message = tr("%1 · %2–%3 cleared to %4")
+                       .arg(QString::fromStdString(laneName))
+                       .arg(formatTime(start))
+                       .arg(formatTime(end))
+                       .arg(result);
+    const auto removedRelationCount = relationCountBefore
+        - std::min(relationCountBefore, scenario_->relations.size());
+    if (removedRelationCount > 0) {
+        message += tr(" · removed %1 relation(s) · "
+                      "Ctrl+Z restores waveform and relations")
+                       .arg(static_cast<qulonglong>(removedRelationCount));
+    } else {
+        message += tr(" · Ctrl+Z to undo");
+    }
+    emit statusMessage(message);
 }
 void WaveCanvas::updateLaneDropTarget(const int y)
 {

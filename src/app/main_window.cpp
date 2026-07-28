@@ -903,6 +903,8 @@ void MainWindow::undo()
         cancelQuickLaneSetup(pendingQuickLaneId_);
         return;
     }
+    const auto description =
+        QString::fromStdString(commandStack_.undoDescription());
     if (commandStack_.undo()) {
         invalidateCompareResult();
         dirty_ = true;
@@ -910,6 +912,9 @@ void MainWindow::undo()
         canvas_->refreshModel();
         updateCommandActions();
         updateWindowTitle();
+        statusBar()->showMessage(
+            tr("Undid %1 · Ctrl+Y to redo").arg(description),
+            5'000);
     }
 }
 
@@ -919,6 +924,8 @@ void MainWindow::redo()
         canvas_->showQuickLaneSetupError(tr("Finish or cancel the current signal first."));
         return;
     }
+    const auto description =
+        QString::fromStdString(commandStack_.redoDescription());
     if (commandStack_.redo()) {
         invalidateCompareResult();
         dirty_ = true;
@@ -926,6 +933,9 @@ void MainWindow::redo()
         canvas_->refreshModel();
         updateCommandActions();
         updateWindowTitle();
+        statusBar()->showMessage(
+            tr("Redid %1 · Ctrl+Z to undo").arg(description),
+            5'000);
     }
 }
 

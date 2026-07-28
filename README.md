@@ -117,7 +117,8 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   拖动期间按 Esc 会立即清除插入反馈并取消重排，随后释放鼠标不会提交 `MoveLaneCommand`。
 - 单击非 Bit Segment 进行选择；拖动主体整体移动，拖动左右手柄修改边界，双击修改现有值，
   `Delete` / `Backspace` 清除为该信号的隐式值。右键波形可设置常用值、插入一拍 Pulse、编辑
-  完整 Segment 或清除 Segment。提交后状态栏显示信号、时间范围、结果和 `Ctrl+Z` 提示。
+  完整 Segment 或清除 Segment。清除后状态栏显示信号、时间范围、隐式结果和 `Ctrl+Z` 提示；
+  若同步移除引用消失边沿的 Relation，会说明数量以及撤销将同时恢复波形和关系。
 - Bit lane 悬浮时高亮当前拍并显示将变为 `0` 或 `1`；单击只翻转这一拍，横向拖动逐拍翻转
   覆盖范围。选中 Bit 后可直接按 `0`、`1`、`X`、`Z` 写入当前拍，也可从右键菜单选择四态值；
   写值后仍保持原拍级选择，不会扩大到相邻同电平 Segment。`Delete` / `Backspace` 或右键
@@ -159,7 +160,8 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   工程 Marker；单击后可拖动或用方向键移动，`Delete` / `Backspace` 删除，均支持 Undo/Redo。
 - 活动光标存在时，每个可见信号在左侧名称区域显示该时刻的采样值。再次点击 `Measure` 或按
   Esc 返回直接波形编辑，活动、临时和选中状态清除，持久锁定光标保留。
-- Undo/Redo 位于 Edit 菜单，并保留 `Ctrl+Z` / `Ctrl+Y`；工具栏不重复显示按钮。
+- Undo/Redo 位于 Edit 菜单，并保留 `Ctrl+Z` / `Ctrl+Y`；工具栏不重复显示按钮。执行后状态栏
+  显示 `Undid` / `Redid`、具体命令及相反快捷键，明确本次恢复结果和下一步。
 - 状态栏常驻显示 `Not saved`、`Unsaved changes`、`Saved` 或 `Recovery loaded · Save required`；
   自动恢复快照不会被误报为正式保存。File 菜单使用原子替换方式保存 `project.wave.json`，首次
   保存 Untitled 工程时从文件名推断项目名。修改后 1.5 秒启动 Qt Concurrent 后台恢复快照。
@@ -254,7 +256,8 @@ exports/
   Delete 删除以及菜单快捷键均通过离屏回归；双击/F2 无模态重命名、原处校验、真实失焦提交、
   无效新增阻止删除/Bus 控件/Segment 双击并可 Esc 恢复、有效新增先提交再删除、两步 Undo 顺序、
   多个交错命令逐次恢复以及 Marker 模式标题拖动 Esc 取消均具有专项 offscreen 覆盖。
-- 无模式直接编辑的 Segment 选择、整体移动、边界缩放、双击改值、Delete 清除与 Undo，Bit
+- 无模式直接编辑的 Segment 选择、整体移动、边界缩放、双击改值、Delete 清除、Relation 清理提示
+  与 Undo/Redo 确认，Bit
   单拍/多拍翻转、0/1/X/Z 键盘与右键写值后的拍级选择、拍级 Clear/Delete、Undo/Redo 和中键
   平移均通过离屏回归；鼠标离开后的持久拍级选中框、跨信号/边沿状态清理也有专项覆盖；
   Shift 跨 lane 持久框选覆盖

@@ -554,6 +554,30 @@ int main(int argc, char* argv[])
                     fail(QStringLiteral("Single-beat Bit edit gave no clear result or undo feedback"));
                     return;
                 }
+                sendKey(canvas, Qt::Key_Z, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                bitLane = wave::findLane(window.project().scenarios.front(), bitLaneId);
+                if (!bitLane
+                    || !valueAt(*bitLane, 30'000).empty()
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Undid Toggle bit beat"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Y"))) {
+                    fail(QStringLiteral("Ctrl+Z did not confirm the reverted Bit edit"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Y, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                bitLane = wave::findLane(window.project().scenarios.front(), bitLaneId);
+                if (!bitLane
+                    || valueAt(*bitLane, 30'000) != "1"
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Redid Toggle bit beat"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    fail(QStringLiteral("Ctrl+Y did not confirm the restored Bit edit"));
+                    return;
+                }
 
                 const auto busY = laneCenter(busLaneId);
                 click(QPoint(xAtTick(70'000), busY));
@@ -2935,17 +2959,74 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                const auto payloadEvent = std::find_if(
+                    scenario.events.begin(),
+                    scenario.events.end(),
+                    [](const wave::Event& event) {
+                        return event.linkedSegmentId == "segment-data-payload";
+                    });
+                const auto* existingRelation = wave::findRelation(
+                    scenario,
+                    "relation-req-ack");
+                if (payloadEvent == scenario.events.end() || !existingRelation) {
+                    qCritical().noquote()
+                        << "Segment clear relation feedback fixture is missing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                auto clearFeedbackRelation = *existingRelation;
+                clearFeedbackRelation.id = "relation-segment-clear-feedback";
+                clearFeedbackRelation.sourceEventId = payloadEvent->id;
+                clearFeedbackRelation.description =
+                    "temporary Segment clear feedback relation";
+                auto& segmentClearScenario =
+                    const_cast<wave::Scenario&>(scenario);
+                segmentClearScenario.relations.push_back(clearFeedbackRelation);
+                const auto beforeSelectedSegmentClear = scenario;
+
                 canvas->setFocus(Qt::OtherFocusReason);
                 sendKey(Qt::Key_Delete);
                 dataLane = wave::findLane(scenario, "lane-data");
+                const auto segmentClearMessage = window.statusBar()->currentMessage();
                 if (!dataLane
                     || !valueAt(*dataLane, payloadEditTick).empty()
-                    || !canvas->selectedSegmentId().isEmpty()) {
+                    || !canvas->selectedSegmentId().isEmpty()
+                    || wave::findRelation(
+                        scenario,
+                        "relation-segment-clear-feedback")
+                    || !segmentClearMessage.contains(QStringLiteral("data[7:0]"))
+                    || !segmentClearMessage.contains(QStringLiteral("implicit X"))
+                    || !segmentClearMessage.contains(
+                        QStringLiteral("removed 1 relation"))
+                    || !segmentClearMessage.contains(
+                        QStringLiteral("Ctrl+Z restores waveform and relations"))) {
                     qCritical().noquote() << "Delete did not clear the selected Segment";
                     window.hide();
                     application.exit(4);
                     return;
                 }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto segmentClearScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix =
+                        segmentClearScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        segmentClearScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-segment-clear-feedback"));
+                    } else {
+                        segmentClearScreenshotPath.append(
+                            QStringLiteral("-segment-clear-feedback.png"));
+                    }
+                    if (!window.grab().save(segmentClearScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save Segment clear feedback screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                const auto afterSelectedSegmentClear = scenario;
                 if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)) {
                     qCritical().noquote() << "Cannot undo selected Segment deletion";
                     window.hide();
@@ -2953,12 +3034,42 @@ int main(int argc, char* argv[])
                     return;
                 }
                 dataLane = wave::findLane(scenario, "lane-data");
-                if (!dataLane || valueAt(*dataLane, payloadEditTick) != "0x2a") {
+                if (!dataLane
+                    || valueAt(*dataLane, payloadEditTick) != "0x2a"
+                    || scenario != beforeSelectedSegmentClear
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Undid Clear lane range"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Y"))) {
                     qCritical().noquote() << "Selected Segment deletion undo failed";
                     window.hide();
                     application.exit(4);
                     return;
                 }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || scenario != afterSelectedSegmentClear
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Redid Clear lane range"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote() << "Selected Segment deletion redo failed";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeSelectedSegmentClear) {
+                    qCritical().noquote()
+                        << "Selected Segment deletion final recovery failed";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                std::erase_if(
+                    segmentClearScenario.relations,
+                    [](const wave::Relation& relation) {
+                        return relation.id == "relation-segment-clear-feedback";
+                    });
 
                 sendMouse(
                     QEvent::MouseMove,
