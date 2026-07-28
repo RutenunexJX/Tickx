@@ -1977,6 +1977,7 @@ int main(int argc, char* argv[])
                 return menuHandled && dialogHandled;
             };
 
+            const auto busWidthBeforeEdit = quickBus.width;
             if (!editFromContext(quickBus.id, [](QDialog* dialog) {
                     auto* width = dialog->findChild<QSpinBox*>(
                         QStringLiteral("BusWidthSpin"));
@@ -1992,8 +1993,48 @@ int main(int argc, char* argv[])
             }
             const auto* editedBus = wave::findLane(
                 window.project().scenarios.front(), quickBus.id);
+            if (!editedBus
+                || editedBus->width != 16
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("width 16"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Bus right-click parameters lacked exact result feedback"));
+                return;
+            }
+            if (!editFromContext(quickBus.id, [](QDialog* dialog) {
+                    const auto* width = dialog->findChild<QSpinBox*>(
+                        QStringLiteral("BusWidthSpin"));
+                    return dialog->objectName()
+                               == QStringLiteral("QuickLaneParametersDialog")
+                        && width
+                        && width->value() == 16;
+                })) {
+                fail(QStringLiteral("Unchanged Bus parameters could not be confirmed"));
+                return;
+            }
+            const auto unchangedBusMessage = window.statusBar()->currentMessage();
+            editedBus = wave::findLane(window.project().scenarios.front(), quickBus.id);
+            if (!editedBus
+                || editedBus->width != 16
+                || !unchangedBusMessage.contains(
+                    QStringLiteral("no properties changed"))
+                || unchangedBusMessage.contains(QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Unchanged Bus parameters produced misleading feedback"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            editedBus = wave::findLane(window.project().scenarios.front(), quickBus.id);
+            if (!editedBus || editedBus->width != busWidthBeforeEdit) {
+                fail(QStringLiteral("Unchanged Bus parameters inserted an empty Undo entry"));
+                return;
+            }
+            redoAction->trigger();
+            QCoreApplication::processEvents();
+            editedBus = wave::findLane(window.project().scenarios.front(), quickBus.id);
             if (!editedBus || editedBus->width != 16) {
-                fail(QStringLiteral("Bus right-click parameters were not committed"));
+                fail(QStringLiteral("Unchanged Bus parameters damaged the real Redo entry"));
                 return;
             }
 
@@ -2011,11 +2052,23 @@ int main(int argc, char* argv[])
                 return;
             }
             renamedBit = wave::findLane(window.project().scenarios.front(), quickBit.id);
-            if (!renamedBit || renamedBit->height != 64) {
-                fail(QStringLiteral("Bit right-click parameters were not committed"));
+            if (!renamedBit
+                || renamedBit->height != 64
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("height 64"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Bit right-click parameters lacked exact result feedback"));
                 return;
             }
 
+            const auto* clockBeforeEdit = wave::findClock(
+                window.project(), quickClock.clockDomainId);
+            if (!clockBeforeEdit) {
+                fail(QStringLiteral("Quick Clock disappeared before parameter editing"));
+                return;
+            }
+            const auto clockPeriodBeforeEdit = clockBeforeEdit->period;
             if (!editFromContext(quickClock.id, [](QDialog* dialog) {
                     auto* mode = dialog->findChild<QComboBox*>(
                         QStringLiteral("ClockRateMode"));
@@ -2035,8 +2088,66 @@ int main(int argc, char* argv[])
             }
             const auto* editedClock = wave::findClock(
                 window.project(), quickClock.clockDomainId);
+            if (!editedClock
+                || editedClock->period != 12'000
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("period 12 ns"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Clock right-click period lacked exact result feedback"));
+                return;
+            }
+            if (!editFromContext(quickClock.id, [](QDialog* dialog) {
+                    const auto* mode = dialog->findChild<QComboBox*>(
+                        QStringLiteral("ClockRateMode"));
+                    const auto* value = dialog->findChild<QLineEdit*>(
+                        QStringLiteral("ClockRateValue"));
+                    return dialog->objectName()
+                               == QStringLiteral("QuickClockParametersDialog")
+                        && mode
+                        && value;
+                })) {
+                fail(QStringLiteral("Unchanged Clock parameters could not be confirmed"));
+                return;
+            }
+            const auto unchangedClockMessage = window.statusBar()->currentMessage();
+            editedClock = wave::findClock(window.project(), quickClock.clockDomainId);
+            if (!editedClock
+                || editedClock->period != 12'000
+                || !unchangedClockMessage.contains(
+                    QStringLiteral("no properties changed"))
+                || unchangedClockMessage.contains(QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Unchanged Clock parameters produced misleading feedback"));
+                return;
+            }
+            if (!canvasAddLaneScreenshotPath.isEmpty()) {
+                auto parameterScreenshotPath = canvasAddLaneScreenshotPath;
+                const auto suffix = parameterScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                if (suffix >= 0) {
+                    parameterScreenshotPath.insert(
+                        suffix,
+                        QStringLiteral("-quick-parameters-no-effect-feedback"));
+                } else {
+                    parameterScreenshotPath.append(
+                        QStringLiteral("-quick-parameters-no-effect-feedback.png"));
+                }
+                if (!window.grab().save(parameterScreenshotPath)) {
+                    fail(QStringLiteral("Cannot save quick-parameter feedback screenshot"));
+                    return;
+                }
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            editedClock = wave::findClock(window.project(), quickClock.clockDomainId);
+            if (!editedClock || editedClock->period != clockPeriodBeforeEdit) {
+                fail(QStringLiteral("Unchanged Clock parameters inserted an empty Undo entry"));
+                return;
+            }
+            redoAction->trigger();
+            QCoreApplication::processEvents();
+            editedClock = wave::findClock(window.project(), quickClock.clockDomainId);
             if (!editedClock || editedClock->period != 12'000) {
-                fail(QStringLiteral("Clock right-click period was not committed"));
+                fail(QStringLiteral("Unchanged Clock parameters damaged the real Redo entry"));
                 return;
             }
 

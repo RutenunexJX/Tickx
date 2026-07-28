@@ -241,14 +241,28 @@ void testClockOverridesAndRetiming()
     secondaryScenario.events.push_back(std::move(secondaryEvent));
     project.scenarios.push_back(std::move(secondaryScenario));
 
+    wave::CommandStack clockStack;
+    const auto beforeUnchangedClock = project;
+    const auto unchangedClock = project.clockDomains.front();
+    expect(
+        !clockStack.execute(std::make_unique<wave::ChangeClockCommand>(
+            project,
+            scenario,
+            unchangedClock.id,
+            unchangedClock)),
+        "unchanged clock properties reported an effect");
+    expectEqual(project, beforeUnchangedClock, "unchanged clock properties changed the project");
+    expectEqual(clockStack.size(), std::size_t{0}, "unchanged clock properties polluted history");
+
     auto replacement = project.clockDomains.front();
     replacement.period = 18'000;
-    wave::CommandStack clockStack;
-    clockStack.execute(std::make_unique<wave::ChangeClockCommand>(
-        project,
-        scenario,
-        replacement.id,
-        replacement));
+    expect(
+        clockStack.execute(std::make_unique<wave::ChangeClockCommand>(
+            project,
+            scenario,
+            replacement.id,
+            replacement)),
+        "real clock property change reported no effect");
     expectEqual(
         project.clockDomains.front().period,
         wave::Tick{18'000},
@@ -285,6 +299,17 @@ void testClockOverridesAndRetiming()
         wave::findEvent(project.scenarios.at(1), "event-secondary-cycle")->tick,
         wave::Tick{50'000},
         "clock change undo did not restore another scenario");
+    const auto afterClockUndo = project;
+    const auto unchangedClockAfterUndo = project.clockDomains.front();
+    expect(
+        !clockStack.execute(std::make_unique<wave::ChangeClockCommand>(
+            project,
+            scenario,
+            unchangedClockAfterUndo.id,
+            unchangedClockAfterUndo)),
+        "unchanged clock properties after Undo reported an effect");
+    expectEqual(project, afterClockUndo, "unchanged clock properties after Undo changed the project");
+    expect(clockStack.canRedo(), "unchanged clock properties discarded the clock Redo branch");
     expect(clockStack.redo(), "clock change redo failed");
 
     scenario.relations.front().minimumDelay = 18'000;
@@ -417,6 +442,19 @@ void testLaneAndGroupPropertyEditing()
         wave::findLane(scenario, "lane-request")->groupId,
         originalRequestGroup,
         "lane property undo did not restore group membership");
+    const auto unchangedRequest = *wave::findLane(scenario, "lane-request");
+    expect(
+        !stack.execute(std::make_unique<wave::ChangeLaneCommand>(
+            project,
+            scenario,
+            unchangedRequest.id,
+            unchangedRequest)),
+        "unchanged lane properties after Undo reported an effect");
+    expect(stack.canRedo(), "unchanged lane properties discarded the lane Redo branch");
+    expectEqual(
+        *wave::findLane(scenario, "lane-request"),
+        unchangedRequest,
+        "unchanged lane properties changed the lane");
     expect(stack.redo(), "lane property redo failed");
 
     const auto* groupLane = wave::findLane(scenario, group.id);

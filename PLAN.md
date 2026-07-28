@@ -1954,6 +1954,66 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 35：快速参数编辑的真实结果与空历史收口
+
+状态：完成
+
+已交付：
+
+- 开发审计确认画布左侧右键的 Clock/Bit/Bus 快速参数入口忽略 `CommandStack::execute()` 的结果；
+  即使所有值保持不变，仍会调用 `markEdited()`、创建空 Undo 并触发未保存/autosave 状态。真实修改
+  后只刷新画布，没有说明实际提交的参数。
+- 用户主流程中，新建 Bus 后通常需要查看或修改位宽，新建 Clock 后需要确认周期。用户打开预填表单
+  后直接确定，会被错误告知工程已修改；真正修改后只能从局部标题推断结果，无法确认 Undo 对应哪次操作。
+- `ChangeLaneCommand` 与 `ChangeClockCommand` 现在根据规范化后的完整前后状态报告真实效果；无变化命令
+  不入栈并保留既有 Redo。快速参数入口只在真实变化时刷新、标记未保存和安排 autosave。
+- Clock 成功后显示信号名、规范化周期与 `Ctrl+Z`；Bit/Bus 成功后显示颜色、高度、Clock 关联以及
+  Bus 的位宽、符号和进制。原值确认显示同一组当前参数与 `no properties changed`，不附错误撤销提示。
+- 核心回归覆盖 Lane/Clock 原值确认、真实修改、完整 Undo/Redo 及空确认后的 Redo 保留；画布信号管理
+  smoke 真实执行 Bus 8→16→原值确认→Undo/Redo，以及 Clock 默认周期→12 ns→原值确认→Undo/Redo。
+  全部 GUI 路径使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.77 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.46 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-canvas-add-lane-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.86 sec
+
+Screenshot generated:
+  build/qtcreator-debug/canvas-signal-management-smoke-quick-parameters-no-effect-feedback.png
+Automated QA: Bus 显示 width 16/Ctrl+Z，原值确认显示 no properties changed；一次 Undo 直接恢复
+              width 8，Redo 精确返回 16。Clock 显示 period 12 ns，原值确认及 Undo/Redo 同样精确
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

@@ -1154,6 +1154,11 @@ std::string ChangeLaneCommand::description() const
     return "Change lane";
 }
 
+bool ChangeLaneCommand::hasEffect() const noexcept
+{
+    return before_ != after_;
+}
+
 ChangeClockCommand::ChangeClockCommand(
     Project& project,
     Scenario& scenario,
@@ -1341,6 +1346,11 @@ void ChangeClockCommand::undo()
 std::string ChangeClockCommand::description() const
 {
     return "Change clock";
+}
+
+bool ChangeClockCommand::hasEffect() const noexcept
+{
+    return beforeClock_ != afterClock_ || beforeScenarios_ != afterScenarios_;
 }
 
 PasteRangeCommand::PasteRangeCommand(

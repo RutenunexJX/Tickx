@@ -1583,6 +1583,10 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
     auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
     if (!lane || lane->kind == LaneKind::Group) return;
 
+    const auto laneName = QString::fromStdString(lane->name);
+    bool changed = false;
+    QString resultSummary;
+
     if (lane->kind == LaneKind::Clock) {
         const auto* original = findClock(project_, lane->clockDomainId);
         if (!original) {
@@ -1652,13 +1656,16 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         }
         auto replacement = *original;
         replacement.period = *period;
+        const auto periodLabel = QString::fromStdString(
+            formatTick(replacement.period, project_.timeBase));
         try {
-            commandStack_.execute(std::make_unique<ChangeClockCommand>(
-                project_, *scenario, original->id, std::move(replacement)));
+            changed = commandStack_.execute(std::make_unique<ChangeClockCommand>(
+                project_, *scenario, original->id, replacement));
         } catch (const std::exception& exception) {
             QMessageBox::warning(this, tr("Cannot change clock"), QString::fromUtf8(exception.what()));
             return;
         }
+        resultSummary = tr("%1 · period %2").arg(laneName, periodLabel);
     } else {
         QDialog dialog(this);
         dialog.setObjectName(QStringLiteral("QuickLaneParametersDialog"));
@@ -1730,18 +1737,48 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
             replacement.isSigned = signedValue->isChecked();
             replacement.radix = static_cast<Radix>(radix->currentData().toInt());
         }
+        const auto* selectedClock = replacement.clockDomainId.empty()
+            ? nullptr
+            : findClock(project_, replacement.clockDomainId);
+        const auto clockLabel = selectedClock
+            ? QString::fromStdString(selectedClock->name)
+            : tr("none");
+        const auto displaySummary = tr("color %1 · height %2 · clock %3")
+                                        .arg(QString::fromStdString(replacement.color))
+                                        .arg(replacement.height)
+                                        .arg(clockLabel);
+        if (lane->kind == LaneKind::Bus) {
+            const auto radixText = toString(replacement.radix);
+            resultSummary = tr("%1 · width %2 · %3 · %4 · %5")
+                                .arg(laneName)
+                                .arg(static_cast<qulonglong>(replacement.width))
+                                .arg(replacement.isSigned ? tr("signed") : tr("unsigned"))
+                                .arg(QString::fromLatin1(
+                                    radixText.data(),
+                                    static_cast<qsizetype>(radixText.size())))
+                                .arg(displaySummary);
+        } else {
+            resultSummary = tr("%1 · %2").arg(laneName, displaySummary);
+        }
         try {
-            commandStack_.execute(std::make_unique<ChangeLaneCommand>(
-                project_, *scenario, lane->id, std::move(replacement)));
+            changed = commandStack_.execute(std::make_unique<ChangeLaneCommand>(
+                project_, *scenario, lane->id, replacement));
         } catch (const std::exception& exception) {
             QMessageBox::warning(this, tr("Cannot change lane"), QString::fromUtf8(exception.what()));
             return;
         }
     }
 
-    canvas_->refreshModel();
-    markEdited();
+    if (changed) {
+        canvas_->refreshModel();
+        markEdited();
+    }
     canvas_->revealLocation(laneId, canvas_->cursorTick());
+    statusBar()->showMessage(
+        changed
+            ? resultSummary + tr(" · Ctrl+Z to undo")
+            : resultSummary + tr(" · no properties changed"),
+        5'000);
 }
 
 void MainWindow::moveSelectedLaneUp()
