@@ -67,7 +67,8 @@ E:\QT6\Tools\CMake_64\bin\ctest.exe --test-dir build --output-on-failure
 
 该命令生成 testbench、可可靠转换的 SVA include、cocotb test，以及 SVG、PNG、PDF、
 WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或指定时间范围
-导出，并可设置 PNG DPI、PDF 每页时间跨度和附加层。
+导出，并可设置 PNG DPI、PDF 每页时间跨度和附加层。指定范围或分页跨度无效时，错误会在同一窗口就地显示，
+保留范围、尺寸、勾选项与错误字段焦点，修正后直接继续。
 
 无界面执行 Expected/Actual 对比：
 
@@ -322,7 +323,8 @@ exports/
   固定在工具栏中，960 像素宽度下无裁切且显隐不移动画布。不存在 Edit、Transition、Export 与
   Undo/Redo 按钮，菜单快捷键仍存在。
 - 独立用户旅程从空白工程完成三类信号创建、信号就地重命名、波形编辑、Bus/End 双草稿纠错、
-  时间轴延长、测量、Save As、保存结果回读和 1440×900 截图，全程 offscreen。
+  时间轴延长、测量、Save As、保存结果回读、Export 无效范围/PDF 跨度原位纠错、修正后目录选择和
+  1440×900 截图，全程 offscreen。
 - 共享生成计划、确定性 SystemVerilog/cocotb 输出、时钟覆盖调度和严格 SVA 转换；
   独立 assertion 模块及 testbench 均通过 SystemVerilog 语法检查。
 - SVG、PNG、PDF、WaveDrom JSON 的范围、尺寸、页跨度及背景回归。

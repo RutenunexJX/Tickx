@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QColor>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QContextMenuEvent>
 #include <QDialog>
@@ -901,6 +902,195 @@ int main(int argc, char* argv[])
                     || saveState->text() != QStringLiteral("Saved")
                     || window.project().name == "Untitled") {
                     fail(QStringLiteral("Save did not produce a valid file and unambiguous Saved state"));
+                    return;
+                }
+
+                bool invalidExportRangeRetained = false;
+                bool invalidPdfSpanRetained = false;
+                bool exportDirectoryReached = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&application,
+                     &invalidExportRangeRetained,
+                     &invalidPdfSpanRetained,
+                     &exportDirectoryReached] {
+                        auto* dialog = qobject_cast<QDialog*>(
+                            QApplication::activeModalWidget());
+                        if (!dialog
+                            || dialog->objectName()
+                                != QStringLiteral("ExportOptionsDialog")) {
+                            if (dialog) dialog->reject();
+                            return;
+                        }
+                        auto* scope = dialog->findChild<QComboBox*>(
+                            QStringLiteral("ExportScopeCombo"));
+                        auto* start = dialog->findChild<QLineEdit*>(
+                            QStringLiteral("ExportStartEdit"));
+                        auto* end = dialog->findChild<QLineEdit*>(
+                            QStringLiteral("ExportEndEdit"));
+                        auto* width = dialog->findChild<QSpinBox*>(
+                            QStringLiteral("ExportLogicalWidthSpin"));
+                        auto* dpi = dialog->findChild<QSpinBox*>(
+                            QStringLiteral("ExportPngDpiSpin"));
+                        auto* pdfSpan = dialog->findChild<QLineEdit*>(
+                            QStringLiteral("ExportPdfSpanEdit"));
+                        auto* relations = dialog->findChild<QCheckBox*>(
+                            QStringLiteral("ExportRelationsCheck"));
+                        auto* markers = dialog->findChild<QCheckBox*>(
+                            QStringLiteral("ExportMarkersCheck"));
+                        auto* annotations = dialog->findChild<QCheckBox*>(
+                            QStringLiteral("ExportAnnotationsCheck"));
+                        auto* buttons = dialog->findChild<QDialogButtonBox*>();
+                        auto* ok = buttons
+                            ? buttons->button(QDialogButtonBox::Ok)
+                            : nullptr;
+                        if (!scope || !start || !end || !width || !dpi
+                            || !pdfSpan || !relations || !markers
+                            || !annotations || !ok) {
+                            dialog->reject();
+                            return;
+                        }
+                        scope->setCurrentIndex(
+                            scope->findData(QStringLiteral("range")));
+                        start->setText(QStringLiteral("80 ns"));
+                        end->setText(QStringLiteral("40 ns"));
+                        width->setValue(2048);
+                        dpi->setValue(144);
+                        pdfSpan->setText(QStringLiteral("25 ns"));
+                        relations->setChecked(false);
+                        markers->setChecked(true);
+                        annotations->setChecked(false);
+
+                        QTimer::singleShot(
+                            0,
+                            &application,
+                            [&application,
+                             dialog,
+                             scope,
+                             start,
+                             end,
+                             width,
+                             dpi,
+                             pdfSpan,
+                             relations,
+                             markers,
+                             annotations,
+                             ok,
+                             &invalidExportRangeRetained,
+                             &invalidPdfSpanRetained,
+                             &exportDirectoryReached] {
+                                auto* active = QApplication::activeModalWidget();
+                                if (auto* warning = qobject_cast<QMessageBox*>(
+                                        active)) {
+                                    warning->accept();
+                                    return;
+                                }
+                                auto* error = dialog->findChild<QLabel*>(
+                                    QStringLiteral("ExportOptionsError"));
+                                if (active != dialog
+                                    || !error
+                                    || !error->isVisible()
+                                    || !error->text().contains(
+                                        QStringLiteral("greater than start"))
+                                    || start->text() != QStringLiteral("80 ns")
+                                    || end->text() != QStringLiteral("40 ns")
+                                    || !end->hasFocus()
+                                    || width->value() != 2048
+                                    || dpi->value() != 144
+                                    || relations->isChecked()
+                                    || !markers->isChecked()
+                                    || annotations->isChecked()) {
+                                    dialog->reject();
+                                    return;
+                                }
+                                invalidExportRangeRetained = true;
+                                end->setText(QStringLiteral("120 ns"));
+                                pdfSpan->setText(QStringLiteral("-1 tick"));
+
+                                QTimer::singleShot(
+                                    0,
+                                    &application,
+                                    [&application,
+                                     dialog,
+                                     scope,
+                                     start,
+                                     end,
+                                     width,
+                                     dpi,
+                                     pdfSpan,
+                                     relations,
+                                     markers,
+                                     annotations,
+                                     ok,
+                                     &invalidPdfSpanRetained,
+                                     &exportDirectoryReached] {
+                                        auto* active = QApplication::activeModalWidget();
+                                        if (auto* warning = qobject_cast<QMessageBox*>(
+                                                active)) {
+                                            warning->accept();
+                                            return;
+                                        }
+                                        auto* error = dialog->findChild<QLabel*>(
+                                            QStringLiteral("ExportOptionsError"));
+                                        if (active != dialog
+                                            || !error
+                                            || !error->isVisible()
+                                            || !error->text().contains(
+                                                QStringLiteral("non-negative"))
+                                            || scope->currentData().toString()
+                                                != QStringLiteral("range")
+                                            || start->text() != QStringLiteral("80 ns")
+                                            || end->text() != QStringLiteral("120 ns")
+                                            || pdfSpan->text() != QStringLiteral("-1 tick")
+                                            || !pdfSpan->hasFocus()
+                                            || width->value() != 2048
+                                            || dpi->value() != 144
+                                            || relations->isChecked()
+                                            || !markers->isChecked()
+                                            || annotations->isChecked()) {
+                                            dialog->reject();
+                                            return;
+                                        }
+                                        invalidPdfSpanRetained = true;
+                                        pdfSpan->setText(QStringLiteral("25 ns"));
+                                        QTimer::singleShot(
+                                            0,
+                                            &application,
+                                            [&exportDirectoryReached] {
+                                                auto* active =
+                                                    QApplication::activeModalWidget();
+                                                if (auto* fileDialog =
+                                                        qobject_cast<QFileDialog*>(
+                                                            active)) {
+                                                    exportDirectoryReached = true;
+                                                    fileDialog->reject();
+                                                } else if (auto* warning =
+                                                               qobject_cast<QMessageBox*>(
+                                                                   active)) {
+                                                    warning->accept();
+                                                } else if (active) {
+                                                    active->close();
+                                                }
+                                            });
+                                        ok->click();
+                                    });
+                                ok->click();
+                            });
+                        ok->click();
+                    });
+                const auto exportInvoked = QMetaObject::invokeMethod(
+                    &window,
+                    "exportArtifacts",
+                    Qt::DirectConnection);
+                QCoreApplication::processEvents();
+                if (!exportInvoked
+                    || !invalidExportRangeRetained
+                    || !invalidPdfSpanRetained
+                    || !exportDirectoryReached
+                    || QApplication::activeModalWidget()) {
+                    fail(QStringLiteral(
+                        "Export options did not retain invalid range/PDF drafts in place"));
                     return;
                 }
 

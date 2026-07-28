@@ -2837,6 +2837,63 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 50：导出参数原位校验与纠错
+
+状态：完成
+
+已交付：
+
+- 开发审计确认桌面 Export 的指定范围与 PDF page span 在参数窗口关闭后才解析。结束早于开始、时间格式错误或
+  负分页跨度会关闭全部 Export 设置，再弹独立警告；重新尝试时范围、Logical width、PNG DPI 和附加层选择全部复位。
+- 用户视角从空白工程创建并编辑波形、Save As 后进入 Export。此时真正目标是生成交付物；一次输入错误不应迫使用户
+  重新打开菜单、重选 scope 并恢复所有导出选项，因此该问题直接阻断完整任务收尾。
+- Export 现在于 OK 提交前依次校验选择范围、指定 start/end 和 PDF span。错误信息在同一窗口显示，聚焦并选中
+  具体错误字段，保留 scope、范围、width、DPI 与三个附加层勾选；修改相应时间字段或 scope 时清除旧错误，全部有效后才进入目录选择。
+- `wave-user-journey-smoke` 扩展为完整创建→编辑→保存→导出路径：先输入 80–40 ns，断言 end 错误原位保留；
+  再修正为 80–120 ns 并输入 -1 tick PDF span，断言第二次原位纠错；最后改为 25 ns 并确认进入目录选择后静默取消。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.20 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.85 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-user-journey-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.47 sec
+
+Screenshot generated:
+  build/qtcreator-debug/user-journey-smoke.png
+Automated QA: Export 的 80–40 ns 无效范围保留全部字段并聚焦 End；修正范围后的 -1 tick PDF span
+              继续保留 scope、范围、2048 width、144 DPI 和附加层选择并聚焦 span；改为 25 ns 后进入目录选择。
+              空白工程创建、重命名、波形编辑、双草稿门禁、测量、650 ns Save As 与保存回读无回归。
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

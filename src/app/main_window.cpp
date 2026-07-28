@@ -247,9 +247,11 @@ std::optional<ExportOptions> requestExportOptions(
     const std::optional<std::pair<Tick, Tick>>& selection)
 {
     QDialog dialog(parent);
+    dialog.setObjectName(QStringLiteral("ExportOptionsDialog"));
     dialog.setWindowTitle(QObject::tr("Export scenario"));
     auto* layout = new QFormLayout(&dialog);
     auto* scope = new QComboBox;
+    scope->setObjectName(QStringLiteral("ExportScopeCombo"));
     scope->addItem(QObject::tr("Full scenario"), QStringLiteral("full"));
     scope->addItem(QObject::tr("Current selection"), QStringLiteral("selection"));
     scope->addItem(QObject::tr("Specified time range"), QStringLiteral("range"));
@@ -257,21 +259,29 @@ std::optional<ExportOptions> requestExportOptions(
         scope->setItemData(1, 0, Qt::UserRole - 1);
     }
     auto* start = new QLineEdit(QString::fromStdString(formatTick(0, project.timeBase)));
+    start->setObjectName(QStringLiteral("ExportStartEdit"));
     auto* end = new QLineEdit(
         QString::fromStdString(formatTick(scenario.duration, project.timeBase)));
+    end->setObjectName(QStringLiteral("ExportEndEdit"));
     auto* width = new QSpinBox;
+    width->setObjectName(QStringLiteral("ExportLogicalWidthSpin"));
     width->setRange(640, 8000);
     width->setValue(1600);
     auto* dpi = new QSpinBox;
+    dpi->setObjectName(QStringLiteral("ExportPngDpiSpin"));
     dpi->setRange(72, 600);
     dpi->setValue(192);
     auto* pdfSpan = new QLineEdit(QStringLiteral("0 tick"));
+    pdfSpan->setObjectName(QStringLiteral("ExportPdfSpanEdit"));
     pdfSpan->setToolTip(QObject::tr("0 keeps the selected range on one PDF page"));
     auto* relations = new QCheckBox(QObject::tr("Include relations"));
+    relations->setObjectName(QStringLiteral("ExportRelationsCheck"));
     relations->setChecked(true);
     auto* markers = new QCheckBox(QObject::tr("Include markers"));
+    markers->setObjectName(QStringLiteral("ExportMarkersCheck"));
     markers->setChecked(true);
     auto* annotations = new QCheckBox(QObject::tr("Include annotations"));
+    annotations->setObjectName(QStringLiteral("ExportAnnotationsCheck"));
     annotations->setChecked(true);
     layout->addRow(QObject::tr("Scope"), scope);
     layout->addRow(QObject::tr("Start"), start);
@@ -282,10 +292,15 @@ std::optional<ExportOptions> requestExportOptions(
     layout->addRow(relations);
     layout->addRow(markers);
     layout->addRow(annotations);
+    auto* error = new QLabel;
+    error->setObjectName(QStringLiteral("ExportOptionsError"));
+    error->setWordWrap(true);
+    error->setStyleSheet(QStringLiteral("color: #ff9d9a;"));
+    error->hide();
+    layout->addRow(error);
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     layout->addRow(buttons);
-    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     const auto updateRangeFields = [=] {
         const auto rangeMode = scope->currentData().toString() == QStringLiteral("range");
@@ -293,72 +308,113 @@ std::optional<ExportOptions> requestExportOptions(
         end->setEnabled(rangeMode);
     };
     QObject::connect(scope, &QComboBox::currentIndexChanged, &dialog, [=](int) {
+        error->hide();
         updateRangeFields();
     });
+    QObject::connect(start, &QLineEdit::textEdited, error, &QWidget::hide);
+    QObject::connect(end, &QLineEdit::textEdited, error, &QWidget::hide);
+    QObject::connect(pdfSpan, &QLineEdit::textEdited, error, &QWidget::hide);
     updateRangeFields();
-    if (dialog.exec() != QDialog::Accepted) return std::nullopt;
 
-    ExportOptions options;
-    options.width = width->value();
-    options.pngDpi = dpi->value();
-    options.includeRelations = relations->isChecked();
-    options.includeMarkers = markers->isChecked();
-    options.includeAnnotations = annotations->isChecked();
-    QString parseError;
-    std::optional<std::int64_t> unusedCycle;
-    const auto mode = scope->currentData().toString();
-    if (mode == QStringLiteral("selection")) {
-        if (!selection || selection->second <= selection->first) {
-            QMessageBox::warning(
-                parent,
-                QObject::tr("Invalid export range"),
-                QObject::tr("No non-empty time selection exists."));
-            return std::nullopt;
-        }
-        options.start = selection->first;
-        options.end = selection->second;
-    } else if (mode == QStringLiteral("range")) {
-        options.start = parseTimeText(
-            start->text(),
-            project.timeBase,
-            nullptr,
-            unusedCycle,
-            parseError);
-        if (parseError.isEmpty()) {
-            options.end = parseTimeText(
-                end->text(),
+    std::optional<ExportOptions> acceptedOptions;
+    const auto showError = [error](const QString& message, QWidget* field) {
+        error->setText(message);
+        error->show();
+        if (!field) return;
+        field->setFocus(Qt::OtherFocusReason);
+        if (auto* edit = qobject_cast<QLineEdit*>(field)) edit->selectAll();
+    };
+    QObject::connect(
+        buttons,
+        &QDialogButtonBox::accepted,
+        &dialog,
+        [&] {
+            ExportOptions options;
+            options.width = width->value();
+            options.pngDpi = dpi->value();
+            options.includeRelations = relations->isChecked();
+            options.includeMarkers = markers->isChecked();
+            options.includeAnnotations = annotations->isChecked();
+
+            const auto mode = scope->currentData().toString();
+            if (mode == QStringLiteral("selection")) {
+                if (!selection || selection->second <= selection->first) {
+                    showError(
+                        QObject::tr("No non-empty time selection exists."),
+                        scope);
+                    return;
+                }
+                options.start = selection->first;
+                options.end = selection->second;
+            } else if (mode == QStringLiteral("range")) {
+                QString parseError;
+                std::optional<std::int64_t> unusedCycle;
+                const auto parsedStart = parseTimeText(
+                    start->text(),
+                    project.timeBase,
+                    nullptr,
+                    unusedCycle,
+                    parseError);
+                if (!parsedStart) {
+                    showError(
+                        parseError.isEmpty()
+                            ? QObject::tr("Enter a valid export start time.")
+                            : parseError,
+                        start);
+                    return;
+                }
+                parseError.clear();
+                unusedCycle.reset();
+                const auto parsedEnd = parseTimeText(
+                    end->text(),
+                    project.timeBase,
+                    nullptr,
+                    unusedCycle,
+                    parseError);
+                if (!parsedEnd) {
+                    showError(
+                        parseError.isEmpty()
+                            ? QObject::tr("Enter a valid export end time.")
+                            : parseError,
+                        end);
+                    return;
+                }
+                if (*parsedEnd <= *parsedStart) {
+                    showError(
+                        QObject::tr("Export end must be greater than start."),
+                        end);
+                    return;
+                }
+                options.start = *parsedStart;
+                options.end = *parsedEnd;
+            }
+
+            QString parseError;
+            std::optional<std::int64_t> unusedCycle;
+            const auto parsedSpan = parseTimeText(
+                pdfSpan->text(),
                 project.timeBase,
                 nullptr,
                 unusedCycle,
                 parseError);
-        }
-        if (!parseError.isEmpty() || !options.start || !options.end
-            || *options.end <= *options.start) {
-            QMessageBox::warning(
-                parent,
-                QObject::tr("Invalid export range"),
-                parseError.isEmpty()
-                    ? QObject::tr("Export end must be greater than start.")
-                    : parseError);
-            return std::nullopt;
-        }
-    }
-    unusedCycle.reset();
-    const auto parsedSpan = parseTimeText(
-        pdfSpan->text(),
-        project.timeBase,
-        nullptr,
-        unusedCycle,
-        parseError);
-    if (!parsedSpan || *parsedSpan < 0) {
-        QMessageBox::warning(
-            parent,
-            QObject::tr("Invalid PDF page span"),
-            parseError.isEmpty() ? QObject::tr("PDF page span must be non-negative.") : parseError);
+            if (!parsedSpan || *parsedSpan < 0) {
+                showError(
+                    parseError.isEmpty()
+                        ? QObject::tr("PDF page span must be non-negative.")
+                        : parseError,
+                    pdfSpan);
+                return;
+            }
+            options.pdfPageSpanTicks = *parsedSpan;
+            acceptedOptions = std::move(options);
+            error->hide();
+            dialog.accept();
+        });
+
+    if (dialog.exec() != QDialog::Accepted || !acceptedOptions) {
         return std::nullopt;
     }
-    options.pdfPageSpanTicks = *parsedSpan;
-    return options;
+    return acceptedOptions;
 }
 
 std::filesystem::path nativePath(const QString& path)
