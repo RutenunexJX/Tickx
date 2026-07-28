@@ -1715,6 +1715,65 @@ Visual QA: data[7:0] 的 100–170 ns 清除区间显示居中红色虚线 X；�
 Desktop interaction: none
 ```
 
+## 持续迭代 31：单信号写值关系安全与一拍 Pulse 一致性
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `SetLaneRangeCommand` 只保存 Segment 与 Event；一拍写值、Pulse 或 Bus 快捷值若令
+  被 Relation 引用的边沿消失，关系会被清理，但 `Ctrl+Z` 不会恢复。命令现在同时保存变更前后的
+  Relation 集合，首次执行、Undo 与 Redo 对 Scenario 的波形、Event 和 Relation 保持一致。
+- 用户审计确认 `Insert one-beat pulse` 使用 Clock 周期或主刻度宽度，而 Bit 单击、悬浮和键盘写值
+  使用画布统一拍范围。同一位置可能得到 60–80 ns Pulse，而界面指示的一拍是 60–70 ns。Pulse
+  现在直接复用 `beatRangeAt`，提交后保持精确拍级选择，并显示信号、范围、结果与撤销提示。
+- Bus 预设、键盘/右键单信号写值、双击 Segment 改值均显示实际结果；非法输入明确说明未修改，
+  双击输入规范化后与原值相同时不产生空历史。若写值删除关系，反馈说明数量及撤销会同步恢复。
+- 核心回归新增单信号范围写值导致 Relation 清理后的完整 Scenario Undo/Redo；Wave Edit smoke
+  通过真实右键菜单插入 req 60–70 ns Pulse，验证相邻拍不变、拍级选择、状态反馈以及精确
+  Undo/Redo。全部 GUI 路径使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.31 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.09 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.82 sec
+
+Screenshot generated:
+  build/qtcreator-debug/wave-edit-smoke-pulse-feedback.png
+Automated QA: req 的 60–70 ns 单拍变为 1，55 ns 与 75 ns 相邻拍保持 0；选择范围、状态反馈和
+              完整 Scenario Undo/Redo 均通过断言
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

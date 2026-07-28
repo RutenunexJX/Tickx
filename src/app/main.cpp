@@ -2952,7 +2952,13 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 dataLane = wave::findLane(scenario, "lane-data");
                 if (!valueDialogHandled || !dataLane
-                    || valueAt(*dataLane, payloadEditTick) != "0x2a") {
+                    || valueAt(*dataLane, payloadEditTick) != "0x2a"
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("data[7:0]"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("= 0x2a"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
                     qCritical().noquote() << "Double click did not edit the existing segment value";
                     window.hide();
                     application.exit(4);
@@ -3070,6 +3076,122 @@ int main(int argc, char* argv[])
                     [](const wave::Relation& relation) {
                         return relation.id == "relation-segment-clear-feedback";
                     });
+
+                const auto beforePulse = scenario;
+                bool pulseMenuHandled = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&application, &pulseMenuHandled] {
+                        auto* menu = qobject_cast<QMenu*>(
+                            QApplication::activePopupWidget());
+                        QAction* pulse = nullptr;
+                        if (menu
+                            && menu->objectName()
+                                == QStringLiteral("WaveformContextMenu")) {
+                            for (auto* action : menu->actions()) {
+                                if (action
+                                    && action->text()
+                                        == QStringLiteral("Insert one-beat pulse")) {
+                                    pulse = action;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!menu || !pulse) {
+                            qCritical().noquote()
+                                << "Bit context menu does not expose one-beat Pulse";
+                            if (menu) menu->close();
+                            application.exit(4);
+                            return;
+                        }
+                        menu->setActiveAction(pulse);
+                        pulseMenuHandled = true;
+                        QKeyEvent enter(
+                            QEvent::KeyPress,
+                            Qt::Key_Return,
+                            Qt::NoModifier);
+                        QCoreApplication::sendEvent(menu, &enter);
+                    });
+                const QPoint pulseContextPoint(xAtTick(60'000), requestY);
+                QContextMenuEvent pulseContext(
+                    QContextMenuEvent::Mouse,
+                    pulseContextPoint,
+                    canvas->viewport()->mapToGlobal(pulseContextPoint));
+                QCoreApplication::sendEvent(canvas->viewport(), &pulseContext);
+                settleLayouts();
+                auto* pulseLane = wave::findLane(scenario, "lane-request");
+                const auto pulseRange = canvas->selectedTimeRange();
+                if (!pulseMenuHandled
+                    || !pulseLane
+                    || valueAt(*pulseLane, 55'000) != "0"
+                    || valueAt(*pulseLane, 65'000) != "1"
+                    || valueAt(*pulseLane, 75'000) != "0"
+                    || pulseRange
+                        != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                            std::pair<wave::Tick, wave::Tick>{60'000, 70'000}}
+                    || !canvas->selectedSegmentId().isEmpty()
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("req"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("pulse = 1"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "One-beat Pulse did not report or select its exact result"
+                        << "handled=" << pulseMenuHandled
+                        << "v55=" << (pulseLane ? QString::fromStdString(valueAt(*pulseLane, 55'000)) : QStringLiteral("<missing>"))
+                        << "v65=" << (pulseLane ? QString::fromStdString(valueAt(*pulseLane, 65'000)) : QStringLiteral("<missing>"))
+                        << "v75=" << (pulseLane ? QString::fromStdString(valueAt(*pulseLane, 75'000)) : QStringLiteral("<missing>"))
+                        << "range=" << (pulseRange ? QStringLiteral("%1-%2").arg(pulseRange->first).arg(pulseRange->second) : QStringLiteral("<none>"))
+                        << "segment=" << canvas->selectedSegmentId()
+                        << "status=" << window.statusBar()->currentMessage();
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto pulseScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix =
+                        pulseScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        pulseScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-pulse-feedback"));
+                    } else {
+                        pulseScreenshotPath.append(
+                            QStringLiteral("-pulse-feedback.png"));
+                    }
+                    if (!window.grab().save(pulseScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save one-beat Pulse feedback screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                const auto afterPulse = scenario;
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforePulse) {
+                    qCritical().noquote() << "One-beat Pulse undo was not exact";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || scenario != afterPulse) {
+                    qCritical().noquote() << "One-beat Pulse redo was not exact";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforePulse) {
+                    qCritical().noquote() << "One-beat Pulse final recovery failed";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
 
                 sendMouse(
                     QEvent::MouseMove,

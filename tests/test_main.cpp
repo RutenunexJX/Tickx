@@ -792,6 +792,30 @@ void testUndoRedo()
     expectEqual(lane->segments, after, "redo did not restore the exact edit");
     expectEqual(stack.size(), std::size_t{1}, "one drag-style command must make one history entry");
 
+    auto relationScenario = wave::makeDemonstrationProject().scenarios.front();
+    const auto relationBefore = relationScenario;
+    wave::CommandStack relationStack;
+    relationStack.execute(std::make_unique<wave::SetLaneRangeCommand>(
+        relationScenario,
+        "lane-request",
+        80'000,
+        130'000,
+        "0"));
+    expect(
+        !wave::findRelation(relationScenario, "relation-req-ack"),
+        "single-lane range edit left a Relation whose source edge disappeared");
+    const auto relationAfter = relationScenario;
+    expect(relationStack.undo(), "single-lane relation cleanup undo failed");
+    expectEqual(
+        relationScenario,
+        relationBefore,
+        "single-lane range undo did not restore waveform, events, and relations");
+    expect(relationStack.redo(), "single-lane relation cleanup redo failed");
+    expectEqual(
+        relationScenario,
+        relationAfter,
+        "single-lane range redo did not reproduce relation cleanup exactly");
+
     auto* bus = wave::findLane(scenario, "lane-data");
     expect(bus != nullptr, "demonstration bus lane is missing");
     const auto busBefore = bus->segments;

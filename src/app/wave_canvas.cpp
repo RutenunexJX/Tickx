@@ -134,6 +134,24 @@ QString busPresetLabel(const Segment& segment)
     return preset.empty() ? QString{} : busPresetDisplayLabel(preset);
 }
 
+QString appendRelationAwareUndo(
+    QString message,
+    const std::size_t relationCountBefore,
+    const std::size_t relationCountAfter)
+{
+    const auto removedRelationCount = relationCountBefore
+        - std::min(relationCountBefore, relationCountAfter);
+    if (removedRelationCount > 0) {
+        message += QObject::tr(
+            " · removed %1 relation(s) because referenced edges disappeared"
+            " · Ctrl+Z restores waveform and relations")
+                       .arg(static_cast<qulonglong>(removedRelationCount));
+    } else {
+        message += QObject::tr(" · Ctrl+Z to undo");
+    }
+    return message;
+}
+
 Tick floorToStep(const Tick value, const Tick step)
 {
     if (step <= 0) return value;
@@ -1371,30 +1389,56 @@ void WaveCanvas::insertPulse()
         emit statusMessage(tr("Pulse requires a selected bit lane."));
         return;
     }
-    Tick width = majorTickStep();
-    if (const auto* clock = findClock(*project_, lane->clockDomainId)) {
-        width = clock->period;
+    const auto [start, end] = beatRangeAt(cursorTick_, *lane);
+
+    if (end <= start) {
+        emit statusMessage(tr("Pulse not inserted · cursor is at the scenario end"));
+        return;
     }
-    const auto end = std::min(scenario_->duration, cursorTick_ + std::max<Tick>(1, width));
-    if (end <= cursorTick_) return;
+    const auto laneId = lane->id;
+    const auto laneName = lane->name;
     auto value = std::string{"1"};
     const auto covering = std::find_if(
         lane->segments.begin(),
         lane->segments.end(),
-        [this](const Segment& segment) {
-            return segment.start <= cursorTick_ && cursorTick_ < segment.end;
+        [start](const Segment& segment) {
+            return segment.start <= start && start < segment.end;
         });
     if (covering != lane->segments.end() && covering->value == "1") value = "0";
-    commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
-        *scenario_,
-        lane->id,
-        cursorTick_,
-        end,
-        value));
-    selectionRange_ = std::pair{cursorTick_, end};
+    const auto relationCountBefore = scenario_->relations.size();
+    try {
+        commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
+            *scenario_,
+            laneId,
+            start,
+            end,
+            value));
+    } catch (const std::exception& exception) {
+        emit statusMessage(
+            tr("Pulse not inserted · %1").arg(QString::fromUtf8(exception.what())));
+        return;
+    }
+    selectedLaneId_ = laneId;
+    selectedLaneIds_ = {laneId};
+    laneHeaderSelectionActive_ = false;
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    selectionRange_ = std::pair{start, end};
+    waveEditHoverLaneId_ = laneId;
+    waveEditHoverRange_ = selectionRange_;
+    cursorTick_ = start;
     emit modelEdited();
     emit commandAvailabilityChanged();
+    emit selectionChanged(QString::fromStdString(laneId), start);
     refreshModel();
+    emit statusMessage(appendRelationAwareUndo(
+        tr("%1 · %2–%3 pulse = %4")
+            .arg(QString::fromStdString(laneName))
+            .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+            .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
+            .arg(QString::fromStdString(value)),
+        relationCountBefore,
+        scenario_->relations.size()));
 }
 
 bool WaveCanvas::viewportEvent(QEvent* event)
@@ -3619,6 +3663,8 @@ void WaveCanvas::applyBusPreset(
     extensions.emplace(
         std::string(kBusPresetExtension),
         "\"" + presetId + "\"");
+    const auto laneName = lane->name;
+    const auto relationCountBefore = scenario_->relations.size();
     try {
         commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
             *scenario_,
@@ -3656,11 +3702,14 @@ void WaveCanvas::applyBusPreset(
     rebuildLaneLayout();
     hideBusPresetPalette();
     viewport()->update();
-    emit statusMessage(
-        tr("%1 · %2–%3 · Ctrl+Z to undo")
-            .arg(busPresetDisplayLabel(presetId))
+    emit statusMessage(appendRelationAwareUndo(
+        tr("%1 · %2–%3 = %4")
+            .arg(QString::fromStdString(laneName))
             .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
-            .arg(QString::fromStdString(formatTick(end, project_->timeBase))));
+            .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
+            .arg(busPresetDisplayLabel(presetId)),
+        relationCountBefore,
+        scenario_->relations.size()));
 }
 
 void WaveCanvas::promptBusValueAt(const std::string& laneId, const Tick tick)
@@ -3694,10 +3743,14 @@ bool WaveCanvas::setLaneRangeValue(
             viewport()->mapToGlobal(QPoint(xAtTick(start), RulerHeight + 4)),
             QString::fromStdString(validation.error),
             viewport());
+        emit statusMessage(
+            tr("No values changed · %1")
+                .arg(QString::fromStdString(validation.error)));
         return false;
     }
     const auto laneName = lane->name;
     const auto laneKind = lane->kind;
+    const auto relationCountBefore = scenario_->relations.size();
     try {
         commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
             *scenario_,
@@ -3733,12 +3786,14 @@ bool WaveCanvas::setLaneRangeValue(
     emit commandAvailabilityChanged();
     emit selectionChanged(QString::fromStdString(laneId), cursorTick_);
     refreshModel();
-    emit statusMessage(
-        tr("%1 · %2–%3 = %4 · Ctrl+Z to undo")
+    emit statusMessage(appendRelationAwareUndo(
+        tr("%1 · %2–%3 = %4")
             .arg(QString::fromStdString(laneName))
             .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
             .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
-            .arg(QString::fromStdString(validation.normalizedValue)));
+            .arg(QString::fromStdString(validation.normalizedValue)),
+        relationCountBefore,
+        scenario_->relations.size()));
     return true;
 }
 
@@ -4921,9 +4976,40 @@ void WaveCanvas::editSegmentAt(const QPoint& position)
     if (!accepted) return;
 
     const auto laneId = lane->id;
+    const auto laneName = lane->name;
     const auto segmentId = segment->id;
     const auto start = segment->start;
     const auto end = segment->end;
+    const auto formatTime = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : QString::number(tick);
+    };
+    if (!clearClockOverride) {
+        const auto validation = validateLaneValue(*lane, replacementValue);
+        if (!validation.valid) {
+            const auto error = QString::fromStdString(validation.error);
+            QToolTip::showText(
+                viewport()->mapToGlobal(position),
+                error,
+                viewport());
+            emit statusMessage(tr("No values changed · %1").arg(error));
+            viewport()->update();
+            return;
+        }
+        replacementValue = validation.normalizedValue;
+        if (replacementValue == segment->value) {
+            emit statusMessage(
+                tr("%1 · %2–%3 already = %4 · no values changed")
+                    .arg(QString::fromStdString(laneName))
+                    .arg(formatTime(start))
+                    .arg(formatTime(end))
+                    .arg(QString::fromStdString(replacementValue)));
+            return;
+        }
+    }
+
+    const auto relationCountBefore = scenario_->relations.size();
     try {
         if (clearClockOverride) {
             commandStack_->execute(std::make_unique<ClearLaneRangeCommand>(
@@ -4933,24 +5019,47 @@ void WaveCanvas::editSegmentAt(const QPoint& position)
                 *scenario_, laneId, segmentId, start, end, replacementValue));
         }
     } catch (const std::exception& exception) {
+        const auto error = QString::fromUtf8(exception.what());
         QToolTip::showText(
             viewport()->mapToGlobal(position),
-            QString::fromUtf8(exception.what()),
+            error,
             viewport());
+        emit statusMessage(tr("No values changed · %1").arg(error));
         viewport()->update();
         return;
     }
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    selectionRange_.reset();
     emit modelEdited();
     emit commandAvailabilityChanged();
     refreshModel();
+    auto displayValue = QString::fromStdString(replacementValue);
     if (const auto* refreshedLane = findLane(*scenario_, laneId)) {
-        if (const auto* refreshed = segmentAtTick(*refreshedLane, start)) {
+        const auto probe = start + (end - start) / 2;
+        if (const auto* refreshed = segmentAtTick(*refreshedLane, probe)) {
             selectedSegmentLaneId_ = refreshedLane->id;
             selectedSegmentId_ = refreshed->id;
             selectionRange_ = std::pair{refreshed->start, refreshed->end};
+            displayValue = QString::fromStdString(refreshed->value);
         }
     }
+    emit selectionChanged(QString::fromStdString(laneId), start);
     viewport()->update();
+    const auto message = clearClockOverride
+        ? tr("%1 · %2–%3 restored normal clock waveform")
+              .arg(QString::fromStdString(laneName))
+              .arg(formatTime(start))
+              .arg(formatTime(end))
+        : tr("%1 · %2–%3 = %4")
+              .arg(QString::fromStdString(laneName))
+              .arg(formatTime(start))
+              .arg(formatTime(end))
+              .arg(displayValue);
+    emit statusMessage(appendRelationAwareUndo(
+        message,
+        relationCountBefore,
+        scenario_->relations.size()));
 }
 
 void WaveCanvas::commitMarker(const QPoint& releasePosition)

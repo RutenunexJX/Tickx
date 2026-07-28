@@ -80,6 +80,8 @@ private:
     std::vector<Segment> after_;
     std::vector<Event> eventsBefore_;
     std::vector<Event> eventsAfter_;
+    std::vector<Relation> relationsBefore_;
+    std::vector<Relation> relationsAfter_;
     bool initialized_{false};
 };
 

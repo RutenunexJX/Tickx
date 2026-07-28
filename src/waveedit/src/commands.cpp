@@ -361,6 +361,7 @@ SetLaneRangeCommand::SetLaneRangeCommand(
     }
     before_ = lane->segments;
     eventsBefore_ = scenario.events;
+    relationsBefore_ = scenario.relations;
 }
 
 void SetLaneRangeCommand::redo()
@@ -378,11 +379,13 @@ void SetLaneRangeCommand::redo()
         }
         after_ = lane->segments;
         eventsAfter_ = scenario_->events;
+        relationsAfter_ = scenario_->relations;
         initialized_ = true;
         return;
     }
     lane->segments = after_;
     scenario_->events = eventsAfter_;
+    scenario_->relations = relationsAfter_;
 }
 
 void SetLaneRangeCommand::undo()
@@ -393,6 +396,7 @@ void SetLaneRangeCommand::undo()
     }
     lane->segments = before_;
     scenario_->events = eventsBefore_;
+    scenario_->relations = relationsBefore_;
 }
 
 std::string SetLaneRangeCommand::description() const
