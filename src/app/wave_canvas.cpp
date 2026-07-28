@@ -401,6 +401,18 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeCopyButton_->setAccessibleName(tr("Copy selected range"));
     rangeLayout->addWidget(rangeCopyButton_);
     connect(rangeCopyButton_, &QToolButton::clicked, this, &WaveCanvas::copySelection);
+    rangeClearButton_ = new QToolButton(rangeEditPalette_);
+    rangeClearButton_->setText(tr("Clear"));
+    rangeClearButton_->setObjectName(QStringLiteral("RangeEditClearButton"));
+    rangeClearButton_->setAutoRaise(true);
+    rangeClearButton_->setFocusPolicy(Qt::NoFocus);
+    rangeClearButton_->setCursor(Qt::PointingHandCursor);
+    rangeClearButton_->setToolTip(tr("Clear values in the selected range (Delete)"));
+    rangeClearButton_->setAccessibleName(tr("Clear selected range"));
+    rangeLayout->addWidget(rangeClearButton_);
+    connect(rangeClearButton_, &QToolButton::clicked, this, [this] {
+        static_cast<void>(clearExplicitRange());
+    });
     rangeValueEdit_ = new QLineEdit(rangeEditPalette_);
     rangeValueEdit_->setObjectName(QStringLiteral("RangeEditValueEdit"));
     rangeValueEdit_->setPlaceholderText(tr("Value + Enter"));
@@ -1583,6 +1595,12 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
     }
 
     if (tool_ == Tool::WaveEdit && scenario_) {
+        if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)
+            && explicitRangeSelection_) {
+            static_cast<void>(clearExplicitRange());
+            event->accept();
+            return;
+        }
         if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)
             && !selectedSegmentId_.empty()) {
             clearSelectedSegment();
@@ -3030,7 +3048,7 @@ void WaveCanvas::showRangeEditPalette()
                       .arg(bitRange ? tr("Bit") : tr("Bus"))
                       .arg(format(selectionRange_->first))
                       .arg(format(selectionRange_->second))
-                : tr("Mixed/unsupported selection · Copy only"));
+                : tr("Mixed/unsupported selection · Copy or clear"));
         rangeEditContextLabel_->setToolTip(
             editable
                 ? tr("Applies to every selected signal from %1 to %2")
@@ -3042,6 +3060,10 @@ void WaveCanvas::showRangeEditPalette()
     if (rangeCopyButton_) {
         rangeCopyButton_->setVisible(true);
         rangeCopyButton_->setEnabled(true);
+    }
+    if (rangeClearButton_) {
+        rangeClearButton_->setVisible(true);
+        rangeClearButton_->setEnabled(true);
     }
     for (auto* button : {
              rangeZeroButton_,
@@ -3207,6 +3229,72 @@ bool WaveCanvas::applyExplicitRangeValue(
         message += tr(" · Ctrl+Z restores waveform and relations");
     } else {
         message += tr(" · Ctrl+Z to undo");
+    }
+    emit statusMessage(message);
+    return true;
+}
+
+bool WaveCanvas::clearExplicitRange()
+{
+    if (!scenario_ || !commandStack_ || !explicitRangeSelection_
+        || !selectionRange_ || selectionRange_->second <= selectionRange_->first) {
+        return false;
+    }
+
+    const auto [start, end] = *selectionRange_;
+    std::vector<std::string> laneIds;
+    laneIds.reserve(selectedLaneIds_.size());
+    for (const auto& laneId : selectedLaneIds_) {
+        const auto* lane = findLane(*scenario_, laneId);
+        if (!lane || lane->kind == LaneKind::Group) continue;
+        const auto overlaps = std::any_of(
+            lane->segments.begin(),
+            lane->segments.end(),
+            [start, end](const Segment& segment) {
+                return segment.start < end && segment.end > start;
+            });
+        if (overlaps) laneIds.push_back(laneId);
+    }
+    if (laneIds.empty()) {
+        emit statusMessage(
+            tr("No values cleared · selected range already uses implicit values"));
+        return false;
+    }
+
+    const auto relationCountBefore = scenario_->relations.size();
+    try {
+        commandStack_->execute(std::make_unique<ClearLaneRangesCommand>(
+            *scenario_, start, end, laneIds));
+    } catch (const std::exception& exception) {
+        emit statusMessage(
+            tr("No values cleared · %1").arg(QString::fromUtf8(exception.what())));
+        return false;
+    }
+
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    cursorTick_ = start;
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    if (!selectedLaneIds_.empty()) {
+        emit selectionChanged(QString::fromStdString(selectedLaneIds_.front()), start);
+    }
+    rebuildLaneLayout();
+    showRangeEditPalette();
+    viewport()->update();
+
+    auto message = tr("Cleared %1 signal(s) over %2 · Ctrl+Z to undo")
+                       .arg(static_cast<qulonglong>(laneIds.size()))
+                       .arg(QString::fromStdString(
+                           formatTick(end - start, project_->timeBase)));
+    const auto removedRelationCount = relationCountBefore
+        - std::min(relationCountBefore, scenario_->relations.size());
+    if (removedRelationCount > 0) {
+        message = tr("Cleared %1 signal(s) over %2 · removed %3 relation(s) · Ctrl+Z restores all")
+                      .arg(static_cast<qulonglong>(laneIds.size()))
+                      .arg(QString::fromStdString(
+                          formatTick(end - start, project_->timeBase)))
+                      .arg(static_cast<qulonglong>(removedRelationCount));
     }
     emit statusMessage(message);
     return true;
@@ -4312,7 +4400,7 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
                     .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
         } else {
             emit statusMessage(
-                tr("Selected %1 · mixed/unsupported signal types · Copy only")
+                tr("Selected %1 · mixed/unsupported signal types · Copy or Delete to clear")
                     .arg(QString::fromStdString(formatTick(duration, project_->timeBase))));
         }
         emit selectionChanged(QString::fromStdString(selectedLaneId_), cursorTick_);

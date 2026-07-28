@@ -3055,6 +3055,8 @@ int main(int argc, char* argv[])
                     QStringLiteral("RangeEditContextLabel"));
                 auto* rangeCopyButton = window.findChild<QToolButton*>(
                     QStringLiteral("RangeEditCopyButton"));
+                auto* rangeClearButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditClearButton"));
                 auto* rangeOneButton = window.findChild<QToolButton*>(
                     QStringLiteral("RangeEditOneButton"));
                 auto* rangeXButton = window.findChild<QToolButton*>(
@@ -3068,6 +3070,9 @@ int main(int argc, char* argv[])
                     || !rangeCopyButton
                     || !rangeCopyButton->isVisibleTo(&window)
                     || !rangeCopyButton->isEnabled()
+                    || !rangeClearButton
+                    || !rangeClearButton->isVisibleTo(&window)
+                    || !rangeClearButton->isEnabled()
                     || !rangeOneButton
                     || !rangeOneButton->isEnabled()
                     || !rangeXButton
@@ -3462,9 +3467,10 @@ int main(int argc, char* argv[])
                 settleLayouts();
                 const auto toolbarGlobalRect = widgetGlobalRect(waveformToolbar);
                 const auto rangePaletteGlobalRect = widgetGlobalRect(rangePalette);
-                const std::array<QWidget*, 7> visibleRangeControls{
+                const std::array<QWidget*, 8> visibleRangeControls{
                     rangeContext,
                     rangeCopyButton,
+                    rangeClearButton,
                     rangeValueEdit,
                     rangeZeroButton,
                     rangeXButton,
@@ -3715,17 +3721,19 @@ int main(int argc, char* argv[])
                     || !rangePalette->isVisibleTo(&window)
                     || !rangeToolbarAction->isVisible()
                     || !stableVerticalLayout()
-                    || !rangeContext->text().contains(QStringLiteral("Copy only"))
+                    || !rangeContext->text().contains(QStringLiteral("Copy or clear"))
                     || !rangeCopyButton
                     || !rangeCopyButton->isVisibleTo(&window)
                     || !rangeCopyButton->isEnabled()
+                    || !rangeClearButton->isVisibleTo(&window)
+                    || !rangeClearButton->isEnabled()
                     || rangeValueEdit->isVisibleTo(&window)
                     || rangeZeroButton->isVisibleTo(&window)
                     || rangeOneButton->isVisibleTo(&window)
                     || rangeXButton->isVisibleTo(&window)
                     || rangeZButton->isVisibleTo(&window)
                     || rangeDontCareButton->isVisibleTo(&window)) {
-                    qCritical().noquote() << "Mixed range did not enter safe copy-only state";
+                    qCritical().noquote() << "Mixed range did not enter safe copy/clear state";
                     window.hide();
                     application.exit(4);
                     return;
@@ -3832,7 +3840,7 @@ int main(int argc, char* argv[])
                     || !rangePalette->isVisibleTo(&window)
                     || !rangeToolbarAction->isVisible()
                     || !stableVerticalLayout()
-                    || !rangeContext->text().contains(QStringLiteral("Copy only"))
+                    || !rangeContext->text().contains(QStringLiteral("Copy or clear"))
                     || !pastedRange
                     || pastedRange->first <= mixedRange->second
                     || pastedRange->second - pastedRange->first != copiedDuration
@@ -3860,6 +3868,61 @@ int main(int argc, char* argv[])
                         application.exit(3);
                         return;
                     }
+                }
+                const auto afterPaste = scenario;
+                if (!clickWidget(rangeClearButton)) {
+                    qCritical().noquote() << "Selected range Clear button is not hit-testable";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                settleLayouts();
+                const auto afterClear = scenario;
+                if (afterClear == afterPaste
+                    || !canvas->hasExplicitRangeSelection()
+                    || !rangePalette->isVisibleTo(&window)
+                    || !rangeToolbarAction->isVisible()
+                    || canvas->selectedTimeRange() != pastedRange
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Cleared"))) {
+                    qCritical().noquote()
+                        << "Visible Clear did not clear the pasted range in place";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != afterPaste
+                    || !canvas->hasExplicitRangeSelection()
+                    || !rangePalette->isVisibleTo(&window)
+                    || canvas->selectedTimeRange() != pastedRange) {
+                    qCritical().noquote() << "Range Clear was not one atomic undo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_Delete);
+                settleLayouts();
+                if (scenario == afterPaste
+                    || !canvas->hasExplicitRangeSelection()
+                    || !rangePalette->isVisibleTo(&window)
+                    || canvas->selectedTimeRange() != pastedRange
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Cleared"))) {
+                    qCritical().noquote()
+                        << "Delete did not clear the selected range while retaining context";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != afterPaste
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != pastedRange) {
+                    qCritical().noquote() << "Delete range clear was not one atomic undo";
+                    window.hide();
+                    application.exit(4);
+                    return;
                 }
                 if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
                     || scenario != beforeMixedAssignment

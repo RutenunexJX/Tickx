@@ -1317,6 +1317,65 @@ Visual QA: 粘贴目标范围持续高亮，Copy-only 范围栏保持可见；
 Desktop interaction: none
 ```
 
+## 持续迭代 24：范围清除闭环与关系安全撤销
+
+状态：完成
+
+已交付：
+
+- 开发审计确认显式范围选中后 `Delete` / `Backspace` 无响应；用户只能逐个 Segment 清除，且混合
+  Bit/Bus 范围工具栏仅显示 Copy，没有可发现的清除动作。单信号 `ClearLaneRangeCommand` 还只保存
+  Segment 与 Event，事件同步删除的 Relation 无法由 Undo 恢复。
+- 固定范围工具栏新增可见 `Clear`，同类型和混合类型选择均可直接清除；`Delete` / `Backspace`
+  执行相同行为。成功后保持范围、lane 集合和工具栏，不要求用户重新框选；无显式值的范围给出
+  “already uses implicit values”反馈且不污染命令历史。
+- 新增 `ClearLaneRangesCommand`，在一个命令中清除所有实际相交的非 Group lane；完整 Scenario
+  快照保证 Segment、Event、Relation 一起 Undo/Redo。单 lane Clear 同步改用完整快照，修复关系
+  随边沿删除后 Undo 不恢复的问题。
+- `wave-core-tests` 验证两 lane 清除只产生一条历史、隐式区间、Relation 精确删除和完整 Undo/Redo，
+  并单独覆盖原单 lane Clear 的关系恢复；`wave-wave-edit-smoke` 真实点击 Clear、按 Delete、验证选区
+  保持与两级原子 Undo。全部 GUI 路径继续使用 `QT_QPA_PLATFORM=offscreen`，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.33 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.15 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.74 sec
+
+Screenshot:
+  build/qtcreator-debug/wave-edit-smoke-pasted-range.png
+Visual QA: 固定范围栏同时显示 Copy 与 Clear；混合范围动作可发现且可命中；
+           范围高亮、刻度和波形无覆盖，清除后上下文持续保留
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

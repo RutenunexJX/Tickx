@@ -110,6 +110,27 @@ private:
     std::optional<Scenario> after_;
 };
 
+class ClearLaneRangesCommand final : public EditCommand {
+public:
+    ClearLaneRangesCommand(
+        Scenario& scenario,
+        Tick start,
+        Tick end,
+        std::vector<std::string> laneIds);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    Tick start_;
+    Tick end_;
+    std::vector<std::string> laneIds_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
 class ClearLaneRangeCommand final : public EditCommand {
 public:
     ClearLaneRangeCommand(
@@ -127,11 +148,8 @@ private:
     std::string laneId_;
     Tick start_;
     Tick end_;
-    std::vector<Segment> before_;
-    std::vector<Segment> after_;
-    std::vector<Event> eventsBefore_;
-    std::vector<Event> eventsAfter_;
-    bool initialized_{false};
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
 };
 
 class EditSegmentCommand final : public EditCommand {

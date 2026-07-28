@@ -477,6 +477,73 @@ std::string SetLaneRangesCommand::description() const
     return "Set selected ranges";
 }
 
+ClearLaneRangesCommand::ClearLaneRangesCommand(
+    Scenario& scenario,
+    const Tick start,
+    const Tick end,
+    std::vector<std::string> laneIds)
+    : scenario_(&scenario)
+    , start_(start)
+    , end_(end)
+    , laneIds_(std::move(laneIds))
+{
+    if (laneIds_.empty()) {
+        throw std::invalid_argument("range clear contains no lanes");
+    }
+    if (start_ < 0 || end_ <= start_ || end_ > scenario.duration) {
+        throw std::invalid_argument("range clear is outside the scenario");
+    }
+
+    std::vector<std::string> uniqueLaneIds;
+    uniqueLaneIds.reserve(laneIds_.size());
+    for (const auto& laneId : laneIds_) {
+        if (laneId.empty()
+            || std::find(uniqueLaneIds.begin(), uniqueLaneIds.end(), laneId)
+                != uniqueLaneIds.end()) {
+            throw std::invalid_argument("range clear contains an invalid or duplicate lane");
+        }
+        const auto* lane = findLane(scenario, laneId);
+        if (!lane || lane->kind == LaneKind::Group) {
+            throw std::invalid_argument("range clear target lane does not exist");
+        }
+        uniqueLaneIds.push_back(laneId);
+    }
+}
+
+void ClearLaneRangesCommand::redo()
+{
+    if (after_) {
+        *scenario_ = *after_;
+        return;
+    }
+
+    before_ = *scenario_;
+    auto candidate = *scenario_;
+    for (const auto& laneId : laneIds_) {
+        auto* lane = findLane(candidate, laneId);
+        if (!lane) throw std::runtime_error("range clear target lane was removed");
+        clearSegmentRange(*lane, start_, end_);
+        if (lane->kind == LaneKind::Bit
+            || lane->kind == LaneKind::Bus
+            || lane->kind == LaneKind::Enum) {
+            synchronizeLaneEventsFromSegments(candidate, lane->id);
+        }
+    }
+    after_ = std::move(candidate);
+    *scenario_ = *after_;
+}
+
+void ClearLaneRangesCommand::undo()
+{
+    if (!before_) throw std::runtime_error("range clear command was not initialized");
+    *scenario_ = *before_;
+}
+
+std::string ClearLaneRangesCommand::description() const
+{
+    return "Clear selected ranges";
+}
+
 ClearLaneRangeCommand::ClearLaneRangeCommand(
     Scenario& scenario,
     std::string laneId,
@@ -492,36 +559,33 @@ ClearLaneRangeCommand::ClearLaneRangeCommand(
     if (start_ < 0 || end_ <= start_ || end_ > scenario.duration) {
         throw std::invalid_argument("clear range is outside the scenario");
     }
-    before_ = lane->segments;
-    eventsBefore_ = scenario.events;
 }
 
 void ClearLaneRangeCommand::redo()
 {
-    auto* lane = findLane(*scenario_, laneId_);
-    if (!lane) throw std::runtime_error("lane was removed before command execution");
-    if (!initialized_) {
-        clearSegmentRange(*lane, start_, end_);
-        if (lane->kind == LaneKind::Bit
-            || lane->kind == LaneKind::Bus
-            || lane->kind == LaneKind::Enum) {
-            synchronizeLaneEventsFromSegments(*scenario_, laneId_);
-        }
-        after_ = lane->segments;
-        eventsAfter_ = scenario_->events;
-        initialized_ = true;
+    if (after_) {
+        *scenario_ = *after_;
         return;
     }
-    lane->segments = after_;
-    scenario_->events = eventsAfter_;
+
+    before_ = *scenario_;
+    auto candidate = *scenario_;
+    auto* lane = findLane(candidate, laneId_);
+    if (!lane) throw std::runtime_error("lane was removed before command execution");
+    clearSegmentRange(*lane, start_, end_);
+    if (lane->kind == LaneKind::Bit
+        || lane->kind == LaneKind::Bus
+        || lane->kind == LaneKind::Enum) {
+        synchronizeLaneEventsFromSegments(candidate, laneId_);
+    }
+    after_ = std::move(candidate);
+    *scenario_ = *after_;
 }
 
 void ClearLaneRangeCommand::undo()
 {
-    auto* lane = findLane(*scenario_, laneId_);
-    if (!lane) throw std::runtime_error("lane was removed before undo");
-    lane->segments = before_;
-    scenario_->events = eventsBefore_;
+    if (!before_) throw std::runtime_error("clear command was not initialized");
+    *scenario_ = *before_;
 }
 
 std::string ClearLaneRangeCommand::description() const

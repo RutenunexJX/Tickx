@@ -944,6 +944,57 @@ void testMultiLaneRangeAssignmentCommand()
     expect(stack.redo(), "multi-lane range assignment redo failed");
     expectEqual(scenario, after, "one redo did not restore every assigned lane");
 
+    auto clearScenario = before;
+    const auto clearedRelationId = clearScenario.relations.front().id;
+    wave::CommandStack clearRangesStack;
+    clearRangesStack.execute(std::make_unique<wave::ClearLaneRangesCommand>(
+        clearScenario,
+        80'000,
+        150'000,
+        std::vector<std::string>{"lane-request", "lane-ack"}));
+    expectEqual(
+        clearRangesStack.size(),
+        std::size_t{1},
+        "multi-lane range clear must create one history entry");
+    const auto* clearedRequest = wave::findLane(clearScenario, "lane-request");
+    const auto* clearedAcknowledge = wave::findLane(clearScenario, "lane-ack");
+    expect(
+        clearedRequest != nullptr && clearedAcknowledge != nullptr,
+        "cleared target lanes disappeared");
+    expectEqual(
+        valueAt(*clearedRequest, 90'000),
+        std::string{},
+        "request range was not cleared to its implicit state");
+    expectEqual(
+        valueAt(*clearedAcknowledge, 120'000),
+        std::string{},
+        "ack range was not cleared to its implicit state");
+    expect(
+        !wave::findRelation(clearScenario, clearedRelationId),
+        "relation survived after the cleared range removed its referenced edge");
+    expectEventRelationIntegrity(clearScenario);
+    const auto afterClear = clearScenario;
+    expect(clearRangesStack.undo(), "multi-lane range clear undo failed");
+    expectEqual(clearScenario, before, "one undo did not restore cleared lanes and relations");
+    expect(clearRangesStack.redo(), "multi-lane range clear redo failed");
+    expectEqual(clearScenario, afterClear, "one redo did not restore the complete clear result");
+
+    auto singleClearScenario = before;
+    wave::CommandStack singleClearStack;
+    singleClearStack.execute(std::make_unique<wave::ClearLaneRangeCommand>(
+        singleClearScenario,
+        "lane-ack",
+        100'000,
+        120'000));
+    expect(
+        !wave::findRelation(singleClearScenario, clearedRelationId),
+        "single-lane clear did not remove a relation whose edge disappeared");
+    expect(singleClearStack.undo(), "single-lane clear undo failed");
+    expectEqual(
+        singleClearScenario,
+        before,
+        "single-lane clear undo did not restore the removed relation");
+
     auto preservedRelationScenario = before;
     const auto relationBefore = preservedRelationScenario.relations.front();
     const auto* targetEventBefore = wave::findEvent(
