@@ -2140,6 +2140,8 @@ int main(int argc, char* argv[])
                 auto* canvas = window.findChild<wave::WaveCanvas*>();
                 auto* undoAction = window.findChild<QAction*>(
                     QStringLiteral("UndoAction"));
+                auto* fitAction = window.findChild<QAction*>(
+                    QStringLiteral("FitScenarioAction"));
                 auto* saveState = window.findChild<QLabel*>(
                     QStringLiteral("SaveStateLabel"));
                 auto fail = [&application, &window](const QString& message) {
@@ -2147,7 +2149,7 @@ int main(int argc, char* argv[])
                     window.hide();
                     application.exit(4);
                 };
-                if (!canvas || !undoAction || !saveState
+                if (!canvas || !undoAction || !fitAction || !saveState
                     || window.project().scenarios.empty()) {
                     fail(QStringLiteral(
                         "Wave Edit autoscroll smoke prerequisites are missing"));
@@ -2159,7 +2161,10 @@ int main(int argc, char* argv[])
                     || scenario.lanes.front().id != "lane-wave-edit-scroll"
                     || scenario.lanes.front().segments.size() != 1
                     || saveState->text() != QStringLiteral("Saved")
-                    || undoAction->isEnabled()) {
+                    || undoAction->isEnabled()
+                    || fitAction->text() != QStringLiteral("Fit scenario")
+                    || !fitAction->toolTip().contains(
+                        QStringLiteral("complete scenario"))) {
                     fail(QStringLiteral(
                         "Wave Edit autoscroll smoke did not start from its Saved fixture"));
                     return;
@@ -2415,6 +2420,9 @@ int main(int argc, char* argv[])
                     || scenario != originalScenario
                     || undoAction->isEnabled()
                     || saveState->text() != QStringLiteral("Saved")
+                    || fitAction->text() != QStringLiteral("Fit selection")
+                    || !fitAction->toolTip().contains(
+                        QStringLiteral("selected time range"))
                     || !window.statusBar()->currentMessage().startsWith(
                         QStringLiteral("Selected "))) {
                     fail(QStringLiteral(
@@ -2430,14 +2438,88 @@ int main(int argc, char* argv[])
                         "Wave Edit edge scrolling continued after range release"));
                     return;
                 }
+
+                fitAction->trigger();
+                QCoreApplication::processEvents();
+                const auto fittedRange = canvas->selectedTimeRange();
+                const auto fittedContentWidth = static_cast<double>(waveWidth())
+                    + canvas->horizontalScrollBar()->maximum();
+                const auto fittedXAtTick = [
+                                              canvas,
+                                              &scenario,
+                                              fittedContentWidth](
+                                              const wave::Tick tick) {
+                    return canvas->signalHeaderWidth()
+                        + static_cast<int>(std::llround(
+                            static_cast<double>(tick) * fittedContentWidth
+                            / static_cast<double>(scenario.duration)))
+                        - canvas->horizontalScrollBar()->value();
+                };
+                const auto fittedStartX = fittedRange
+                    ? fittedXAtTick(fittedRange->first)
+                    : -1;
+                const auto fittedEndX = fittedRange
+                    ? fittedXAtTick(fittedRange->second)
+                    : -1;
+                if (!canvas->hasExplicitRangeSelection()
+                    || fittedRange != committedRange
+                    || fittedStartX < canvas->signalHeaderWidth() - 2
+                    || fittedStartX > canvas->signalHeaderWidth() + 2
+                    || fittedEndX < canvas->viewport()->width() - 2
+                    || fittedEndX > canvas->viewport()->width() + 2
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || fitAction->text() != QStringLiteral("Fit selection")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Fitted selected range"))) {
+                    fail(QStringLiteral(
+                        "Contextual Fit did not fill the viewport with the selected range"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto fitScreenshotPath = waveEditAutoScrollScreenshotPath;
+                    const auto suffix = fitScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        fitScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-fit-selection"));
+                    } else {
+                        fitScreenshotPath.append(
+                            QStringLiteral("-fit-selection.png"));
+                    }
+                    if (!window.grab().save(fitScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save contextual Fit selection screenshot"));
+                        return;
+                    }
+                }
+
                 sendKey(canvas, Qt::Key_Escape);
                 if (canvas->hasExplicitRangeSelection()
                     || canvas->selectedTimeRange()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->text() != QStringLiteral("Saved")
+                    || fitAction->text() != QStringLiteral("Fit scenario")
+                    || !fitAction->toolTip().contains(
+                        QStringLiteral("complete scenario"))) {
                     fail(QStringLiteral(
-                        "Range cleanup altered the Saved waveform after autoscroll"));
+                        "Range cleanup did not restore the Fit scenario action"));
+                    return;
+                }
+                fitAction->trigger();
+                QCoreApplication::processEvents();
+                if (canvas->horizontalScrollBar()->value() != 0
+                    || canvas->horizontalScrollBar()->maximum() != 0
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Fitted complete scenario"))) {
+                    fail(QStringLiteral(
+                        "Contextual Fit scenario did not restore the complete overview"));
                     return;
                 }
 
@@ -3568,7 +3650,12 @@ int main(int argc, char* argv[])
                     return text.compare(QStringLiteral("Transition"), Qt::CaseInsensitive) == 0
                         || text.compare(QStringLiteral("Edit"), Qt::CaseInsensitive) == 0
                         || text.compare(QStringLiteral("Export"), Qt::CaseInsensitive) == 0
-                        || text.compare(QStringLiteral("Fit selection"), Qt::CaseInsensitive) == 0;
+                        || (text.compare(
+                                QStringLiteral("Fit selection"),
+                                Qt::CaseInsensitive)
+                            == 0
+                            && action->objectName()
+                                != QStringLiteral("FitScenarioAction"));
                 });
             if (!waveformToolbar
                 || !undoAction

@@ -140,6 +140,7 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   Undo。Pulse 与单击/悬浮共用同一拍范围，插入后保持该拍选中并显示实际结果。若任一单信号写值
   同步移除引用消失边沿的 Relation，会说明数量，撤销会原子恢复波形、Event 与关系。
 - 放大长时间轴后，Wave Edit 的 Shift 范围选择、范围端点、Bit 多拍、Bit 边沿、Segment 移动与左右边界拖动在进入波形区左右 48 px 时持续自动滚动；每次滚动都会更新真实时间、吸附与预览，状态栏显示方向。释放后停留在目标视图，仍只提交原手势对应的一个命令；Esc 或异常失去左键会停止滚动、恢复起始视图，并保持模型、Undo 与 Saved 状态不变。
+- 建立显式时间范围后，现有单个 `Fit scenario` 动作会就地改为 `Fit selection`；点击后让范围左右端点准确占满波形视口，同时保留选区、固定范围栏和编辑能力。状态栏说明 Esc 可清除选区；清除后同一动作恢复为 `Fit scenario`，再次点击返回完整概览。缩放过程不修改模型、Undo 或 Saved 状态，也不增加第二个 Fit 按钮。
 - Clock 波形右键可对一拍执行 Gate、Drive X 或 Run。Run 清除该拍覆盖后保持拍级选择，并显示
   `restored normal clock waveform` 与撤销提示；已正常运行时显示 `no values changed`，不新增
   Undo 或清除 Redo。
@@ -315,7 +316,7 @@ exports/
   多个交错命令逐次恢复、右键参数真实结果/原值确认/Undo/Redo、无效时间/颜色原位纠错与草稿/焦点保留、Marker 模式标题拖动 Esc 取消、
   跨位置/原位拖放结果以及 Undo/Redo 恢复提示均具有专项 offscreen 覆盖。
   长列表专项另覆盖上下边缘持续滚动、真实插入位置、Esc 复原视口与顺序，以及跨视口移动的一步 Undo。
-  Wave Edit 跨视口专项构造放大长时间轴，覆盖右向 Segment 模型外预览、Esc 视图复原、释放单命令提交、Undo 回到 Saved、释放后计时器停止，以及左向 Shift 范围持续扩展。
+  Wave Edit 长时间轴专项覆盖右向 Segment 模型外预览、Esc 视图复原、释放单命令提交、Undo 回到 Saved、释放后计时器停止、左向 Shift 范围持续扩展，以及同一 Fit 动作在 selection/scenario 之间切换、选区满宽缩放、固定工具栏稳定和全局概览恢复。
 - Measure 离屏回归覆盖活动/临时光标、持久锁定点/区间、精确 `Δ`、创建/选择/拖动/方向键/删除
   结果、活动光标单击与方向键最终值、Shift 参考点、正负拖动的 Reference/Cursor/Δ、边界无效果
   反馈、一次 Undo 直达前一真实移动、Delete 的 Undo/Redo 恢复提示、删除较早点后的名称冲突规避、

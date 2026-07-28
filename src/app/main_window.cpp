@@ -4012,11 +4012,34 @@ void MainWindow::createToolBars()
     zoomOutAction->setToolTip(tr("Zoom out around the viewport center"));
     auto* fitAction = editBar->addAction(
         themedIcon(QStringLiteral("zoom-fit-best"), style(), QStyle::SP_DesktopIcon),
-        tr("Fit scenario"),
-        canvas_,
-        &WaveCanvas::fitScenario);
+        tr("Fit scenario"));
     fitAction->setObjectName(QStringLiteral("FitScenarioAction"));
     fitAction->setToolTip(tr("Fit the complete scenario"));
+    connect(fitAction, &QAction::triggered, this, [this] {
+        if (canvas_->hasExplicitRangeSelection()) {
+            canvas_->fitSelection();
+            statusBar()->showMessage(
+                tr("Fitted selected range · Esc clears selection · Fit scenario returns to overview"),
+                5'000);
+        } else {
+            canvas_->fitScenario();
+            statusBar()->showMessage(tr("Fitted complete scenario"), 3'000);
+        }
+    });
+    connect(
+        canvas_,
+        &WaveCanvas::rangeEditPaletteVisibilityChanged,
+        fitAction,
+        [this, fitAction](const bool rangeVisible) {
+            fitAction->setText(
+                rangeVisible
+                    ? tr("Fit selection")
+                    : tr("Fit scenario"));
+            fitAction->setToolTip(
+                rangeVisible
+                    ? tr("Fit the selected time range and keep it editable")
+                    : tr("Fit the complete scenario"));
+        });
 }
 void MainWindow::createDocks()
 {

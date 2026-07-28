@@ -3901,6 +3901,58 @@ Automated QA: 第一次将 data[7:0] Segment 保持在右边缘时，视图持�
 Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke.png
 Desktop interaction: none
 ```
+## 持续迭代 69：显式范围的上下文 Fit
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `WaveCanvas::fitSelection()` 已具备整数时间范围缩放能力，但生产界面没有连接到该槽；工具栏唯一 Fit 动作固定执行 `fitScenario()`。该能力对用户不可达，已有代码不能减少任何实际步骤。
+- 用户视角从长波形中 Shift 框选关注区间：下一步是放大该区间继续改值或检查边沿；原界面的 `Fit scenario` 只会缩回全局，用户必须反复 Ctrl+滚轮并重新保持指针锚点。选区越窄，重复缩放和定位成本越高。
+- 保留原有单个 `FitScenarioAction`，不新增工具栏按钮。显式范围出现时，动作文本和提示就地变为 `Fit selection`；范围被清除后恢复 `Fit scenario`，因此按钮数量和位置始终不变。
+- 点击 `Fit selection` 后，范围起点与终点准确映射到波形视口左右边界；显式范围、所选 signals、固定范围栏及后续编辑能力全部保留。状态栏明确提示 Esc 清除范围，以及随后使用 Fit scenario 返回概览。
+- 点击 `Fit scenario` 恢复完整时间轴、水平滚动起点和零溢出视图。两种缩放均只改变视图，不修改 Scenario、命令栈、autosave 或 Saved 状态。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：在既有长时间轴左向 Shift 范围之后，覆盖初始 Fit scenario 文案、范围出现后的 Fit selection 文案/提示、选区满宽几何、固定栏持续可见、第二张离屏截图、模型/Undo/Saved 隔离、Esc 文案恢复及完整概览返回。工具栏收敛断言继续禁止独立 Fit selection 按钮，仅允许同一 `FitScenarioAction` 动态切换。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure -j 4
+26/26 tests passed
+Total Test time: 4.12 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure -j 4
+26/26 tests passed
+Total Test time: 4.10 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 1.75 sec
+
+Automated QA: Saved 长时间轴中，Shift 范围出现后同一按钮从 Fit scenario 变为 Fit selection；
+              点击后约 382.7 ns–528 ns 的范围准确占满波形宽度，固定范围栏仍位于工具栏且选区保持可编辑；
+              状态说明 Esc 与返回概览方式，Scenario/Undo/Saved 不变；Esc 后按钮恢复 Fit scenario，再次点击回到水平滚动值和最大值均为 0 的完整时间轴。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-fit-selection.png
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
