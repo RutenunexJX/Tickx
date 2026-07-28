@@ -4269,13 +4269,21 @@ void WaveCanvas::commitLaneReorder()
     if (source == scenario_->lanes.end()) return;
     const auto sourceIndex = static_cast<std::size_t>(
         std::distance(scenario_->lanes.begin(), source));
-    if (sourceIndex == *laneDropDestinationIndex_) return;
+    const auto laneName = QString::fromStdString(source->name);
+    if (sourceIndex == *laneDropDestinationIndex_) {
+        emit statusMessage(
+            tr("%1 remains at position %2. No order changed.")
+                .arg(laneName)
+                .arg(sourceIndex + 1));
+        return;
+    }
+    const auto destinationIndex = *laneDropDestinationIndex_;
 
     try {
         commandStack_->execute(std::make_unique<MoveLaneCommand>(
             *scenario_,
             laneDragId_,
-            *laneDropDestinationIndex_));
+            destinationIndex));
     } catch (const std::exception& exception) {
         QToolTip::showText(
             viewport()->mapToGlobal(laneHeaderPressPosition_),
@@ -4289,6 +4297,11 @@ void WaveCanvas::commitLaneReorder()
     emit modelEdited();
     emit commandAvailabilityChanged();
     emit selectionChanged(QString::fromStdString(laneDragId_), cursorTick_);
+    emit statusMessage(
+        tr("Moved %1: position %2 -> %3. Ctrl+Z to undo.")
+            .arg(laneName)
+            .arg(sourceIndex + 1)
+            .arg(destinationIndex + 1));
 }
 
 void WaveCanvas::drawLaneReorderOverlay(QPainter& painter)

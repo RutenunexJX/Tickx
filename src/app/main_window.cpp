@@ -1874,6 +1874,7 @@ void MainWindow::moveSelectedLaneBy(const int offset)
     const auto currentIndex = static_cast<std::ptrdiff_t>(
         std::distance(scenario->lanes.begin(), iterator));
     const auto destinationIndex = currentIndex + offset;
+    const auto laneName = QString::fromStdString(iterator->name);
     if (destinationIndex < 0
         || destinationIndex >= static_cast<std::ptrdiff_t>(scenario->lanes.size())) {
         statusBar()->showMessage(tr("The selected lane is already at the display boundary."), 4'000);
@@ -1899,6 +1900,12 @@ void MainWindow::moveSelectedLaneBy(const int offset)
     selectLaneItem(signalTree_, laneId);
     selectLaneItem(groupTree_, laneId);
     updateLaneOrderActions();
+    statusBar()->showMessage(
+        tr("Moved %1: position %2 -> %3. Ctrl+Z to undo.")
+            .arg(laneName)
+            .arg(currentIndex + 1)
+            .arg(destinationIndex + 1),
+        5'000);
 }
 
 void MainWindow::updateLaneOrderActions()

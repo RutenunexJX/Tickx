@@ -2314,6 +2314,62 @@ Automated QA: req 确认框显示 3 events、1 relation 和 Ctrl+Z；完成状�
               Undo 恢复 req/Relation 并显示 Ctrl+Y；相关创建、编辑和保存流程无回归
 Desktop interaction: none
 ```
+## 持续迭代 41：信号重排结果与恢复反馈
+
+状态：完成
+
+已交付：
+
+- 开发审计确认菜单上移/下移与画布标题拖动均已正确提交单个 `MoveLaneCommand`，边界拒绝和 Esc
+  取消也已有保护；但成功提交后没有操作结果，标题拖回原位置时同样静默结束。
+- 用户主流程中，信号重排依赖相邻行位置变化，长列表、相似名称或短距离拖动时难以确认是否已经
+  放下。用户也无法立即知道可用 Ctrl+Z 恢复；原位放下无反馈会被误判为拖动失效。
+- 菜单和画布拖动成功后统一显示信号名、1-based 原位置、新位置及 `Ctrl+Z to undo`。原位放下明确
+  显示当前位置和 `No order changed`，不执行命令、不标记修改，也不占用 Undo 历史。
+- `wave-lane-reorder-smoke` 覆盖菜单向上/向下的精确位置反馈及 Undo 后 `Ctrl+Y`；
+  `wave-canvas-add-lane-smoke` 通过真实标题拖动覆盖插入目标、跨位置提交、水平原位拖放、无空历史、
+  Undo/Redo 顺序与恢复提示。全部 GUI 路径使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 19 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.22 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.69 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "wave-(lane-reorder|canvas-add-lane)-smoke" --output-on-failure
+2/2 passed
+Total Test time: 0.65 sec
+
+Automated QA: req 菜单移动精确报告 4→3/4→5；Quick Bus 跨位置拖动报告名称、原/新位置和 Ctrl+Z；
+              同位置水平拖放保持顺序并报告 No order changed；随后一次 Undo 直接恢复真实重排，
+              Redo 再次生效并分别显示 Ctrl+Y/Ctrl+Z
+Visual desktop review: not performed; offscreen-only requirement observed
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

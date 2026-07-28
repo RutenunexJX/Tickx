@@ -1040,16 +1040,29 @@ int main(int argc, char* argv[])
                     return;
                 }
                 const auto& movedUp = window.project().scenarios.front().lanes;
+                const auto expectedUpStatus = QStringLiteral(
+                    "Moved %1: position 4 -> 3. Ctrl+Z to undo.")
+                                                  .arg(QString::fromStdString(
+                                                      originalLanes.at(3).name));
                 if (movedUp.size() != originalLanes.size()
-                    || movedUp.at(2).id != "lane-request") {
-                    qCritical().noquote() << "Lane reorder up produced the wrong order";
+                    || movedUp.at(2).id != "lane-request"
+                    || window.statusBar()->currentMessage() != expectedUpStatus) {
+                    qCritical().noquote()
+                        << "Lane reorder up produced the wrong order or feedback"
+                        << window.statusBar()->currentMessage();
                     window.hide();
                     application.exit(4);
                     return;
                 }
                 if (!invoke("undo")
-                    || window.project().scenarios.front().lanes != originalLanes) {
-                    qCritical().noquote() << "Lane reorder up undo failed";
+                    || window.project().scenarios.front().lanes != originalLanes
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Undid Move lane"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Y"))) {
+                    qCritical().noquote()
+                        << "Lane reorder up undo or recovery feedback failed"
+                        << window.statusBar()->currentMessage();
                     window.hide();
                     application.exit(4);
                     return;
@@ -1061,16 +1074,29 @@ int main(int argc, char* argv[])
                     return;
                 }
                 const auto& movedDown = window.project().scenarios.front().lanes;
+                const auto expectedDownStatus = QStringLiteral(
+                    "Moved %1: position 4 -> 5. Ctrl+Z to undo.")
+                                                    .arg(QString::fromStdString(
+                                                        originalLanes.at(3).name));
                 if (movedDown.size() != originalLanes.size()
-                    || movedDown.at(4).id != "lane-request") {
-                    qCritical().noquote() << "Lane reorder down produced the wrong order";
+                    || movedDown.at(4).id != "lane-request"
+                    || window.statusBar()->currentMessage() != expectedDownStatus) {
+                    qCritical().noquote()
+                        << "Lane reorder down produced the wrong order or feedback"
+                        << window.statusBar()->currentMessage();
                     window.hide();
                     application.exit(4);
                     return;
                 }
                 if (!invoke("undo")
-                    || window.project().scenarios.front().lanes != originalLanes) {
-                    qCritical().noquote() << "Lane reorder down undo failed";
+                    || window.project().scenarios.front().lanes != originalLanes
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Undid Move lane"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Y"))) {
+                    qCritical().noquote()
+                        << "Lane reorder down undo or recovery feedback failed"
+                        << window.statusBar()->currentMessage();
                     window.hide();
                     application.exit(4);
                     return;
@@ -2190,12 +2216,17 @@ int main(int argc, char* argv[])
             const auto orderBeforeDrag = laneOrder();
             const auto clockPosition = std::find(
                 orderBeforeDrag.begin(), orderBeforeDrag.end(), quickClock.id);
-            if (clockPosition == orderBeforeDrag.end()) {
-                fail(QStringLiteral("Quick clock disappeared before lane drag"));
+            const auto busPosition = std::find(
+                orderBeforeDrag.begin(), orderBeforeDrag.end(), quickBus.id);
+            if (clockPosition == orderBeforeDrag.end()
+                || busPosition == orderBeforeDrag.end()) {
+                fail(QStringLiteral("Quick lane disappeared before lane drag"));
                 return;
             }
             const auto expectedDrop = static_cast<std::size_t>(
                 std::distance(orderBeforeDrag.begin(), clockPosition));
+            const auto sourcePosition = static_cast<std::size_t>(
+                std::distance(orderBeforeDrag.begin(), busPosition));
             canvas->revealLocation(QString::fromStdString(quickBus.id), 0);
             QCoreApplication::processEvents();
             const auto busY = laneCenter(quickBus.id);
@@ -2279,20 +2310,67 @@ int main(int argc, char* argv[])
                 Qt::NoButton);
             QCoreApplication::processEvents();
             const auto orderAfterDrag = laneOrder();
-            if (orderAfterDrag.at(expectedDrop) != quickBus.id) {
-                fail(QStringLiteral("Header drag committed the wrong lane order"));
+            const auto expectedDragStatus = QStringLiteral(
+                "Moved %1: position %2 -> %3. Ctrl+Z to undo.")
+                                                .arg(QString::fromStdString(quickBus.name))
+                                                .arg(sourcePosition + 1)
+                                                .arg(expectedDrop + 1);
+            if (orderAfterDrag.at(expectedDrop) != quickBus.id
+                || window.statusBar()->currentMessage() != expectedDragStatus) {
+                fail(QStringLiteral("Header drag committed the wrong lane order or feedback"));
                 return;
             }
+
+            const auto busYAfterDrag = laneCenter(quickBus.id);
+            if (busYAfterDrag < 40) {
+                fail(QStringLiteral("Reordered Bus is not visible for same-slot drag"));
+                return;
+            }
+            sendMouse(
+                QEvent::MouseButtonPress,
+                QPoint(80, busYAfterDrag),
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseMove,
+                QPoint(105, busYAfterDrag),
+                Qt::NoButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                QPoint(105, busYAfterDrag),
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            const auto expectedNoOpStatus = QStringLiteral(
+                "%1 remains at position %2. No order changed.")
+                                                .arg(QString::fromStdString(quickBus.name))
+                                                .arg(expectedDrop + 1);
+            if (laneOrder() != orderAfterDrag
+                || canvas->laneDropDestinationIndex()
+                || window.statusBar()->currentMessage() != expectedNoOpStatus) {
+                fail(QStringLiteral("Same-slot header drag changed order or ended silently"));
+                return;
+            }
+
             undoAction->trigger();
             QCoreApplication::processEvents();
-            if (laneOrder() != orderBeforeDrag) {
-                fail(QStringLiteral("Header drag was not one undoable MoveLaneCommand"));
+            if (laneOrder() != orderBeforeDrag
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Undid Move lane"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Y"))) {
+                fail(QStringLiteral("Header drag was not one undoable MoveLaneCommand with recovery feedback"));
                 return;
             }
             redoAction->trigger();
             QCoreApplication::processEvents();
-            if (laneOrder() != orderAfterDrag) {
-                fail(QStringLiteral("Header drag redo failed"));
+            if (laneOrder() != orderAfterDrag
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Redid Move lane"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Header drag redo or recovery feedback failed"));
                 return;
             }
 

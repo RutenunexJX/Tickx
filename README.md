@@ -118,7 +118,8 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   Clock 周期/频率以及 Bit/Bus 常用参数；真实
   修改后状态栏显示当前参数与 `Ctrl+Z`，原值确认显示 `no properties changed`，不新增 Undo、
   不清除 Redo，也不标记未保存。标题拖动期间按 Esc 会立即清除插入反馈并取消重排，随后释放
-  鼠标不会提交 `MoveLaneCommand`。
+  鼠标不会提交 `MoveLaneCommand`；成功放下会显示信号名、原位置→新位置和 `Ctrl+Z`，原位放下
+  明确显示顺序未改变且不增加 Undo。
 - 单击非 Bit Segment 进行选择；拖动主体整体移动，拖动左右手柄修改边界，双击修改现有值，
   `Delete` / `Backspace` 清除为该信号的隐式值。右键波形可设置常用值、插入一拍 Pulse、编辑
   完整 Segment 或清除 Segment。清除后状态栏显示信号、时间范围、隐式结果和 `Ctrl+Z` 提示；
@@ -278,8 +279,8 @@ exports/
 - 画布快速添加 CLK/Bit/Bus、唯一命名、随机颜色、默认时钟域、信号名拖动重排、右键轻量参数、
   Delete 删除以及菜单快捷键均通过离屏回归；双击/F2 无模态重命名、原处校验、真实失焦提交、
   无效新增阻止删除/Bus 控件/Segment 双击并可 Esc 恢复、有效新增先提交再删除、两步 Undo 顺序、
-  多个交错命令逐次恢复、右键参数真实结果/原值确认/Undo/Redo 以及 Marker 模式标题拖动 Esc 取消
-  均具有专项 offscreen 覆盖。
+  多个交错命令逐次恢复、右键参数真实结果/原值确认/Undo/Redo、Marker 模式标题拖动 Esc 取消、
+  跨位置/原位拖放结果以及 Undo/Redo 恢复提示均具有专项 offscreen 覆盖。
 - 无模式直接编辑的 Segment 选择、整体移动、边界缩放、双击改值、Delete 清除、Relation 清理提示
   与 Undo/Redo 确认，Bit
   单拍/多拍翻转、0/1/X/Z 键盘与右键写值后的拍级选择、拍级 Clear/Delete、Undo/Redo 和中键
