@@ -16,6 +16,9 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDesktopServices>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
@@ -28,6 +31,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QInputDialog>
 #include <QProgressBar>
 #include <QPushButton>
@@ -48,6 +52,7 @@
 #include <QTreeWidgetItem>
 #include <QTreeWidgetItemIterator>
 #include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -473,6 +478,22 @@ bool sameProjectPath(const QString& left, const QString& right)
     return !normalizedLeft.isEmpty()
         && !normalizedRight.isEmpty()
         && QString::compare(normalizedLeft, normalizedRight, Qt::CaseInsensitive) == 0;
+}
+
+std::optional<QString> droppedProjectPath(const QMimeData* mimeData)
+{
+    if (!mimeData || !mimeData->hasUrls()) return std::nullopt;
+    const auto urls = mimeData->urls();
+    if (urls.size() != 1 || !urls.front().isLocalFile()) return std::nullopt;
+
+    const auto path = normalizedProjectPath(urls.front().toLocalFile());
+    const auto lowerPath = path.toLower();
+    if (!QFileInfo(path).isFile()
+        || (!lowerPath.endsWith(QStringLiteral(".json"))
+            && !lowerPath.endsWith(QStringLiteral(".autosave")))) {
+        return std::nullopt;
+    }
+    return path;
 }
 
 QStringList storedRecentProjectPaths()
@@ -948,6 +969,8 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
 
     canvas_ = new WaveCanvas(this);
     setCentralWidget(canvas_);
+    canvas_->installEventFilter(this);
+    canvas_->viewport()->installEventFilter(this);
     compareTraceCanvas_ = new TraceCanvas(this);
     compareTraceCanvas_->hide();
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
@@ -1100,6 +1123,38 @@ void MainWindow::closeEvent(QCloseEvent* event)
     }
 }
 
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    const auto watchesCanvas = canvas_
+        && (watched == canvas_ || watched == canvas_->viewport());
+    if (watchesCanvas && event) {
+        if (event->type() == QEvent::DragEnter) {
+            auto* drag = static_cast<QDragEnterEvent*>(event);
+            if (droppedProjectPath(drag->mimeData())) {
+                drag->acceptProposedAction();
+                return true;
+            }
+        } else if (event->type() == QEvent::DragMove) {
+            auto* drag = static_cast<QDragMoveEvent*>(event);
+            if (droppedProjectPath(drag->mimeData())) {
+                drag->acceptProposedAction();
+                return true;
+            }
+        } else if (event->type() == QEvent::Drop) {
+            auto* drop = static_cast<QDropEvent*>(event);
+            const auto path = droppedProjectPath(drop->mimeData());
+            if (path) {
+                drop->acceptProposedAction();
+                QTimer::singleShot(0, this, [this, path = *path] {
+                    openProjectPath(path);
+                });
+                return true;
+            }
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
 void MainWindow::updateRecentProjectsMenu()
 {
     if (!recentProjectsMenu_) return;
@@ -1190,6 +1245,12 @@ void MainWindow::openRecentProject(const QString& path)
             8'000);
         return;
     }
+    openProjectPath(normalized);
+}
+
+void MainWindow::openProjectPath(const QString& path)
+{
+    const auto normalized = normalizedProjectPath(path);
     if (sameProjectPath(projectFile_, normalized)) {
         statusBar()->showMessage(
             tr("Already open: %1").arg(normalized),

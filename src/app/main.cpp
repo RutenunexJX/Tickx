@@ -707,13 +707,22 @@ int main(int argc, char* argv[])
                 Qt::CaseInsensitive)) {
             userJourneyBareSavePath.chop(QStringLiteral(".wave.json").size());
         }
+        const auto userJourneyDropPath =
+            QFileInfo(userJourneySavePath).absolutePath()
+            + QStringLiteral("/user-journey-dropped.wave.json");
         QFile::remove(userJourneySavePath);
         QFile::remove(userJourneyBareSavePath);
         QFile::remove(userJourneySavePath + QStringLiteral(".autosave"));
+        QFile::remove(userJourneyDropPath);
+        QFile::remove(userJourneyDropPath + QStringLiteral(".autosave"));
         QTimer::singleShot(
             0,
             &window,
-            [&application, &window, userJourneySavePath, userJourneyBareSavePath] {
+            [&application,
+             &window,
+             userJourneySavePath,
+             userJourneyBareSavePath,
+             userJourneyDropPath] {
                 const auto fail = [&application, &window](const QString& message) {
                     qCritical().noquote() << message;
                     if (auto* modal = QApplication::activeModalWidget()) modal->close();
@@ -1763,6 +1772,77 @@ int main(int argc, char* argv[])
                         QFileInfo(userJourneySavePath).fileName())) {
                     fail(QStringLiteral(
                         "Open Recent did not restore the last project in one step"));
+                    return;
+                }
+
+                auto droppedProject = window.project();
+                droppedProject.name = "Dropped waveform";
+                droppedProject.scenarios.front().duration = 700'000;
+                QString droppedWriteError;
+                if (!wave::saveProjectFileAtomic(
+                        droppedProject,
+                        userJourneyDropPath,
+                        &droppedWriteError)) {
+                    fail(QStringLiteral("Cannot create dropped project: %1")
+                             .arg(droppedWriteError));
+                    return;
+                }
+                QMimeData projectMime;
+                projectMime.setUrls({QUrl::fromLocalFile(userJourneyDropPath)});
+                const auto dropPosition = canvas->viewport()->rect().center();
+                QDragEnterEvent projectDragEnter(
+                    dropPosition,
+                    Qt::CopyAction,
+                    &projectMime,
+                    Qt::LeftButton,
+                    Qt::NoModifier);
+                QCoreApplication::sendEvent(
+                    canvas->viewport(),
+                    &projectDragEnter);
+                QDropEvent projectDrop(
+                    QPointF(dropPosition),
+                    Qt::CopyAction,
+                    &projectMime,
+                    Qt::LeftButton,
+                    Qt::NoModifier);
+                QCoreApplication::sendEvent(canvas->viewport(), &projectDrop);
+                QCoreApplication::processEvents();
+                QCoreApplication::processEvents();
+                auto* droppedRecentAction = window.findChild<QAction*>(
+                    QStringLiteral("RecentProjectAction1"));
+                const auto droppedOpenStatus =
+                    window.statusBar()->currentMessage();
+                if (!projectDragEnter.isAccepted()
+                    || !projectDrop.isAccepted()
+                    || QApplication::activeModalWidget()
+                    || window.project().name != "Dropped waveform"
+                    || window.project().scenarios.front().duration != 700'000
+                    || window.project().scenarios.front().lanes.size() != 3
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !droppedOpenStatus.startsWith(QStringLiteral("Opened "))
+                    || !droppedOpenStatus.contains(
+                        QFileInfo(userJourneyDropPath).fileName())
+                    || !droppedRecentAction
+                    || QString::compare(
+                        QDir::cleanPath(droppedRecentAction->data().toString()),
+                        QDir::cleanPath(
+                            QFileInfo(userJourneyDropPath).absoluteFilePath()),
+                        Qt::CaseInsensitive)
+                        != 0) {
+                    qCritical().noquote()
+                        << "drop diagnostics"
+                        << projectDragEnter.isAccepted()
+                        << projectDrop.isAccepted()
+                        << window.project().name.c_str()
+                        << window.project().scenarios.front().duration
+                        << window.project().scenarios.front().lanes.size()
+                        << saveState->text()
+                        << droppedOpenStatus
+                        << (droppedRecentAction
+                                ? droppedRecentAction->data().toString()
+                                : QStringLiteral("<missing recent>"));
+                    fail(QStringLiteral(
+                        "Dropping one project file did not open and remember it"));
                     return;
                 }
 

@@ -20,6 +20,7 @@
 class QAction;
 class QCloseEvent;
 class QComboBox;
+class QEvent;
 class QCheckBox;
 class QPoint;
 class QLabel;
@@ -53,6 +54,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     void newProject();
@@ -131,6 +133,7 @@ private:
     void updateRecentProjectsMenu();
     void rememberProjectPath(const QString& path);
     void openRecentProject(const QString& path);
+    void openProjectPath(const QString& path);
     [[nodiscard]] QString projectDialogDirectory() const;
     bool loadFromPath(const QString& path);
     bool writeToPath(const QString& path);

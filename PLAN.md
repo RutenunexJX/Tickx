@@ -3516,6 +3516,67 @@ Automated QA: 首次 Save As 从 Documents/Home 开始并生成最近项；New �
 Desktop interaction: none
 ```
 
+## 持续迭代 62：工程文件直接拖放打开
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 WaveCanvas 已设置 `acceptDrops`，但其 `dragEnterEvent()` / `dropEvent()` 只识别内部 Bus preset MIME。资源管理器提供的 URL MIME 被明确 ignore，
+  主窗口也没有拖放入口；用户将 `.wave.json` 放到最显眼的工作区不会得到任何反馈，只能改走 File > Open 或 Open Recent。
+- 用户从文件系统看到工程时，最直接的动作是把它拖进已经打开的工作台。该动作应等价于已选定目标后的 Open，不应要求重新浏览同一路径；同时 Bus 值拖放是高频编辑动作，不能被工程级处理抢占。
+- MainWindow 在 WaveCanvas 与 viewport 上安装事件过滤器，仅当 MIME 包含一个本地普通文件且扩展名为 `.json` 或 `.autosave` 时接管 DragEnter/DragMove/Drop；
+  `.wave.json` 自然属于 JSON。多文件、远程 URL、目录和其他扩展名继续下放，原有 Bus preset MIME 路径不变。
+- 工程 Drop 在事件返回后排入下一事件周期，避免在拖放分发栈中打开模态确认。随后复用规范化路径、当前工程安全无操作、草稿提交、Save/Discard/Cancel、
+  `preferredProjectLoadPath()`、正式加载、Saved/Recovery 反馈以及 Recent/目录记忆；解析失败仍由现有 Open failed 反馈处理。
+- 最近工程和拖放共享 `openProjectPath()`，避免两套未保存确认或加载语义。加载后的 Recent 菜单仍按上一轮设计在后续事件周期刷新，不会在 QAction 触发过程中删除发送者。
+- `wave-user-journey-smoke` 在完成保存与 Recent 重开后复制当前工程、将名称改为 Dropped waveform 并把 End 延长至 700 ns，原子写入独立文件；随后向真实 canvas viewport 发送
+  URL DragEnter/Drop，断言两个事件被接受、700 ns/3 lane 内容加载、SaveState=Saved、状态为 `Opened <drop path>` 且 Recent 第一项切换到该文件。
+- `wave-wave-edit-smoke` 同轮定向回归 Bus `Don't care` MIME DragEnter/Drop、单拍写入及 Undo/Redo，证明工程过滤器只消费 URL 文件，不影响波形内部拖放。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 10.89 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 10.86 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-user-journey-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 1.05 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-(wave-edit|user-journey)-smoke$" --output-on-failure
+2/2 passed
+Total Test time: 1.39 sec
+
+Automated QA: 一个本地 user-journey-dropped.wave.json 拖到 canvas viewport 后，DragEnter/Drop 均接受；窗口加载 Dropped waveform、700 ns/3 lane，
+              显示 Saved 与 Opened <drop path>，Recent 第一项更新为拖入文件。既有 Bus Don't care 预设拖放、单拍结果和 Undo/Redo 无回归。
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

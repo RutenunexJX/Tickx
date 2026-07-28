@@ -200,7 +200,8 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   保存 Untitled 工程时从文件名推断项目名。Open/Save As 默认显示 `*.wave.json`；Save As 只输入工程名时
   自动补全 `.wave.json`，显式扩展名保持不变。首次 Save As 从 Documents（不可用时 Home）开始；成功保存或打开后记住目录。
   `File > Open Recent` 保留最近 5 个有效工程，以文件名和父目录区分、完整路径置于提示；点击当前脏工程只显示 Already open，不重载或触发丢弃确认。
-  普通工程成功打开后状态栏显示 `Opened <path>`；恢复快照
+  单个本地 `.wave.json`、`.json` 或 `.autosave` 文件可直接从资源管理器拖到波形画布打开；它复用同一草稿门禁、未保存确认、恢复选择和 Recent 更新，
+  不接管或破坏 Bus 快捷值的内部拖放。普通工程成功打开后状态栏显示 `Opened <path>`；恢复快照
   和迁移警告仍显示各自说明。Open 先选择目标文件；取消选择不会触发未保存确认或改变当前工程，只有选定
   目标后才询问 Save/Discard/Cancel。修改后 1.5 秒启动 Qt Concurrent 后台恢复快照；首次 Save As 前的 Untitled 波形同样写入应用恢复目录，
   无参数启动时自动恢复有效快照，并明确显示 `Recovery loaded · Save required`；此时 Save 仍打开 Save As，要求选择正式工程文件。
@@ -352,7 +353,7 @@ exports/
 - first mismatch、缺失 signal、width mismatch、condition evaluation error、诊断可见性
   以及 JSON/CSV/HTML 报告。
 - ZeroSlack signal-list、Private Frame sample、Pinloom entry 和 Wave Workbench URI。
-- 文件对话框与最近工程通过完整用户旅程验收：首次 Save As 位于 Documents/Home；保存后最近工程立即出现；New 后 Open 保持最近目录；当前脏工程的最近项为安全无操作；New 后最近项一键恢复 650 ns/3 lane 工程。所有 GUI 测试的设置目录相互隔离且不触碰真实用户设置。
+- 文件对话框、最近工程和工程拖放通过完整用户旅程验收：首次 Save As 位于 Documents/Home；保存后最近工程立即出现；New 后 Open 保持最近目录；当前脏工程的最近项为安全无操作；New 后最近项一键恢复 650 ns/3 lane 工程；再将独立 700 ns 工程拖入画布，断言加载、Saved/Opened 和 Recent 置顶。所有 GUI 测试的设置目录相互隔离且不触碰真实用户设置；既有 Bus `Don't care` MIME 拖放继续通过专项回归。
 - 主窗口后台 autosave 生成可由正式加载器读取的恢复快照；首次保存前的 Untitled 编辑也写入隔离恢复目录，无参数重启自动恢复且 Save 仍要求正式位置；启动/Open 已保存工程自动采用有效且更新的快照并显示 Save required，较旧或损坏快照回退正式工程；正式保存清除已完成/在途快照并保留 Saved 反馈；New/Open/Close 的 Discard 也等待在途 worker、永久清除快照且不重新调度。
 
 最近一次验证结果：21 个 CTest 入口均通过，其中核心入口包含 26 组细分测试；Qt Creator
