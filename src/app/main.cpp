@@ -249,17 +249,54 @@ int main(int argc, char* argv[])
         QTimer::singleShot(2'500, &application, [&application, &window, autosaveSmokePath] {
             const auto snapshotPath = autosaveSmokePath + QStringLiteral(".autosave");
             const auto loaded = wave::loadProjectFile(snapshotPath);
-            if (!QFileInfo::exists(snapshotPath) || !loaded.ok()) {
-                qCritical().noquote()
-                    << "Autosave recovery snapshot is missing or invalid:"
-                    << snapshotPath
-                    << loaded.error;
+            auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+            const auto fail = [&application, &window](const QString& message) {
+                qCritical().noquote() << message;
                 window.hide();
                 application.exit(4);
+            };
+            if (!QFileInfo::exists(snapshotPath) || !loaded.ok() || !saveState) {
+                fail(QStringLiteral("Autosave recovery snapshot is missing or invalid"));
                 return;
             }
-            window.hide();
-            application.exit(0);
+            if (!QMetaObject::invokeMethod(&window, "saveProject", Qt::DirectConnection)) {
+                fail(QStringLiteral("Cannot save the autosave smoke project"));
+                return;
+            }
+            QCoreApplication::processEvents();
+            const auto saved = wave::loadProjectFile(autosaveSmokePath);
+            if (QFileInfo::exists(snapshotPath)
+                || !saved.ok()
+                || saveState->text() != QStringLiteral("Saved")) {
+                fail(QStringLiteral("Formal save did not remove the completed recovery snapshot"));
+                return;
+            }
+
+            if (!QMetaObject::invokeMethod(&window, "markEdited", Qt::DirectConnection)
+                || !QMetaObject::invokeMethod(&window, "startAutosave", Qt::DirectConnection)
+                || !QMetaObject::invokeMethod(&window, "saveProject", Qt::DirectConnection)) {
+                fail(QStringLiteral("Cannot trigger the in-flight autosave cleanup scenario"));
+                return;
+            }
+            QTimer::singleShot(
+                750,
+                &application,
+                [&application, &window, autosaveSmokePath, snapshotPath, saveState] {
+                    const auto savedAfterRace = wave::loadProjectFile(autosaveSmokePath);
+                    if (QFileInfo::exists(snapshotPath)
+                        || !savedAfterRace.ok()
+                        || saveState->text() != QStringLiteral("Saved")
+                        || !window.statusBar()->currentMessage().contains(
+                            QStringLiteral("Saved"))) {
+                        qCritical().noquote()
+                            << "Stale in-flight autosave survived or obscured the formal save";
+                        window.hide();
+                        application.exit(4);
+                        return;
+                    }
+                    window.hide();
+                    application.exit(0);
+                });
         });
     } else if (newProjectSmoke) {
         QTimer::singleShot(0, &window, [&application, &window] {

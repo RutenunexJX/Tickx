@@ -3238,6 +3238,60 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 57：正式保存与恢复快照生命周期闭环
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 autosave 将当前工程写入 `<project>.autosave`，但 `writeToPath()` 正式保存成功后仅停止定时器、递增 generation，未删除已有恢复文件。
+  若 Qt Concurrent 写入已开始，generation 只让结果被判为 stale，后台任务仍可能在正式保存之后重新留下旧快照。
+- 用户完成正式保存后真正需要的是磁盘工程成为唯一最新版本。Open 过滤器显式暴露 Recovery snapshot，若同目录仍保留旧 `.autosave`，用户无法仅凭文件名判断其过期，
+  误开后会看到 `Save required` 并可能把旧数据覆盖回正式文件。
+- 正式保存成功后现在删除目标工程对应的恢复快照；Save As 时也清理旧工程路径的快照。清理失败不把成功保存误报为失败，但状态栏会明确列出仍残留的快照路径。
+- 每次后台写入记录独立的在途路径。正式保存、新建或加载使 generation 失效后，worker 完成时若当前工程已干净，会对该确切路径再次清理；stale 错误或成功消息不再覆盖
+  更晚的 `Saved` 反馈。watcher 已完成但 `finished` 尚未处理时禁止启动下一任务，避免在途路径被覆盖。
+- `wave-autosave-smoke` 先验证 1.5 秒防抖生成可读取快照，再正式保存并断言快照立即消失；随后直接启动后台写入并在同一事件循环内正式保存，
+  等待 stale worker 完成后断言 `.autosave` 未重现、正式文件仍可读取、SaveState 与状态栏仍为 Saved。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.99 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 8.79 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-autosave-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 3.41 sec
+
+Automated QA: 修改后生成的恢复快照可由正式加载器读取；正式保存后文件立即删除，磁盘工程与 SaveState=Saved 有效。
+              后台快照与保存重叠时，过期 worker 完成后未重新留下 .autosave，状态栏仍保留 Saved 结果。
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

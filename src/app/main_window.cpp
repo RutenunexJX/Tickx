@@ -18,6 +18,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QDockWidget>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -3307,7 +3308,8 @@ void MainWindow::scheduleAutosave()
         return;
     }
     if (!dirty_ || projectFile_.isEmpty() || !autosaveTimer_) return;
-    if (autosaveWatcher_ && autosaveWatcher_->isRunning()) {
+    if (autosaveWatcher_
+        && (autosaveWatcher_->isRunning() || !autosaveInFlightPath_.isEmpty())) {
         autosavePending_ = true;
         return;
     }
@@ -3321,7 +3323,7 @@ void MainWindow::startAutosave()
         return;
     }
     if (!dirty_ || projectFile_.isEmpty() || !autosaveWatcher_) return;
-    if (autosaveWatcher_->isRunning()) {
+    if (autosaveWatcher_->isRunning() || !autosaveInFlightPath_.isEmpty()) {
         autosavePending_ = true;
         return;
     }
@@ -3329,6 +3331,7 @@ void MainWindow::startAutosave()
     const auto generation = autosaveGeneration_;
     auto snapshot = project_;
     const auto path = autosavePathForProject(projectFile_);
+    autosaveInFlightPath_ = path;
     const auto future = QtConcurrent::run(
         [snapshot = std::move(snapshot), path, generation]() mutable {
             QString error;
@@ -3343,12 +3346,23 @@ void MainWindow::startAutosave()
 void MainWindow::finishAutosave()
 {
     const auto result = autosaveWatcher_->result();
+    const auto path = std::exchange(autosaveInFlightPath_, QString{});
     const auto stale = result.first != autosaveGeneration_;
-    if (!result.second.isEmpty()) {
+    if (stale) {
+        if (!dirty_
+            && !path.isEmpty()
+            && QFileInfo::exists(path)
+            && !QFile::remove(path)) {
+            statusBar()->showMessage(
+                tr("Saved project, but stale recovery snapshot could not be removed: %1")
+                    .arg(path),
+                10'000);
+        }
+    } else if (!result.second.isEmpty()) {
         statusBar()->showMessage(
             tr("Autosave recovery snapshot failed: %1").arg(result.second),
             10'000);
-    } else if (!stale) {
+    } else {
         statusBar()->showMessage(tr("Autosaved recovery snapshot"), 3'000);
     }
     if (autosavePending_ || stale) {
@@ -4356,6 +4370,7 @@ bool MainWindow::loadFromPath(const QString& path)
 bool MainWindow::writeToPath(const QString& path)
 {
     const auto beforeName = project_.name;
+    const auto previousProjectFile = projectFile_;
     if (project_.name.empty() || project_.name == "Untitled") {
         auto inferred = QFileInfo(path).fileName();
         if (inferred.endsWith(QStringLiteral(".wave.json"), Qt::CaseInsensitive)) {
@@ -4378,8 +4393,32 @@ bool MainWindow::writeToPath(const QString& path)
     if (autosaveTimer_) autosaveTimer_->stop();
     ++autosaveGeneration_;
     autosavePending_ = false;
+
+    QString cleanupError;
+    const auto removeRecoverySnapshot = [&cleanupError](const QString& projectPath) {
+        const auto snapshotPath = autosavePathForProject(projectPath);
+        if (snapshotPath.isEmpty()
+            || !QFileInfo::exists(snapshotPath)
+            || QFile::remove(snapshotPath)) {
+            return;
+        }
+        if (!cleanupError.isEmpty()) cleanupError += QStringLiteral(", ");
+        cleanupError += snapshotPath;
+    };
+    removeRecoverySnapshot(path);
+    if (QString::compare(previousProjectFile, path, Qt::CaseInsensitive) != 0) {
+        removeRecoverySnapshot(previousProjectFile);
+    }
+
     updateWindowTitle();
-    statusBar()->showMessage(tr("Saved %1").arg(path), 5'000);
+    if (cleanupError.isEmpty()) {
+        statusBar()->showMessage(tr("Saved %1").arg(path), 5'000);
+    } else {
+        statusBar()->showMessage(
+            tr("Saved %1, but stale recovery snapshot remains: %2")
+                .arg(path, cleanupError),
+            10'000);
+    }
     return true;
 }
 

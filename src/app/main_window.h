@@ -207,6 +207,7 @@ private:
     QTimer* autosaveTimer_{nullptr};
     QFutureWatcher<QPair<quint64, QString>>* autosaveWatcher_{nullptr};
     quint64 autosaveGeneration_{0};
+    QString autosaveInFlightPath_;
     bool autosavePending_{false};
     bool reloadTraceAfterCurrent_{false};
     bool compareModeRequested_{false};
