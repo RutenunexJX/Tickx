@@ -2430,6 +2430,67 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 43：活动光标最终测量反馈
+
+状态：完成
+
+已交付：
+
+- 开发审计确认活动光标和临时参考点的绘制、采样值与带符号 `Δ` 已存在；但普通单击释放和 Shift
+  参考点不提交状态消息。完成测量后移动鼠标还会把悬浮指针时间标成 `Cursor`，与画布上保留的实际
+  活动光标不一致；方向键只显示单一时间，已有参考点时会丢失 `Δ` 语境。
+- 用户完成测量后需要读取“参考点、活动点、差值”这一组事实。若状态随悬浮指针改写，用户可能把
+  未放置的指针位置误认为活动光标；若释放后没有最终结果，则必须依赖最后一次 MouseMove 是否发生。
+- 新增统一活动测量文本：单一活动点显示 `Cursor` 精确时间并说明采样值位于信号名旁；有参考点时
+  固定显示 `Reference`、`Cursor` 与以 Reference→Cursor 计算的带符号 `Δ`。
+- 左键单击/拖动释放、Shift 点击、方向键和 Measure 内鼠标移动共用同一格式。Shift 只改变参考点，
+  不把参考点写成活动 Cursor；测量完成后的普通悬浮保留实际活动测量，尚未放置光标时才显示
+  `Pointer … · click to place cursor`。
+- `wave-cursor-mode-smoke` 精确断言单击与方向键最终 Cursor、Shift 的负 Δ、反向/正向拖动释放后的
+  Reference/Cursor 与 `Δ -`/`Δ +`，并继续覆盖第 42 轮全部锁定光标路径。全部 GUI 使用 offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 28 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.17 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.74 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-cursor-mode-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.27 sec
+
+Screenshot generated:
+  build/qtcreator-debug/cursor-mode-smoke.png
+Automated QA: 单击和右方向键报告最终 Cursor/采样值位置；Shift 点击保留活动点并报告负 Δ；
+              右→左拖动报告负 Δ，左→右拖动报告正 Δ，释放后的 Reference/Cursor 均匹配模型；
+              锁定点/区间创建、移动、边界、删除和 Undo/Redo 无回归
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

@@ -178,7 +178,8 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
 - `Ctrl` + 鼠标滚轮以指针所在时间为锚缩放，`Shift` + 滚轮水平滚动；中键拖动或按住空格再左键
   拖动可平移时间轴。`Fit scenario` 显示完整场景。
 - `Measure` 是临时状态：左键创建或移动唯一活动光标；直接拖动以起点作为临时参考、终点作为
-  活动光标，`Shift` + 左键创建临时参考。两者显示带符号的 `Δ` 时间宽度。
+  活动光标，`Shift` + 左键创建临时参考。单击与方向键显示最终 `Cursor`，Shift 与拖动统一显示
+  `Reference`、`Cursor` 和带符号的 `Δ`；释放后保留最终测量结果。
 - `Ctrl` + 左键创建持久锁定光标，`Ctrl` + 拖动创建持久锁定区间。锁定对象使用独立颜色并写入
   工程 Marker；单击后可拖动或用方向键移动，`Delete` / `Backspace` 删除，均支持 Undo/Redo。
   创建、选择、移动和删除后状态栏显示名称与精确时间/区间；真实修改显示 `Ctrl+Z`，时间轴边界
@@ -284,7 +285,8 @@ exports/
   多个交错命令逐次恢复、右键参数真实结果/原值确认/Undo/Redo、Marker 模式标题拖动 Esc 取消、
   跨位置/原位拖放结果以及 Undo/Redo 恢复提示均具有专项 offscreen 覆盖。
 - Measure 离屏回归覆盖活动/临时光标、持久锁定点/区间、精确 `Δ`、创建/选择/拖动/方向键/删除
-  结果、边界无效果反馈、一次 Undo 直达前一真实移动及 Delete 的 Undo/Redo 恢复提示。
+  结果、活动光标单击与方向键最终值、Shift 参考点、正负拖动的 Reference/Cursor/Δ、边界无效果
+  反馈、一次 Undo 直达前一真实移动及 Delete 的 Undo/Redo 恢复提示。
 - 无模式直接编辑的 Segment 选择、整体移动、边界缩放、双击改值、Delete 清除、Relation 清理提示
   与 Undo/Redo 确认，Bit
   单拍/多拍翻转、0/1/X/Z 键盘与右键写值后的拍级选择、拍级 Clear/Delete、Undo/Redo 和中键

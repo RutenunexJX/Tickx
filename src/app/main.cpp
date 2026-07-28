@@ -2720,20 +2720,39 @@ int main(int argc, char* argv[])
                 const auto point2 = pointAt(0.35);
                 const auto point3 = pointAt(0.57);
                 const auto point4 = pointAt(0.82);
+                const auto formatTime = [&window](const wave::Tick tick) {
+                    return QString::fromStdString(wave::formatTick(
+                        tick,
+                        window.project().timeBase));
+                };
 
                 click(point1);
+                const auto clickStatus = window.statusBar()->currentMessage();
                 if (!canvas->movableCursorTick()
-                    || canvas->temporaryCursorTick()) {
-                    qCritical().noquote() << "Left click did not create one movable cursor";
+                    || canvas->temporaryCursorTick()
+                    || !clickStatus.contains(QStringLiteral("Cursor"))
+                    || !clickStatus.contains(formatTime(*canvas->movableCursorTick()))
+                    || !clickStatus.contains(QStringLiteral("values shown beside signals"))
+                    || clickStatus.contains(QStringLiteral("Reference"))) {
+                    qCritical().noquote()
+                        << "Left click did not report the final movable cursor"
+                        << clickStatus;
                     window.hide();
                     application.exit(4);
                     return;
                 }
                 const auto beforeArrow = *canvas->movableCursorTick();
                 sendKey(Qt::Key_Right);
+                const auto arrowCursorStatus = window.statusBar()->currentMessage();
                 if (!canvas->movableCursorTick()
-                    || *canvas->movableCursorTick() <= beforeArrow) {
-                    qCritical().noquote() << "Right arrow did not move the cursor";
+                    || *canvas->movableCursorTick() <= beforeArrow
+                    || !arrowCursorStatus.contains(
+                        formatTime(*canvas->movableCursorTick()))
+                    || !arrowCursorStatus.contains(
+                        QStringLiteral("values shown beside signals"))) {
+                    qCritical().noquote()
+                        << "Right arrow did not report the final movable cursor"
+                        << arrowCursorStatus;
                     window.hide();
                     application.exit(4);
                     return;
@@ -2741,20 +2760,58 @@ int main(int argc, char* argv[])
 
                 const auto movableBeforeShift = *canvas->movableCursorTick();
                 click(point4, Qt::ShiftModifier);
+                const auto shiftStatus = window.statusBar()->currentMessage();
                 if (!canvas->temporaryCursorTick()
                     || *canvas->movableCursorTick() != movableBeforeShift
-                    || *canvas->temporaryCursorTick() <= *canvas->movableCursorTick()) {
-                    qCritical().noquote() << "Shift click did not create a temporary cursor";
+                    || *canvas->temporaryCursorTick() <= *canvas->movableCursorTick()
+                    || !shiftStatus.contains(QStringLiteral("Reference"))
+                    || !shiftStatus.contains(formatTime(*canvas->temporaryCursorTick()))
+                    || !shiftStatus.contains(QStringLiteral("Cursor"))
+                    || !shiftStatus.contains(formatTime(*canvas->movableCursorTick()))
+                    || !shiftStatus.contains(QString::fromUtf8("Δ -"))) {
+                    qCritical().noquote()
+                        << "Shift click did not report reference, cursor, and negative delta"
+                        << shiftStatus;
                     window.hide();
                     application.exit(4);
                     return;
                 }
 
                 drag(point4, point3);
+                const auto negativeDragStatus = window.statusBar()->currentMessage();
                 if (!canvas->movableCursorTick()
                     || !canvas->temporaryCursorTick()
-                    || *canvas->movableCursorTick() >= *canvas->temporaryCursorTick()) {
-                    qCritical().noquote() << "Direct drag did not create a signed cursor measurement";
+                    || *canvas->movableCursorTick() >= *canvas->temporaryCursorTick()
+                    || !negativeDragStatus.contains(QStringLiteral("Reference"))
+                    || !negativeDragStatus.contains(
+                        formatTime(*canvas->temporaryCursorTick()))
+                    || !negativeDragStatus.contains(QStringLiteral("Cursor"))
+                    || !negativeDragStatus.contains(
+                        formatTime(*canvas->movableCursorTick()))
+                    || !negativeDragStatus.contains(QString::fromUtf8("Δ -"))) {
+                    qCritical().noquote()
+                        << "Direct drag did not report the final negative measurement"
+                        << negativeDragStatus;
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                drag(point3, point4);
+                const auto positiveDragStatus = window.statusBar()->currentMessage();
+                if (!canvas->movableCursorTick()
+                    || !canvas->temporaryCursorTick()
+                    || *canvas->movableCursorTick() <= *canvas->temporaryCursorTick()
+                    || !positiveDragStatus.contains(QStringLiteral("Reference"))
+                    || !positiveDragStatus.contains(
+                        formatTime(*canvas->temporaryCursorTick()))
+                    || !positiveDragStatus.contains(QStringLiteral("Cursor"))
+                    || !positiveDragStatus.contains(
+                        formatTime(*canvas->movableCursorTick()))
+                    || !positiveDragStatus.contains(QString::fromUtf8("Δ +"))) {
+                    qCritical().noquote()
+                        << "Direct drag did not report the final positive measurement"
+                        << positiveDragStatus;
                     window.hide();
                     application.exit(4);
                     return;
@@ -2781,11 +2838,6 @@ int main(int argc, char* argv[])
                             return candidate.id == lockedId;
                         });
                     return marker == markers.end() ? nullptr : &*marker;
-                };
-                const auto formatTime = [&window](const wave::Tick tick) {
-                    return QString::fromStdString(wave::formatTick(
-                        tick,
-                        window.project().timeBase));
                 };
                 const auto* locked = markerById();
                 if (!locked || locked->start != locked->end) {

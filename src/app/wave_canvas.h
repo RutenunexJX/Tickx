@@ -244,6 +244,7 @@ private:
     [[nodiscard]] Tick cursorKeyboardStep() const;
     [[nodiscard]] QString cursorValue(const Lane& lane) const;
     [[nodiscard]] QString cursorDeltaText(Tick from, Tick to) const;
+    [[nodiscard]] QString cursorMeasurementText() const;
     [[nodiscard]] Segment* segmentById(
         const std::string& laneId,
         const std::string& segmentId);

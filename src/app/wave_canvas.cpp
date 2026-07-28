@@ -2027,9 +2027,7 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             movableCursorTick_ = next;
             cursorTick_ = next;
             ensureCursorVisible(next);
-            emit statusMessage(
-                tr("Cursor %1").arg(QString::fromStdString(
-                    formatTick(next, project_->timeBase))));
+            emit statusMessage(cursorMeasurementText());
             viewport()->update();
         }
         event->accept();
@@ -2496,10 +2494,12 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             lockedMarkerOriginalRange_.reset();
             if (movableCursorTick_) {
                 temporaryCursorTick_ = drawStart_;
+                cursorTick_ = *movableCursorTick_;
             } else {
                 movableCursorTick_ = drawStart_;
                 temporaryCursorTick_.reset();
             }
+            emit statusMessage(cursorMeasurementText());
             viewport()->update();
             return;
         }
@@ -2875,13 +2875,12 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
     }
 
     if (tool_ == Tool::Marker) {
-        auto message = tr("Cursor %1").arg(QString::fromStdString(
-            formatTick(cursorTick_, project_->timeBase)));
-        if (movableCursorTick_ && temporaryCursorTick_) {
-            message += QStringLiteral("  |  ")
-                + cursorDeltaText(*temporaryCursorTick_, *movableCursorTick_);
-        }
-        emit statusMessage(message);
+        emit statusMessage(
+            movableCursorTick_
+                ? cursorMeasurementText()
+                : tr("Pointer %1 · click to place cursor")
+                      .arg(QString::fromStdString(
+                          formatTick(cursorTick_, project_->timeBase))));
     } else {
         emit statusMessage(
             tr("%1  |  %2")
@@ -4707,6 +4706,24 @@ QString WaveCanvas::cursorDeltaText(const Tick from, const Tick to) const
     return QStringLiteral("\u0394 %1").arg(text);
 }
 
+QString WaveCanvas::cursorMeasurementText() const
+{
+    if (!movableCursorTick_) return tr("No active cursor");
+    const auto format = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : tr("%1 ticks").arg(tick);
+    };
+    if (!temporaryCursorTick_) {
+        return tr("Cursor %1 · values shown beside signals")
+            .arg(format(*movableCursorTick_));
+    }
+    return tr("Reference %1 · Cursor %2 · %3")
+        .arg(format(*temporaryCursorTick_))
+        .arg(format(*movableCursorTick_))
+        .arg(cursorDeltaText(*temporaryCursorTick_, *movableCursorTick_));
+}
+
 void WaveCanvas::ensureCursorVisible(const Tick tick)
 {
     const auto x = xAtTick(tick);
@@ -5442,6 +5459,7 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
             temporaryCursorTick_ = drawStart_;
         }
         lockedMarkerOriginalRange_.reset();
+        emit statusMessage(cursorMeasurementText());
         viewport()->update();
         return;
     }
