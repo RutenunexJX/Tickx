@@ -1,6 +1,7 @@
 #include "wave/commands.h"
 
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -1364,7 +1365,8 @@ PasteRangeCommand::PasteRangeCommand(
     , duration_(duration)
 {
     if (lanes_.empty()) throw std::invalid_argument("paste contains no lanes");
-    if (destination_ < 0 || duration_ <= 0 || destination_ >= scenario.duration) {
+    if (destination_ < 0 || duration_ <= 0 || destination_ > scenario.duration
+        || duration_ > std::numeric_limits<Tick>::max() - destination_) {
         throw std::invalid_argument("paste range is outside the scenario");
     }
     for (const auto& copiedLane : lanes_) {
@@ -1387,18 +1389,15 @@ void PasteRangeCommand::redo()
         return;
     }
     before_ = *scenario_;
-    const auto pasteEnd = std::min(
-        scenario_->duration,
-        destination_ + std::min(duration_, scenario_->duration - destination_));
+    const auto pasteEnd = destination_ + duration_;
+    scenario_->duration = std::max(scenario_->duration, pasteEnd);
     for (const auto& copiedLane : lanes_) {
         auto* lane = findLane(*scenario_, copiedLane.laneId);
         if (!lane) throw std::runtime_error("paste target lane was removed");
         clearSegmentRange(*lane, destination_, pasteEnd);
         for (const auto& relative : copiedLane.relativeSegments) {
-            const auto available = pasteEnd - destination_;
-            if (relative.start >= available) continue;
             const auto start = destination_ + relative.start;
-            const auto end = destination_ + std::min(relative.end, available);
+            const auto end = destination_ + relative.end;
             if (end <= start) continue;
             setSegmentRange(
                 *lane,

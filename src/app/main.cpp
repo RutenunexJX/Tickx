@@ -5511,6 +5511,84 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                const auto endBeforeExtendedPaste = scenario.duration;
+                const auto nearEndPasteStart = endBeforeExtendedPaste - 5'000;
+                const auto expectedExtendedEnd = endBeforeExtendedPaste + 5'000;
+                const auto extendedProbeTick = endBeforeExtendedPaste + 2'000;
+                const auto expectedExtendedEndLabel = QString::fromStdString(
+                    wave::formatTick(expectedExtendedEnd, window.project().timeBase));
+                if (!chooseWaveformAction(
+                        QPoint(xAtTick(nearEndPasteStart), acknowledgeY),
+                        QStringLiteral("Paste copied range here"))) {
+                    qCritical().noquote()
+                        << "Near-End Paste action could not be invoked";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                settleLayouts();
+                const auto extendedPasteRange = canvas->selectedTimeRange();
+                const auto* extendedPasteTarget =
+                    wave::findLane(scenario, "lane-ack");
+                if (!extendedPasteRange
+                    || extendedPasteRange->first != nearEndPasteStart
+                    || extendedPasteRange->second != expectedExtendedEnd
+                    || scenario.duration != expectedExtendedEnd
+                    || !extendedPasteTarget
+                    || valueAt(*extendedPasteTarget, extendedProbeTick) != durableSourceValue
+                    || canvas->horizontalScrollBar()->value() <= 0
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("End extended to %1").arg(expectedExtendedEndLabel))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    const auto failedExtendedRange = extendedPasteRange.value_or(
+                        std::pair<wave::Tick, wave::Tick>{-1, -1});
+                    qCritical().noquote()
+                        << "Near-End Paste was truncated or not visibly extended"
+                        << "range" << failedExtendedRange.first << failedExtendedRange.second
+                        << "end" << scenario.duration
+                        << "value"
+                        << (extendedPasteTarget
+                                ? QString::fromStdString(
+                                      valueAt(*extendedPasteTarget, extendedProbeTick))
+                                : QStringLiteral("<missing>"))
+                        << "scroll" << canvas->horizontalScrollBar()->value()
+                        << "status" << window.statusBar()->currentMessage();
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto extendedPasteScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix =
+                        extendedPasteScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        extendedPasteScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-paste-extends-end"));
+                    } else {
+                        extendedPasteScreenshotPath.append(
+                            QStringLiteral("-paste-extends-end.png"));
+                    }
+                    if (!window.grab().save(extendedPasteScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save extended Paste screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeDeletedSourcePaste) {
+                    qCritical().noquote()
+                        << "Extended Paste was not one atomic Undo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_Escape);
+                settleLayouts();
+
                 bool sourceDeleteConfirmed = false;
                 QTimer::singleShot(0, &application, [&sourceDeleteConfirmed] {
                     auto* confirmation = qobject_cast<QMessageBox*>(

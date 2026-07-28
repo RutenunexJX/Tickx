@@ -157,7 +157,9 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   兼容目标完成 Paste，无目标直接粘贴会说明需要选择几个目标。旧 schema 1 剪贴板在源信号仍存在时
   继续兼容。固定范围栏显示可见 `Paste`；多 lane clipboard 与显式目标选择数量相等时，
   按双方可见顺序一一映射，数量或任一配对不兼容时零写入。未建立显式多 lane 目标而使用右键 Paste
-  时仍保持复制时的完整源 lane 集合，避免猜测配对。目标已与复制范围一致时显示 `no values changed`，
+  时仍保持复制时的完整源 lane 集合，避免猜测配对。粘贴完整宽度超过当前 End 时会原子延长时间轴，
+  保持当前缩放并把新尾部滚入视野；状态显示新的 End 和 `Ctrl+Z`，一次 Undo 同时恢复 End 与波形，
+  也可直接在 End 处开始粘贴。目标已与复制范围一致时显示 `no values changed`，
   不新增 Undo 或清除 Redo。粘贴后的目标范围保持显式选中，固定范围栏立即可用于再次
   Copy、Cut、Paste、Clear 或批量编辑；Undo 后选择仍保留，Esc 清除。Edit 菜单及
   `Ctrl+C` / `Ctrl+X` / `Ctrl+V` 入口继续保留；当内联文本框获得焦点时，这三个快捷键只操作文本，
@@ -288,7 +290,8 @@ exports/
   目标映射、Bit→Bus 原子拒绝、正常 Clock 空 Paste 的无效果反馈/Redo 保留、可见 Paste 按钮、
   2→1 数量拒绝、两 lane 顺序目标映射及 960 像素无裁切命中、粘贴结果持久选中、标题/标尺同次
   清除并重定向、schema 2 元数据/旧 schema 1 兼容、复制后确认删除源信号、无目标恢复提示、
-  指定目标成功 Paste 及删除/Paste 两步 Undo、波形正文防误触、单步 Undo 后选择保留、混合类型无效控件
+  指定目标成功 Paste 及删除/Paste 两步 Undo、End 前 5 ns 完整粘贴 10 ns、End 自动延长/尾部滚入
+  视野/单步 Undo、波形正文防误触、单步 Undo 后选择保留、混合类型无效控件
   隐藏和零修改、缩放/刷新定位以及 Esc/外部点击清除。
 - Event 菱形局部虚线预览期间模型不变，释放、Undo 与 Redo 后 Event/Segment 保持同步。
 - Clock 真实右键 Gate→Run→重复 Run、拍级选择、无效果反馈、一次 Undo/Redo 及基线恢复具有专项

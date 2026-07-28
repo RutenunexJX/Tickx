@@ -2199,6 +2199,64 @@ Automated QA: schema 2 快照含 req/bit/1-bit 元数据；删除 req 后直接 
 Manual visual read: not performed because the permission service blocked screenshot access
 Desktop interaction: none
 ```
+## 持续迭代 39：Paste 完整宽度与 End 原子延长
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `PasteRangeCommand` 将目标结束时间裁剪到 Scenario duration，超出 End 的相对 Segment
+  也被跳过或截短；画布随后只显示实际剩余宽度，未明确说明复制内容已丢失。
+- 用户主流程中，在时间轴尾部复用一段波形时，用户期待 Paste 保持复制宽度。静默截断会使波形看似
+  成功但缺少尾部，必须逐段核对才能发现，属于高错误风险而非可接受的边界限制。
+- Paste 现在允许目标起点等于 End，并在目标结束超过当前 duration 时先把 Scenario 延长到完整复制
+  结束，再写入所有相对 Segment；加法溢出与真正位于 End 之外的起点仍在命令执行前拒绝。
+- End 延长、波形写入、Event 同步和 Relation 变化保存在同一个完整 Scenario 命令快照中，一次
+  Undo/Redo 同时恢复。没有越过 End 的重复 Paste 继续保持无效果命令抑制。
+- 画布状态显示 `End extended to …` 和 `Ctrl+Z`，保留当前缩放比例，仅水平滚动到新尾部，粘贴后的
+  完整目标范围继续显式选中。核心测试覆盖从 End 本身粘贴；Wave Edit smoke 从实际 End 前 5 ns
+  粘贴 10 ns，验证完整宽度、新 End、尾部可见、目标值及单步 Undo。全部 GUI 路径使用 offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 19 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.44 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.90 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 1.19 sec
+
+Screenshot generated:
+  build/qtcreator-debug/wave-edit-smoke-paste-extends-end.png
+Automated QA: 示例 End 220 ns；req 的 10 ns 快照从 215 ns 粘贴后完整选中 215–225 ns，
+              End 变为 225 ns，新尾部滚入视野，状态明确提示，单步 Undo 恢复 End 与波形
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

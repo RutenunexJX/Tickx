@@ -1311,7 +1311,7 @@ void WaveCanvas::pasteAtCursor()
     const auto duration = root.value(QStringLiteral("durationTick"))
                               .toString()
                               .toLongLong(&validDuration);
-    if (!validDuration || duration <= 0 || cursorTick_ >= scenario_->duration) {
+    if (!validDuration || duration <= 0 || cursorTick_ > scenario_->duration) {
         emit statusMessage(tr("Clipboard range duration or destination is invalid."));
         return;
     }
@@ -1499,6 +1499,7 @@ void WaveCanvas::pasteAtCursor()
     }
 
     const auto pasteStart = cursorTick_;
+    const auto durationBeforePaste = scenario_->duration;
     const auto relationCountBefore = scenario_->relations.size();
     bool changed = false;
     try {
@@ -1527,6 +1528,18 @@ void WaveCanvas::pasteAtCursor()
         emit commandAvailabilityChanged();
     }
     refreshModel();
+    const auto endExtended = scenario_->duration > durationBeforePaste;
+    if (endExtended && selectionRange_) {
+        const auto desiredScroll = static_cast<int>(std::clamp(
+            std::ceil(
+                static_cast<double>(selectionRange_->second) * pixelsPerTick_
+                - static_cast<double>(std::max(1, waveViewportWidth() - 20))),
+            0.0,
+            static_cast<double>(horizontalScrollBar()->maximum())));
+        if (desiredScroll > horizontalScrollBar()->value()) {
+            horizontalScrollBar()->setValue(desiredScroll);
+        }
+    }
     const auto pastedDuration = selectionRange_->second - selectionRange_->first;
     const auto startLabel = project_
         ? QString::fromStdString(formatTick(pasteStart, project_->timeBase))
@@ -1534,11 +1547,17 @@ void WaveCanvas::pasteAtCursor()
     const auto durationLabel = project_
         ? QString::fromStdString(formatTick(pastedDuration, project_->timeBase))
         : QString::number(pastedDuration);
-    const auto message = changed
+    auto message = changed
         ? tr("Pasted %1 at %2 · %3")
               .arg(targetSummary, startLabel, durationLabel)
         : tr("%1 at %2 · %3 already matches copied range · no values changed")
               .arg(targetSummary, startLabel, durationLabel);
+    if (endExtended) {
+        message += tr(" · End extended to %1").arg(
+            project_
+                ? QString::fromStdString(formatTick(scenario_->duration, project_->timeBase))
+                : QString::number(scenario_->duration));
+    }
     emit statusMessage(
         changed
             ? appendRelationAwareUndo(

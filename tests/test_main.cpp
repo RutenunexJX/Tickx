@@ -1766,6 +1766,49 @@ void testMultiLanePasteCommand()
     expect(targetStack.canRedo(), "empty Paste discarded the real Paste Redo branch");
     expect(targetStack.redo(), "real Paste Redo was unavailable after empty Paste");
     expectEqual(targetScenario, targetAfter, "real Paste Redo changed after empty Paste");
+
+    auto endScenario = wave::makeDemonstrationProject().scenarios.front();
+    const auto endBefore = endScenario;
+    const auto originalEnd = endScenario.duration;
+    wave::Segment endSegment;
+    endSegment.start = 0;
+    endSegment.end = 10'000;
+    endSegment.value = "1";
+    std::vector<wave::CopiedLaneRange> endCopied{
+        {"lane-request", {endSegment}},
+    };
+    wave::CommandStack endStack;
+    expect(
+        endStack.execute(std::make_unique<wave::PasteRangeCommand>(
+            endScenario,
+            endCopied,
+            originalEnd,
+            10'000)),
+        "Paste at End did not extend the Scenario");
+    expectEqual(
+        endScenario.duration,
+        originalEnd + 10'000,
+        "Paste at End did not preserve the complete copied duration");
+    const auto* extendedLane = wave::findLane(endScenario, "lane-request");
+    const auto extendedValue = extendedLane
+        ? std::find_if(
+              extendedLane->segments.begin(),
+              extendedLane->segments.end(),
+              [originalEnd](const wave::Segment& segment) {
+                  return segment.start <= originalEnd + 5'000
+                      && originalEnd + 5'000 < segment.end;
+              })
+        : std::vector<wave::Segment>::const_iterator{};
+    expect(
+        extendedLane
+            && extendedValue != extendedLane->segments.end()
+            && extendedValue->value == "1",
+        "Paste at End truncated the copied waveform");
+    const auto endAfter = endScenario;
+    expect(endStack.undo(), "extended Paste undo failed");
+    expectEqual(endScenario, endBefore, "extended Paste undo did not restore End and waveform");
+    expect(endStack.redo(), "extended Paste redo failed");
+    expectEqual(endScenario, endAfter, "extended Paste redo did not restore End and waveform");
 }
 
 void testEventSegmentSynchronization()
