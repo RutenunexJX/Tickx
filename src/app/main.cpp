@@ -194,6 +194,7 @@ int main(int argc, char* argv[])
         project.scenarios.push_back(std::move(scenario));
     }
     if (!projectPath.isEmpty()) {
+        projectPath = wave::preferredProjectLoadPath(projectPath);
         const auto loadResult = wave::loadProjectFile(projectPath);
         if (!loadResult.ok()) {
             if (smokeTest) {
@@ -281,20 +282,115 @@ int main(int argc, char* argv[])
             QTimer::singleShot(
                 750,
                 &application,
-                [&application, &window, autosaveSmokePath, snapshotPath, saveState] {
+                [&application,
+                 &window,
+                 autosaveSmokePath,
+                 snapshotPath,
+                 saveState,
+                 fail] {
                     const auto savedAfterRace = wave::loadProjectFile(autosaveSmokePath);
                     if (QFileInfo::exists(snapshotPath)
                         || !savedAfterRace.ok()
                         || saveState->text() != QStringLiteral("Saved")
                         || !window.statusBar()->currentMessage().contains(
                             QStringLiteral("Saved"))) {
-                        qCritical().noquote()
-                            << "Stale in-flight autosave survived or obscured the formal save";
-                        window.hide();
-                        application.exit(4);
+                        fail(QStringLiteral(
+                            "Stale in-flight autosave survived or obscured the formal save"));
                         return;
                     }
+
+                    auto recoveryProject = window.project();
+                    const auto recoveredDuration =
+                        recoveryProject.scenarios.front().duration + 1'234;
+                    recoveryProject.scenarios.front().duration = recoveredDuration;
+                    QString recoveryWriteError;
+                    if (!wave::saveProjectFileAtomic(
+                            recoveryProject,
+                            snapshotPath,
+                            &recoveryWriteError)) {
+                        fail(QStringLiteral("Cannot create a newer recovery snapshot: %1")
+                                 .arg(recoveryWriteError));
+                        return;
+                    }
+                    QFile recoveryFile(snapshotPath);
+                    const auto newerTime =
+                        QFileInfo(autosaveSmokePath).lastModified().addSecs(2);
+                    if (!recoveryFile.open(QIODevice::ReadWrite)
+                        || !recoveryFile.setFileTime(
+                            newerTime,
+                            QFileDevice::FileModificationTime)) {
+                        fail(QStringLiteral("Cannot make the recovery snapshot newer than the project"));
+                        return;
+                    }
+                    recoveryFile.close();
+
+                    const auto selectedPath =
+                        wave::preferredProjectLoadPath(autosaveSmokePath);
+                    const auto recoveryLoad = wave::loadProjectFile(selectedPath);
+                    if (selectedPath != snapshotPath || !recoveryLoad.ok()) {
+                        fail(QStringLiteral("A newer valid recovery snapshot was not selected"));
+                        return;
+                    }
+
                     window.hide();
+                    wave::MainWindow recoveredWindow(
+                        *recoveryLoad.project,
+                        selectedPath);
+                    recoveredWindow.show();
+                    QCoreApplication::processEvents();
+                    auto* recoveredState = recoveredWindow.findChild<QLabel*>(
+                        QStringLiteral("SaveStateLabel"));
+                    if (!recoveredState
+                        || recoveredState->text()
+                            != QStringLiteral("Recovery loaded · Save required")
+                        || recoveredState->toolTip() != autosaveSmokePath
+                        || recoveredWindow.project().scenarios.front().duration
+                            != recoveredDuration
+                        || !recoveredWindow.windowTitle().contains(QStringLiteral(" *"))
+                        || !recoveredWindow.statusBar()->currentMessage().contains(
+                            QStringLiteral("Recovery snapshot loaded"))) {
+                        fail(QStringLiteral(
+                            "Crash restart did not surface the newer recovery snapshot safely"));
+                        return;
+                    }
+                    recoveredWindow.hide();
+
+                    QFile olderRecovery(snapshotPath);
+                    const auto olderTime =
+                        QFileInfo(autosaveSmokePath).lastModified().addSecs(-2);
+                    if (!olderRecovery.open(QIODevice::ReadWrite)
+                        || !olderRecovery.setFileTime(
+                            olderTime,
+                            QFileDevice::FileModificationTime)) {
+                        fail(QStringLiteral("Cannot age the recovery snapshot for fallback testing"));
+                        return;
+                    }
+                    olderRecovery.close();
+                    if (wave::preferredProjectLoadPath(autosaveSmokePath)
+                        != autosaveSmokePath) {
+                        fail(QStringLiteral("An older recovery snapshot replaced the saved project"));
+                        return;
+                    }
+
+                    QFile invalidRecovery(snapshotPath);
+                    if (!invalidRecovery.open(QIODevice::WriteOnly | QIODevice::Truncate)
+                        || invalidRecovery.write("{invalid recovery") < 0
+                        || !invalidRecovery.setFileTime(
+                            newerTime.addSecs(2),
+                            QFileDevice::FileModificationTime)) {
+                        fail(QStringLiteral("Cannot create an invalid newer recovery snapshot"));
+                        return;
+                    }
+                    invalidRecovery.close();
+                    if (wave::preferredProjectLoadPath(autosaveSmokePath)
+                        != autosaveSmokePath) {
+                        fail(QStringLiteral("An invalid recovery snapshot replaced the saved project"));
+                        return;
+                    }
+                    if (!QFile::remove(snapshotPath)) {
+                        fail(QStringLiteral("Cannot clean the autosave smoke recovery snapshot"));
+                        return;
+                    }
                     application.exit(0);
                 });
         });

@@ -3292,6 +3292,61 @@ Automated QA: 修改后生成的恢复快照可由正式加载器读取；正式
 Desktop interaction: none
 ```
 
+## 持续迭代 58：崩溃后更新快照自动发现
+
+状态：完成
+
+已交付：
+
+- 开发审计确认第 57 轮已保证正式保存后不残留过期快照，但应用启动和 File > Open 始终直接加载用户指定的 `.wave.json`；自动生成的
+  `<project>.autosave` 只有用户知道命名规则并在 Open 过滤器中手工选择时才会生效。
+- 用户在异常退出后最先做的是重新打开原工程，不会先研究恢复文件。若应用静默显示旧的正式波形，即使同目录已有更新快照，也会让用户误以为最近编辑已经丢失；
+  反过来无条件采用任何 `.autosave` 又可能把旧文件或损坏文件置于正式工程之前。
+- 新增 app 层 `preferredProjectLoadPath()`：显式打开 `.autosave` 时保持用户选择；打开正式工程时，仅在同路径快照存在、是普通文件、修改时间晚于正式工程且能被
+  正式加载器完整解析时返回快照，否则继续返回正式路径。恢复检查只影响桌面入口，不改变领域模型或 CLI 的显式文件语义。
+- 文件关联、命令行项目参数和 `waveworkbench://open` 在初次加载前应用该规则；File > Open 也使用同一规则。采用快照后 MainWindow 继续将正式 `.wave.json`
+  作为保存目标，工程标记 dirty，常驻状态显示 `Recovery loaded · Save required`，状态栏说明保存将提交到正式路径。
+- `wave-autosave-smoke` 在生命周期清理后构造内容与时戳均更新的有效快照，按真实启动顺序执行选择、加载和第二个 MainWindow 构造，断言恢复内容、Save required、
+  标题星号、正式路径 tooltip 和恢复说明；随后将同一快照改旧并改为更新但损坏的内容，分别断言均回退正式工程。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.71 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 8.78 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-autosave-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 3.42 sec
+
+Automated QA: 正式工程旁的有效更新快照被自动选中，恢复后的场景时长来自快照，显示 Recovery loaded · Save required 与正式保存路径。
+              快照时间早于正式工程时不替代；快照更新但 JSON 损坏时也回退正式工程。既有正式保存清理和在途 worker 清理继续通过。
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

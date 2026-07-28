@@ -831,6 +831,26 @@ void selectLaneItem(QTreeWidget* tree, const QString& laneId)
 
 } // namespace
 
+QString preferredProjectLoadPath(const QString& requestedPath)
+{
+    if (requestedPath.isEmpty()
+        || requestedPath.endsWith(
+            QStringLiteral(".autosave"),
+            Qt::CaseInsensitive)) {
+        return requestedPath;
+    }
+    const auto recoveryPath = autosavePathForProject(requestedPath);
+    const QFileInfo recoveryInfo(recoveryPath);
+    if (!recoveryInfo.exists() || !recoveryInfo.isFile()) return requestedPath;
+
+    const QFileInfo projectInfo(requestedPath);
+    if (projectInfo.exists()
+        && recoveryInfo.lastModified() <= projectInfo.lastModified()) {
+        return requestedPath;
+    }
+    return loadProjectFile(recoveryPath).ok() ? recoveryPath : requestedPath;
+}
+
 MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     : QMainWindow(parent)
     , project_(std::move(project))
@@ -4320,7 +4340,8 @@ void MainWindow::updateWindowTitle()
 
 bool MainWindow::loadFromPath(const QString& path)
 {
-    const auto result = loadProjectFile(path);
+    const auto selectedPath = preferredProjectLoadPath(path);
+    const auto result = loadProjectFile(selectedPath);
     if (!result.ok()) {
         QMessageBox::critical(this, tr("Open failed"), result.error);
         return false;
@@ -4338,11 +4359,11 @@ bool MainWindow::loadFromPath(const QString& path)
     activeTraceId_.clear();
     traceVisibleSignalIds_.clear();
     project_ = *result.project;
-    const auto recoveredSnapshot = path.endsWith(
+    const auto recoveredSnapshot = selectedPath.endsWith(
         QStringLiteral(".autosave"),
         Qt::CaseInsensitive);
     recoveryLoaded_ = recoveredSnapshot;
-    projectFile_ = projectPathForLoadedFile(path);
+    projectFile_ = projectPathForLoadedFile(selectedPath);
     commandStack_.clear();
     dirty_ = result.migrated || recoveredSnapshot;
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
@@ -4355,7 +4376,7 @@ bool MainWindow::loadFromPath(const QString& path)
     } else if (!result.warnings.isEmpty()) {
         statusBar()->showMessage(result.warnings.join(QStringLiteral("; ")), 10'000);
     } else {
-        statusBar()->showMessage(tr("Opened %1").arg(path), 5'000);
+        statusBar()->showMessage(tr("Opened %1").arg(selectedPath), 5'000);
     }
     if (traceCanvas_) traceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
     if (compareTraceCanvas_) {
