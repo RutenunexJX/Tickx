@@ -3636,6 +3636,57 @@ Automated QA: 650 ns 正式保存版本改为 660 ns 后显示 Unsaved changes�
 Desktop interaction: none
 ```
 
+## 持续迭代 64：隐藏项可发现恢复
+
+状态：完成
+
+已交付：
+
+- 开发审计确认高级 Lane/Group 属性允许关闭 `Visible`，但纯波形工作区已移除 Signals、Project 和 Scenario 导航窗口。隐藏后该 lane 会从唯一工作区消失，除立即 Undo 或手工修改 JSON 外没有应用内恢复路径；示例工程本身还包含一个隐藏 group，说明这不是仅由误操作产生的边缘状态。
+- 用户真正需要的是在隐藏动作完成后仍能看到“有内容被隐藏”以及直接恢复入口，而不是记住高级属性位置或撤销历史。恢复动作应一次完成、结果立即可见，并能用一次 Ctrl+Z 撤销。
+- 画布末尾增加上下文 `Show N hidden items` 按钮；Edit 菜单同步提供同名动态动作。无隐藏项时两者均不占用主界面，有隐藏项时即使所有可见 lane 都消失，入口仍位于快速新增按钮附近。
+- `ShowHiddenLanesCommand` 在创建时捕获当前场景全部隐藏 lane，作为单个命令统一恢复，并支持原子 Undo/Redo；无隐藏项时不产生历史或状态 ID。恢复结果进入现有保存点和 autosave 判定。
+- 关闭 `Visible` 后会立即清理不可见 lane 的标题选择、波形选择、编辑状态和 Bus 便携面板，防止键盘操作继续作用于不可见目标；定位请求也不再重新选中隐藏 lane。状态栏明确说明底部和 Edit 菜单的恢复入口。
+- 空画布提示统一使用 hidden item，准确覆盖 signal 与 group。新增 `wave-hidden-lane-smoke` 使用真实 Lane properties 对话框关闭 `req`，验证两处入口、恢复、Undo、Redo 及两次 Undo 回到示例工程原保存基线。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 19 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+22/22 tests passed
+Total Test time: 11.47 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+22/22 tests passed
+Total Test time: 11.10 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-hidden-lane-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.21 sec
+
+Automated QA: 示例工程初始有 1 个隐藏 group，画布末尾和 Edit 菜单均显示 Show 1 hidden item；
+              在 req 的真实 Lane properties 对话框关闭 Visible 后，req 消失、不可见选择清空、两处入口更新为 Show 2 hidden items，状态栏说明恢复位置；
+              点击画布按钮后 group 与 req 同时恢复且显示 Ctrl+Z；Undo 后两者重新隐藏，Redo 后重新恢复；再 Undo 两次回到 req 可见、group 隐藏的 Saved 基线，无标题星号。
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

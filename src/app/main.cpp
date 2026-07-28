@@ -98,6 +98,7 @@ int main(int argc, char* argv[])
     QString autosaveSmokePath;
     bool laneRemovalSmoke = false;
     bool laneReorderSmoke = false;
+    bool hiddenLaneSmoke = false;
     bool canvasAddLaneSmoke = false;
     QString canvasAddLaneScreenshotPath;
     bool userJourneySmoke = false;
@@ -126,6 +127,8 @@ int main(int argc, char* argv[])
             laneRemovalSmoke = true;
         } else if (argument == QStringLiteral("--lane-reorder-smoke")) {
             laneReorderSmoke = true;
+        } else if (argument == QStringLiteral("--hidden-lane-smoke")) {
+            hiddenLaneSmoke = true;
         } else if (argument.startsWith(QStringLiteral("--canvas-add-lane-smoke="))) {
             canvasAddLaneSmoke = true;
             canvasAddLaneScreenshotPath = argument.mid(
@@ -187,6 +190,7 @@ int main(int argc, char* argv[])
         || userJourneySmoke
         || laneRemovalSmoke
         || laneReorderSmoke
+        || hiddenLaneSmoke
         || canvasAddLaneSmoke
         || !screenshotPath.isEmpty()
         || !laneDialogScreenshotPath.isEmpty()
@@ -2118,6 +2122,177 @@ int main(int argc, char* argv[])
                 window.hide();
                 application.exit(0);
             });
+        });
+    } else if (hiddenLaneSmoke) {
+        QTimer::singleShot(0, &window, [&application, &window] {
+            auto fail = [&application, &window](const QString& message) {
+                qCritical().noquote() << message;
+                if (auto* modal = QApplication::activeModalWidget()) modal->close();
+                window.hide();
+                application.exit(4);
+            };
+            auto* canvas = window.findChild<wave::WaveCanvas*>();
+            auto* showButton = window.findChild<QToolButton*>(
+                QStringLiteral("CanvasShowHiddenLanesButton"));
+            auto* showAction = window.findChild<QAction*>(
+                QStringLiteral("ShowHiddenLanesAction"));
+            auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
+            auto* redoAction = window.findChild<QAction*>(QStringLiteral("RedoAction"));
+            auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+            const auto* initialLane = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            const auto* initialGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!canvas || !showButton || !showAction || !undoAction || !redoAction
+                || !saveState || !initialLane || !initialLane->visible
+                || !initialGroup || initialGroup->visible
+                || !showButton->isVisible() || !showAction->isVisible()
+                || showButton->text() != QStringLiteral("Show 1 hidden item")
+                || showAction->text() != QStringLiteral("Show 1 hidden item")
+                || saveState->text() != QStringLiteral("Saved")) {
+                qCritical().noquote()
+                    << "Hidden-item start diagnostic: canvas=" << (canvas != nullptr)
+                    << "button=" << (showButton != nullptr)
+                    << "action=" << (showAction != nullptr)
+                    << "saveState=" << (saveState ? saveState->text() : QStringLiteral("<missing>"))
+                    << "laneVisible=" << (initialLane && initialLane->visible)
+                    << "groupHidden=" << (initialGroup && !initialGroup->visible)
+                    << "buttonText=" << (showButton ? showButton->text() : QStringLiteral("<missing>"))
+                    << "actionText=" << (showAction ? showAction->text() : QStringLiteral("<missing>"));
+                fail(QStringLiteral(
+                    "Existing hidden project data did not expose a recovery entry on load"));
+                return;
+            }
+
+            bool hideDialogHandled = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&hideDialogHandled] {
+                    auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                    auto* visible = dialog
+                        ? dialog->findChild<QCheckBox*>(
+                              QStringLiteral("LanePropertiesVisibleCheck"))
+                        : nullptr;
+                    auto* buttons = dialog
+                        ? dialog->findChild<QDialogButtonBox*>()
+                        : nullptr;
+                    auto* ok = buttons ? buttons->button(QDialogButtonBox::Ok) : nullptr;
+                    if (!dialog || !visible || !ok) {
+                        if (dialog) dialog->reject();
+                        return;
+                    }
+                    visible->setChecked(false);
+                    hideDialogHandled = true;
+                    ok->click();
+                });
+            window.openLanePropertiesPreview(QStringLiteral("lane-request"));
+            QCoreApplication::processEvents();
+
+            const auto* hiddenLane = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            if (!hideDialogHandled || !hiddenLane || hiddenLane->visible
+                || !canvas->selectedLaneId().isEmpty()
+                || !showButton->isVisible()
+                || !showButton->geometry().intersects(canvas->viewport()->rect())
+                || showButton->text() != QStringLiteral("Show 2 hidden items")
+                || !showAction->isVisible()
+                || showAction->text() != QStringLiteral("Show 2 hidden items")
+                || saveState->text() != QStringLiteral("Unsaved changes")
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Hidden req"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Show hidden items"))) {
+                fail(QStringLiteral(
+                    "Hiding a signal did not expose an immediate and discoverable recovery path"));
+                return;
+            }
+
+            showButton->click();
+            QCoreApplication::processEvents();
+            const auto* restoredLane = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            const auto* restoredGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!restoredLane || !restoredLane->visible
+                || !restoredGroup || !restoredGroup->visible
+                || showButton->isVisible() || showAction->isVisible()
+                || saveState->text() != QStringLiteral("Unsaved changes")
+                || !window.statusBar()->currentMessage().startsWith(
+                    QStringLiteral("Restored 2 hidden items"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral(
+                    "Show hidden items did not restore every item with clear undo feedback"));
+                return;
+            }
+
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* hiddenAfterUndo = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            const auto* groupAfterUndo = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!hiddenAfterUndo || hiddenAfterUndo->visible
+                || !groupAfterUndo || groupAfterUndo->visible
+                || !showButton->isVisible() || !showAction->isVisible()
+                || showButton->text() != QStringLiteral("Show 2 hidden items")
+                || !window.statusBar()->currentMessage().startsWith(
+                    QStringLiteral("Undid Show hidden items"))) {
+                fail(QStringLiteral(
+                    "Undo did not atomically restore all hidden items and the recovery entry"));
+                return;
+            }
+
+            redoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* visibleAfterRedo = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            const auto* groupAfterRedo = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!visibleAfterRedo || !visibleAfterRedo->visible
+                || !groupAfterRedo || !groupAfterRedo->visible
+                || showButton->isVisible() || showAction->isVisible()
+                || !window.statusBar()->currentMessage().startsWith(
+                    QStringLiteral("Redid Show hidden items"))) {
+                fail(QStringLiteral(
+                    "Redo did not restore every hidden item and remove stale recovery entries"));
+                return;
+            }
+
+            undoAction->trigger();
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* baselineLane = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            const auto* baselineGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!baselineLane || !baselineLane->visible
+                || !baselineGroup || baselineGroup->visible
+                || !showButton->isVisible() || !showAction->isVisible()
+                || showButton->text() != QStringLiteral("Show 1 hidden item")
+                || saveState->text() != QStringLiteral("Saved")
+                || window.windowTitle().contains(QStringLiteral(" *"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("back to saved version"))) {
+                fail(QStringLiteral(
+                    "Undoing hide and restore did not return to the exact Saved baseline"));
+                return;
+            }
+
+            window.hide();
+            application.exit(0);
         });
     } else if (canvasAddLaneSmoke) {
         QTimer::singleShot(0, &window, [&application, &window, canvasAddLaneScreenshotPath] {

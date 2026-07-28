@@ -68,6 +68,7 @@ private slots:
     void updateSelection(const QString& laneId, qint64 tick);
     void updateCommandActions();
     void addLane();
+    void showHiddenLanes();
     void addGroup();
     void editSelectedLane();
     void removeSelectedLane();
@@ -197,6 +198,7 @@ private:
     QAction* redoAction_{nullptr};
     QAction* moveLaneUpAction_{nullptr};
     QAction* moveLaneDownAction_{nullptr};
+    QAction* showHiddenLanesAction_{nullptr};
     QAction* selectAction_{nullptr};
     QAction* drawAction_{nullptr};
     QAction* markerAction_{nullptr};

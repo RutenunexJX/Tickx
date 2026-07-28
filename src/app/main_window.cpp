@@ -980,6 +980,11 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     });
     connect(
         canvas_,
+        &WaveCanvas::showHiddenLanesRequested,
+        this,
+        &MainWindow::showHiddenLanes);
+    connect(
+        canvas_,
         &WaveCanvas::quickLaneSetupAccepted,
         this,
         &MainWindow::completeQuickLaneSetup);
@@ -1459,6 +1464,22 @@ void MainWindow::updateCommandActions()
         commandStack_.canRedo()
             ? tr("Redo %1").arg(QString::fromStdString(commandStack_.redoDescription()))
             : tr("Redo"));
+    if (showHiddenLanesAction_) {
+        const auto* scenario = activeScenario();
+        const auto hiddenCount = scenario
+            ? static_cast<std::size_t>(std::count_if(
+                  scenario->lanes.begin(),
+                  scenario->lanes.end(),
+                  [](const Lane& lane) { return !lane.visible; }))
+            : std::size_t{0};
+        showHiddenLanesAction_->setVisible(hiddenCount > 0);
+        showHiddenLanesAction_->setEnabled(hiddenCount > 0);
+        showHiddenLanesAction_->setText(
+            hiddenCount == 1
+                ? tr("Show 1 hidden item")
+                : tr("Show %1 hidden items").arg(
+                    static_cast<qulonglong>(hiddenCount)));
+    }
     updateLaneOrderActions();
 }
 
@@ -1509,6 +1530,47 @@ void MainWindow::newProject()
         tr("Blank 200 ns waveform ready · add CLK, BIT or BUS"),
         5'000);
 }
+
+void MainWindow::showHiddenLanes()
+{
+    if (!commitPendingEdits()) return;
+    auto* scenario = activeScenario();
+    if (!scenario) return;
+    const auto hiddenCount = static_cast<std::size_t>(std::count_if(
+        scenario->lanes.begin(),
+        scenario->lanes.end(),
+        [](const Lane& lane) { return !lane.visible; }));
+    if (hiddenCount == 0) {
+        statusBar()->showMessage(tr("No hidden items"), 3'000);
+        updateCommandActions();
+        return;
+    }
+
+    try {
+        if (!commandStack_.execute(
+                std::make_unique<ShowHiddenLanesCommand>(*scenario))) {
+            statusBar()->showMessage(tr("No hidden items"), 3'000);
+            updateCommandActions();
+            return;
+        }
+    } catch (const std::exception& exception) {
+        QMessageBox::warning(
+            this,
+            tr("Cannot show hidden items"),
+            QString::fromUtf8(exception.what()));
+        return;
+    }
+
+    canvas_->refreshModel();
+    markEdited();
+    statusBar()->showMessage(
+        hiddenCount == 1
+            ? tr("Restored 1 hidden item · Ctrl+Z to undo")
+            : tr("Restored %1 hidden items · Ctrl+Z to undo")
+                  .arg(static_cast<qulonglong>(hiddenCount)),
+        5'000);
+}
+
 void MainWindow::addLane()
 {
     if (!commitPendingEdits()) return;
@@ -2477,6 +2539,7 @@ void MainWindow::editLaneById(const QString& laneId)
     auto* scenario = activeScenario();
     auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
     if (!lane) return;
+    const auto laneWasVisible = lane->visible;
     const auto replacement = promptLaneProperties(
         this,
         project_,
@@ -2513,10 +2576,18 @@ void MainWindow::editLaneById(const QString& laneId)
     canvas_->revealLocation(laneId, canvas_->cursorTick());
     selectLaneItem(signalTree_, laneId);
     selectLaneItem(groupTree_, laneId);
-    statusBar()->showMessage(
-        tr("Changed properties for %1 · Ctrl+Z to undo").arg(replacementName),
-        5'000);
+    if (laneWasVisible && !replacement->visible) {
+        statusBar()->showMessage(
+            tr("Hidden %1 · use Show hidden items at the bottom or in Edit · Ctrl+Z to undo")
+                .arg(replacementName),
+            8'000);
+    } else {
+        statusBar()->showMessage(
+            tr("Changed properties for %1 · Ctrl+Z to undo").arg(replacementName),
+            5'000);
+    }
 }
+
 void MainWindow::editSelectedClock()
 {
     if (!commitPendingEdits()) return;
@@ -3817,6 +3888,14 @@ void MainWindow::createActions()
         this,
         &MainWindow::editSelectedLane);
     editLaneAction->setToolTip(tr("Edit the selected lane or group without changing its stable ID"));
+    showHiddenLanesAction_ = editMenu_->addAction(
+        tr("Show hidden items"),
+        this,
+        &MainWindow::showHiddenLanes);
+    showHiddenLanesAction_->setObjectName(QStringLiteral("ShowHiddenLanesAction"));
+    showHiddenLanesAction_->setToolTip(
+        tr("Restore every hidden signal or group as one undoable edit"));
+    showHiddenLanesAction_->setVisible(false);
     moveLaneUpAction_ = editMenu_->addAction(
         themedIcon(QStringLiteral("go-up"), style(), QStyle::SP_ArrowUp),
         tr("Move selected lane &up"),

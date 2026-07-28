@@ -226,6 +226,28 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         });
     }
 
+    showHiddenLanesButton_ = new QToolButton(viewport());
+    showHiddenLanesButton_->setObjectName(QStringLiteral("CanvasShowHiddenLanesButton"));
+    showHiddenLanesButton_->setText(tr("Show hidden items"));
+    showHiddenLanesButton_->setToolTip(
+        tr("Restore every hidden signal or group as one undoable edit"));
+    showHiddenLanesButton_->setAccessibleName(tr("Show hidden items"));
+    showHiddenLanesButton_->setCursor(Qt::PointingHandCursor);
+    showHiddenLanesButton_->setStyleSheet(QStringLiteral(
+        "QToolButton {"
+        " color: #e7f1ff; background: #2f4d69;"
+        " border: 1px solid #6e9cc5; border-radius: 5px;"
+        " font-weight: 600; padding: 3px 10px;"
+        "}"
+        "QToolButton:hover, QToolButton:focus {"
+        " background: #3c6285; border-color: #9acbfa;"
+        "}"
+        "QToolButton:pressed { background: #29445d; }"));
+    showHiddenLanesButton_->hide();
+    connect(showHiddenLanesButton_, &QToolButton::clicked, this, [this] {
+        emit showHiddenLanesRequested();
+    });
+
     quickLaneSetupPanel_ = new QFrame(viewport());
     quickLaneSetupPanel_->setObjectName(QStringLiteral("QuickLaneSetupPanel"));
     quickLaneSetupPanel_->setAttribute(Qt::WA_StyledBackground, true);
@@ -1130,6 +1152,24 @@ void WaveCanvas::fitSelection()
 void WaveCanvas::refreshModel()
 {
     rebuildLaneLayout();
+    if (scenario_) {
+        std::erase_if(
+            selectedLaneIds_,
+            [this](const std::string& laneId) {
+                const auto* lane = findLane(*scenario_, laneId);
+                return !lane || !lane->visible;
+            });
+        if (!selectedLaneId_.empty()) {
+            const auto* lane = findLane(*scenario_, selectedLaneId_);
+            if (!lane || !lane->visible) {
+                selectedLaneId_ = selectedLaneIds_.empty()
+                    ? std::string{}
+                    : selectedLaneIds_.front();
+                laneHeaderSelectionActive_ = false;
+                clearWaveEditState();
+            }
+        }
+    }
     if (!selectedMarkerId_.empty() && !markerById(selectedMarkerId_)) {
         selectedMarkerId_.clear();
     }
@@ -1142,10 +1182,11 @@ void WaveCanvas::refreshModel()
     positionQuickLaneSetup();
     positionLaneRename();
     positionDurationEditor();
-    if (!busPresetLaneId_.empty()
-        && (!scenario_ || !findLane(*scenario_, busPresetLaneId_))) {
-        hideBusPresetPalette();
-    } else {
+    if (!busPresetLaneId_.empty()) {
+        const auto* lane = scenario_ ? findLane(*scenario_, busPresetLaneId_) : nullptr;
+        if (!lane || !lane->visible) hideBusPresetPalette();
+    }
+    if (!busPresetLaneId_.empty()) {
         positionBusPresetPalette();
     }
     if (explicitRangeSelection_) {
@@ -1181,7 +1222,7 @@ void WaveCanvas::revealLocation(const QString& laneId, const qint64 tick)
         clearExplicitRangeSelection(false);
     }
     const auto* lane = findLane(*scenario_, laneId.toStdString());
-    if (!lane) return;
+    if (!lane || !lane->visible) return;
     selectedLaneId_ = lane->id;
     selectedLaneIds_ = {lane->id};
     cursorTick_ = std::clamp<Tick>(tick, 0, scenario_->duration);
@@ -3266,6 +3307,15 @@ QRect WaveCanvas::addLaneRowRect() const
     };
 }
 
+std::size_t WaveCanvas::hiddenLaneCount() const noexcept
+{
+    if (!scenario_) return 0;
+    return static_cast<std::size_t>(std::count_if(
+        scenario_->lanes.begin(),
+        scenario_->lanes.end(),
+        [](const Lane& lane) { return !lane.visible; }));
+}
+
 void WaveCanvas::updateAddLaneButtonGeometry()
 {
     const auto row = addLaneRowRect();
@@ -3274,6 +3324,10 @@ void WaveCanvas::updateAddLaneButtonGeometry()
         && row.top() < viewport()->height();
     for (auto* button : addLaneButtons_) {
         if (button) button->setVisible(visible);
+    }
+    const auto hiddenCount = hiddenLaneCount();
+    if (showHiddenLanesButton_) {
+        showHiddenLanesButton_->setVisible(visible && hiddenCount > 0);
     }
     if (!visible) return;
 
@@ -3301,6 +3355,26 @@ void WaveCanvas::updateAddLaneButtonGeometry()
             buttonHeight);
         button->raise();
     }
+
+    if (!showHiddenLanesButton_ || hiddenCount == 0) return;
+    const auto label = hiddenCount == 1
+        ? tr("Show 1 hidden item")
+        : tr("Show %1 hidden items").arg(static_cast<qulonglong>(hiddenCount));
+    showHiddenLanesButton_->setText(label);
+    showHiddenLanesButton_->setToolTip(
+        tr("Restore every hidden signal or group as one undoable edit"));
+    const auto hiddenWidth = std::clamp(
+        showHiddenLanesButton_->sizeHint().width() + 12,
+        142,
+        std::max(142, waveViewportWidth() - 28));
+    const auto hiddenX = empty
+        ? HeaderWidth + std::max(14, (waveViewportWidth() - hiddenWidth) / 2)
+        : HeaderWidth + 14;
+    const auto hiddenY = empty
+        ? startY + buttonHeight + 10
+        : row.top() + 6;
+    showHiddenLanesButton_->setGeometry(hiddenX, hiddenY, hiddenWidth, buttonHeight);
+    showHiddenLanesButton_->raise();
 }
 
 void WaveCanvas::positionQuickLaneSetup()
@@ -5922,6 +5996,7 @@ void WaveCanvas::drawAddLaneRow(QPainter& painter)
         scenario_->lanes.begin(),
         scenario_->lanes.end(),
         [](const Lane& lane) { return lane.visible && lane.kind != LaneKind::Group; });
+    const auto hiddenCount = hiddenLaneCount();
     if (empty) {
         const auto buttonsTop = addLaneButtons_.front()
             ? addLaneButtons_.front()->geometry().top()
@@ -5934,7 +6009,12 @@ void WaveCanvas::drawAddLaneRow(QPainter& painter)
         painter.drawText(
             QRect(HeaderWidth + 24, buttonsTop - 70, waveViewportWidth() - 48, 28),
             Qt::AlignCenter,
-            tr("Start with a clock or signal"));
+            hiddenCount == 0
+                ? tr("Start with a clock or signal")
+                : hiddenCount == 1
+                    ? tr("1 item is hidden")
+                    : tr("%1 items are hidden").arg(
+                        static_cast<qulonglong>(hiddenCount)));
         QFont detail = painter.font();
         detail.setBold(false);
         detail.setPointSizeF(std::max(8.0, detail.pointSizeF() - 1.0));
@@ -5943,7 +6023,9 @@ void WaveCanvas::drawAddLaneRow(QPainter& painter)
         painter.drawText(
             QRect(HeaderWidth + 24, buttonsTop - 40, waveViewportWidth() - 48, 24),
             Qt::AlignCenter,
-            tr("Add a lane, then click or drag its waveform to edit."));
+            hiddenCount == 0
+                ? tr("Add a lane, then click or drag its waveform to edit.")
+                : tr("Restore hidden items below or add another lane."));
         return;
     }
 

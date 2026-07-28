@@ -291,6 +291,20 @@ private:
     Lane after_;
 };
 
+class ShowHiddenLanesCommand final : public EditCommand {
+public:
+    explicit ShowHiddenLanesCommand(Scenario& scenario);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::vector<std::string> laneIds_;
+};
+
 class ChangeClockCommand final : public EditCommand {
 public:
     ChangeClockCommand(

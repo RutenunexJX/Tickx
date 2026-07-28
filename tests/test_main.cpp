@@ -475,6 +475,32 @@ void testLaneAndGroupPropertyEditing()
         group.id,
         "group rename changed stable membership references");
 
+    const auto beforeShowStateId = stack.stateId();
+    expect(
+        stack.execute(std::make_unique<wave::ShowHiddenLanesCommand>(scenario)),
+        "show hidden lanes command reported no effect");
+    expect(
+        wave::findLane(scenario, group.id)->visible
+            && wave::findLane(scenario, "lane-request")->visible,
+        "show hidden lanes command did not restore every hidden lane");
+    expect(
+        stack.stateId() != beforeShowStateId,
+        "show hidden lanes command did not create one history state");
+    expect(stack.undo(), "show hidden lanes undo failed");
+    expect(
+        !wave::findLane(scenario, group.id)->visible
+            && !wave::findLane(scenario, "lane-request")->visible,
+        "show hidden lanes undo did not atomically restore hidden state");
+    expect(stack.redo(), "show hidden lanes redo failed");
+    const auto shownStateId = stack.stateId();
+    expect(
+        !stack.execute(std::make_unique<wave::ShowHiddenLanesCommand>(scenario)),
+        "show hidden lanes polluted history when every lane was already visible");
+    expectEqual(
+        stack.stateId(),
+        shownStateId,
+        "no-effect show hidden lanes command changed history state");
+
     const auto* data = wave::findLane(scenario, "lane-data");
     expect(data != nullptr, "data lane is missing");
     auto octalData = *data;

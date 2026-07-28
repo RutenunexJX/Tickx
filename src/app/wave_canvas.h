@@ -101,6 +101,7 @@ public slots:
 
 signals:
     void addLaneRequested(LaneKind kind);
+    void showHiddenLanesRequested();
     void renameLaneRequested(const QString& laneId);
     void removeLaneRequested(const QString& laneId);
     void editLaneParametersRequested(const QString& laneId, const QPoint& globalPosition);
@@ -231,6 +232,7 @@ private:
     [[nodiscard]] double contentWidth() const;
     [[nodiscard]] int waveViewportWidth() const;
     [[nodiscard]] QRect addLaneRowRect() const;
+    [[nodiscard]] std::size_t hiddenLaneCount() const noexcept;
     [[nodiscard]] Tick tickAtX(int x) const;
     [[nodiscard]] int xAtTick(Tick tick) const;
     [[nodiscard]] const LaneLayout* layoutAtY(int y) const;
@@ -322,6 +324,7 @@ private:
     Scenario* scenario_{nullptr};
     CommandStack* commandStack_{nullptr};
     std::array<QToolButton*, 3> addLaneButtons_{};
+    QToolButton* showHiddenLanesButton_{nullptr};
     QFrame* quickLaneSetupPanel_{nullptr};
     QLineEdit* quickLaneNameEdit_{nullptr};
     QLineEdit* quickLaneParameterEdit_{nullptr};

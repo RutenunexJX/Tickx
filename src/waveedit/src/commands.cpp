@@ -1179,6 +1179,38 @@ bool ChangeLaneCommand::hasEffect() const noexcept
     return before_ != after_;
 }
 
+ShowHiddenLanesCommand::ShowHiddenLanesCommand(Scenario& scenario)
+    : scenario_(&scenario)
+{
+    for (const auto& lane : scenario.lanes) {
+        if (!lane.visible) laneIds_.push_back(lane.id);
+    }
+}
+
+void ShowHiddenLanesCommand::redo()
+{
+    for (const auto& laneId : laneIds_) {
+        if (auto* lane = findLane(*scenario_, laneId)) lane->visible = true;
+    }
+}
+
+void ShowHiddenLanesCommand::undo()
+{
+    for (const auto& laneId : laneIds_) {
+        if (auto* lane = findLane(*scenario_, laneId)) lane->visible = false;
+    }
+}
+
+std::string ShowHiddenLanesCommand::description() const
+{
+    return "Show hidden items";
+}
+
+bool ShowHiddenLanesCommand::hasEffect() const noexcept
+{
+    return !laneIds_.empty();
+}
+
 ChangeClockCommand::ChangeClockCommand(
     Project& project,
     Scenario& scenario,
