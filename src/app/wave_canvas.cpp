@@ -1839,6 +1839,9 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
                   .arg(QString::fromStdString(lane->name))
             : tr("Selected signal %1 · Delete removes signal · F2 renames")
                   .arg(QString::fromStdString(lane->name));
+        if (tool_ == Tool::WaveEdit && lane->kind != LaneKind::Group) {
+            selectionMessage.append(tr(" · Ctrl+Left/Right jumps edges"));
+        }
         if (lockedMarkerDeselected) {
             selectionMessage.append(tr(" · locked cursor/range deselected"));
         }
@@ -2181,6 +2184,51 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                           .arg(format(cursorTick_))
                           .arg(format(0)));
             viewport()->update();
+            event->accept();
+            return;
+        }
+        if ((event->key() == Qt::Key_Left
+             || event->key() == Qt::Key_Right)
+            && event->modifiers() == Qt::ControlModifier) {
+            const auto forward = event->key() == Qt::Key_Right;
+            const auto* lane = findLane(*scenario_, selectedLaneId_);
+            if (drawing_) {
+                emit statusMessage(
+                    tr("Finish or cancel the current drag before navigating edges"));
+            } else if (!lane || lane->kind == LaneKind::Group) {
+                emit statusMessage(
+                    tr("Select a signal before using Ctrl+Left or Ctrl+Right"));
+            } else if (const auto edge = adjacentEdgeTick(
+                           *lane,
+                           cursorTick_,
+                           forward)) {
+                cursorTick_ = *edge;
+                ensureCursorVisible(cursorTick_);
+                snapGuideTick_.reset();
+                emit statusMessage(
+                    forward
+                        ? tr("Next edge on %1 · %2 · Ctrl+Left goes back")
+                              .arg(QString::fromStdString(lane->name))
+                              .arg(QString::fromStdString(formatTick(
+                                  cursorTick_,
+                                  project_->timeBase)))
+                        : tr("Previous edge on %1 · %2 · Ctrl+Right goes forward")
+                              .arg(QString::fromStdString(lane->name))
+                              .arg(QString::fromStdString(formatTick(
+                                  cursorTick_,
+                                  project_->timeBase))));
+                viewport()->update();
+            } else {
+                emit statusMessage(
+                    forward
+                        ? tr("No later edge on %1 · End jumps to %2")
+                              .arg(QString::fromStdString(lane->name))
+                              .arg(QString::fromStdString(formatTick(
+                                  scenario_->duration,
+                                  project_->timeBase)))
+                        : tr("No earlier edge on %1 · Home jumps to 0")
+                              .arg(QString::fromStdString(lane->name)));
+            }
             event->accept();
             return;
         }
@@ -2589,6 +2637,9 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
                   .arg(QString::fromStdString(lane->name))
             : tr("Selected signal %1 · Delete removes signal · F2 renames")
                   .arg(QString::fromStdString(lane->name));
+        if (tool_ == Tool::WaveEdit && lane->kind != LaneKind::Group) {
+            selectionMessage.append(tr(" · Ctrl+Left/Right jumps edges"));
+        }
         if (lockedMarkerDeselected) {
             selectionMessage.append(tr(" · locked cursor/range deselected"));
         }
@@ -5225,6 +5276,52 @@ Tick WaveCanvas::cursorKeyboardStep() const
     return std::max<Tick>(
         1,
         toTicks(10, TimeUnit::Nanosecond, project_->timeBase).value_or(1));
+}
+
+std::optional<Tick> WaveCanvas::adjacentEdgeTick(
+    const Lane& lane,
+    const Tick from,
+    const bool forward) const
+{
+    if (!scenario_ || lane.kind == LaneKind::Group) return std::nullopt;
+    std::optional<Tick> result;
+    const auto consider = [&](const Tick candidate) {
+        if (candidate < 0 || candidate > scenario_->duration) return;
+        if (forward ? candidate <= from : candidate >= from) return;
+        if (!result
+            || (forward ? candidate < *result : candidate > *result)) {
+            result = candidate;
+        }
+    };
+    for (const auto& segment : lane.segments) {
+        consider(segment.start);
+        consider(segment.end);
+    }
+
+    if (lane.kind == LaneKind::Clock && project_) {
+        const auto* clock = findClock(*project_, lane.clockDomainId);
+        if (clock && clock->isValid()) {
+            const auto rawCycle = std::floor(
+                (static_cast<long double>(from)
+                 - static_cast<long double>(clock->phase))
+                / static_cast<long double>(clock->period));
+            const auto minimumCycle = static_cast<long double>(
+                std::numeric_limits<std::int64_t>::min() + 3);
+            const auto maximumCycle = static_cast<long double>(
+                std::numeric_limits<std::int64_t>::max() - 3);
+            const auto baseCycle = static_cast<std::int64_t>(
+                std::clamp(rawCycle, minimumCycle, maximumCycle));
+            for (auto offset = std::int64_t{-2}; offset <= 2; ++offset) {
+                const auto cycle = baseCycle + offset;
+                for (const auto edge : {ClockEdge::Rising, ClockEdge::Falling}) {
+                    if (const auto candidate = tickAtCycle(*clock, cycle, edge)) {
+                        consider(*candidate);
+                    }
+                }
+            }
+        }
+    }
+    return result;
 }
 
 QString WaveCanvas::cursorValue(const Lane& lane) const

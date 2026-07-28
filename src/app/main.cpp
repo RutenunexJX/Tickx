@@ -320,8 +320,25 @@ int main(int argc, char* argv[])
         segment.value = "0x35";
         lane.segments.push_back(std::move(segment));
         scenario.lanes.push_back(std::move(lane));
-        project.name = "Wave Edit autoscroll";
+
         project.clockDomains.clear();
+        wave::ClockDomain clock;
+        clock.id = "clock-wave-edit-scroll";
+        clock.name = "navigation clock";
+        clock.period = 10'000;
+        clock.phase = 0;
+        clock.dutyCycle = {1, 2};
+        project.clockDomains.push_back(std::move(clock));
+        wave::Lane clockLane;
+        clockLane.id = "lane-wave-edit-clock";
+        clockLane.name = "clk";
+        clockLane.kind = wave::LaneKind::Clock;
+        clockLane.clockDomainId = "clock-wave-edit-scroll";
+        clockLane.color = "#81c784";
+        clockLane.height = 56;
+        scenario.lanes.push_back(std::move(clockLane));
+
+        project.name = "Wave Edit autoscroll";
         project.importedTraces.clear();
         project.linkedResources.clear();
     }
@@ -2159,9 +2176,11 @@ int main(int argc, char* argv[])
                 }
 
                 auto& scenario = window.project().scenarios.front();
-                if (scenario.lanes.size() != 1
+                if (scenario.lanes.size() != 2
                     || scenario.lanes.front().id != "lane-wave-edit-scroll"
                     || scenario.lanes.front().segments.size() != 1
+                    || scenario.lanes.back().id != "lane-wave-edit-clock"
+                    || window.project().clockDomains.size() != 1
                     || saveState->text() != QStringLiteral("Saved")
                     || undoAction->isEnabled()
                     || fitAction->text() != QStringLiteral("Fit scenario")
@@ -2608,6 +2627,141 @@ int main(int argc, char* argv[])
                     }
                 }
 
+                const auto clickSignalHeader = [&](const int y) {
+                    const QPoint position(80, y);
+                    sendMouse(
+                        QEvent::MouseButtonPress,
+                        position,
+                        Qt::LeftButton,
+                        Qt::LeftButton,
+                        Qt::NoModifier);
+                    sendMouse(
+                        QEvent::MouseButtonRelease,
+                        position,
+                        Qt::LeftButton,
+                        Qt::NoButton,
+                        Qt::NoModifier);
+                    QCoreApplication::processEvents();
+                };
+                clickSignalHeader(laneY);
+                if (!window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Left/Right jumps edges"))) {
+                    fail(QStringLiteral(
+                        "Signal selection did not disclose adjacent edge navigation"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);
+                if (canvas->cursorTick() != 50'000
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Next edge on data[7:0]"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+Right did not jump to the Bus segment start"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);
+                if (canvas->cursorTick() != 100'000
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Next edge on data[7:0]"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+Right did not jump to the Bus segment end"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Left, Qt::ControlModifier);
+                if (canvas->cursorTick() != 50'000
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Previous edge on data[7:0]"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+Left did not return to the Bus segment start"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Left, Qt::ControlModifier);
+                if (canvas->cursorTick() != 50'000
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("No earlier edge on data[7:0]"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Home jumps to 0"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Bus edge navigation did not report its earlier boundary"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_Home);
+                const auto clockLaneY = 40
+                    + scenario.lanes.front().height
+                    + scenario.lanes.back().height / 2;
+                clickSignalHeader(clockLaneY);
+                sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);
+                if (canvas->cursorTick() != 5'000
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-clock")
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Next edge on clk"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+Right did not jump to the Clock falling edge"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);
+                if (canvas->cursorTick() != 10'000
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-clock")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Next edge on clk"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+Right did not jump to the next Clock rising edge"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Left, Qt::ControlModifier);
+                if (canvas->cursorTick() != 5'000
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-clock")
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Previous edge on clk"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+Left did not return to the Clock falling edge"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto edgeScreenshotPath = waveEditAutoScrollScreenshotPath;
+                    const auto suffix = edgeScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        edgeScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-next-edge"));
+                    } else {
+                        edgeScreenshotPath.append(
+                            QStringLiteral("-next-edge.png"));
+                    }
+                    if (!window.grab().save(edgeScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save adjacent signal edge navigation screenshot"));
+                        return;
+                    }
+                }
                 window.hide();
                 application.exit(0);
             });

@@ -268,6 +268,10 @@ private:
     [[nodiscard]] QString markerLocationText(const Marker& marker) const;
     [[nodiscard]] std::string nextLockedMarkerName(bool interval) const;
     [[nodiscard]] Tick cursorKeyboardStep() const;
+    [[nodiscard]] std::optional<Tick> adjacentEdgeTick(
+        const Lane& lane,
+        Tick from,
+        bool forward) const;
     [[nodiscard]] QString cursorValue(const Lane& lane) const;
     [[nodiscard]] QString cursorDeltaText(Tick from, Tick to) const;
     [[nodiscard]] QString cursorMeasurementText() const;

@@ -4005,6 +4005,59 @@ Automated QA: Saved 的 1 µs 时间轴先保持 5 级放大，End 将编辑光�
 Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-timeline-home.png
 Desktop interaction: none
 ```
+## 持续迭代 71：当前信号相邻边沿导航
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Wave Edit 的左右方向键固定移动 10 ns，Home/End 只能到达全局边界；已选信号的实际变化点没有可达键盘路径。检查稀疏 Bus 区段或高频 Clock 时，用户仍需缩放、目测并点击，且点击精度受像素比例影响。
+- 用户视角从“选中一个信号，逐个核对它什么时候变化”出发：需要的是严格跳过当前位置并到达前一个或后一个真实边沿，不是再移动一个固定时间步长。无相邻边沿时应保留上下文并说明全局边界键，不能静默移动或修改波形。
+- Wave Edit 画布获得焦点且未拖动时，`Ctrl+Left` / `Ctrl+Right` 按当前所选 signal 导航。Bit、Bus、Enum 使用 Segment 起止边界；Clock 另外计算周期上升/下降沿，并纳入 Gate/Drive X 覆盖 Segment 边界。候选严格位于当前 tick 的前后，结果限制在 Scenario 范围内。
+- 导航沿用 `ensureCursorVisible()`，保留缩放与信号选择；到达边沿时状态栏显示信号名、精确时间和反向快捷键，无候选时保持光标原位并提示 Home/End。信号名单击反馈直接公开 `Ctrl+Left/Right jumps edges`，不新增按钮或模式。
+- 普通 Left/Right 的固定步进、Home/End、Measure 模式和所有文本输入焦点语义保持不变；相邻边沿导航不创建命令、不触发 autosave，也不改变 Saved 状态。
+- 扩展 `wave-wave-edit-autoscroll-smoke` 的 1 µs Saved 夹具，增加 10 ns、50% duty Clock，并验证 Bus 0→50→100→50 ns、无更早边沿原位反馈，以及 Clock 0→5→10→5 ns；同时断言信号目标、水平视图、Scenario、Undo、Saved、选择提示和第四张离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 20 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 15.12 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.20 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 2.23 sec
+
+Automated QA: 选中 data[7:0] 时状态栏先公开 Ctrl+Left/Right；从 0 ps 连续向后到达 50 ns Segment 起点和 100 ns 终点，再向前回到 50 ns；
+              再次向前不移动，并明确提示没有更早边沿及 Home。选中 clk 后，从 0 ps 依次到达 5 ns 下降沿、10 ns 上升沿，再返回 5 ns；
+              全过程保持 5 级缩放、所选 signal、水平起始视图、Scenario、Undo 和 Saved 状态。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-next-edge.png
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
