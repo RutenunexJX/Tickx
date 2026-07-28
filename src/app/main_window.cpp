@@ -891,13 +891,13 @@ void MainWindow::openProject()
 {
     if (!commitPendingEdits()) return;
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
-    if (!confirmDiscardChanges()) return;
     const auto path = QFileDialog::getOpenFileName(
         this,
         tr("Open Wave Workbench project"),
         QFileInfo(projectFile_).absolutePath(),
         tr("Wave Workbench project (*.wave.json);;Recovery snapshot (*.autosave);;JSON files (*.json)"));
-    if (!path.isEmpty()) loadFromPath(path);
+    if (path.isEmpty() || !confirmDiscardChanges()) return;
+    loadFromPath(path);
 }
 
 void MainWindow::saveProject()

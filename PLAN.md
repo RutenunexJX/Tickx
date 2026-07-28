@@ -3008,6 +3008,63 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 53：脏工程 Open 的选择与确认顺序
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `openProject()` 在文件选择前调用 `confirmDiscardChanges()`。用户取消文件选择仍必须先处理未保存提示；
+  选择 Discard 后再取消 Open 时，当前编辑实际仍保留，使“Discard”文字与结果矛盾。
+- 用户在脏工程中点击 Open 时，首先要确认目标文件是否存在并决定是否继续。未选定目标前要求 Save/Discard 增加一次
+  无效决定，也会让误触 Open 变成有风险感的流程。
+- Open 现在先显示文件选择；路径为空立即返回，不触发未保存确认。只有选定目标后才执行 Save/Discard/Cancel；取消确认
+  不加载目标，Save 成功或 Discard 后才加载。所有未提交内联草稿仍在打开文件选择前通过既有门禁。
+- `wave-user-journey-smoke` 将重新打开的 650 ns 工程改到 660 ns：第一次 Open 直接取消文件选择，断言未出现未保存提示、
+  660 ns 与 Unsaved changes 保留；第二次选择已保存文件，断言随后才出现确认，Discard 后恢复 650 ns/3 lane 与 Saved。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.09 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.82 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-user-journey-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.55 sec
+
+Screenshot generated:
+  build/qtcreator-debug/user-journey-smoke.png
+Automated QA: 脏工程 Open 首先出现文件选择；取消后无 Save/Discard 提示，660 ns 编辑与 Unsaved changes 保留。
+              再次 Open 选定目标后才出现未保存确认；Discard 后加载 650 ns/3 lane 磁盘工程并显示 Saved/Opened。
+              快速新增/Bus/End 草稿门禁、项目保存回读、Export 原位纠错与目录交接无回归。
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

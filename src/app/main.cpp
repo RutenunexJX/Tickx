@@ -1020,6 +1020,119 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                durationEdit->setText(QStringLiteral("660 ns"));
+                durationEdit->setModified(true);
+                sendKey(durationEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                if (window.project().scenarios.front().duration != 660'000
+                    || saveState->text() != QStringLiteral("Unsaved changes")) {
+                    fail(QStringLiteral(
+                        "User journey could not create a dirty project before Open"));
+                    return;
+                }
+
+                bool dirtyOpenFileDialogSeen = false;
+                bool prematureUnsavedPrompt = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&dirtyOpenFileDialogSeen, &prematureUnsavedPrompt] {
+                        auto* active = QApplication::activeModalWidget();
+                        if (auto* dialog = qobject_cast<QFileDialog*>(active)) {
+                            dirtyOpenFileDialogSeen = true;
+                            dialog->reject();
+                        } else if (auto* warning = qobject_cast<QMessageBox*>(
+                                       active)) {
+                            prematureUnsavedPrompt = true;
+                            warning->reject();
+                        } else if (active) {
+                            active->close();
+                        }
+                    });
+                const auto dirtyOpenCancelInvoked = QMetaObject::invokeMethod(
+                    &window,
+                    "openProject",
+                    Qt::DirectConnection);
+                QCoreApplication::processEvents();
+                if (!dirtyOpenCancelInvoked
+                    || !dirtyOpenFileDialogSeen
+                    || prematureUnsavedPrompt
+                    || QApplication::activeModalWidget()
+                    || window.project().scenarios.front().duration != 660'000
+                    || saveState->text() != QStringLiteral("Unsaved changes")) {
+                    fail(QStringLiteral(
+                        "Cancelling Open did not bypass discard confirmation safely"));
+                    return;
+                }
+
+                bool dirtyOpenFileSelected = false;
+                bool discardPromptAfterSelection = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&application,
+                     &dirtyOpenFileSelected,
+                     &discardPromptAfterSelection,
+                     userJourneySavePath] {
+                        auto* active = QApplication::activeModalWidget();
+                        auto* dialog = qobject_cast<QFileDialog*>(active);
+                        if (!dialog) {
+                            if (auto* warning = qobject_cast<QMessageBox*>(
+                                    active)) {
+                                warning->reject();
+                            } else if (active) {
+                                active->close();
+                            }
+                            return;
+                        }
+                        dialog->setDirectory(
+                            QFileInfo(userJourneySavePath).absolutePath());
+                        dialog->selectFile(
+                            QFileInfo(userJourneySavePath).fileName());
+                        dirtyOpenFileSelected = true;
+                        QTimer::singleShot(
+                            0,
+                            &application,
+                            [&discardPromptAfterSelection] {
+                                auto* warning = qobject_cast<QMessageBox*>(
+                                    QApplication::activeModalWidget());
+                                auto* discard = warning
+                                    ? warning->button(QMessageBox::Discard)
+                                    : nullptr;
+                                if (!warning || !discard
+                                    || warning->windowTitle()
+                                        != QStringLiteral("Unsaved changes")) {
+                                    if (warning) warning->reject();
+                                    return;
+                                }
+                                discardPromptAfterSelection = true;
+                                discard->click();
+                            });
+                        QMetaObject::invokeMethod(
+                            dialog,
+                            "accept",
+                            Qt::DirectConnection);
+                    });
+                const auto dirtyReopenInvoked = QMetaObject::invokeMethod(
+                    &window,
+                    "openProject",
+                    Qt::DirectConnection);
+                QCoreApplication::processEvents();
+                const auto dirtyReopenStatus =
+                    window.statusBar()->currentMessage();
+                if (!dirtyReopenInvoked
+                    || !dirtyOpenFileSelected
+                    || !discardPromptAfterSelection
+                    || QApplication::activeModalWidget()
+                    || window.project().scenarios.front().duration != 650'000
+                    || window.project().scenarios.front().lanes.size() != 3
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !dirtyReopenStatus.startsWith(QStringLiteral("Opened "))) {
+                    fail(QStringLiteral(
+                        "Dirty Open did not confirm discard after file selection"));
+                    return;
+                }
+
                 bool invalidExportRangeRetained = false;
                 bool invalidPdfSpanRetained = false;
                 bool exportDirectoryReached = false;
