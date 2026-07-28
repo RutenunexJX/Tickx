@@ -1207,7 +1207,7 @@ void WaveCanvas::copySelection()
     const auto start = selectionRange_->first;
     const auto end = selectionRange_->second;
     QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), 1);
+    root.insert(QStringLiteral("schemaVersion"), 2);
     root.insert(QStringLiteral("durationTick"), QString::number(end - start));
     QJsonArray lanes;
     for (const auto& laneId : laneIds) {
@@ -1215,6 +1215,13 @@ void WaveCanvas::copySelection()
         if (!lane || lane->kind == LaneKind::Group) continue;
         QJsonObject laneObject;
         laneObject.insert(QStringLiteral("laneId"), QString::fromStdString(laneId));
+        laneObject.insert(QStringLiteral("name"), QString::fromStdString(lane->name));
+        laneObject.insert(
+            QStringLiteral("kind"),
+            QString::fromLatin1(
+                toString(lane->kind).data(),
+                static_cast<qsizetype>(toString(lane->kind).size())));
+        laneObject.insert(QStringLiteral("width"), QString::number(lane->width));
         QJsonArray segments;
         auto iterator = std::lower_bound(
             lane->segments.begin(),
@@ -1292,7 +1299,9 @@ void WaveCanvas::pasteAtCursor()
         return;
     }
     const auto root = document.object();
-    if (root.value(QStringLiteral("schemaVersion")).toInt(-1) != 1
+    const auto schemaVersion =
+        root.value(QStringLiteral("schemaVersion")).toInt(-1);
+    if ((schemaVersion != 1 && schemaVersion != 2)
         || !root.value(QStringLiteral("durationTick")).isString()
         || !root.value(QStringLiteral("lanes")).isArray()) {
         emit statusMessage(tr("Clipboard range schema is invalid."));
@@ -1307,13 +1316,46 @@ void WaveCanvas::pasteAtCursor()
         return;
     }
     std::vector<CopiedLaneRange> copiedLanes;
+    struct CopiedLaneMetadata {
+        QString name;
+        LaneKind kind{LaneKind::Bit};
+        std::size_t width{1};
+    };
+    std::vector<CopiedLaneMetadata> copiedMetadata;
     for (const auto& laneValue : root.value(QStringLiteral("lanes")).toArray()) {
         if (!laneValue.isObject()) continue;
         const auto laneObject = laneValue.toObject();
         const auto laneId = laneObject.value(QStringLiteral("laneId")).toString().toStdString();
-        if (!findLane(*scenario_, laneId)
-            || !laneObject.value(QStringLiteral("segments")).isArray()) {
+        if (laneId.empty() || !laneObject.value(QStringLiteral("segments")).isArray()) {
             continue;
+        }
+        CopiedLaneMetadata metadata;
+        if (schemaVersion == 2) {
+            bool validWidth = false;
+            const auto kind = laneKindFromString(
+                laneObject.value(QStringLiteral("kind")).toString().toStdString());
+            const auto width = laneObject.value(QStringLiteral("width"))
+                                   .toString()
+                                   .toULongLong(&validWidth);
+            if (!laneObject.value(QStringLiteral("name")).isString()
+                || !laneObject.value(QStringLiteral("kind")).isString()
+                || !laneObject.value(QStringLiteral("width")).isString()
+                || !kind
+                || *kind == LaneKind::Group
+                || !validWidth
+                || width == 0) {
+                emit statusMessage(tr("Clipboard range signal metadata is invalid."));
+                return;
+            }
+            metadata.name = laneObject.value(QStringLiteral("name")).toString();
+            metadata.kind = *kind;
+            metadata.width = static_cast<std::size_t>(width);
+        } else {
+            const auto* sourceLane = findLane(*scenario_, laneId);
+            if (!sourceLane || sourceLane->kind == LaneKind::Group) continue;
+            metadata.name = QString::fromStdString(sourceLane->name);
+            metadata.kind = sourceLane->kind;
+            metadata.width = sourceLane->width;
         }
         CopiedLaneRange copied;
         copied.laneId = laneId;
@@ -1349,6 +1391,7 @@ void WaveCanvas::pasteAtCursor()
             if (validStart && validEnd) copied.relativeSegments.push_back(std::move(segment));
         }
         copiedLanes.push_back(std::move(copied));
+        copiedMetadata.push_back(std::move(metadata));
     }
     if (copiedLanes.empty()) {
         emit statusMessage(tr("No clipboard lanes exist in this scenario."));
@@ -1371,6 +1414,11 @@ void WaveCanvas::pasteAtCursor()
         requestedTargetIds = selectedLaneIds_;
     } else if (copiedLanes.size() == 1 && !selectedLaneId_.empty()) {
         requestedTargetIds.push_back(selectedLaneId_);
+    } else {
+        requestedTargetIds.reserve(copiedLanes.size());
+        for (const auto& copied : copiedLanes) {
+            requestedTargetIds.push_back(copied.laneId);
+        }
     }
 
     if (!requestedTargetIds.empty()) {
@@ -1383,33 +1431,43 @@ void WaveCanvas::pasteAtCursor()
         bool remapped = false;
         for (std::size_t index = 0; index < copiedLanes.size(); ++index) {
             auto& copied = copiedLanes.at(index);
-            const auto* sourceLane = findLane(*scenario_, copied.laneId);
+            const auto& source = copiedMetadata.at(index);
             const auto* targetLane = findLane(*scenario_, requestedTargetIds.at(index));
-            if (!sourceLane || !targetLane || targetLane->kind == LaneKind::Group) {
+            if (!targetLane) {
                 emit statusMessage(
-                    tr("Cannot paste signal %1 · source or selected target is unavailable")
-                        .arg(static_cast<qulonglong>(index + 1)));
+                    requestedTargetIds.at(index) == copied.laneId
+                        ? tr("Cannot paste %1 · original signal no longer exists; select %2 target signal(s)")
+                              .arg(source.name)
+                              .arg(static_cast<qulonglong>(copiedLanes.size()))
+                        : tr("Cannot paste %1 · selected target is unavailable")
+                              .arg(source.name));
                 return;
             }
-            const auto sourceName = QString::fromStdString(sourceLane->name);
+            if (targetLane->kind == LaneKind::Group) {
+                emit statusMessage(
+                    tr("Cannot paste %1 · selected target is not a signal")
+                        .arg(source.name));
+                return;
+            }
+            const auto sourceName = source.name;
             const auto targetName = QString::fromStdString(targetLane->name);
-            if (sourceLane->kind != targetLane->kind) {
+            if (source.kind != targetLane->kind) {
                 emit statusMessage(
                     tr("Cannot paste %1 (%2) into %3 (%4) · signal types must match")
                         .arg(
                             sourceName,
-                            kindLabel(sourceLane->kind),
+                            kindLabel(source.kind),
                             targetName,
                             kindLabel(targetLane->kind)));
                 return;
             }
-            if ((sourceLane->kind == LaneKind::Bus
-                 || sourceLane->kind == LaneKind::Enum)
-                && sourceLane->width != targetLane->width) {
+            if ((source.kind == LaneKind::Bus
+                 || source.kind == LaneKind::Enum)
+                && source.width != targetLane->width) {
                 emit statusMessage(
                     tr("Cannot paste %1 (%2-bit) into %3 (%4-bit) · signal widths must match")
                         .arg(sourceName)
-                        .arg(static_cast<qulonglong>(sourceLane->width))
+                        .arg(static_cast<qulonglong>(source.width))
                         .arg(targetName)
                         .arg(static_cast<qulonglong>(targetLane->width)));
                 return;
@@ -3437,7 +3495,9 @@ void WaveCanvas::showRangeEditPalette()
                 : mime->text().toUtf8();
         const auto document = QJsonDocument::fromJson(content);
         const auto root = document.isObject() ? document.object() : QJsonObject{};
-        const auto copiedCount = root.value(QStringLiteral("schemaVersion")).toInt(-1) == 1
+        const auto schemaVersion =
+            root.value(QStringLiteral("schemaVersion")).toInt(-1);
+        const auto copiedCount = (schemaVersion == 1 || schemaVersion == 2)
                 && root.value(QStringLiteral("lanes")).isArray()
             ? root.value(QStringLiteral("lanes")).toArray().size()
             : qsizetype{0};

@@ -2140,6 +2140,65 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 38：自描述范围剪贴板与源删除后 Paste
+
+状态：完成
+
+已交付：
+
+- 开发审计确认范围 clipboard 仅保存源 lane ID 和 Segment；Paste 即使已指定兼容目标，仍先要求源
+  lane 存在。因此复制后删除、替换或跨场景重整信号列表会使已复制内容无条件失效。
+- 用户主流程中，Copy 表示独立快照。用户会先复制波形，再删除临时信号或整理信号列表，随后把内容
+  放到保留信号；要求先 Undo 删除才能取回剪贴板内容，既违反直觉，也破坏当前整理步骤。
+- 新复制格式升级为 schema 2，每个 lane 快照携带名称、类型和位宽，并继续保存相对 Segment 与扩展。
+  Paste 以快照元数据验证目标，不再读取当前源 lane；源被删除后，单 lane 右键目标和同数量显式多
+  lane 目标仍可原子粘贴。没有目标且原 ID 已消失时零写入，并明确提示选择所需数量的目标信号。
+- schema 1 继续受支持：源 lane 仍存在时从当前模型补全旧格式元数据，避免升级后丢失进程内旧剪贴板。
+  schema 2 元数据缺失、类型错误或位宽非法会在写入前拒绝。
+- Wave Edit smoke 真实执行 schema 1 目标 Paste，以及 req 90–100 ns Copy→确认删除 req→无目标恢复
+  提示→右键 ack 50 ns→成功 Paste；随后分别 Undo Paste 和删除，完整恢复 Scenario。全部 GUI 路径
+  使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.91 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.77 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 1.14 sec
+
+Screenshot generated:
+  build/qtcreator-debug/wave-edit-smoke-source-deleted-paste.png
+Automated QA: schema 2 快照含 req/bit/1-bit 元数据；删除 req 后直接 Paste 明确要求选择 1 个目标；
+              右键 ack 后 90–100 ns 内容写入 50–60 ns；Paste 与删除可分别 Undo，旧 schema 1 可用
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

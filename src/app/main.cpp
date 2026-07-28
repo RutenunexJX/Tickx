@@ -4865,6 +4865,27 @@ int main(int argc, char* argv[])
                           QByteArrayLiteral("application/x-wave-workbench-range+json")))
                     : QJsonDocument{};
                 const auto copiedRoot = copiedDocument.object();
+                const auto copiedLaneObjects =
+                    copiedRoot.value(QStringLiteral("lanes")).toArray();
+                const auto copiedMetadataValid =
+                    copiedRoot.value(QStringLiteral("schemaVersion")).toInt(-1) == 2
+                    && std::all_of(
+                        copiedLaneObjects.begin(),
+                        copiedLaneObjects.end(),
+                        [](const QJsonValue& laneValue) {
+                            if (!laneValue.isObject()) return false;
+                            const auto lane = laneValue.toObject();
+                            bool validWidth = false;
+                            const auto width = lane.value(QStringLiteral("width"))
+                                                   .toString()
+                                                   .toULongLong(&validWidth);
+                            return lane.value(QStringLiteral("laneId")).isString()
+                                && lane.value(QStringLiteral("name")).isString()
+                                && lane.value(QStringLiteral("kind")).isString()
+                                && lane.value(QStringLiteral("width")).isString()
+                                && validWidth
+                                && width > 0;
+                        });
                 bool validCopiedDuration = false;
                 const auto copiedDuration = copiedRoot.value(QStringLiteral("durationTick"))
                                                 .toString()
@@ -4878,6 +4899,7 @@ int main(int argc, char* argv[])
                     || !copiedDocument.isObject()
                     || copiedRoot.value(QStringLiteral("lanes")).toArray().size()
                         != mixedLaneIds.size()
+                    || !copiedMetadataValid
                     || !validCopiedDuration
                     || copiedDuration != mixedRange->second - mixedRange->first
                     || !window.statusBar()->currentMessage().startsWith(
@@ -5255,6 +5277,30 @@ int main(int argc, char* argv[])
                     return;
                 }
                 const auto copiedRequestValue = valueAt(*sourceRequest, 95'000);
+                const auto* snapshotMime = QApplication::clipboard()->mimeData();
+                const auto snapshotDocument = snapshotMime
+                    ? QJsonDocument::fromJson(snapshotMime->data(
+                          QByteArrayLiteral("application/x-wave-workbench-range+json")))
+                    : QJsonDocument{};
+                auto legacyRoot = snapshotDocument.object();
+                auto legacyLanes = legacyRoot.value(QStringLiteral("lanes")).toArray();
+                for (auto index = 0; index < legacyLanes.size(); ++index) {
+                    auto legacyLane = legacyLanes.at(index).toObject();
+                    legacyLane.remove(QStringLiteral("name"));
+                    legacyLane.remove(QStringLiteral("kind"));
+                    legacyLane.remove(QStringLiteral("width"));
+                    legacyLanes.replace(index, legacyLane);
+                }
+                legacyRoot.insert(QStringLiteral("schemaVersion"), 1);
+                legacyRoot.insert(QStringLiteral("lanes"), legacyLanes);
+                const auto legacyBytes =
+                    QJsonDocument(legacyRoot).toJson(QJsonDocument::Compact);
+                auto* legacyMime = new QMimeData;
+                legacyMime->setData(
+                    QByteArrayLiteral("application/x-wave-workbench-range+json"),
+                    legacyBytes);
+                legacyMime->setText(QString::fromUtf8(legacyBytes));
+                QApplication::clipboard()->setMimeData(legacyMime);
                 if (!chooseWaveformAction(
                         QPoint(xAtTick(50'000), dataY),
                         QStringLiteral("Paste copied range here"))) {
@@ -5411,6 +5457,172 @@ int main(int argc, char* argv[])
                     || scenario != beforeTargetAwarePaste) {
                     qCritical().noquote()
                         << "Target-aware Paste baseline was not recoverable after Redo";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_Escape);
+                settleLayouts();
+
+                const auto beforeDeletedSourcePaste = scenario;
+                dragModified(
+                    QPoint(xAtTick(90'000), requestY),
+                    QPoint(xAtTick(100'000), requestY),
+                    Qt::ShiftModifier);
+                settleLayouts();
+                const auto* durableSource = wave::findLane(scenario, "lane-request");
+                const auto* durableTarget = wave::findLane(scenario, "lane-ack");
+                const auto durableSourceValue =
+                    durableSource ? valueAt(*durableSource, 95'000) : std::string{};
+                const auto durableTargetValue =
+                    durableTarget ? valueAt(*durableTarget, 55'000) : std::string{};
+                if (!durableSource
+                    || !durableTarget
+                    || durableSourceValue == durableTargetValue
+                    || !clickWidget(rangeCopyButton)) {
+                    qCritical().noquote()
+                        << "Durable clipboard source range could not be copied";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto* durableMime = QApplication::clipboard()->mimeData();
+                const auto durableDocument = durableMime
+                    ? QJsonDocument::fromJson(durableMime->data(
+                          QByteArrayLiteral("application/x-wave-workbench-range+json")))
+                    : QJsonDocument{};
+                const auto durableRoot = durableDocument.object();
+                const auto durableLanes =
+                    durableRoot.value(QStringLiteral("lanes")).toArray();
+                const auto durableLane = durableLanes.size() == 1
+                    ? durableLanes.first().toObject()
+                    : QJsonObject{};
+                if (durableRoot.value(QStringLiteral("schemaVersion")).toInt(-1) != 2
+                    || durableLane.value(QStringLiteral("name")).toString()
+                        != QStringLiteral("req")
+                    || durableLane.value(QStringLiteral("kind")).toString()
+                        != QStringLiteral("bit")
+                    || durableLane.value(QStringLiteral("width")).toString()
+                        != QStringLiteral("1")) {
+                    qCritical().noquote()
+                        << "Clipboard range is not a self-describing snapshot";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                bool sourceDeleteConfirmed = false;
+                QTimer::singleShot(0, &application, [&sourceDeleteConfirmed] {
+                    auto* confirmation = qobject_cast<QMessageBox*>(
+                        QApplication::activeModalWidget());
+                    auto* yes = confirmation
+                        ? confirmation->button(QMessageBox::Yes)
+                        : nullptr;
+                    if (!confirmation || !yes) {
+                        if (confirmation) confirmation->reject();
+                        return;
+                    }
+                    sourceDeleteConfirmed = true;
+                    yes->click();
+                });
+                if (!QMetaObject::invokeMethod(
+                        canvas,
+                        "removeLaneRequested",
+                        Qt::DirectConnection,
+                        Q_ARG(QString, QStringLiteral("lane-request")))) {
+                    qCritical().noquote()
+                        << "Copied source signal could not be removed";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                settleLayouts();
+                const auto afterSourceRemoval = scenario;
+                const auto ackYAfterSourceRemoval = laneCenterY("lane-ack");
+                if (!sourceDeleteConfirmed
+                    || wave::findLane(scenario, "lane-request")
+                    || ackYAfterSourceRemoval < 0) {
+                    qCritical().noquote()
+                        << "Copied source signal was not removed cleanly";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(
+                        canvas,
+                        "pasteAtCursor",
+                        Qt::DirectConnection)
+                    || scenario != afterSourceRemoval
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("original signal no longer exists"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("select 1 target signal"))) {
+                    qCritical().noquote()
+                        << "Deleted-source Paste did not explain how to recover";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!chooseWaveformAction(
+                        QPoint(xAtTick(50'000), ackYAfterSourceRemoval),
+                        QStringLiteral("Paste copied range here"))) {
+                    qCritical().noquote()
+                        << "Deleted-source clipboard could not target a remaining signal";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                settleLayouts();
+                const auto afterDeletedSourcePaste = scenario;
+                const auto* durablePastedTarget =
+                    wave::findLane(scenario, "lane-ack");
+                const auto durablePasteRange = canvas->selectedTimeRange();
+                if (afterDeletedSourcePaste == afterSourceRemoval
+                    || wave::findLane(scenario, "lane-request")
+                    || !durablePastedTarget
+                    || valueAt(*durablePastedTarget, 55'000) != durableSourceValue
+                    || !durablePasteRange
+                    || *durablePasteRange
+                        != std::pair<wave::Tick, wave::Tick>{50'000, 60'000}
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-ack")}
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("req → ack"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Self-describing clipboard did not survive source deletion";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto durablePasteScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix =
+                        durablePasteScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        durablePasteScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-source-deleted-paste"));
+                    } else {
+                        durablePasteScreenshotPath.append(
+                            QStringLiteral("-source-deleted-paste.png"));
+                    }
+                    if (!window.grab().save(durablePasteScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save source-deleted Paste screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != afterSourceRemoval
+                    || wave::findLane(scenario, "lane-request")
+                    || !QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || scenario != beforeDeletedSourcePaste) {
+                    qCritical().noquote()
+                        << "Paste and source deletion were not independently undoable";
                     window.hide();
                     application.exit(4);
                     return;
