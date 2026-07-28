@@ -3181,6 +3181,63 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 56：高级属性名称唯一性收口
+
+状态：完成
+
+已交付：
+
+- 开发审计确认快速新增通过 `uniqueLaneName()` 生成大小写不敏感的唯一名称，就地重命名也原位拒绝重复名称；完整 Lane/Group 属性窗口却仅检查非空，
+  因而 Edit 菜单仍可创建重名对象或把现有信号改成已有名称。
+- Relation condition 允许使用唯一显示名称引用 lane，出现重复名称时会明确报告 ambiguous。用户在画布中也无法仅凭相同标题区分 Delete、F2、测量值或编辑目标，
+  因此重名并非低风险格式问题，而是由属性入口制造的后续歧义。
+- 完整属性窗口现在以 stable ID 排除当前对象，对所有其他 lane/group 执行大小写不敏感名称比较；发现重复时窗口保持打开，显示
+  `Another signal or group already uses this name.`，焦点回到 Name 并全选，类型、位宽、颜色等草稿不变。
+- 同一校验同时覆盖编辑现有属性、Edit > Add lane 和 Add group，使快速新增、就地重命名与完整属性入口采用一致的名称策略；领域模型仍保留读取旧有重名工程的能力。
+- `wave-lane-dialog-smoke` 在 `data[7:0]` 的空名称错误后输入已有 `req` 的大小写变体 `REQ`，真实点击 OK 并断言原位拒绝、Name 焦点与其他草稿保留；
+  随后继续完成位宽、Enum、颜色、结构冲突和最终空提交的全部回归链。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.13 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 8.00 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-lane-dialog-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.56 sec
+
+Screenshot generated:
+  build/qtcreator-debug/lane-dialog-smoke.png
+Automated QA: data[7:0] 改为已有 REQ 时窗口保持，提示名称已被使用，Name 获得焦点，原 Kind/Color 等草稿保留。
+              修正名称后继续通过基础字段与结构兼容性纠错，恢复原值确认仍保持模型、Saved 和空 Undo。
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

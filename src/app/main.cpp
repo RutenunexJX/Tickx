@@ -7289,7 +7289,7 @@ int main(int argc, char* argv[])
                         return QApplication::activeModalWidget() == state->dialog
                             && state->dialog->isVisible();
                     };
-                    if (state->stage < 5 && !dialogStillOpen()) {
+                    if (state->stage < 6 && !dialogStillOpen()) {
                         fail(QStringLiteral("Invalid lane properties closed the editor or opened a warning dialog"));
                         return;
                     }
@@ -7305,15 +7305,32 @@ int main(int argc, char* argv[])
                             fail(QStringLiteral("Invalid lane name was not corrected inline with the draft retained"));
                             return;
                         }
-                        state->name->setText(state->originalName);
-                        state->kind->setCurrentIndex(state->kind->findData(
-                            static_cast<int>(wave::LaneKind::Bus)));
-                        state->width->setText(QStringLiteral("0"));
+                        state->name->setText(QStringLiteral("REQ"));
                         state->stage = 1;
                         submitAndCheckNext();
                         return;
                     }
                     if (state->stage == 1) {
+                        if (!state->error->isVisible()
+                            || !state->error->text().contains(
+                                QStringLiteral("already uses this name"),
+                                Qt::CaseInsensitive)
+                            || QApplication::focusWidget() != state->name
+                            || state->name->text() != QStringLiteral("REQ")
+                            || state->kind->currentIndex() != state->originalKindIndex
+                            || state->color->text() != state->originalColor) {
+                            fail(QStringLiteral("Duplicate lane name was not rejected inline with the draft retained"));
+                            return;
+                        }
+                        state->name->setText(state->originalName);
+                        state->kind->setCurrentIndex(state->kind->findData(
+                            static_cast<int>(wave::LaneKind::Bus)));
+                        state->width->setText(QStringLiteral("0"));
+                        state->stage = 2;
+                        submitAndCheckNext();
+                        return;
+                    }
+                    if (state->stage == 2) {
                         if (!state->error->isVisible()
                             || !state->error->text().contains(
                                 QStringLiteral("Width must"),
@@ -7327,11 +7344,11 @@ int main(int argc, char* argv[])
                             static_cast<int>(wave::LaneKind::Enum)));
                         state->width->setText(QStringLiteral("8"));
                         state->enumMap->setText(QStringLiteral("BROKEN"));
-                        state->stage = 2;
+                        state->stage = 3;
                         submitAndCheckNext();
                         return;
                     }
-                    if (state->stage == 2) {
+                    if (state->stage == 3) {
                         if (!state->error->isVisible()
                             || !state->error->text().contains(
                                 QStringLiteral("NAME=VALUE"),
@@ -7352,11 +7369,11 @@ int main(int argc, char* argv[])
                         state->color->setText(QStringLiteral("not-a-color"));
                         state->height->setValue(state->originalHeight);
                         state->visible->setChecked(state->originalVisible);
-                        state->stage = 3;
+                        state->stage = 4;
                         submitAndCheckNext();
                         return;
                     }
-                    if (state->stage == 3) {
+                    if (state->stage == 4) {
                         if (!state->error->isVisible()
                             || !state->error->text().contains(
                                 QStringLiteral("valid Qt color"),
@@ -7369,11 +7386,11 @@ int main(int argc, char* argv[])
                         }
                         state->color->setText(state->originalColor);
                         state->width->setText(QStringLiteral("4"));
-                        state->stage = 4;
+                        state->stage = 5;
                         submitAndCheckNext();
                         return;
                     }
-                    if (state->stage == 4) {
+                    if (state->stage == 5) {
                         if (!state->error->isVisible()
                             || !state->error->text().contains(
                                 QStringLiteral("cannot be applied"),
@@ -7390,11 +7407,10 @@ int main(int argc, char* argv[])
                             return;
                         }
                         state->width->setText(state->originalWidth);
-                        state->stage = 5;
+                        state->stage = 6;
                         submitAndCheckNext();
                         return;
                     }
-
                     const auto* lane = !window.project().scenarios.empty()
                         ? wave::findLane(
                               window.project().scenarios.front(),

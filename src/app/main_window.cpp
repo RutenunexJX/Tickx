@@ -686,6 +686,23 @@ std::optional<Lane> promptLaneProperties(
                 showError(QObject::tr("Lane name cannot be empty."), name);
                 return;
             }
+            const auto duplicateName = std::any_of(
+                scenario.lanes.begin(),
+                scenario.lanes.end(),
+                [&initial, &result](const Lane& candidate) {
+                    return candidate.id != initial.id
+                        && QString::compare(
+                               QString::fromStdString(candidate.name),
+                               QString::fromStdString(result.name),
+                               Qt::CaseInsensitive)
+                            == 0;
+                });
+            if (duplicateName) {
+                showError(
+                    QObject::tr("Another signal or group already uses this name."),
+                    name);
+                return;
+            }
 
             result.kind = static_cast<LaneKind>(kind->currentData().toInt());
             if (result.kind == LaneKind::Bus || result.kind == LaneKind::Enum) {
