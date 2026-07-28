@@ -4656,6 +4656,28 @@ QString WaveCanvas::markerLocationText(const Marker& marker) const
         .arg(cursorDeltaText(marker.start, marker.end));
 }
 
+std::string WaveCanvas::nextLockedMarkerName(const bool interval) const
+{
+    const auto prefix = interval
+        ? std::string{"Locked range "}
+        : std::string{"Locked cursor "};
+    if (!scenario_) return prefix + "1";
+    for (auto suffix = scenario_->markers.size() + 1;; ++suffix) {
+        const auto candidate = prefix + std::to_string(suffix);
+        const auto exists = std::any_of(
+            scenario_->markers.begin(),
+            scenario_->markers.end(),
+            [&candidate](const Marker& marker) {
+                return QString::compare(
+                           QString::fromStdString(marker.name),
+                           QString::fromStdString(candidate),
+                           Qt::CaseInsensitive)
+                    == 0;
+            });
+        if (!exists) return candidate;
+    }
+}
+
 Tick WaveCanvas::cursorKeyboardStep() const
 {
     if (!project_) return 1;
@@ -5541,9 +5563,7 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
     const auto end = std::max(drawStart_, drawCurrent_);
     Marker marker;
     marker.id = makeStableId("marker");
-    marker.name = start == end
-        ? "Locked cursor " + std::to_string(scenario_->markers.size() + 1)
-        : "Locked range " + std::to_string(scenario_->markers.size() + 1);
+    marker.name = nextLockedMarkerName(start != end);
     marker.start = start;
     marker.end = end;
     marker.kind = start == end ? MarkerKind::Point : MarkerKind::Interval;

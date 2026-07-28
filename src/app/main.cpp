@@ -3055,6 +3055,114 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                click(point3, Qt::ControlModifier);
+                const auto firstRecreatedId = canvas->selectedMarkerId().toStdString();
+                const auto firstRecreated = std::find_if(
+                    window.project().scenarios.front().markers.begin(),
+                    window.project().scenarios.front().markers.end(),
+                    [&firstRecreatedId](const wave::Marker& marker) {
+                        return marker.id == firstRecreatedId;
+                    });
+                if (firstRecreatedId.empty()
+                    || firstRecreated
+                        == window.project().scenarios.front().markers.end()) {
+                    qCritical().noquote() << "First marker for name-reuse smoke is missing";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto firstRecreatedMarker = *firstRecreated;
+
+                click(point4, Qt::ControlModifier);
+                const auto survivingId = canvas->selectedMarkerId().toStdString();
+                const auto surviving = std::find_if(
+                    window.project().scenarios.front().markers.begin(),
+                    window.project().scenarios.front().markers.end(),
+                    [&survivingId](const wave::Marker& marker) {
+                        return marker.id == survivingId;
+                    });
+                if (survivingId.empty()
+                    || surviving == window.project().scenarios.front().markers.end()
+                    || QString::compare(
+                           QString::fromStdString(firstRecreatedMarker.name),
+                           QString::fromStdString(surviving->name),
+                           Qt::CaseInsensitive)
+                        == 0) {
+                    qCritical().noquote() << "Consecutive locked cursors were not uniquely named";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto survivingMarker = *surviving;
+
+                click(QPoint(
+                    markerX(firstRecreatedMarker.start),
+                    point3.y()));
+                if (canvas->selectedMarkerId().toStdString() != firstRecreatedId) {
+                    qCritical().noquote() << "Cannot select the earlier marker for name-reuse smoke";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_Delete);
+                const auto deletedEarlier = std::none_of(
+                    window.project().scenarios.front().markers.begin(),
+                    window.project().scenarios.front().markers.end(),
+                    [&firstRecreatedId](const wave::Marker& marker) {
+                        return marker.id == firstRecreatedId;
+                    });
+                if (!deletedEarlier) {
+                    qCritical().noquote() << "Earlier marker was not deleted before name reuse";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                click(point2, Qt::ControlModifier);
+                const auto replacementId = canvas->selectedMarkerId().toStdString();
+                const auto replacement = std::find_if(
+                    window.project().scenarios.front().markers.begin(),
+                    window.project().scenarios.front().markers.end(),
+                    [&replacementId](const wave::Marker& marker) {
+                        return marker.id == replacementId;
+                    });
+                const auto replacementStatus = window.statusBar()->currentMessage();
+                if (replacementId.empty()
+                    || replacement == window.project().scenarios.front().markers.end()
+                    || QString::compare(
+                           QString::fromStdString(replacement->name),
+                           QString::fromStdString(survivingMarker.name),
+                           Qt::CaseInsensitive)
+                        == 0
+                    || !replacementStatus.contains(QStringLiteral("Created"))
+                    || !replacementStatus.contains(
+                        QString::fromStdString(replacement->name))
+                    || !replacementStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Locked cursor name was reused after deleting an earlier marker"
+                        << replacementStatus;
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto& uniqueMarkers =
+                    window.project().scenarios.front().markers;
+                for (auto left = uniqueMarkers.begin(); left != uniqueMarkers.end(); ++left) {
+                    for (auto right = std::next(left); right != uniqueMarkers.end(); ++right) {
+                        if (QString::compare(
+                                QString::fromStdString(left->name),
+                                QString::fromStdString(right->name),
+                                Qt::CaseInsensitive)
+                            == 0) {
+                            qCritical().noquote()
+                                << "Marker names are not unique after deletion and recreation";
+                            window.hide();
+                            application.exit(4);
+                            return;
+                        }
+                    }
+                }
+
                 drag(point4, point3);
                 QCoreApplication::processEvents();
                 if (!cursorModeScreenshotPath.isEmpty()

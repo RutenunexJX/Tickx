@@ -2491,6 +2491,65 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 44：持久 Marker 唯一命名
+
+状态：完成
+
+已交付：
+
+- 开发审计确认锁定点/区间名称直接使用 `scenario.markers.size()+1`。创建多个锁定点、删除较早对象后
+  再创建时，当前数量回退，新对象会复用仍存在对象的编号；例如两个 `Locked cursor 4` 可同时存在。
+- 用户依赖第 42–43 轮新增的对象名确认创建、移动和删除结果。重名会使状态栏无法唯一指代目标，
+  相邻光标或高缩放场景中也无法根据反馈判断编辑了哪一个持久对象。
+- 新建 Marker 现在按点/区间分别生成 `Locked cursor N` / `Locked range N`，从原候选编号开始逐个
+  检查当前 Scenario；与任何现有名称不区分大小写冲突时继续递增，直至得到唯一名称。
+- 只影响新建对象，不改写已有工程名称、ID、时间或 Undo/Redo 快照。创建结果继续显示最终唯一名称、
+  精确时间/区间和 `Ctrl+Z`。
+- `wave-cursor-mode-smoke` 在完整 Measure 流程中新增“创建两点→保留后一点→删除前一点→再创建”
+  序列；断言新对象不复用幸存名称、场景所有 Marker 名称唯一且状态栏引用新名称。全部 GUI offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 22 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.16 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.88 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-cursor-mode-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.20 sec
+
+Screenshot generated:
+  build/qtcreator-debug/cursor-mode-smoke.png
+Automated QA: 连续创建两个锁定点时名称不同；删除较早点后再创建不会复用幸存点名称；
+              场景中 Transfer、锁定区间及全部锁定点名称不区分大小写地唯一；创建状态引用新名称；
+              活动/临时/锁定光标的结果、边界和恢复流程无回归
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
