@@ -3123,6 +3123,64 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 55：高级属性结构兼容性原位预检
+
+状态：完成
+
+已交付：
+
+- 开发审计确认第 54 轮已把名称、数值格式、引用与颜色错误移入属性窗口，但类型/位宽变更仍只在窗口关闭后由
+  `ChangeLaneCommand` 检查。Group 成员转换、Clock/Group 持有 Event、位宽缩减导致 Event 值溢出等冲突仍会弹出独立警告并丢失全部草稿。
+- 用户把示例 `data[7:0]` 从 8 位误改为 4 位时，真正需要的是看到 `0x35` 已超出新位宽、直接把 Width 改回；关闭窗口、确认警告、
+  重新打开并恢复其他字段没有产生任何有效工作，只增加重复输入和误放弃风险。
+- 完整属性窗口在 OK 时先构造一个不执行的 `ChangeLaneCommand`，复用正式提交的同一结构规范化与兼容性规则；只有预检成功才关闭窗口。
+  预检不修改 Project、Scenario 或命令栈。失败时在现有错误区显示命令原因，并根据 Enum、位宽/值或类型冲突把焦点放回 Enum map、Width 或 Kind。
+- 实际提交仍保留原异常防线，避免窗口确认与命令执行之间的状态变化绕过校验；新增 lane/group 因尚不存在于场景而跳过变更预检，继续由
+  `AddLaneCommand` 负责最终一致性。
+- `wave-lane-dialog-smoke` 改用真实 `data[7:0]`：在四类基础输入错误后提交 8→4 位，断言窗口不关闭、提示现有 `0x35` 超出位宽、Width 获得焦点、
+  名称/类型/颜色等草稿保留；恢复 8 位后确认仍保持原模型、Saved 和空 Undo。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 22 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.10 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.88 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-lane-dialog-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.52 sec
+
+Screenshot generated:
+  build/qtcreator-debug/lane-dialog-smoke.png
+Automated QA: data[7:0] 的 8→4 位草稿未关闭窗口；提示说明现有 0x35 超出 lane width，焦点回到 Width，其他草稿保留。
+              改回 8 位确认后模型、Saved 状态和 Undo 均不变，并显示 No properties changed for data[7:0]。
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

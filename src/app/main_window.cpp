@@ -508,7 +508,7 @@ std::optional<std::map<std::string, std::string>> parseEnumMapText(
 std::optional<Lane> promptLaneProperties(
     QWidget* parent,
     const Project& project,
-    const Scenario& scenario,
+    Scenario& scenario,
     const Lane& initial,
     const bool lockKind)
 {
@@ -755,6 +755,38 @@ std::optional<Lane> promptLaneProperties(
             result.color = parsedColor.name(QColor::HexRgb).toStdString();
             result.height = height->value();
             result.visible = visible->isChecked();
+            if (findLane(scenario, initial.id)) {
+                try {
+                    [[maybe_unused]] const ChangeLaneCommand validation(
+                        project,
+                        scenario,
+                        initial.id,
+                        result);
+                } catch (const std::exception& exception) {
+                    const auto message = QString::fromUtf8(exception.what());
+                    QWidget* field = kind;
+                    if (result.kind == LaneKind::Enum
+                        && message.contains(
+                            QStringLiteral("enum"),
+                            Qt::CaseInsensitive)) {
+                        field = enumMap;
+                    } else if ((result.kind == LaneKind::Bus
+                                || result.kind == LaneKind::Enum)
+                               && (message.contains(
+                                       QStringLiteral("width"),
+                                       Qt::CaseInsensitive)
+                                   || message.contains(
+                                       QStringLiteral("value"),
+                                       Qt::CaseInsensitive))) {
+                        field = width;
+                    }
+                    showError(
+                        QObject::tr("These properties cannot be applied: %1")
+                            .arg(message),
+                        field);
+                    return;
+                }
+            }
             acceptedLane = std::move(result);
             error->hide();
             dialog.accept();

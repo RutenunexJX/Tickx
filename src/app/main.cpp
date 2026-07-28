@@ -7160,7 +7160,7 @@ int main(int argc, char* argv[])
         };
         const auto state = std::make_shared<LaneDialogSmokeState>();
         QTimer::singleShot(0, &window, [&window] {
-            window.openLanePropertiesPreview(QStringLiteral("lane-request"));
+            window.openLanePropertiesPreview(QStringLiteral("lane-data"));
         });
         QTimer::singleShot(
             350,
@@ -7226,7 +7226,7 @@ int main(int argc, char* argv[])
                 const auto* original = !window.project().scenarios.empty()
                     ? wave::findLane(
                           window.project().scenarios.front(),
-                          "lane-request")
+                          "lane-data")
                     : nullptr;
                 const auto fail = [&application, &window](const QString& message) {
                     qCritical().noquote() << message;
@@ -7289,7 +7289,7 @@ int main(int argc, char* argv[])
                         return QApplication::activeModalWidget() == state->dialog
                             && state->dialog->isVisible();
                     };
-                    if (state->stage < 4 && !dialogStillOpen()) {
+                    if (state->stage < 5 && !dialogStillOpen()) {
                         fail(QStringLiteral("Invalid lane properties closed the editor or opened a warning dialog"));
                         return;
                     }
@@ -7363,13 +7363,34 @@ int main(int argc, char* argv[])
                                 Qt::CaseInsensitive)
                             || QApplication::focusWidget() != state->color
                             || state->name->text() != state->originalName
-                            || state->kind->currentIndex() != state->originalKindIndex
-                            || !state->dialog->grab().save(laneDialogScreenshotPath)) {
-                            fail(QStringLiteral("Invalid lane color was not corrected inline or captured"));
+                            || state->kind->currentIndex() != state->originalKindIndex) {
+                            fail(QStringLiteral("Invalid lane color was not corrected inline with the draft retained"));
                             return;
                         }
                         state->color->setText(state->originalColor);
+                        state->width->setText(QStringLiteral("4"));
                         state->stage = 4;
+                        submitAndCheckNext();
+                        return;
+                    }
+                    if (state->stage == 4) {
+                        if (!state->error->isVisible()
+                            || !state->error->text().contains(
+                                QStringLiteral("cannot be applied"),
+                                Qt::CaseInsensitive)
+                            || !state->error->text().contains(
+                                QStringLiteral("exceeds the lane width"),
+                                Qt::CaseInsensitive)
+                            || QApplication::focusWidget() != state->width
+                            || state->name->text() != state->originalName
+                            || state->kind->currentIndex() != state->originalKindIndex
+                            || state->color->text() != state->originalColor
+                            || !state->dialog->grab().save(laneDialogScreenshotPath)) {
+                            fail(QStringLiteral("Incompatible lane width was not rejected inline with the draft retained"));
+                            return;
+                        }
+                        state->width->setText(state->originalWidth);
+                        state->stage = 5;
                         submitAndCheckNext();
                         return;
                     }
@@ -7377,7 +7398,7 @@ int main(int argc, char* argv[])
                     const auto* lane = !window.project().scenarios.empty()
                         ? wave::findLane(
                               window.project().scenarios.front(),
-                              "lane-request")
+                              "lane-data")
                         : nullptr;
                     if (QApplication::activeModalWidget()
                         || !lane
@@ -7385,7 +7406,7 @@ int main(int argc, char* argv[])
                         || state->saveState->text() != QStringLiteral("Saved")
                         || state->undoAction->isEnabled()
                         || !window.statusBar()->currentMessage().contains(
-                            QStringLiteral("No properties changed for req"))) {
+                            QStringLiteral("No properties changed for data[7:0]"))) {
                         fail(QStringLiteral("Unchanged lane properties created an edit or lacked clear feedback"));
                         return;
                     }
@@ -7399,7 +7420,8 @@ int main(int argc, char* argv[])
                     (*runner)();
                 });
                 state->ok->click();
-            });    } else if (waveformOnlySmoke) {
+            });
+    } else if (waveformOnlySmoke) {
         QTimer::singleShot(
             0,
             &application,
