@@ -3116,6 +3116,11 @@ void MainWindow::createToolBars()
     auto* editBar = addToolBar(tr("Waveform tools"));
     editBar->setObjectName(QStringLiteral("WaveformToolbar"));
     editBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    editBar->setMovable(false);
+    editBar->setFloatable(false);
+    editBar->setAllowedAreas(Qt::TopToolBarArea);
+    editBar->toggleViewAction()->setEnabled(false);
+    editBar->toggleViewAction()->setVisible(false);
 
     markerAction_ = editBar->addAction(
         themedIcon(QStringLiteral("flag"), style(), QStyle::SP_DialogYesButton),
@@ -3126,6 +3131,11 @@ void MainWindow::createToolBars()
     markerAction_->setToolTip(
         tr("Temporarily measure time and signal values; Ctrl+M toggles, Esc exits"));
     connect(markerAction_, &QAction::toggled, this, [this](const bool checked) {
+        if (checked && !canvas_->commitPendingInlineEdits()) {
+            const QSignalBlocker blocker(markerAction_);
+            markerAction_->setChecked(false);
+            return;
+        }
         canvas_->setTool(checked ? WaveCanvas::Tool::Marker : WaveCanvas::Tool::WaveEdit);
         statusBar()->showMessage(
             checked
@@ -3133,6 +3143,19 @@ void MainWindow::createToolBars()
                 : tr("Direct waveform editing active"),
             5'000);
     });
+
+    auto* rangeEditPalette = canvas_->rangeEditPaletteWidget();
+    rangeEditPaletteAction_ = editBar->addWidget(rangeEditPalette);
+    rangeEditPaletteAction_->setObjectName(QStringLiteral("RangeEditToolbarAction"));
+    rangeEditPalette->ensurePolished();
+    editBar->ensurePolished();
+    editBar->setMinimumHeight(editBar->sizeHint().height());
+    rangeEditPaletteAction_->setVisible(false);
+    connect(
+        canvas_,
+        &WaveCanvas::rangeEditPaletteVisibilityChanged,
+        rangeEditPaletteAction_,
+        &QAction::setVisible);
 
     editBar->addSeparator();
     auto* zoomInAction = editBar->addAction(

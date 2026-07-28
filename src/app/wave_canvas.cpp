@@ -359,7 +359,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     busPresetPalette_->adjustSize();
     busPresetPalette_->hide();
 
-    rangeEditPalette_ = new QFrame(viewport());
+    rangeEditPalette_ = new QFrame(this);
     rangeEditPalette_->setObjectName(QStringLiteral("RangeEditPalette"));
     rangeEditPalette_->setFrameShape(QFrame::StyledPanel);
     rangeEditPalette_->setAttribute(Qt::WA_StyledBackground, true);
@@ -429,11 +429,9 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         QStringLiteral("RangeEditDontCareButton"),
         "dont-care");
     rangeEditPalette_->adjustSize();
-    rangeEditPalette_->hide();
 
     connect(horizontalScrollBar(), &QScrollBar::valueChanged, this, [this] {
         positionBusPresetPalette();
-        positionRangeEditPalette();
         viewport()->update();
     });
     connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
@@ -441,7 +439,6 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         positionQuickLaneSetup();
         positionLaneRename();
         positionBusPresetPalette();
-        positionRangeEditPalette();
         viewport()->update();
     });
     positionDurationEditor();
@@ -455,6 +452,11 @@ bool WaveCanvas::hasQuickLaneSetup() const noexcept
 bool WaveCanvas::hasLaneRename() const noexcept
 {
     return laneRenameEdit_ && laneRenameEdit_->isVisible();
+}
+
+QWidget* WaveCanvas::rangeEditPaletteWidget() const noexcept
+{
+    return rangeEditPalette_;
 }
 
 bool WaveCanvas::commitLaneRename()
@@ -785,12 +787,13 @@ bool WaveCanvas::hasPendingBusValueEdit() const noexcept
 
 bool WaveCanvas::hasPendingRangeValueEdit() const noexcept
 {
+    const auto kind = explicitRangeKind();
     return rangeValueEdit_
-        && rangeValueEdit_->isVisible()
         && rangeValueEdit_->isModified()
+        && rangeEditPaletteVisible_
         && explicitRangeSelection_
-        && rangeEditPalette_
-        && rangeEditPalette_->isVisible();
+        && kind
+        && *kind == LaneKind::Bus;
 }
 
 bool WaveCanvas::hasPendingValueEdit() const noexcept
@@ -1018,7 +1021,6 @@ void WaveCanvas::fitScenario()
     updateScrollBars();
     horizontalScrollBar()->setValue(0);
     positionBusPresetPalette();
-    positionRangeEditPalette();
     viewport()->update();
 }
 
@@ -1042,7 +1044,6 @@ void WaveCanvas::fitSelection()
         static_cast<double>(horizontalScrollBar()->maximum()));
     horizontalScrollBar()->setValue(static_cast<int>(std::llround(scroll)));
     positionBusPresetPalette();
-    positionRangeEditPalette();
     viewport()->update();
 }
 
@@ -1087,8 +1088,6 @@ void WaveCanvas::refreshModel()
         } else {
             clearExplicitRangeSelection();
         }
-    } else {
-        positionRangeEditPalette();
     }
     viewport()->update();
 }
@@ -1814,7 +1813,6 @@ void WaveCanvas::resizeEvent(QResizeEvent* event)
     positionLaneRename();
     positionDurationEditor();
     positionBusPresetPalette();
-    positionRangeEditPalette();
 }
 
 void WaveCanvas::mousePressEvent(QMouseEvent* event)
@@ -2972,51 +2970,6 @@ std::optional<LaneKind> WaveCanvas::explicitRangeKind() const
     return kind;
 }
 
-void WaveCanvas::positionRangeEditPalette()
-{
-    if (!rangeEditPalette_ || !scenario_ || !explicitRangeSelection_
-        || !selectionRange_ || selectionRange_->second <= selectionRange_->first
-        || selectedLaneIds_.empty()) {
-        if (rangeEditPalette_) rangeEditPalette_->hide();
-        return;
-    }
-
-    const auto firstLayout = std::find_if(
-        laneLayout_.begin(),
-        laneLayout_.end(),
-        [this](const LaneLayout& candidate) {
-            if (candidate.laneIndex >= scenario_->lanes.size()) return false;
-            const auto& laneId = scenario_->lanes.at(candidate.laneIndex).id;
-            return std::find(
-                selectedLaneIds_.begin(),
-                selectedLaneIds_.end(),
-                laneId) != selectedLaneIds_.end();
-        });
-    if (firstLayout == laneLayout_.end()) {
-        rangeEditPalette_->hide();
-        return;
-    }
-
-    rangeEditPalette_->adjustSize();
-    const auto size = rangeEditPalette_->sizeHint().expandedTo(rangeEditPalette_->size());
-    const auto minimumX = HeaderWidth + 6;
-    const auto maximumX = std::max(minimumX, viewport()->width() - size.width() - 7);
-    const auto x = std::clamp(
-        xAtTick(selectionRange_->first) + 10,
-        minimumX,
-        maximumX);
-    const auto laneTop = RulerHeight + firstLayout->top - verticalScrollBar()->value();
-    auto y = laneTop - size.height() - 5;
-    if (y < RulerHeight + 4) y = laneTop + 4;
-    y = std::clamp(
-        y,
-        RulerHeight + 4,
-        std::max(RulerHeight + 4, viewport()->height() - size.height() - 6));
-    rangeEditPalette_->setGeometry(x, y, size.width(), size.height());
-    rangeEditPalette_->show();
-    rangeEditPalette_->raise();
-}
-
 void WaveCanvas::showRangeEditPalette()
 {
     if (!rangeEditPalette_ || !scenario_ || !explicitRangeSelection_
@@ -3067,6 +3020,7 @@ void WaveCanvas::showRangeEditPalette()
     if (rangeZButton_) rangeZButton_->show();
     if (rangeDontCareButton_) rangeDontCareButton_->setVisible(busRange);
     if (rangeValueEdit_) {
+        const auto restoreCanvasFocus = rangeValueEdit_->hasFocus() && !busRange;
         rangeValueEdit_->setVisible(busRange);
         if (!busRange) {
             rangeValueEdit_->clear();
@@ -3078,13 +3032,24 @@ void WaveCanvas::showRangeEditPalette()
             rangeValueEdit_->setToolTip(tr("Type one value for the whole selected Bus range"));
             rangeValueEdit_->setStyleSheet({});
         }
+        if (restoreCanvasFocus) viewport()->setFocus(Qt::OtherFocusReason);
     }
-    positionRangeEditPalette();
+    rangeEditPalette_->adjustSize();
+    rangeEditPalette_->updateGeometry();
+    if (!rangeEditPaletteVisible_) {
+        rangeEditPaletteVisible_ = true;
+        emit rangeEditPaletteVisibilityChanged(true);
+    }
 }
 
 void WaveCanvas::hideRangeEditPalette()
 {
-    if (rangeEditPalette_) rangeEditPalette_->hide();
+    const auto restoreCanvasFocus = rangeValueEdit_ && rangeValueEdit_->hasFocus();
+    if (rangeEditPaletteVisible_) {
+        rangeEditPaletteVisible_ = false;
+        emit rangeEditPaletteVisibilityChanged(false);
+    }
+    if (restoreCanvasFocus) viewport()->setFocus(Qt::OtherFocusReason);
 }
 
 void WaveCanvas::clearExplicitRangeSelection(const bool clearLanes)
@@ -3616,7 +3581,6 @@ void WaveCanvas::setScale(const double scale, const int anchorX)
         0LL,
         static_cast<long long>(horizontalScrollBar()->maximum()))));
     positionBusPresetPalette();
-    positionRangeEditPalette();
     viewport()->update();
 }
 
@@ -4306,7 +4270,7 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
         const auto duration = selectionRange_->second - selectionRange_->first;
         if (explicitRangeKind()) {
             emit statusMessage(
-                tr("Selected %1 · %2 signals · use 0/1/X/Z or the range palette · Esc clears")
+                tr("Selected %1 · %2 signals · use 0/1/X/Z or the range toolbar · Esc clears")
                     .arg(QString::fromStdString(formatTick(duration, project_->timeBase)))
                     .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
         } else {

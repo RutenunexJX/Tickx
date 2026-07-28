@@ -70,6 +70,7 @@ public:
     [[nodiscard]] bool hasLaneRename() const noexcept;
     [[nodiscard]] bool commitLaneRename();
     [[nodiscard]] bool commitPendingInlineEdits();
+    [[nodiscard]] QWidget* rangeEditPaletteWidget() const noexcept;
 
     void beginQuickLaneSetup(
         const QString& laneId,
@@ -116,6 +117,7 @@ signals:
     void laneRenameAccepted(const QString& laneId, const QString& name);
     void durationEditRequested(const QString& value);
     void measureModeExitRequested();
+    void rangeEditPaletteVisibilityChanged(bool visible);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -199,7 +201,6 @@ private:
     void positionBusPresetPalette();
     void showBusPresetPalette(const Lane& lane, const QPoint& anchor);
     void hideBusPresetPalette();
-    void positionRangeEditPalette();
     void showRangeEditPalette();
     void hideRangeEditPalette();
     void clearExplicitRangeSelection(bool clearLanes = true);
@@ -339,6 +340,7 @@ private:
     QToolButton* rangeXButton_{nullptr};
     QToolButton* rangeZButton_{nullptr};
     QToolButton* rangeDontCareButton_{nullptr};
+    bool rangeEditPaletteVisible_{false};
     bool explicitRangeSelection_{false};
     std::vector<LaneLayout> laneLayout_;
     std::vector<Tick> signalEdgeIndex_;

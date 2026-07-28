@@ -2639,6 +2639,41 @@ int main(int argc, char* argv[])
 
                 canvas->fitScenario();
 
+                const auto settleLayouts = [] {
+                    for (auto pass = 0; pass < 3; ++pass) {
+                        QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+                        QCoreApplication::processEvents();
+                    }
+                };
+                settleLayouts();
+                auto* waveformToolbar = window.findChild<QToolBar*>(
+                    QStringLiteral("WaveformToolbar"));
+                auto* rangeToolbarAction = window.findChild<QAction*>(
+                    QStringLiteral("RangeEditToolbarAction"));
+                if (!waveformToolbar
+                    || !rangeToolbarAction
+                    || rangeToolbarAction->isVisible()
+                    || waveformToolbar->isMovable()
+                    || waveformToolbar->isFloatable()
+                    || waveformToolbar->toggleViewAction()->isVisible()
+                    || waveformToolbar->toggleViewAction()->isEnabled()) {
+                    qCritical().noquote()
+                        << "Fixed waveform toolbar baseline is not available";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto stableToolbarHeight = waveformToolbar->height();
+                const auto stableViewportTop =
+                    canvas->viewport()->mapToGlobal(QPoint{}).y();
+                const auto stableVerticalLayout = [&] {
+                    return waveformToolbar->height() == stableToolbarHeight
+                        && canvas->viewport()->mapToGlobal(QPoint{}).y()
+                            == stableViewportTop;
+                };
+                const auto widgetGlobalRect = [](const QWidget* widget) {
+                    return QRect(widget->mapToGlobal(QPoint{}), widget->size());
+                };
                 const auto sendMouse = [canvas](
                                            const QEvent::Type type,
                                            const QPoint position,
@@ -2668,6 +2703,33 @@ int main(int argc, char* argv[])
                         position,
                         Qt::LeftButton,
                         Qt::NoButton);
+                };
+                const auto clickWidget = [&window](QWidget* widget) {
+                    if (!widget) return false;
+                    const QPoint localPosition = widget->rect().center();
+                    const QPoint globalPosition = widget->mapToGlobal(localPosition);
+                    auto* hit = window.childAt(window.mapFromGlobal(globalPosition));
+                    if (hit != widget && (!hit || !widget->isAncestorOf(hit))) return false;
+                    const QPointF localPoint(localPosition);
+                    const QPointF globalPoint(globalPosition);
+                    QMouseEvent press(
+                        QEvent::MouseButtonPress,
+                        localPoint,
+                        globalPoint,
+                        Qt::LeftButton,
+                        Qt::LeftButton,
+                        Qt::NoModifier);
+                    QCoreApplication::sendEvent(widget, &press);
+                    QMouseEvent release(
+                        QEvent::MouseButtonRelease,
+                        localPoint,
+                        globalPoint,
+                        Qt::LeftButton,
+                        Qt::NoButton,
+                        Qt::NoModifier);
+                    QCoreApplication::sendEvent(widget, &release);
+                    QCoreApplication::processEvents();
+                    return true;
                 };
                 const auto drag = [&sendMouse](const QPoint start, const QPoint end) {
                     sendMouse(
@@ -2756,9 +2818,10 @@ int main(int argc, char* argv[])
                 };
 
                 const auto dataY = laneCenterY("lane-data");
+                const auto resetY = laneCenterY("lane-reset");
                 const auto requestY = laneCenterY("lane-request");
                 const auto acknowledgeY = laneCenterY("lane-ack");
-                if (dataY < 0 || requestY < 0 || acknowledgeY < 0) {
+                if (dataY < 0 || resetY < 0 || requestY < 0 || acknowledgeY < 0) {
                     qCritical().noquote() << "Wave Edit smoke lanes are missing";
                     window.hide();
                     application.exit(4);
@@ -2969,6 +3032,7 @@ int main(int argc, char* argv[])
                     QPoint(xAtTick(20'000), requestY),
                     QPoint(xAtTick(40'000), acknowledgeY),
                     Qt::ShiftModifier);
+                settleLayouts();
                 const auto multiLaneRange = canvas->selectedTimeRange();
                 const auto multiLaneIds = canvas->selectedLaneIds();
                 if (!multiLaneRange
@@ -2989,35 +3053,88 @@ int main(int argc, char* argv[])
                     QStringLiteral("RangeEditOneButton"));
                 auto* rangeXButton = window.findChild<QToolButton*>(
                     QStringLiteral("RangeEditXButton"));
+
                 if (!canvas->hasExplicitRangeSelection()
                     || !rangePalette
-                    || !rangePalette->isVisible()
+                    || !rangePalette->isVisibleTo(&window)
                     || !rangeContext
                     || !rangeContext->text().contains(QStringLiteral("Bit"))
                     || !rangeOneButton
                     || !rangeOneButton->isEnabled()
                     || !rangeXButton
-                    || !rangeXButton->isEnabled()) {
-                    qCritical().noquote() << "Released Bit range is not persistently actionable";
+                    || !rangeXButton->isEnabled()
+                    || !waveformToolbar
+                    || !rangeToolbarAction
+                    || !rangeToolbarAction->isVisible()
+                    || waveformToolbar->widgetForAction(rangeToolbarAction) != rangePalette
+                    || !waveformToolbar->isAncestorOf(rangePalette)
+                    || !stableVerticalLayout()
+                    || waveformToolbar->actions().indexOf(measureAction)
+                        >= waveformToolbar->actions().indexOf(rangeToolbarAction)
+                    || widgetGlobalRect(rangePalette).intersects(
+                        widgetGlobalRect(canvas->viewport()))) {
+                    qCritical().noquote()
+                        << "Released Bit range is not actionable in the fixed toolbar"
+                        << "paletteVisible" << (rangePalette && rangePalette->isVisibleTo(&window))
+                        << "actionVisible" << (rangeToolbarAction && rangeToolbarAction->isVisible())
+                        << "hosted" << (waveformToolbar && rangeToolbarAction
+                            && waveformToolbar->widgetForAction(rangeToolbarAction) == rangePalette)
+                        << "ancestor" << (waveformToolbar && rangePalette
+                            && waveformToolbar->isAncestorOf(rangePalette))
+                        << "measureIndex" << (waveformToolbar
+                            ? waveformToolbar->actions().indexOf(measureAction) : -1)
+                        << "rangeIndex" << (waveformToolbar && rangeToolbarAction
+                            ? waveformToolbar->actions().indexOf(rangeToolbarAction) : -1)
+                        << "intersects" << (rangePalette
+                            && widgetGlobalRect(rangePalette).intersects(
+                                widgetGlobalRect(canvas->viewport())));
                     window.hide();
                     application.exit(4);
                     return;
                 }
-                const auto rangePaletteXBeforeZoom = rangePalette->x();
-                canvas->zoomOut();
-                QCoreApplication::processEvents();
-                if (!rangePalette->isVisible()
-                    || rangePalette->x() == rangePaletteXBeforeZoom) {
-                    qCritical().noquote() << "Range palette did not follow a zero-scroll zoom";
+                const auto rangePaletteRectBeforeViewChange = widgetGlobalRect(rangePalette);
+                canvas->zoomIn();
+                settleLayouts();
+                if (!rangePalette->isVisibleTo(&window)
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != multiLaneRange
+                    || canvas->horizontalScrollBar()->maximum() <= 0
+                    || !stableVerticalLayout()
+                    || widgetGlobalRect(rangePalette) != rangePaletteRectBeforeViewChange
+                    || widgetGlobalRect(rangePalette).intersects(
+                        widgetGlobalRect(canvas->viewport()))) {
+                    qCritical().noquote()
+                        << "Range toolbar moved, hid or lost selection during zoom";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto horizontalMaximum = canvas->horizontalScrollBar()->maximum();
+                canvas->horizontalScrollBar()->setValue(horizontalMaximum);
+                settleLayouts();
+                if (canvas->horizontalScrollBar()->value() != horizontalMaximum
+                    || !rangePalette->isVisibleTo(&window)
+                    || canvas->selectedTimeRange() != multiLaneRange
+                    || !stableVerticalLayout()
+                    || widgetGlobalRect(rangePalette) != rangePaletteRectBeforeViewChange
+                    || widgetGlobalRect(rangePalette).intersects(
+                        widgetGlobalRect(canvas->viewport()))) {
+                    qCritical().noquote()
+                        << "Range toolbar moved or lost selection during waveform scrolling";
                     window.hide();
                     application.exit(4);
                     return;
                 }
                 canvas->fitScenario();
-                QCoreApplication::processEvents();
-                if (!rangePalette->isVisible()
-                    || std::abs(rangePalette->x() - rangePaletteXBeforeZoom) > 1) {
-                    qCritical().noquote() << "Range palette did not return with Fit scenario";
+                settleLayouts();
+                if (!rangePalette->isVisibleTo(&window)
+                    || canvas->selectedTimeRange() != multiLaneRange
+                    || !stableVerticalLayout()
+                    || widgetGlobalRect(rangePalette) != rangePaletteRectBeforeViewChange
+                    || widgetGlobalRect(rangePalette).intersects(
+                        widgetGlobalRect(canvas->viewport()))) {
+                    qCritical().noquote()
+                        << "Range toolbar moved or lost selection after Fit scenario";
                     window.hide();
                     application.exit(4);
                     return;
@@ -3215,13 +3332,32 @@ int main(int argc, char* argv[])
                 }
 
                 const auto beforeRangeDismissClick = scenario;
-                click(QPoint(xAtTick(65'000), requestY));
+                const auto rangeBeforeDismiss = canvas->selectedTimeRange();
+                if (!rangeBeforeDismiss) {
+                    qCritical().noquote() << "Range disappeared before old overlay hit test";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const QPoint oldOverlayPoint(
+                    xAtTick(rangeBeforeDismiss->first) + 20,
+                    resetY);
+                if (!canvas->viewport()->rect().contains(oldOverlayPoint)) {
+                    qCritical().noquote() << "Old overlay hit-test point is outside the viewport";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                click(oldOverlayPoint);
+                settleLayouts();
                 if (scenario != beforeRangeDismissClick
                     || canvas->hasExplicitRangeSelection()
-                    || rangePalette->isVisible()
+                    || rangePalette->isVisibleTo(&window)
+                    || rangeToolbarAction->isVisible()
+                    || !stableVerticalLayout()
                     || canvas->selectedTimeRange()) {
                     qCritical().noquote()
-                        << "First click outside the range did not clear it without editing";
+                        << "Old overlay area did not clear the range without editing";
                     window.hide();
                     application.exit(4);
                     return;
@@ -3276,9 +3412,14 @@ int main(int argc, char* argv[])
                     QPoint(xAtTick(20'000), dataY),
                     QPoint(xAtTick(50'000), smallBusY),
                     Qt::ShiftModifier);
+                settleLayouts();
                 const auto busRange = canvas->selectedTimeRange();
                 auto* rangeValueEdit = window.findChild<QLineEdit*>(
                     QStringLiteral("RangeEditValueEdit"));
+                auto* rangeZeroButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditZeroButton"));
+                auto* rangeZButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditZButton"));
                 auto* rangeDontCareButton = window.findChild<QToolButton*>(
                     QStringLiteral("RangeEditDontCareButton"));
                 if (!busRange
@@ -3288,26 +3429,87 @@ int main(int argc, char* argv[])
                         != QStringList{
                             QStringLiteral("lane-data"),
                             QStringLiteral("lane-data-small")}
-                    || !rangePalette->isVisible()
+                    || !rangePalette->isVisibleTo(&window)
+                    || !rangeToolbarAction->isVisible()
                     || !rangeContext->text().contains(QStringLiteral("Bus"))
                     || !rangeValueEdit
                     || !rangeValueEdit->isVisible()
+                    || !rangeZeroButton
+                    || !rangeZeroButton->isVisible()
+                    || !rangeZButton
+                    || !rangeZButton->isVisible()
                     || !rangeDontCareButton
                     || !rangeDontCareButton->isVisible()
-                    || !rangeDontCareButton->isEnabled()) {
-                    qCritical().noquote() << "Bus range palette is not actionable";
+                    || !rangeDontCareButton->isEnabled()
+                    || !stableVerticalLayout()) {
+                    qCritical().noquote() << "Bus range toolbar is not actionable";
                     window.hide();
                     application.exit(4);
                     return;
                 }
 
+                const auto fullWindowSize = window.size();
+                window.resize(960, fullWindowSize.height());
+                settleLayouts();
+                const auto toolbarGlobalRect = widgetGlobalRect(waveformToolbar);
+                const auto rangePaletteGlobalRect = widgetGlobalRect(rangePalette);
+                const std::array<QWidget*, 6> visibleRangeControls{
+                    rangeContext,
+                    rangeValueEdit,
+                    rangeZeroButton,
+                    rangeXButton,
+                    rangeZButton,
+                    rangeDontCareButton,
+                };
+                auto* measureWidget = waveformToolbar->widgetForAction(measureAction);
+                const auto clippedRangeControl = std::any_of(
+                    visibleRangeControls.begin(),
+                    visibleRangeControls.end(),
+                    [&window,
+                     &toolbarGlobalRect,
+                     &rangePaletteGlobalRect,
+                     &widgetGlobalRect](const QWidget* control) {
+                        if (!control || !control->isVisibleTo(&window)) return true;
+                        const auto controlRect = widgetGlobalRect(control);
+                        auto* hit = window.childAt(
+                            window.mapFromGlobal(controlRect.center()));
+                        return !toolbarGlobalRect.contains(controlRect)
+                            || !rangePaletteGlobalRect.contains(controlRect)
+                            || (hit != control
+                                && (!hit || !control->isAncestorOf(hit)));
+                    });
+                if (window.width() != 960
+                    || window.height() != fullWindowSize.height()
+                    || !rangePalette->isVisibleTo(&window)
+                    || !rangeToolbarAction->isVisible()
+                    || !stableVerticalLayout()
+                    || !toolbarGlobalRect.contains(rangePaletteGlobalRect)
+                    || rangePaletteGlobalRect.intersects(
+                        widgetGlobalRect(canvas->viewport()))
+                    || clippedRangeControl
+                    || !measureWidget
+                    || !measureWidget->isVisibleTo(&window)
+                    || !toolbarGlobalRect.contains(widgetGlobalRect(measureWidget))
+                    || widgetGlobalRect(measureWidget).left()
+                        >= rangePaletteGlobalRect.left()) {
+                    qCritical().noquote()
+                        << "Range toolbar is clipped or displaced at the minimum window size";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
                 const auto beforeBusRangeAssignment = scenario;
                 const auto* beforeDataLane = wave::findLane(
                     beforeBusRangeAssignment, "lane-data");
                 const auto* beforeSmallDataLane = wave::findLane(
                     beforeBusRangeAssignment, "lane-data-small");
-                rangeDontCareButton->click();
-                QCoreApplication::processEvents();
+                if (!clickWidget(rangeDontCareButton)) {
+                    qCritical().noquote()
+                        << "Don't care button is not hit-testable in the range toolbar";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
                 dataLane = wave::findLane(scenario, "lane-data");
                 auto* smallDataLane = wave::findLane(scenario, "lane-data-small");
                 if (!beforeDataLane
@@ -3340,6 +3542,7 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                rangeValueEdit->setFocus(Qt::OtherFocusReason);
                 rangeValueEdit->setText(QStringLiteral("0xa5"));
                 rangeValueEdit->setModified(true);
                 QKeyEvent invalidBusEnter(
@@ -3352,6 +3555,19 @@ int main(int argc, char* argv[])
                     || !rangeValueEdit->isModified()
                     || !canvas->hasExplicitRangeSelection()) {
                     qCritical().noquote() << "Invalid Bus range value caused a partial edit";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                measureAction->setChecked(true);
+                QCoreApplication::processEvents();
+                if (measureAction->isChecked()
+                    || canvas->tool() != wave::WaveCanvas::Tool::WaveEdit
+                    || scenario != beforeBusRangeAssignment
+                    || !rangeValueEdit->isModified()
+                    || !rangeToolbarAction->isVisible()) {
+                    qCritical().noquote()
+                        << "Measure mode discarded or bypassed an invalid Bus range draft";
                     window.hide();
                     application.exit(4);
                     return;
@@ -3445,15 +3661,30 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
+                window.resize(fullWindowSize);
+                settleLayouts();
+                if (window.size() != fullWindowSize
+                    || !rangePalette->isVisibleTo(&window)
+                    || !stableVerticalLayout()
+                    || widgetGlobalRect(rangePalette).intersects(
+                        widgetGlobalRect(canvas->viewport()))) {
+                    qCritical().noquote()
+                        << "Range toolbar did not remain detached after restoring the window";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
                 rangeValueEdit->setFocus(Qt::OtherFocusReason);
                 QKeyEvent focusedRangeEscape(
                     QEvent::KeyPress,
                     Qt::Key_Escape,
                     Qt::NoModifier);
                 QCoreApplication::sendEvent(rangeValueEdit, &focusedRangeEscape);
-                QCoreApplication::processEvents();
+                settleLayouts();
                 if (canvas->hasExplicitRangeSelection()
-                    || rangePalette->isVisible()
+                    || rangePalette->isVisibleTo(&window)
+                    || rangeToolbarAction->isVisible()
+                    || !stableVerticalLayout()
                     || canvas->selectedTimeRange()) {
                     qCritical().noquote()
                         << "Escape in the Bus range value field did not clear the selection";
@@ -3466,9 +3697,12 @@ int main(int argc, char* argv[])
                     QPoint(xAtTick(20'000), requestY),
                     QPoint(xAtTick(40'000), dataY),
                     Qt::ShiftModifier);
+                settleLayouts();
                 const auto beforeMixedAssignment = scenario;
                 if (!canvas->hasExplicitRangeSelection()
-                    || !rangePalette->isVisible()
+                    || !rangePalette->isVisibleTo(&window)
+                    || !rangeToolbarAction->isVisible()
+                    || !stableVerticalLayout()
                     || !rangeContext->text().contains(QStringLiteral("Copy only"))
                     || rangeOneButton->isEnabled()) {
                     qCritical().noquote() << "Mixed range did not enter safe copy-only state";
@@ -3485,8 +3719,11 @@ int main(int argc, char* argv[])
                     return;
                 }
                 sendKey(Qt::Key_Escape);
+                settleLayouts();
                 if (canvas->hasExplicitRangeSelection()
-                    || rangePalette->isVisible()
+                    || rangePalette->isVisibleTo(&window)
+                    || rangeToolbarAction->isVisible()
+                    || !stableVerticalLayout()
                     || canvas->selectedTimeRange()) {
                     qCritical().noquote() << "Escape did not clear the mixed range";
                     window.hide();

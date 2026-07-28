@@ -93,8 +93,8 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
 ## 当前交互
 
 - 主窗口中央组件直接为 WaveCanvas；不创建 Project、Inspector、Scenario Dock 或独立 Modes
-  工具栏。波形始终可直接编辑，工具栏只保留临时 `Measure`、缩放和 `Fit scenario`；Export
-  位于 File 菜单。
+  工具栏。波形始终可直接编辑，工具栏常驻只保留临时 `Measure`、缩放和 `Fit scenario`；
+  建立持久范围时在同一固定工具栏显示批量赋值栏，不覆盖波形。Export 位于 File 菜单。
 - 无命令行工程参数时直接进入 200 ns 空白波形；中央首先显示 `+ CLK`、`+ BIT`、`+ BUS` 和
   简短操作提示。`File > New` / `Ctrl+N` 立即恢复同一空白默认值，不再要求先配置工程。
 - `+ CLK`、`+ BIT`、`+ BUS` 点击后在末行显示就地输入条。用户只需补齐名称以及 Clock
@@ -120,8 +120,9 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   完整 Segment 或清除 Segment。提交后状态栏显示信号、时间范围、结果和 `Ctrl+Z` 提示。
 - Bit lane 悬浮时高亮当前拍并显示将变为 `0` 或 `1`；单击只翻转这一拍，横向拖动逐拍翻转
   覆盖范围。选中 Bit 后可直接按 `0`、`1`、`X`、`Z` 写入当前拍，也可从右键菜单选择四态值。
-- `Shift` + 拖动在一个或多个 lane 上建立持久时间范围；同类型 Bit/Bus 选择会在附近显示轻量赋值
-  面板。Bit 可用面板或 `0`、`1`、`X`、`Z` 键一次写入完整范围；Bus 可直接输入值或选择
+- `Shift` + 拖动在一个或多个 lane 上建立持久时间范围；同类型 Bit/Bus 选择会在顶部固定工具栏
+  显示批量赋值栏，不覆盖或截获波形点击，也不造成画布上下跳动。Bit 可用按钮或 `0`、`1`、`X`、
+  `Z` 键一次写入完整范围；Bus 可直接输入值或选择
   `0`、`X`、`Z`、`Don't care`，每条 lane 按自身位宽生成值。混合类型只保留复制入口，
   不允许产生部分写入。一次批量赋值对应一个 Undo/Redo，Esc 清除选择，第一次点击范围外只
   清除选择而不修改波形。同一时间边沿仍存在时复用稳定 Event ID，Relation 保持不变；边沿确实
@@ -245,7 +246,8 @@ exports/
 - Bus 浮层覆盖直接值、非法值纠错、0/X/Z/Don't care 单击与拖放以及波形右键；未提交值的
   点击别处提交、隐藏草稿恢复、Save/New/Open/Close/Export 门禁、Bus/End 冲突顺序、鼠标失焦
   坐标保护及 Undo 后越界草稿的 End 延长恢复均有专项离屏回归。
-- Waveform 工具栏离屏检查确认仅有一个临时 Measure 动作，不存在 Edit、Transition、Export 与
+- Waveform 工具栏离屏检查确认常驻动作仅有临时 Measure、缩放和 Fit；持久选择期间的批量赋值栏
+  固定在工具栏中，960 像素宽度下无裁切且显隐不移动画布。不存在 Edit、Transition、Export 与
   Undo/Redo 按钮，菜单快捷键仍存在。
 - 独立用户旅程从空白工程完成三类信号创建、信号就地重命名、波形编辑、Bus/End 双草稿纠错、
   时间轴延长、测量、Save As、保存结果回读和 1440×900 截图，全程 offscreen。

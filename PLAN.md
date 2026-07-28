@@ -1,6 +1,6 @@
 # Wave Workbench 实施计划
 
-更新时间：2026-07-26
+更新时间：2026-07-28
 
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
@@ -1081,6 +1081,66 @@ Visual QA: 80–150 ns 批量赋值、选择范围与波形清晰；状态栏明
            原因及 Ctrl+Z 恢复波形和关系；完整用户旅程无视觉回归
 Desktop interaction: none
 ```
+## 持续迭代 20：范围赋值栏移出波形画布
+
+状态：完成
+
+已交付：
+
+- 持久范围选择的 Bit/Bus/混合类型操作栏从 WaveCanvas viewport 浮层移到顶部
+  `WaveformToolbar`，位于 Measure 之后、缩放和 Fit 之前；显隐、缩放、水平滚动和 Fit
+  均不再覆盖波形或截获画布点击。
+- Waveform 工具栏固定在顶部并禁止移动、浮动或隐藏；预留最大工具栏高度，范围栏显示和隐藏时
+  toolbar 高度与 viewport 全局起点保持不变，消除原先的 8 像素画布跳动。
+- Bit 四态批量赋值、Bus 直接值与 0/X/Z/Don't care、混合类型只读、Esc、范围外点击及
+  Undo/Redo 保持原行为。无效 Bus 草稿会阻止进入 Measure，并保留文本、选择与焦点。
+- `wave-wave-edit-smoke` 增加真实控件命中、960 像素宽度双重 containment、旧浮层区域点击、
+  工具栏显隐、缩放/滚动/Fit、窗口缩放恢复及纵向布局稳定回归。全部 GUI 路径使用
+  `QT_QPA_PLATFORM=offscreen`，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.26 sec
+
+cmake --build build/qtcreator-release --parallel
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.04 sec
+
+git diff --check
+Result: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.66 sec
+
+Screenshots:
+  build/qtcreator-debug/wave-edit-smoke.png
+  build/qtcreator-debug/wave-edit-smoke-range-selection.png
+  build/qtcreator-debug/user-journey-smoke.png
+Visual QA: 范围栏隐藏和显示时画布起点均为 y=68；范围栏不覆盖波形；
+           960 像素宽度下 Measure 与全部 Bus 范围控件可见、可命中、可操作
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

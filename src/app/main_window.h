@@ -182,6 +182,7 @@ private:
     QAction* selectAction_{nullptr};
     QAction* drawAction_{nullptr};
     QAction* markerAction_{nullptr};
+    QAction* rangeEditPaletteAction_{nullptr};
     QAction* relationAction_{nullptr};
     QAction* exportAction_{nullptr};
     QAction* importTraceAction_{nullptr};
