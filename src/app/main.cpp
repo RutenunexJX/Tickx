@@ -15,6 +15,7 @@
 #include <QContextMenuEvent>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QDockWidget>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -36,7 +37,9 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QSettings>
 #include <QSpinBox>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QStringList>
 #include <QTimer>
@@ -67,6 +70,16 @@ int main(int argc, char* argv[])
     QCoreApplication::setOrganizationName(QStringLiteral("WaveWorkbench"));
     QCoreApplication::setApplicationName(QStringLiteral("Wave Workbench"));
     QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    const auto testSettingsDirectory =
+        qEnvironmentVariable("WAVEWORKBENCH_SETTINGS_DIR");
+    if (!testSettingsDirectory.isEmpty()) {
+        QDir().mkpath(testSettingsDirectory);
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(
+            QSettings::IniFormat,
+            QSettings::UserScope,
+            QDir::cleanPath(testSettingsDirectory));
+    }
 
     bool smokeTest = false;
     bool compareMode = false;
@@ -179,6 +192,11 @@ int main(int argc, char* argv[])
         || !laneDialogScreenshotPath.isEmpty()
         || !editMenuScreenshotPath.isEmpty()
         || !autosaveSmokePath.isEmpty();
+    if (automationMode && !testSettingsDirectory.isEmpty()) {
+        QSettings settings;
+        settings.clear();
+        settings.sync();
+    }
     if (projectPath.isEmpty()
         && uriText.isEmpty()
         && !compareMode
@@ -1208,12 +1226,14 @@ int main(int argc, char* argv[])
 
                 bool saveDialogHandled = false;
                 bool saveDialogUsedWildcardFilter = false;
+                bool saveDialogStartedInDefaultDirectory = false;
                 QTimer::singleShot(
                     0,
                     &window,
                     [&application,
                      &saveDialogHandled,
                      &saveDialogUsedWildcardFilter,
+                     &saveDialogStartedInDefaultDirectory,
                      userJourneySavePath] {
                         auto* dialog = qobject_cast<QFileDialog*>(
                             QApplication::activeModalWidget());
@@ -1222,6 +1242,18 @@ int main(int argc, char* argv[])
                             application.exit(4);
                             return;
                         }
+                        auto defaultDirectory = QStandardPaths::writableLocation(
+                            QStandardPaths::DocumentsLocation);
+                        if (defaultDirectory.isEmpty()
+                            || !QFileInfo(defaultDirectory).isDir()) {
+                            defaultDirectory = QDir::homePath();
+                        }
+                        saveDialogStartedInDefaultDirectory =
+                            QString::compare(
+                                QDir::cleanPath(dialog->directory().absolutePath()),
+                                QDir::cleanPath(defaultDirectory),
+                                Qt::CaseInsensitive)
+                            == 0;
                         dialog->setDirectory(QFileInfo(userJourneySavePath).absolutePath());
                         auto selectedName = QFileInfo(userJourneySavePath).fileName();
                         if (selectedName.endsWith(
@@ -1238,6 +1270,10 @@ int main(int argc, char* argv[])
                     });
                 sendKey(durationEdit, Qt::Key_S, Qt::ControlModifier);
                 QCoreApplication::processEvents();
+                auto* recentMenuAfterSave = window.findChild<QMenu*>(
+                    QStringLiteral("RecentProjectsMenu"));
+                auto* recentActionAfterSave = window.findChild<QAction*>(
+                    QStringLiteral("RecentProjectAction1"));
                 const auto saved = wave::loadProjectFile(userJourneySavePath);
                 const auto* savedRenamedBit = saved.ok()
                     ? wave::findLane(saved.project->scenarios.front(), bitLaneId)
@@ -1247,6 +1283,16 @@ int main(int argc, char* argv[])
                     : nullptr;
                 if (!saveDialogHandled
                     || !saveDialogUsedWildcardFilter
+                    || !saveDialogStartedInDefaultDirectory
+                    || !recentMenuAfterSave
+                    || !recentActionAfterSave
+                    || QString::compare(
+                        QDir::cleanPath(recentActionAfterSave->data().toString()),
+                        QDir::cleanPath(QFileInfo(userJourneySavePath).absoluteFilePath()),
+                        Qt::CaseInsensitive)
+                        != 0
+                    || !recentActionAfterSave->text().contains(
+                        QFileInfo(userJourneySavePath).fileName())
                     || !QFileInfo::exists(userJourneySavePath)
                     || QFileInfo::exists(userJourneyBareSavePath)
                     || !saved.ok()
@@ -1311,11 +1357,13 @@ int main(int argc, char* argv[])
                 }
 
                 bool savedProjectSelectedForOpen = false;
+                bool openDialogRememberedDirectory = false;
                 QTimer::singleShot(
                     0,
                     &application,
                     [&application,
                      &savedProjectSelectedForOpen,
+                     &openDialogRememberedDirectory,
                      userJourneySavePath] {
                         auto* dialog = qobject_cast<QFileDialog*>(
                             QApplication::activeModalWidget());
@@ -1325,6 +1373,13 @@ int main(int argc, char* argv[])
                             application.exit(4);
                             return;
                         }
+                        openDialogRememberedDirectory =
+                            QString::compare(
+                                QDir::cleanPath(dialog->directory().absolutePath()),
+                                QDir::cleanPath(
+                                    QFileInfo(userJourneySavePath).absolutePath()),
+                                Qt::CaseInsensitive)
+                            == 0;
                         dialog->setDirectory(
                             QFileInfo(userJourneySavePath).absolutePath());
                         dialog->selectFile(
@@ -1343,6 +1398,7 @@ int main(int argc, char* argv[])
                 const auto reopenStatus = window.statusBar()->currentMessage();
                 if (!reopenInvoked
                     || !savedProjectSelectedForOpen
+                    || !openDialogRememberedDirectory
                     || QApplication::activeModalWidget()
                     || window.project().scenarios.front().duration != 650'000
                     || window.project().scenarios.front().lanes.size() != 3
@@ -1363,6 +1419,24 @@ int main(int argc, char* argv[])
                     || saveState->text() != QStringLiteral("Unsaved changes")) {
                     fail(QStringLiteral(
                         "User journey could not create a dirty project before Open"));
+                    return;
+                }
+                auto* currentRecentAction = window.findChild<QAction*>(
+                    QStringLiteral("RecentProjectAction1"));
+                if (!currentRecentAction) {
+                    fail(QStringLiteral(
+                        "The current project disappeared from Open Recent"));
+                    return;
+                }
+                currentRecentAction->trigger();
+                QCoreApplication::processEvents();
+                if (QApplication::activeModalWidget()
+                    || window.project().scenarios.front().duration != 660'000
+                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || !window.statusBar()->currentMessage().startsWith(
+                        QStringLiteral("Already open:"))) {
+                    fail(QStringLiteral(
+                        "Open Recent reloaded or prompted for the dirty current project"));
                     return;
                 }
 
@@ -1654,6 +1728,41 @@ int main(int argc, char* argv[])
                     || QApplication::activeModalWidget()) {
                     fail(QStringLiteral(
                         "Export options did not retain invalid range/PDF drafts in place"));
+                    return;
+                }
+
+                auto* newActionForRecent = window.findChild<QAction*>(
+                    QStringLiteral("NewProjectAction"));
+                if (!newActionForRecent) {
+                    fail(QStringLiteral(
+                        "New action was unavailable before recent-project reopen"));
+                    return;
+                }
+                newActionForRecent->trigger();
+                QCoreApplication::processEvents();
+                auto* recentAction = window.findChild<QAction*>(
+                    QStringLiteral("RecentProjectAction1"));
+                if (!recentAction
+                    || !window.project().scenarios.front().lanes.empty()
+                    || window.project().scenarios.front().duration != 200'000
+                    || saveState->text() != QStringLiteral("Not saved")) {
+                    fail(QStringLiteral(
+                        "A clean New did not retain the recent-project shortcut"));
+                    return;
+                }
+                recentAction->trigger();
+                QCoreApplication::processEvents();
+                const auto recentOpenStatus =
+                    window.statusBar()->currentMessage();
+                if (QApplication::activeModalWidget()
+                    || window.project().scenarios.front().duration != 650'000
+                    || window.project().scenarios.front().lanes.size() != 3
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !recentOpenStatus.startsWith(QStringLiteral("Opened "))
+                    || !recentOpenStatus.contains(
+                        QFileInfo(userJourneySavePath).fileName())) {
+                    fail(QStringLiteral(
+                        "Open Recent did not restore the last project in one step"));
                     return;
                 }
 

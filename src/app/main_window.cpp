@@ -34,6 +34,7 @@
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QSpinBox>
@@ -454,6 +455,50 @@ bool checkedSum(const Tick left, const Tick right, Tick& result)
     result = left + right;
     return true;
 #endif
+}
+
+constexpr qsizetype maximumRecentProjects = 5;
+
+QString normalizedProjectPath(const QString& path)
+{
+    return path.isEmpty()
+        ? QString{}
+        : QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+}
+
+bool sameProjectPath(const QString& left, const QString& right)
+{
+    const auto normalizedLeft = normalizedProjectPath(left);
+    const auto normalizedRight = normalizedProjectPath(right);
+    return !normalizedLeft.isEmpty()
+        && !normalizedRight.isEmpty()
+        && QString::compare(normalizedLeft, normalizedRight, Qt::CaseInsensitive) == 0;
+}
+
+QStringList storedRecentProjectPaths()
+{
+    const auto stored = QSettings{}.value(
+        QStringLiteral("files/recentProjects")).toStringList();
+    QStringList result;
+    for (const auto& rawPath : stored) {
+        const auto path = normalizedProjectPath(rawPath);
+        if (path.isEmpty()) continue;
+        const auto duplicate = std::any_of(
+            result.cbegin(),
+            result.cend(),
+            [&path](const QString& existing) {
+                return sameProjectPath(existing, path);
+            });
+        if (!duplicate) result.push_back(path);
+        if (result.size() == maximumRecentProjects) break;
+    }
+    return result;
+}
+
+void storeRecentProjectPaths(const QStringList& paths)
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("files/recentProjects"), paths);
 }
 
 QString autosavePathForProject(const QString& projectPath)
@@ -960,6 +1005,9 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
         });
 
     createActions();
+    if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
+        rememberProjectPath(projectFile_);
+    }
     createToolBars();
     traceWatcher_ = new QFutureWatcher<std::shared_ptr<TraceParseResult>>(this);
     connect(
@@ -1052,6 +1100,108 @@ void MainWindow::closeEvent(QCloseEvent* event)
     }
 }
 
+void MainWindow::updateRecentProjectsMenu()
+{
+    if (!recentProjectsMenu_) return;
+    recentProjectsMenu_->clear();
+
+    const auto paths = storedRecentProjectPaths();
+    if (paths.isEmpty()) {
+        auto* emptyAction = recentProjectsMenu_->addAction(tr("No recent projects"));
+        emptyAction->setObjectName(QStringLiteral("NoRecentProjectsAction"));
+        emptyAction->setEnabled(false);
+        return;
+    }
+
+    qsizetype index = 0;
+    for (const auto& path : paths) {
+        ++index;
+        const QFileInfo info(path);
+        auto fileName = info.fileName();
+        auto directory = QFileInfo(info.absolutePath()).fileName();
+        if (directory.isEmpty()) {
+            directory = QDir::toNativeSeparators(info.absolutePath());
+        }
+        fileName.replace(QLatin1Char('&'), QStringLiteral("&&"));
+        directory.replace(QLatin1Char('&'), QStringLiteral("&&"));
+        auto* action = recentProjectsMenu_->addAction(
+            tr("&%1 %2 — %3").arg(index).arg(fileName, directory));
+        action->setObjectName(
+            QStringLiteral("RecentProjectAction%1").arg(index));
+        action->setData(path);
+        action->setToolTip(QDir::toNativeSeparators(path));
+        connect(action, &QAction::triggered, this, [this, path] {
+            openRecentProject(path);
+        });
+    }
+}
+
+void MainWindow::rememberProjectPath(const QString& path)
+{
+    const auto normalized = normalizedProjectPath(path);
+    if (normalized.isEmpty()) return;
+
+    auto paths = storedRecentProjectPaths();
+    paths.removeIf([&normalized](const QString& existing) {
+        return sameProjectPath(existing, normalized);
+    });
+    paths.prepend(normalized);
+    while (paths.size() > maximumRecentProjects) paths.removeLast();
+    storeRecentProjectPaths(paths);
+
+    QSettings settings;
+    settings.setValue(
+        QStringLiteral("files/lastProjectDirectory"),
+        QFileInfo(normalized).absolutePath());
+    QTimer::singleShot(0, this, &MainWindow::updateRecentProjectsMenu);
+}
+
+QString MainWindow::projectDialogDirectory() const
+{
+    if (!projectFile_.isEmpty()) {
+        return QFileInfo(normalizedProjectPath(projectFile_)).absolutePath();
+    }
+
+    const auto remembered = QSettings{}.value(
+        QStringLiteral("files/lastProjectDirectory")).toString();
+    if (!remembered.isEmpty() && QFileInfo(remembered).isDir()) {
+        return QDir::cleanPath(remembered);
+    }
+
+    const auto documents = QStandardPaths::writableLocation(
+        QStandardPaths::DocumentsLocation);
+    return !documents.isEmpty() && QFileInfo(documents).isDir()
+        ? documents
+        : QDir::homePath();
+}
+
+void MainWindow::openRecentProject(const QString& path)
+{
+    const auto normalized = normalizedProjectPath(path);
+    if (!QFileInfo(normalized).isFile()) {
+        auto paths = storedRecentProjectPaths();
+        paths.removeIf([&normalized](const QString& existing) {
+            return sameProjectPath(existing, normalized);
+        });
+        storeRecentProjectPaths(paths);
+        QTimer::singleShot(0, this, &MainWindow::updateRecentProjectsMenu);
+        statusBar()->showMessage(
+            tr("Recent project no longer exists: %1").arg(normalized),
+            8'000);
+        return;
+    }
+    if (sameProjectPath(projectFile_, normalized)) {
+        statusBar()->showMessage(
+            tr("Already open: %1").arg(normalized),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+    if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
+    if (!confirmDiscardChanges()) return;
+    if (!loadFromPath(normalized) && dirty_) scheduleAutosave();
+}
+
 void MainWindow::openProject()
 {
     if (!commitPendingEdits()) return;
@@ -1059,7 +1209,7 @@ void MainWindow::openProject()
     const auto path = QFileDialog::getOpenFileName(
         this,
         tr("Open Wave Workbench project"),
-        QFileInfo(projectFile_).absolutePath(),
+        projectDialogDirectory(),
         tr("Wave Workbench project (*.wave.json);;Recovery snapshot (*.autosave);;JSON files (*.json)"));
     if (path.isEmpty() || !confirmDiscardChanges()) return;
     if (!loadFromPath(path) && dirty_) scheduleAutosave();
@@ -1087,7 +1237,8 @@ void MainWindow::saveProjectAs()
         return;
     }
     const auto suggested = projectFile_.isEmpty()
-        ? QStringLiteral("project.wave.json")
+        ? QDir(projectDialogDirectory()).filePath(
+              QStringLiteral("project.wave.json"))
         : projectFile_;
     auto path = QFileDialog::getSaveFileName(
         this,
@@ -3457,6 +3608,14 @@ void MainWindow::createActions()
         this,
         &MainWindow::openProject);
     openAction->setToolTip(tr("Open a project.wave.json file"));
+    recentProjectsMenu_ = fileMenu->addMenu(tr("Open &Recent"));
+    recentProjectsMenu_->setObjectName(QStringLiteral("RecentProjectsMenu"));
+    connect(
+        recentProjectsMenu_,
+        &QMenu::aboutToShow,
+        this,
+        &MainWindow::updateRecentProjectsMenu);
+    updateRecentProjectsMenu();
     auto* saveAction = fileMenu->addAction(
         themedIcon(QStringLiteral("document-save"), style(), QStyle::SP_DialogSaveButton),
         tr("&Save"),
@@ -4408,6 +4567,9 @@ bool MainWindow::loadFromPath(const QString& path)
         Qt::CaseInsensitive);
     recoveryLoaded_ = recoveredSnapshot;
     projectFile_ = projectPathForLoadedFile(selectedPath);
+    if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
+        rememberProjectPath(projectFile_);
+    }
     commandStack_.clear();
     dirty_ = result.migrated || recoveredSnapshot;
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
@@ -4455,6 +4617,7 @@ bool MainWindow::writeToPath(const QString& path)
         return false;
     }
     projectFile_ = path;
+    rememberProjectPath(projectFile_);
     recoveryLoaded_ = false;
     dirty_ = false;
     if (autosaveTimer_) autosaveTimer_->stop();

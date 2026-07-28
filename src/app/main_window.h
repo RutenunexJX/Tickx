@@ -128,6 +128,10 @@ private:
     void invalidateCompareResult();
     void scheduleAutosave();
     void updateWindowTitle();
+    void updateRecentProjectsMenu();
+    void rememberProjectPath(const QString& path);
+    void openRecentProject(const QString& path);
+    [[nodiscard]] QString projectDialogDirectory() const;
     bool loadFromPath(const QString& path);
     bool writeToPath(const QString& path);
     bool discardRecoverySnapshots();
@@ -193,6 +197,7 @@ private:
     QAction* cancelTraceAction_{nullptr};
     QAction* compareModeAction_{nullptr};
     QMenu* editMenu_{nullptr};
+    QMenu* recentProjectsMenu_{nullptr};
     QAction* pinloomAction_{nullptr};
     bool populatingTables_{false};
     bool populatingTraceMapping_{false};

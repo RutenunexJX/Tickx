@@ -3457,6 +3457,65 @@ Automated QA: Untitled 的 300 ns 修改在首次 Save As 前生成可读取的�
 Desktop interaction: none
 ```
 
+## 持续迭代 61：最近工程与文件目录记忆
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `openProject()` 在未命名工程中使用 `QFileInfo("").absolutePath()`，`saveProjectAs()` 仅传入相对文件名 `project.wave.json`。
+  应用从快捷方式或安装目录启动时，首次保存和 New 后打开都会落到进程工作目录；没有最近工程入口，用户每次继续已有工作都必须重新导航文件系统。
+- 用户真正想做的是继续最近的波形，而不是重新确认目录结构。首次保存应进入个人文档目录，后续同一工作流应记住刚使用的位置；常用工程应能从 File 菜单一步打开，
+  同时不能因误点当前工程而重载并丢弃内存修改。
+- 首次 Save As 现在从 Documents 开始；若该位置不可用则使用 Home。成功 Save/Save As/Open 或命令行加载后记录正式工程的绝对路径和父目录，New 不再清空目录记忆。
+  Open 与未命名 Save As 共享同一目录选择规则。
+- File 菜单新增 `Open Recent` 子菜单，最多保留 5 个去重工程。主标签只显示文件名与父目录名，完整路径放在 tooltip，避免主菜单被长路径撑宽；缺失目标点击后移除陈旧记录并给出状态反馈。
+- 点击当前已经打开的最近工程先按规范化路径识别并显示 `Already open`，不提交草稿、不重载、不弹出 Save/Discard，也不改变 dirty 状态。其他最近工程继续复用既有草稿门禁、未保存确认、
+  恢复快照选择和加载反馈。菜单刷新通过事件队列执行，避免在 QAction 自身触发期间删除发送者。
+- 最近列表和目录使用应用设置持久化。所有 GUI CTest 获得独立 `WAVEWORKBENCH_SETTINGS_DIR`，启动自动化时先清空各自设置；测试可验证持久交互，又不会读取、覆盖或污染真实用户设置，
+  并可与第 60 轮独立恢复目录并行运行。
+- `wave-user-journey-smoke` 扩展为：首次 Save As 验证 Documents/Home 与文件过滤；保存后验证最近项路径；New 后验证 Open 初始目录仍为保存目录；在 660 ns 脏工程中点击当前最近项，
+  断言无模态提示且内容/dirty 不变；完成既有 Open/Export 流程后再次 New，再点击最近项一步恢复 650 ns、3 lane、Saved 和 `Opened <path>`。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 22 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 11.36 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 10.94 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-user-journey-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 1.04 sec
+
+Automated QA: 首次 Save As 从 Documents/Home 开始并生成最近项；New 后 Open 初始目录仍为刚保存目录。
+              660 ns 脏工程点击自身最近项只显示 Already open，无确认、无重载；再次 New 后点击最近项一步恢复 650 ns/3 lane、Saved 与 Opened 反馈。
+              GUI 测试 QSettings 逐测试隔离，未访问真实用户设置。
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
