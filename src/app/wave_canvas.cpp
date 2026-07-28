@@ -4643,6 +4643,20 @@ std::pair<Tick, Tick> WaveCanvas::markerDisplayRange(const Marker& marker) const
     return {originalStart + offset, originalEnd + offset};
 }
 
+QString WaveCanvas::markerLocationText(const Marker& marker) const
+{
+    const auto format = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : tr("%1 ticks").arg(tick);
+    };
+    if (marker.start == marker.end) return format(marker.start);
+    return tr("%1–%2 (%3)")
+        .arg(format(marker.start))
+        .arg(format(marker.end))
+        .arg(cursorDeltaText(marker.start, marker.end));
+}
+
 Tick WaveCanvas::cursorKeyboardStep() const
 {
     if (!project_) return 1;
@@ -4708,6 +4722,15 @@ void WaveCanvas::ensureCursorVisible(const Tick tick)
 void WaveCanvas::removeSelectedMarker()
 {
     if (!scenario_ || !commandStack_ || selectedMarkerId_.empty()) return;
+    const auto* marker = markerById(selectedMarkerId_);
+    if (!marker) {
+        selectedMarkerId_.clear();
+        emit statusMessage(tr("The selected locked cursor no longer exists."));
+        viewport()->update();
+        return;
+    }
+    const auto markerName = QString::fromStdString(marker->name);
+    const auto location = markerLocationText(*marker);
     try {
         commandStack_->execute(std::make_unique<RemoveMarkerCommand>(
             *scenario_,
@@ -4720,6 +4743,10 @@ void WaveCanvas::removeSelectedMarker()
     emit modelEdited();
     emit commandAvailabilityChanged();
     refreshModel();
+    emit statusMessage(
+        tr("Deleted %1 · %2 · Ctrl+Z to undo")
+            .arg(markerName)
+            .arg(location));
 }
 
 void WaveCanvas::moveSelectedMarkerBy(const Tick delta)
@@ -4728,16 +4755,27 @@ void WaveCanvas::moveSelectedMarkerBy(const Tick delta)
     const auto* marker = markerById(selectedMarkerId_);
     if (!marker) {
         selectedMarkerId_.clear();
+        emit statusMessage(tr("The selected locked cursor no longer exists."));
+        viewport()->update();
         return;
     }
+    const auto markerName = QString::fromStdString(marker->name);
+    const auto previousLocation = markerLocationText(*marker);
     const auto offset = std::clamp(
         delta,
         -marker->start,
         scenario_->duration - marker->end);
-    if (offset == 0) return;
+    if (offset == 0) {
+        emit statusMessage(
+            tr("%1 remains at %2 · timeline boundary reached · no position changed")
+                .arg(markerName)
+                .arg(previousLocation));
+        return;
+    }
     auto replacement = *marker;
     replacement.start += offset;
     replacement.end += offset;
+    const auto replacementLocation = markerLocationText(replacement);
     try {
         commandStack_->execute(std::make_unique<ChangeMarkerCommand>(
             *scenario_,
@@ -4752,6 +4790,11 @@ void WaveCanvas::moveSelectedMarkerBy(const Tick delta)
     emit commandAvailabilityChanged();
     refreshModel();
     ensureCursorVisible(cursorTick_);
+    emit statusMessage(
+        tr("Moved %1 · %2 → %3 · Ctrl+Z to undo")
+            .arg(markerName)
+            .arg(previousLocation)
+            .arg(replacementLocation));
 }
 
 Tick WaveCanvas::snappedTick(const Tick input, const Lane* lane) const
@@ -5408,10 +5451,16 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
         if (!marker || !lockedMarkerOriginalRange_) {
             selectedMarkerId_.clear();
             lockedMarkerOriginalRange_.reset();
+            emit statusMessage(tr("The selected locked cursor no longer exists."));
             viewport()->update();
             return;
         }
         const auto [originalStart, originalEnd] = *lockedMarkerOriginalRange_;
+        auto original = *marker;
+        original.start = originalStart;
+        original.end = originalEnd;
+        const auto markerName = QString::fromStdString(marker->name);
+        const auto previousLocation = markerLocationText(original);
         const auto requested = drawCurrent_ - drawStart_;
         const auto offset = std::clamp(
             requested,
@@ -5421,6 +5470,7 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
             auto replacement = *marker;
             replacement.start = originalStart + offset;
             replacement.end = originalEnd + offset;
+            const auto replacementLocation = markerLocationText(replacement);
             try {
                 commandStack_->execute(std::make_unique<ChangeMarkerCommand>(
                     *scenario_,
@@ -5431,6 +5481,9 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
                     viewport()->mapToGlobal(releasePosition),
                     QString::fromUtf8(exception.what()),
                     viewport());
+                emit statusMessage(
+                    tr("Locked cursor not moved · %1")
+                        .arg(QString::fromUtf8(exception.what())));
                 lockedMarkerOriginalRange_.reset();
                 viewport()->update();
                 return;
@@ -5439,6 +5492,21 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
             emit modelEdited();
             emit commandAvailabilityChanged();
             refreshModel();
+            emit statusMessage(
+                tr("Moved %1 · %2 → %3 · Ctrl+Z to undo")
+                    .arg(markerName)
+                    .arg(previousLocation)
+                    .arg(replacementLocation));
+        } else if (requested == 0) {
+            emit statusMessage(
+                tr("Selected %1 · %2 · drag or arrow keys to move · Delete to remove")
+                    .arg(markerName)
+                    .arg(previousLocation));
+        } else {
+            emit statusMessage(
+                tr("%1 remains at %2 · timeline boundary reached · no position changed")
+                    .arg(markerName)
+                    .arg(previousLocation));
         }
         lockedMarkerOriginalRange_.reset();
         viewport()->update();
@@ -5468,6 +5536,9 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
             viewport()->mapToGlobal(releasePosition),
             QString::fromUtf8(exception.what()),
             viewport());
+        emit statusMessage(
+            tr("Locked cursor not created · %1")
+                .arg(QString::fromUtf8(exception.what())));
         viewport()->update();
         return;
     }
@@ -5476,6 +5547,10 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
     emit modelEdited();
     emit commandAvailabilityChanged();
     refreshModel();
+    emit statusMessage(
+        tr("Created %1 · %2 · Ctrl+Z to undo")
+            .arg(QString::fromStdString(marker.name))
+            .arg(markerLocationText(marker)));
 }
 
 void WaveCanvas::commitRelation(const QPoint& releasePosition)

@@ -2782,9 +2782,27 @@ int main(int argc, char* argv[])
                         });
                     return marker == markers.end() ? nullptr : &*marker;
                 };
+                const auto formatTime = [&window](const wave::Tick tick) {
+                    return QString::fromStdString(wave::formatTick(
+                        tick,
+                        window.project().timeBase));
+                };
                 const auto* locked = markerById();
                 if (!locked || locked->start != locked->end) {
                     qCritical().noquote() << "Locked cursor is not a point marker";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto lockedName = QString::fromStdString(locked->name);
+                const auto createdStatus = window.statusBar()->currentMessage();
+                if (!createdStatus.contains(QStringLiteral("Created"))
+                    || !createdStatus.contains(lockedName)
+                    || !createdStatus.contains(formatTime(locked->start))
+                    || !createdStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Locked cursor creation result or recovery feedback is missing"
+                        << createdStatus;
                     window.hide();
                     application.exit(4);
                     return;
@@ -2799,8 +2817,17 @@ int main(int argc, char* argv[])
                 };
                 drag(QPoint(markerX(lockedBeforeDrag), point3.y()), point4);
                 locked = markerById();
-                if (!locked || locked->start <= lockedBeforeDrag) {
-                    qCritical().noquote() << "Dragging a selected locked cursor did not move it";
+                const auto dragStatus = window.statusBar()->currentMessage();
+                if (!locked
+                    || locked->start <= lockedBeforeDrag
+                    || !dragStatus.contains(QStringLiteral("Moved"))
+                    || !dragStatus.contains(lockedName)
+                    || !dragStatus.contains(formatTime(lockedBeforeDrag))
+                    || !dragStatus.contains(formatTime(locked->start))
+                    || !dragStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Dragging a selected locked cursor lacked exact result feedback"
+                        << dragStatus;
                     window.hide();
                     application.exit(4);
                     return;
@@ -2808,16 +2835,77 @@ int main(int argc, char* argv[])
                 const auto lockedBeforeArrow = locked->start;
                 sendKey(Qt::Key_Left);
                 locked = markerById();
-                if (!locked || locked->start >= lockedBeforeArrow) {
-                    qCritical().noquote() << "Left arrow did not move the selected locked cursor";
+                const auto arrowStatus = window.statusBar()->currentMessage();
+                if (!locked
+                    || locked->start >= lockedBeforeArrow
+                    || !arrowStatus.contains(QStringLiteral("Moved"))
+                    || !arrowStatus.contains(lockedName)
+                    || !arrowStatus.contains(formatTime(lockedBeforeArrow))
+                    || !arrowStatus.contains(formatTime(locked->start))
+                    || !arrowStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Locked cursor arrow move lacked exact result feedback"
+                        << arrowStatus;
                     window.hide();
                     application.exit(4);
                     return;
                 }
+
+                click(QPoint(markerX(locked->start), point3.y()));
+                locked = markerById();
+                const auto selectionStatus = window.statusBar()->currentMessage();
+                if (!locked
+                    || canvas->selectedMarkerId().toStdString() != lockedId
+                    || !selectionStatus.contains(QStringLiteral("Selected"))
+                    || !selectionStatus.contains(lockedName)
+                    || !selectionStatus.contains(formatTime(locked->start))
+                    || !selectionStatus.contains(QStringLiteral("Delete"))) {
+                    qCritical().noquote()
+                        << "Locked cursor selection did not explain available editing"
+                        << selectionStatus;
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
+                const auto deletedStart = locked->start;
                 sendKey(Qt::Key_Delete);
+                const auto deleteStatus = window.statusBar()->currentMessage();
                 if (window.project().scenarios.front().markers.size()
-                    != originalMarkerCount) {
-                    qCritical().noquote() << "Delete did not remove the selected locked cursor";
+                        != originalMarkerCount
+                    || !deleteStatus.contains(QStringLiteral("Deleted"))
+                    || !deleteStatus.contains(lockedName)
+                    || !deleteStatus.contains(formatTime(deletedStart))
+                    || !deleteStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Delete did not report the locked cursor result or recovery"
+                        << deleteStatus;
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || !markerById()
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Undid"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Y"))) {
+                    qCritical().noquote()
+                        << "Locked cursor deletion Undo or recovery feedback failed"
+                        << window.statusBar()->currentMessage();
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || markerById()
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Redid"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Locked cursor deletion Redo or recovery feedback failed"
+                        << window.statusBar()->currentMessage();
                     window.hide();
                     application.exit(4);
                     return;
@@ -2829,6 +2917,87 @@ int main(int argc, char* argv[])
                 if (markersAfterRange.size() != originalMarkerCount + 1
                     || markersAfterRange.back().start == markersAfterRange.back().end) {
                     qCritical().noquote() << "Control drag did not create a locked range";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto rangeId = markersAfterRange.back().id;
+                const auto rangeName = QString::fromStdString(
+                    markersAfterRange.back().name);
+                const auto rangeStart = markersAfterRange.back().start;
+                const auto rangeEnd = markersAfterRange.back().end;
+                const auto rangeStatus = window.statusBar()->currentMessage();
+                if (!rangeStatus.contains(QStringLiteral("Created"))
+                    || !rangeStatus.contains(rangeName)
+                    || !rangeStatus.contains(formatTime(rangeStart))
+                    || !rangeStatus.contains(formatTime(rangeEnd))
+                    || !rangeStatus.contains(QString::fromUtf8("Δ"))
+                    || !rangeStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Locked range creation result or width feedback is missing"
+                        << rangeStatus;
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto rangeById = [&window, &rangeId]() -> const wave::Marker* {
+                    const auto& markers = window.project().scenarios.front().markers;
+                    const auto marker = std::find_if(
+                        markers.begin(),
+                        markers.end(),
+                        [&rangeId](const wave::Marker& candidate) {
+                            return candidate.id == rangeId;
+                        });
+                    return marker == markers.end() ? nullptr : &*marker;
+                };
+                auto* range = rangeById();
+                auto boundaryMoves = 0;
+                while (range && range->start > 0 && boundaryMoves < 100) {
+                    sendKey(Qt::Key_Left);
+                    range = rangeById();
+                    ++boundaryMoves;
+                }
+                if (!range || range->start != 0) {
+                    qCritical().noquote() << "Locked range did not reach the left boundary";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_Left);
+                range = rangeById();
+                const auto boundaryStatus = window.statusBar()->currentMessage();
+                if (!range
+                    || range->start != 0
+                    || !boundaryStatus.contains(rangeName)
+                    || !boundaryStatus.contains(QStringLiteral("timeline boundary reached"))
+                    || !boundaryStatus.contains(QStringLiteral("no position changed"))) {
+                    qCritical().noquote()
+                        << "Locked range boundary move ended silently or changed the model"
+                        << boundaryStatus;
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || !(range = rangeById())
+                    || range->start <= 0
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Y"))) {
+                    qCritical().noquote()
+                        << "Boundary no-op inserted history or blocked the last real marker Undo"
+                        << window.statusBar()->currentMessage();
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || !(range = rangeById())
+                    || range->start != 0
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Locked range boundary move Redo failed"
+                        << window.statusBar()->currentMessage();
                     window.hide();
                     application.exit(4);
                     return;

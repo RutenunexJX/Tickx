@@ -2370,6 +2370,66 @@ Visual desktop review: not performed; offscreen-only requirement observed
 Desktop interaction: none
 ```
 
+## 持续迭代 42：锁定光标结果与恢复反馈
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Marker 的创建、Change、Remove 命令和 Undo/Redo 已完整存在，活动光标移动也会显示
+  当前时间；但持久锁定点/区间的创建、拖动、方向键移动与删除提交后均没有结果消息，边界移动静默。
+- 用户在 Measure 中依赖细线和半透明区间判断结果。短距离移动、相邻锁定对象或高缩放下，仅凭位置
+  变化不能确认目标、精确时间和是否已经提交，也不知道 Delete 或移动可用 Ctrl+Z 恢复。
+- 新增统一 Marker 位置格式：点显示精确时间，区间显示起止时间与带符号 `Δ`。创建、拖动/方向键
+  移动、Delete 分别显示对象名、旧/新位置和 `Ctrl+Z`；单击选择说明拖动、方向键和 Delete 操作。
+- 到达时间轴边界时明确显示对象未移动，不执行命令、不标记修改、不占用 Undo。命令异常同时显示
+  tooltip 与状态消息；引用对象已经消失时清除陈旧选择并解释原因。
+- `wave-cursor-mode-smoke` 真实创建锁定点，验证创建、拖动、方向键、原位选择、Delete 及删除
+  Undo/Redo；再创建带 `Δ` 的锁定区间，逐步移动到零边界，验证额外左移无效果，随后一次 Undo
+  直接恢复最后一次真实移动并可 Redo。全部 GUI 路径使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 22 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 8.39 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.97 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-cursor-mode-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.20 sec
+
+Screenshot generated:
+  build/qtcreator-debug/cursor-mode-smoke.png
+Automated QA: 锁定点创建后报告名称/时间/Ctrl+Z；拖动和方向键报告旧→新位置；单击说明编辑方式；
+              Delete 报告结果并可 Undo/Redo；锁定区间显示起止与 Δ；零边界无空历史，
+              一次 Undo 直接恢复最后一次真实移动并显示 Ctrl+Y
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

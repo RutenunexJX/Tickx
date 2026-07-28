@@ -240,6 +240,7 @@ private:
     [[nodiscard]] const Marker* markerById(const std::string& markerId) const;
     [[nodiscard]] const Marker* markerAtPosition(const QPoint& position) const;
     [[nodiscard]] std::pair<Tick, Tick> markerDisplayRange(const Marker& marker) const;
+    [[nodiscard]] QString markerLocationText(const Marker& marker) const;
     [[nodiscard]] Tick cursorKeyboardStep() const;
     [[nodiscard]] QString cursorValue(const Lane& lane) const;
     [[nodiscard]] QString cursorDeltaText(Tick from, Tick to) const;
