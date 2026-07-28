@@ -1834,6 +1834,65 @@ Manual visual read: not performed because the permission service blocked screens
 Desktop interaction: none
 ```
 
+## 持续迭代 33：重复写值的无效果命令收口
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 `CommandStack::execute` 无条件清除 redo 尾部并加入新命令；`SetLaneRangeCommand`
+  即使最终波形相同，也会重建 Segment stable ID、同步 Event 并形成空 Undo。批量范围赋值存在同样问题。
+- 用户主流程中，在已经为 X 的拍或范围上再次写 X 会误报修改并标脏。随后第一次 `Ctrl+Z` 波形不变，
+  用户必须再次撤销才能回到上一真实状态；若此前处于 Undo 后，该空操作还会丢失 Redo。
+- 命令增加实际效果判定。单信号与批量范围写值先检查规范化值、完整 Segment 覆盖及扩展语义；
+  完全相同时不重建 Segment/Event ID。命令栈先安全执行，再仅对真实变化截断 redo 并入栈。
+- 单信号键盘/右键值、Bus 预设和多 lane 范围赋值在无效果时保持当前选择，显示
+  `already = … · no values changed`，不发送模型修改或命令可用性变化。隐式区间写入显式值仍属于真实编辑。
+- 核心回归覆盖单信号/批量同值写入、Scenario 与 stable ID 不变、零历史及 Undo 后 Redo 保留；
+  Wave Edit smoke 通过真实重复按 X、重复点击范围 X、一次 Undo/Redo 和状态消息验证用户路径。
+  全部 GUI 路径使用 offscreen，未操作桌面。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 20 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.73 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.54 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.98 sec
+
+Screenshot generated:
+  build/qtcreator-debug/wave-edit-smoke-no-effect-write-feedback.png
+Automated QA: req 的 60–70 ns 仍为 X 且保持拍级选择；状态栏显示 already = X/no values changed；
+              一次 Undo 直接恢复上一真实 0 值，Redo 精确返回，批量范围重复 X 亦不占历史
+Manual visual read: not performed because the permission service blocked screenshot access
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

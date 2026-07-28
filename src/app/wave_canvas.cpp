@@ -3398,8 +3398,9 @@ bool WaveCanvas::applyExplicitRangeValue(
 
     const auto [start, end] = *selectionRange_;
     const auto relationCountBefore = scenario_->relations.size();
+    bool changed = false;
     try {
-        commandStack_->execute(std::make_unique<SetLaneRangesCommand>(
+        changed = commandStack_->execute(std::make_unique<SetLaneRangesCommand>(
             *scenario_,
             start,
             end,
@@ -3419,8 +3420,10 @@ bool WaveCanvas::applyExplicitRangeValue(
         rangeValueEdit_->setToolTip(
             tr("Type one value for the whole selected Bus range"));
     }
-    emit modelEdited();
-    emit commandAvailabilityChanged();
+    if (changed) {
+        emit modelEdited();
+        emit commandAvailabilityChanged();
+    }
     if (!selectedLaneIds_.empty()) {
         emit selectionChanged(QString::fromStdString(selectedLaneIds_.front()), start);
     }
@@ -3430,6 +3433,15 @@ bool WaveCanvas::applyExplicitRangeValue(
     const auto displayValue = !presetId.empty()
         ? busPresetDisplayLabel(presetId)
         : QString::fromStdString(value);
+    if (!changed) {
+        emit statusMessage(
+            tr("%1 signals · %2–%3 already = %4 · no values changed")
+                .arg(static_cast<qulonglong>(selectedLaneIds_.size()))
+                .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+                .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
+                .arg(displayValue));
+        return true;
+    }
     auto message = tr("%1 signals · %2–%3 = %4")
                        .arg(static_cast<qulonglong>(selectedLaneIds_.size()))
                        .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
@@ -3665,8 +3677,9 @@ void WaveCanvas::applyBusPreset(
         "\"" + presetId + "\"");
     const auto laneName = lane->name;
     const auto relationCountBefore = scenario_->relations.size();
+    bool changed = false;
     try {
-        commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
+        changed = commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
             *scenario_,
             laneId,
             start,
@@ -3696,20 +3709,32 @@ void WaveCanvas::applyBusPreset(
             : segment->id;
     }
     cursorTick_ = start;
-    emit modelEdited();
-    emit commandAvailabilityChanged();
+    if (changed) {
+        emit modelEdited();
+        emit commandAvailabilityChanged();
+    }
     emit selectionChanged(QString::fromStdString(laneId), start);
     rebuildLaneLayout();
     hideBusPresetPalette();
     viewport()->update();
-    emit statusMessage(appendRelationAwareUndo(
-        tr("%1 · %2–%3 = %4")
-            .arg(QString::fromStdString(laneName))
-            .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
-            .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
-            .arg(busPresetDisplayLabel(presetId)),
-        relationCountBefore,
-        scenario_->relations.size()));
+    const auto message = changed
+        ? tr("%1 · %2–%3 = %4")
+              .arg(QString::fromStdString(laneName))
+              .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+              .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
+              .arg(busPresetDisplayLabel(presetId))
+        : tr("%1 · %2–%3 already = %4 · no values changed")
+              .arg(QString::fromStdString(laneName))
+              .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+              .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
+              .arg(busPresetDisplayLabel(presetId));
+    emit statusMessage(
+        changed
+            ? appendRelationAwareUndo(
+                  message,
+                  relationCountBefore,
+                  scenario_->relations.size())
+            : message);
 }
 
 void WaveCanvas::promptBusValueAt(const std::string& laneId, const Tick tick)
@@ -3751,8 +3776,9 @@ bool WaveCanvas::setLaneRangeValue(
     const auto laneName = lane->name;
     const auto laneKind = lane->kind;
     const auto relationCountBefore = scenario_->relations.size();
+    bool changed = false;
     try {
-        commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
+        changed = commandStack_->execute(std::make_unique<SetLaneRangeCommand>(
             *scenario_,
             laneId,
             start,
@@ -3782,18 +3808,30 @@ bool WaveCanvas::setLaneRangeValue(
             selectionRange_ = std::pair{segment->start, segment->end};
         }
     }
-    emit modelEdited();
-    emit commandAvailabilityChanged();
+    if (changed) {
+        emit modelEdited();
+        emit commandAvailabilityChanged();
+    }
     emit selectionChanged(QString::fromStdString(laneId), cursorTick_);
     refreshModel();
-    emit statusMessage(appendRelationAwareUndo(
-        tr("%1 · %2–%3 = %4")
-            .arg(QString::fromStdString(laneName))
-            .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
-            .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
-            .arg(QString::fromStdString(validation.normalizedValue)),
-        relationCountBefore,
-        scenario_->relations.size()));
+    const auto message = changed
+        ? tr("%1 · %2–%3 = %4")
+              .arg(QString::fromStdString(laneName))
+              .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+              .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
+              .arg(QString::fromStdString(validation.normalizedValue))
+        : tr("%1 · %2–%3 already = %4 · no values changed")
+              .arg(QString::fromStdString(laneName))
+              .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
+              .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
+              .arg(QString::fromStdString(validation.normalizedValue));
+    emit statusMessage(
+        changed
+            ? appendRelationAwareUndo(
+                  message,
+                  relationCountBefore,
+                  scenario_->relations.size())
+            : message);
     return true;
 }
 

@@ -3394,6 +3394,75 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
+
+                const auto beforeRepeatedBitWrite = scenario;
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(Qt::Key_X);
+                requestLane = wave::findLane(scenario, "lane-request");
+                const auto repeatedBitWriteMessage =
+                    window.statusBar()->currentMessage();
+                if (!requestLane
+                    || scenario != beforeRepeatedBitWrite
+                    || valueAt(*requestLane, 65'000) != "X"
+                    || !hasBeatScopedSelection()
+                    || !repeatedBitWriteMessage.contains(QStringLiteral("req"))
+                    || !repeatedBitWriteMessage.contains(QStringLiteral("already = X"))
+                    || !repeatedBitWriteMessage.contains(
+                        QStringLiteral("no values changed"))
+                    || repeatedBitWriteMessage.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Repeated Bit write created a false edit or misleading feedback";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto noEffectScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix =
+                        noEffectScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        noEffectScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-no-effect-write-feedback"));
+                    } else {
+                        noEffectScreenshotPath.append(
+                            QStringLiteral("-no-effect-write-feedback.png"));
+                    }
+                    if (!window.grab().save(noEffectScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save no-effect write feedback screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)) {
+                    qCritical().noquote()
+                        << "No-effect write removed the preceding real Undo entry";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                requestLane = wave::findLane(scenario, "lane-request");
+                if (!requestLane
+                    || valueAt(*requestLane, 65'000) != "0"
+                    || !hasBeatScopedSelection()) {
+                    qCritical().noquote()
+                        << "One Undo stopped on a no-effect write";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || scenario != beforeRepeatedBitWrite
+                    || !hasBeatScopedSelection()) {
+                    qCritical().noquote()
+                        << "No-effect write damaged the preceding Redo entry";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+
                 if (!waveEditScreenshotPath.isEmpty()) {
                     auto bitBeatScreenshotPath = waveEditScreenshotPath;
                     const auto suffix = bitBeatScreenshotPath.lastIndexOf(QLatin1Char('.'));
@@ -3927,6 +3996,26 @@ int main(int argc, char* argv[])
                     || valueAt(*acknowledgeLane, multiLaneRange->first + 1) != "X"
                     || valueAt(*acknowledgeLane, multiLaneRange->second - 1) != "X") {
                     qCritical().noquote() << "Bit range palette did not assign both complete ranges";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                const auto beforeRepeatedRangeWrite = scenario;
+                rangeXButton->click();
+                QCoreApplication::processEvents();
+                const auto repeatedRangeWriteMessage =
+                    window.statusBar()->currentMessage();
+                if (scenario != beforeRepeatedRangeWrite
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != multiLaneRange
+                    || canvas->selectedLaneIds() != multiLaneIds
+                    || !repeatedRangeWriteMessage.contains(
+                        QStringLiteral("already = X"))
+                    || !repeatedRangeWriteMessage.contains(
+                        QStringLiteral("no values changed"))
+                    || repeatedRangeWriteMessage.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Repeated range write created a false edit or misleading feedback";
                     window.hide();
                     application.exit(4);
                     return;

@@ -792,6 +792,73 @@ void testUndoRedo()
     expectEqual(lane->segments, after, "redo did not restore the exact edit");
     expectEqual(stack.size(), std::size_t{1}, "one drag-style command must make one history entry");
 
+    auto noEffectScenario = wave::makeDemonstrationProject().scenarios.front();
+    const auto noEffectBefore = noEffectScenario;
+    wave::CommandStack noEffectStack;
+    const auto singleRangeChanged = noEffectStack.execute(
+        std::make_unique<wave::SetLaneRangeCommand>(
+            noEffectScenario,
+            "lane-request",
+            80'000,
+            130'000,
+            "1"));
+    expect(!singleRangeChanged, "identical single-lane write reported an effect");
+    expectEqual(
+        noEffectScenario,
+        noEffectBefore,
+        "identical single-lane write replaced stable Segment or Event IDs");
+    expectEqual(noEffectStack.size(), std::size_t{0}, "identical write polluted history");
+    expect(!noEffectStack.canUndo(), "identical write became undoable");
+
+    const auto batchRangeChanged = noEffectStack.execute(
+        std::make_unique<wave::SetLaneRangesCommand>(
+            noEffectScenario,
+            80'000,
+            130'000,
+            std::vector<wave::LaneRangeAssignment>{{"lane-request", "1", {}}}));
+    expect(!batchRangeChanged, "identical multi-lane write reported an effect");
+    expectEqual(
+        noEffectScenario,
+        noEffectBefore,
+        "identical multi-lane write changed the Scenario");
+    expectEqual(noEffectStack.size(), std::size_t{0}, "identical batch write polluted history");
+
+    wave::CommandStack redoPreservationStack;
+    auto redoPreservationScenario = wave::makeDemonstrationProject().scenarios.front();
+    const auto redoPreservationBefore = redoPreservationScenario;
+    expect(
+        redoPreservationStack.execute(std::make_unique<wave::SetLaneRangeCommand>(
+            redoPreservationScenario,
+            "lane-request",
+            10'000,
+            20'000,
+            "1")),
+        "redo preservation fixture did not change the Scenario");
+    const auto redoPreservationAfter = redoPreservationScenario;
+    expect(redoPreservationStack.undo(), "redo preservation fixture undo failed");
+    expectEqual(
+        redoPreservationScenario,
+        redoPreservationBefore,
+        "redo preservation fixture did not return to its baseline");
+    expect(
+        !redoPreservationStack.execute(std::make_unique<wave::SetLaneRangeCommand>(
+            redoPreservationScenario,
+            "lane-request",
+            80'000,
+            130'000,
+            "1")),
+        "identical write after Undo reported an effect");
+    expect(redoPreservationStack.canRedo(), "identical write discarded the redo branch");
+    expectEqual(
+        redoPreservationStack.size(),
+        std::size_t{1},
+        "identical write changed history size after Undo");
+    expect(redoPreservationStack.redo(), "redo branch was not usable after identical write");
+    expectEqual(
+        redoPreservationScenario,
+        redoPreservationAfter,
+        "redo branch changed after identical write");
+
     auto relationScenario = wave::makeDemonstrationProject().scenarios.front();
     const auto relationBefore = relationScenario;
     wave::CommandStack relationStack;

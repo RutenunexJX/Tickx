@@ -191,6 +191,27 @@ void applyRemovedEventToWaveform(Scenario& scenario, const std::string_view even
     synchronizeLaneEventsFromSegments(scenario, laneId);
 }
 
+bool rangeAlreadyEquals(
+    const Lane& lane,
+    const Tick start,
+    const Tick end,
+    const std::string_view value,
+    const JsonExtensions& extensions)
+{
+    auto coveredUntil = start;
+    for (const auto& segment : lane.segments) {
+        if (segment.end <= coveredUntil) continue;
+        if (segment.start > coveredUntil
+            || segment.value != value
+            || segment.extensions != extensions) {
+            return false;
+        }
+        coveredUntil = std::min(end, segment.end);
+        if (coveredUntil >= end) return true;
+    }
+    return false;
+}
+
 template<typename Mutation>
 void snapshotRedo(
     Scenario& scenario,
@@ -209,17 +230,19 @@ void snapshotRedo(
 
 } // namespace
 
-void CommandStack::execute(std::unique_ptr<EditCommand> command)
+bool CommandStack::execute(std::unique_ptr<EditCommand> command)
 {
     if (!command) {
         throw std::invalid_argument("command is null");
     }
+    command->redo();
+    if (!command->hasEffect()) return false;
     if (cursor_ < commands_.size()) {
         commands_.erase(commands_.begin() + static_cast<std::ptrdiff_t>(cursor_), commands_.end());
     }
-    command->redo();
     commands_.push_back(std::move(command));
     cursor_ = commands_.size();
+    return true;
 }
 
 void CommandStack::replaceLast(std::unique_ptr<EditCommand> command)
@@ -359,6 +382,9 @@ SetLaneRangeCommand::SetLaneRangeCommand(
     if (!lane) {
         throw std::invalid_argument("lane does not exist");
     }
+    const auto validation = validateLaneValue(*lane, value_);
+    if (!validation.valid) throw std::invalid_argument(validation.error);
+    value_ = validation.normalizedValue;
     before_ = lane->segments;
     eventsBefore_ = scenario.events;
     relationsBefore_ = scenario.relations;
@@ -371,6 +397,13 @@ void SetLaneRangeCommand::redo()
         throw std::runtime_error("lane was removed before command execution");
     }
     if (!initialized_) {
+        if (rangeAlreadyEquals(*lane, start_, end_, value_, extensions_)) {
+            after_ = before_;
+            eventsAfter_ = eventsBefore_;
+            relationsAfter_ = relationsBefore_;
+            initialized_ = true;
+            return;
+        }
         setSegmentRange(*lane, start_, end_, value_, {}, extensions_);
         if (lane->kind == LaneKind::Bit
             || lane->kind == LaneKind::Bus
@@ -402,6 +435,14 @@ void SetLaneRangeCommand::undo()
 std::string SetLaneRangeCommand::description() const
 {
     return "Set lane range";
+}
+
+bool SetLaneRangeCommand::hasEffect() const noexcept
+{
+    return initialized_
+        && (before_ != after_
+            || eventsBefore_ != eventsAfter_
+            || relationsBefore_ != relationsAfter_);
 }
 
 SetLaneRangesCommand::SetLaneRangesCommand(
@@ -453,6 +494,14 @@ void SetLaneRangesCommand::redo()
         if (!lane) {
             throw std::runtime_error("range assignment target lane was removed");
         }
+        if (rangeAlreadyEquals(
+                *lane,
+                start_,
+                end_,
+                assignment.value,
+                assignment.extensions)) {
+            continue;
+        }
         setSegmentRange(
             *lane,
             start_,
@@ -479,6 +528,11 @@ void SetLaneRangesCommand::undo()
 std::string SetLaneRangesCommand::description() const
 {
     return "Set selected ranges";
+}
+
+bool SetLaneRangesCommand::hasEffect() const noexcept
+{
+    return before_ && after_ && *before_ != *after_;
 }
 
 ClearLaneRangesCommand::ClearLaneRangesCommand(

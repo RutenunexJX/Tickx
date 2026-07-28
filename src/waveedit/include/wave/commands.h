@@ -18,11 +18,12 @@ public:
     virtual void redo() = 0;
     virtual void undo() = 0;
     [[nodiscard]] virtual std::string description() const = 0;
+    [[nodiscard]] virtual bool hasEffect() const noexcept { return true; }
 };
 
 class CommandStack {
 public:
-    void execute(std::unique_ptr<EditCommand> command);
+    bool execute(std::unique_ptr<EditCommand> command);
     void replaceLast(std::unique_ptr<EditCommand> command);
     bool discardLast();
     bool undoLastAfter(std::size_t baseline);
@@ -68,6 +69,7 @@ public:
     void redo() override;
     void undo() override;
     [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
     Scenario* scenario_;
@@ -102,6 +104,7 @@ public:
     void redo() override;
     void undo() override;
     [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
     Scenario* scenario_;
