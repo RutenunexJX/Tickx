@@ -1603,6 +1603,61 @@ Visual QA: req 的 60–70 ns 单拍单独高亮并显示 X；左右相邻 0 电
 Desktop interaction: none
 ```
 
+## 持续迭代 29：Bit 拍级选择脱离悬浮后持续可见
+
+状态：完成
+
+已交付：
+
+- 用户审计确认第 28 轮已保留拍级选择状态，但画布只绘制 hover 覆盖层。鼠标离开画布后高亮消失，
+  Delete 和键盘写值仍作用于原拍，用户无法确认当前操作目标。
+- 非显式范围、非 Segment 的 Bit 时间选择现在拥有独立持久选中框；hover 相同拍时不重复叠加，
+  鼠标 `Leave` 只清理悬浮与吸附提示，不清理已选拍。单拍和拖动形成的多拍选择均适用。
+- 跨信号 `revealLocation`、右键信号标题和开始拖动 Bit Event 边沿时清理旧 Wave Edit 选择，
+  防止持久选中框被错误带到新 lane 或与边沿操作同时显示。普通中键平移仍保留当前选择。
+- `wave-wave-edit-smoke` 在写入 X 后发送真实 `Leave`，断言 hover 已空、拍级选择仍存在并继续完成
+  Clear/Delete；新增无 hover 状态截图。全部 GUI 路径继续使用 offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 21 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.38 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.11 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.78 sec
+
+Screenshot:
+  build/qtcreator-debug/wave-edit-smoke-bit-beat-persistent-selection.png
+Visual QA: 鼠标已离开且无吸附提示线时，req 的 60–70 ns 单拍选中框仍清晰可见；
+           左右相邻拍未被覆盖，状态栏、波形、刻度和布局保持一致
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

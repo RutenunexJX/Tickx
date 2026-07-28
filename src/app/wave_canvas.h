@@ -209,6 +209,7 @@ private:
     void clearExplicitRangeSelection(bool clearLanes = true);
     [[nodiscard]] std::optional<LaneKind> explicitRangeKind() const;
     [[nodiscard]] SegmentBoundary explicitRangeBoundaryAt(const QPoint& position) const;
+    [[nodiscard]] bool hasBitRangeSelection() const;
     bool applyExplicitRangeValue(
         const std::string& value,
         const std::string& presetId = {});

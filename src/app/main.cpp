@@ -3122,6 +3122,39 @@ int main(int argc, char* argv[])
                     }
                 }
 
+                QEvent bitSelectionLeave(QEvent::Leave);
+                QCoreApplication::sendEvent(canvas->viewport(), &bitSelectionLeave);
+                QCoreApplication::processEvents();
+                if (!canvas->hoveredBitBeatLaneId().isEmpty()
+                    || canvas->hoveredBitBeatRange()
+                    || !hasBeatScopedSelection()) {
+                    qCritical().noquote()
+                        << "Bit beat selection did not survive pointer leave independently of hover";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto persistentBeatScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix =
+                        persistentBeatScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        persistentBeatScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-bit-beat-persistent-selection"));
+                    } else {
+                        persistentBeatScreenshotPath.append(
+                            QStringLiteral("-bit-beat-persistent-selection.png"));
+                    }
+                    if (!window.grab().save(persistentBeatScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save persistent Bit beat selection screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+
                 const auto beforeBitBeatClear = scenario;
                 bool bitClearMenuHandled = false;
                 QTimer::singleShot(

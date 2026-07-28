@@ -1127,7 +1127,11 @@ void WaveCanvas::refreshModel()
 void WaveCanvas::revealLocation(const QString& laneId, const qint64 tick)
 {
     if (!scenario_) return;
-    if (explicitRangeSelection_) clearExplicitRangeSelection(false);
+    if (tool_ == Tool::WaveEdit) {
+        clearWaveEditState();
+    } else if (explicitRangeSelection_) {
+        clearExplicitRangeSelection(false);
+    }
     const auto* lane = findLane(*scenario_, laneId.toStdString());
     if (!lane) return;
     selectedLaneId_ = lane->id;
@@ -1439,6 +1443,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     selectedLaneIds_ = {lane->id};
 
     if (event->pos().x() < HeaderWidth) {
+        if (tool_ == Tool::WaveEdit) clearWaveEditState();
         laneHeaderSelectionActive_ = true;
         emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
         emit editLaneParametersRequested(
@@ -2109,6 +2114,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
                 waveEditPreviewRange_.reset();
                 waveEditHoverLaneId_.clear();
                 waveEditHoverRange_.reset();
+                selectionRange_.reset();
                 waveEditInteraction_ = WaveEditInteraction::MoveTransition;
                 activeEventId_ = hitEvent->id;
                 drawLaneId_ = lane->id;
@@ -3164,6 +3170,21 @@ WaveCanvas::SegmentBoundary WaveCanvas::explicitRangeBoundaryAt(
     return startDistance <= endDistance
         ? SegmentBoundary::Start
         : SegmentBoundary::End;
+}
+
+bool WaveCanvas::hasBitRangeSelection() const
+{
+    if (!scenario_ || tool_ != Tool::WaveEdit || explicitRangeSelection_
+        || !selectionRange_ || selectionRange_->second <= selectionRange_->first
+        || !selectedSegmentId_.empty() || selectedLaneId_.empty()) {
+        return false;
+    }
+    const auto* lane = findLane(*scenario_, selectedLaneId_);
+    return lane
+        && lane->visible
+        && lane->kind == LaneKind::Bit
+        && selectionRange_->first >= 0
+        && selectionRange_->second <= scenario_->duration;
 }
 
 void WaveCanvas::showRangeEditPalette()
@@ -5648,10 +5669,19 @@ void WaveCanvas::drawWaveEditOverlay(QPainter& painter)
             drawRange(selectedLaneIds_[index], *selectionRange_, handles, resizing);
         }
     }
+    const auto persistentBitSelection = !drawing_ && hasBitRangeSelection();
+    if (persistentBitSelection) {
+        drawRange(selectedLaneId_, *selectionRange_, false, false);
+    }
     if (!drawing_
         && waveEditHoverRange_
         && !waveEditHoverLaneId_.empty()) {
-        drawRange(waveEditHoverLaneId_, *waveEditHoverRange_, false, false);
+        const auto duplicatesPersistentSelection = persistentBitSelection
+            && waveEditHoverLaneId_ == selectedLaneId_
+            && *waveEditHoverRange_ == *selectionRange_;
+        if (!duplicatesPersistentSelection) {
+            drawRange(waveEditHoverLaneId_, *waveEditHoverRange_, false, false);
+        }
         const auto* hoverLane = findLane(*scenario_, waveEditHoverLaneId_);
         const auto layout = layoutForLane(waveEditHoverLaneId_);
         if (hoverLane && hoverLane->kind == LaneKind::Bit
