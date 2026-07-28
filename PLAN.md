@@ -1491,6 +1491,61 @@ Visual QA: 两路范围的左右手柄清晰可见；范围高亮保持低透明
 Desktop interaction: none
 ```
 
+## 持续迭代 27：范围选择后的同次安全重定向
+
+状态：完成
+
+已交付：
+
+- 开发与用户审计确认显式范围存在时，所有普通左键首击都被“仅清除范围”吞掉。用户点击信号名
+  选信号或点击标尺移动编辑光标时，必须重复点击一次；这两处本身不会修改波形，额外防护没有收益。
+- 信号标题和时间标尺改为同一次点击先清除旧范围，再继续完成 lane 选择或编辑光标定位。范围栏
+  同步隐藏，状态栏显示目标信号或目标时间以及 `range cleared`，用户能确认两项结果均已生效。
+- 波形正文仍保留第一次点击只清除范围、不执行 Bit 翻转或 Segment 编辑的防误触策略；范围左右
+  手柄命中优先级不变。此次改动只调整 UI 选择状态，不写 Scenario，也不新增 Undo 历史。
+- `wave-wave-edit-smoke` 通过真实鼠标事件验证一次标题点击和一次标尺点击的完整结果、工具栏隐藏、
+  状态反馈和 Scenario 不变，并继续执行旧波形正文点击回归。全部 GUI 路径使用 offscreen。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --parallel 4
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: 22 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+21/21 tests passed
+Total Test time: 7.32 sec
+
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+21/21 tests passed
+Total Test time: 7.08 sec
+
+Git diff check: clean
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^(wave-wave-edit-smoke|wave-user-journey-smoke)$" --output-on-failure
+2/2 passed
+Total Test time: 0.73 sec
+
+Screenshot:
+  build/qtcreator-debug/wave-edit-smoke-range-ruler-retarget.png
+Visual QA: 范围栏已在同次标尺点击后隐藏；60 ns 编辑光标和纵向参考线立即落位；
+           状态栏明确显示 “Edit cursor 60 ns · range cleared”，波形、刻度与布局无跳动
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

@@ -3216,6 +3216,82 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
+                const auto beforeSafeRangeRetarget = scenario;
+                click(QPoint(48, acknowledgeY));
+                settleLayouts();
+                if (canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange()
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-ack")}
+                    || rangePalette->isVisibleTo(&window)
+                    || rangeToolbarAction->isVisible()
+                    || scenario != beforeSafeRangeRetarget
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("range cleared"),
+                        Qt::CaseInsensitive)) {
+                    qCritical().noquote()
+                        << "One lane-header click did not dismiss the range and select the lane";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                dragModified(
+                    QPoint(xAtTick(20'000), requestY),
+                    QPoint(xAtTick(40'000), acknowledgeY),
+                    Qt::ShiftModifier);
+                settleLayouts();
+                click(QPoint(xAtTick(60'000), 20));
+                settleLayouts();
+                if (canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange()
+                    || !canvas->selectedLaneIds().isEmpty()
+                    || canvas->cursorTick() != 60'000
+                    || rangePalette->isVisibleTo(&window)
+                    || rangeToolbarAction->isVisible()
+                    || scenario != beforeSafeRangeRetarget
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("range cleared"),
+                        Qt::CaseInsensitive)) {
+                    qCritical().noquote()
+                        << "One ruler click did not dismiss the range and move the edit cursor";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!waveEditScreenshotPath.isEmpty()) {
+                    auto retargetScreenshotPath = waveEditScreenshotPath;
+                    const auto suffix = retargetScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        retargetScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-range-ruler-retarget"));
+                    } else {
+                        retargetScreenshotPath.append(
+                            QStringLiteral("-range-ruler-retarget.png"));
+                    }
+                    if (!window.grab().save(retargetScreenshotPath)) {
+                        qCritical().noquote()
+                            << "Cannot save range ruler retarget screenshot";
+                        window.hide();
+                        application.exit(3);
+                        return;
+                    }
+                }
+                dragModified(
+                    QPoint(xAtTick(20'000), requestY),
+                    QPoint(xAtTick(40'000), acknowledgeY),
+                    Qt::ShiftModifier);
+                settleLayouts();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != multiLaneRange
+                    || canvas->selectedLaneIds() != multiLaneIds
+                    || scenario != beforeSafeRangeRetarget) {
+                    qCritical().noquote()
+                        << "Re-selecting the range after safe retarget checks failed";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
                 if (!waveEditScreenshotPath.isEmpty()) {
                     auto rangeScreenshotPath = waveEditScreenshotPath;
                     const auto suffix = rangeScreenshotPath.lastIndexOf(QLatin1Char('.'));

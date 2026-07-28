@@ -1899,6 +1899,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         return;
     }
     const auto position = event->position().toPoint();
+    auto rangeClearedForRetarget = false;
     if (event->button() == Qt::LeftButton && hasLaneRename()) {
         submitLaneRename();
         if (hasLaneRename()) {
@@ -1952,9 +1953,15 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         clearExplicitRangeSelection();
         snapGuideTick_.reset();
         viewport()->setFocus(Qt::MouseFocusReason);
-        emit statusMessage(tr("Range selection cleared"));
-        event->accept();
-        return;
+        const auto retargetsWithoutEditing = position.y() < RulerHeight
+            || position.x() < HeaderWidth;
+        if (retargetsWithoutEditing) {
+            rangeClearedForRetarget = true;
+        } else {
+            emit statusMessage(tr("Range selection cleared"));
+            event->accept();
+            return;
+        }
     }
     if (event->button() == Qt::MiddleButton
         || (event->button() == Qt::LeftButton && spaceHeld_)) {
@@ -1979,6 +1986,12 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         selectedSegmentId_.clear();
         selectionRange_.reset();
         snapGuideTick_.reset();
+        if (rangeClearedForRetarget) {
+            emit statusMessage(
+                tr("Edit cursor %1 · range cleared")
+                    .arg(QString::fromStdString(
+                        formatTick(cursorTick_, project_->timeBase))));
+        }
         viewport()->update();
         event->accept();
         return;
@@ -2007,6 +2020,11 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         laneDropDestinationIndex_.reset();
         laneDropIndicatorY_.reset();
         emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+        if (rangeClearedForRetarget) {
+            emit statusMessage(
+                tr("Selected %1 · range cleared")
+                    .arg(QString::fromStdString(lane->name)));
+        }
         viewport()->setCursor(Qt::OpenHandCursor);
         viewport()->update();
         return;
