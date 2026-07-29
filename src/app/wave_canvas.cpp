@@ -4344,9 +4344,11 @@ void WaveCanvas::showBusPresetPalette(
         busValueEdit_->setModified(false);
         busValueEdit_->setPlaceholderText(
             busEditScope_ == BusEditScope::Beat
-                ? enumLane
-                    ? tr("Symbol · Tab next")
-                    : tr("Value · Tab next")
+                ? existing
+                    ? enumLane
+                        ? tr("Symbol · Tab next")
+                        : tr("Value · Tab next")
+                    : tr("X (implicit) · Tab skips")
                 : enumLane
                     ? tr("Symbol or value + Enter")
                     : tr("Value + Enter"));
@@ -4368,6 +4370,11 @@ void WaveCanvas::showBusPresetPalette(
                               .arg(lane.width)
                         : tr("Type a value and press Enter · bare input uses the selected radix · width %1 bit(s)")
                           .arg(lane.width));
+        if (busEditScope_ == BusEditScope::Beat && !existing) {
+            busValueEdit_->setToolTip(
+                busValueEdit_->toolTip()
+                + tr("\nCurrent value is implicit X · Tab or Shift+Tab skips it without writing"));
+        }
         busValueEdit_->setStyleSheet({});
     }
     positionBusPresetPalette();
@@ -5027,6 +5034,33 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
     if (!lane
         || (lane->kind != LaneKind::Bus && lane->kind != LaneKind::Enum)) {
         hideBusPresetPalette();
+        return;
+    }
+    const auto navigateWithoutValue = busEditScope_ == BusEditScope::Beat
+        && action != BusEditCommitAction::Close
+        && busValueEdit_->text().trimmed().isEmpty()
+        && !busValueEdit_->isModified();
+    if (navigateWithoutValue) {
+        const auto laneId = busPresetLaneId_;
+        const auto currentRange = *busEditRange_;
+        const auto forward = action == BusEditCommitAction::NextBeat;
+        if (advanceBusValueEdit(laneId, currentRange, forward)) {
+            emit statusMessage(
+                tr("%1 · implicit X skipped · %2")
+                    .arg(QString::fromStdString(lane->name))
+                    .arg(forward
+                             ? tr("Tab advances · no values changed")
+                             : tr("Shift+Tab goes back · no values changed")));
+            return;
+        }
+        busValueEdit_->setFocus(Qt::TabFocusReason);
+        busValueEdit_->selectAll();
+        emit statusMessage(
+            tr("%1 · implicit X unchanged · already at %2 · %3")
+                .arg(QString::fromStdString(lane->name))
+                .arg(forward ? tr("End") : tr("start"))
+                .arg(forward ? tr("Shift+Tab goes back") : tr("Tab advances")));
+        viewport()->update();
         return;
     }
     if (scenario_->duration <= 0

@@ -6908,9 +6908,32 @@ int main(int argc, char* argv[])
                 || !directValue->hasFocus()
                 || !firstSequentialBeat
                 || firstSequentialBeat->second <= firstSequentialBeat->first
+                || !directValue->placeholderText().contains(
+                    QStringLiteral("X (implicit)"))
                 || !contextLabel->toolTip().contains(
                     QStringLiteral("Tab applies and advances"))) {
                 fail(QStringLiteral("Enter did not open an explicit sequential Bus beat target"));
+                return;
+            }
+
+            sendKey(directValue, Qt::Key_Tab);
+            QCoreApplication::processEvents();
+            const auto skippedImplicitBeat = canvas->selectedTimeRange();
+            if (!skippedImplicitBeat
+                || skippedImplicitBeat->first != firstSequentialBeat->second
+                || !assertBusEmpty()
+                || !directValue->hasFocus()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("implicit X skipped"))) {
+                fail(QStringLiteral("Tab did not skip an untouched implicit-X Bus beat"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Backtab, Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange() != firstSequentialBeat
+                || !assertBusEmpty()
+                || !directValue->hasFocus()) {
+                fail(QStringLiteral("Shift+Tab did not skip back across implicit-X Bus beats"));
                 return;
             }
 
