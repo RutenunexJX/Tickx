@@ -7754,6 +7754,133 @@ int main(int argc, char* argv[])
             redoAction->trigger();
             QCoreApplication::processEvents();
 
+            const auto chooseDuplicateAfter = [&application, canvas](
+                                                  const QPoint& position) {
+                bool handled = false;
+                QTimer::singleShot(
+                    0,
+                    &application,
+                    [&application, &handled] {
+                        auto* menu = qobject_cast<QMenu*>(
+                            QApplication::activePopupWidget());
+                        QAction* duplicate = nullptr;
+                        if (menu
+                            && menu->objectName()
+                                == QStringLiteral("WaveformContextMenu")) {
+                            duplicate = menu->findChild<QAction*>(
+                                QStringLiteral("DuplicateSegmentAfterAction"));
+                            if (!duplicate) {
+                                for (auto* action : menu->actions()) {
+                                    if (action
+                                        && action->objectName()
+                                            == QStringLiteral(
+                                                "DuplicateSegmentAfterAction")) {
+                                        duplicate = action;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!menu || !duplicate) {
+                            if (menu) menu->close();
+                            return;
+                        }
+                        menu->setActiveAction(duplicate);
+                        handled = true;
+                        QKeyEvent enter(
+                            QEvent::KeyPress,
+                            Qt::Key_Return,
+                            Qt::NoModifier);
+                        QCoreApplication::sendEvent(menu, &enter);
+                    });
+                QContextMenuEvent context(
+                    QContextMenuEvent::Mouse,
+                    position,
+                    canvas->viewport()->mapToGlobal(position));
+                QCoreApplication::sendEvent(canvas->viewport(), &context);
+                QCoreApplication::processEvents();
+                return handled;
+            };
+            const auto beforeAdjacentDuplicate =
+                window.project().scenarios.front();
+            if (!chooseDuplicateAfter(copySourcePoint)) {
+                fail(QStringLiteral("Bus context menu did not expose duplicate-after"));
+                return;
+            }
+            const auto adjacentStart = presetStart + expectedBeat;
+            busAfterPreset = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto adjacentDuplicate = busAfterPreset
+                ? std::find_if(
+                      busAfterPreset->segments.begin(),
+                      busAfterPreset->segments.end(),
+                      [adjacentStart](const wave::Segment& candidate) {
+                          return candidate.start <= adjacentStart
+                              && adjacentStart < candidate.end;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (!busAfterPreset
+                || adjacentDuplicate == busAfterPreset->segments.end()
+                || adjacentDuplicate->value != "0bxxxxxxxx"
+                || adjacentDuplicate->extensions.find(
+                       "waveWorkbench.busPreset")
+                    == adjacentDuplicate->extensions.end()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("segment duplicated"))) {
+                fail(QStringLiteral("Duplicate-after did not copy the adjacent value and metadata"));
+                return;
+            }
+            const auto afterAdjacentDuplicate =
+                window.project().scenarios.front();
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front() != beforeAdjacentDuplicate) {
+                fail(QStringLiteral("Duplicate-after was not one atomic Undo"));
+                return;
+            }
+            redoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front() != afterAdjacentDuplicate) {
+                fail(QStringLiteral("Duplicate-after atomic Redo failed"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+
+            const QPoint finalBeatPoint(
+                tickX(timelineDuration - expectedBeat / 2),
+                presetBusY);
+            sendMouse(
+                QEvent::MouseButtonPress,
+                finalBeatPoint,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                finalBeatPoint,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            if (!presetPalette->isVisible()) {
+                fail(QStringLiteral("Could not target the final Bus beat"));
+                return;
+            }
+            presetButtons.back()->click();
+            QCoreApplication::processEvents();
+            const auto beforeBoundaryDuplicate =
+                window.project().scenarios.front();
+            const auto undoTextBeforeBoundary = undoAction->text();
+            if (!chooseDuplicateAfter(finalBeatPoint)
+                || window.project().scenarios.front() != beforeBoundaryDuplicate
+                || undoAction->text() != undoTextBeforeBoundary
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("exceeds End"))) {
+                fail(QStringLiteral("Boundary duplicate did not remain history-free with feedback"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+
             const auto edgeX = 190 + static_cast<int>(std::llround(
                 static_cast<double>(presetStart)
                 / static_cast<double>(window.project().scenarios.front().duration)

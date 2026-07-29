@@ -2095,7 +2095,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         ? std::clamp<Tick>(tickAtX(event->pos().x()), 0, scenario_->duration - 1)
         : Tick{0};
     cursorTick_ = editTick(rawTick, *lane);
-    const auto* segment = segmentAtTick(*lane, cursorTick_);
+    const auto* segment = segmentAtTick(*lane, rawTick);
     if (lane->kind == LaneKind::Bit) {
         const auto beatRange = editableBeatRangeAt(cursorTick_, *lane);
         selectedSegmentLaneId_.clear();
@@ -2139,6 +2139,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     QAction* clockGated = nullptr;
     QAction* clockDisabled = nullptr;
     QAction* clockRun = nullptr;
+    QAction* duplicateAfter = nullptr;
 
     if (lane->kind == LaneKind::Bit) {
         setZero = menu.addAction(tr("Set beat to 0"));
@@ -2168,6 +2169,13 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     } else if (segment) {
         editValue = menu.addAction(tr("Edit segment value…"));
     }
+    if (segment
+        && (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum)) {
+        duplicateAfter = menu.addAction(tr("Duplicate segment after"));
+        duplicateAfter->setObjectName(QStringLiteral("DuplicateSegmentAfterAction"));
+        duplicateAfter->setToolTip(
+            tr("Copy this complete segment into the immediately following interval"));
+    }
     if (segment) {
         menu.addSeparator();
         clearValue = menu.addAction(
@@ -2185,6 +2193,8 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         pasteAtCursor();
     } else if (chosen == editValue) {
         editSegmentAt(event->pos());
+    } else if (chosen == duplicateAfter) {
+        static_cast<void>(duplicateSelectedSegmentAfter());
     } else if (chosen == clearValue) {
         if (lane->kind == LaneKind::Bit) {
             static_cast<void>(clearSelectedBitRange());
@@ -5970,6 +5980,93 @@ void WaveCanvas::clearSelectedSegment()
             .arg(result),
         relationCountBefore,
         scenario_->relations.size()));
+}
+
+bool WaveCanvas::duplicateSelectedSegmentAfter()
+{
+    if (!scenario_ || !commandStack_ || selectedSegmentLaneId_.empty()
+        || selectedSegmentId_.empty()) {
+        return false;
+    }
+    const auto* lane = findLane(*scenario_, selectedSegmentLaneId_);
+    const auto* segment = segmentById(selectedSegmentLaneId_, selectedSegmentId_);
+    if (!lane || !segment
+        || (lane->kind != LaneKind::Bus && lane->kind != LaneKind::Enum)) {
+        return false;
+    }
+
+    const auto laneId = lane->id;
+    const auto laneName = lane->name;
+    const auto sourceSegmentId = segment->id;
+    const auto width = segment->end - segment->start;
+    const auto targetStart = segment->end;
+    const auto formatTime = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : QString::number(tick);
+    };
+    if (width <= 0
+        || targetStart < 0
+        || targetStart > scenario_->duration
+        || width > scenario_->duration - targetStart) {
+        const auto targetEnd = targetStart + std::max<Tick>(0, width);
+        emit statusMessage(
+            tr("%1 segment not duplicated · next interval %2–%3 exceeds End %4")
+                .arg(QString::fromStdString(laneName))
+                .arg(formatTime(targetStart))
+                .arg(formatTime(targetEnd))
+                .arg(formatTime(scenario_->duration)));
+        return false;
+    }
+
+    const auto targetEnd = targetStart + width;
+    const auto relationCountBefore = scenario_->relations.size();
+    bool changed = false;
+    try {
+        changed = commandStack_->execute(std::make_unique<CopySegmentCommand>(
+            *scenario_,
+            laneId,
+            sourceSegmentId,
+            targetStart,
+            targetEnd));
+    } catch (const std::exception& exception) {
+        emit statusMessage(QString::fromUtf8(exception.what()));
+        return false;
+    }
+    if (!changed) {
+        emit statusMessage(
+            tr("%1 · %2–%3 already matches the segment · no values changed")
+                .arg(QString::fromStdString(laneName))
+                .arg(formatTime(targetStart))
+                .arg(formatTime(targetEnd)));
+        return false;
+    }
+
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    refreshModel();
+    selectedLaneId_ = laneId;
+    selectedLaneIds_ = {laneId};
+    laneHeaderSelectionActive_ = false;
+    cursorTick_ = targetStart;
+    if (const auto* refreshedLane = findLane(*scenario_, laneId)) {
+        const auto midpoint = targetStart + width / 2;
+        if (const auto* target = segmentAtTick(*refreshedLane, midpoint)) {
+            selectedSegmentLaneId_ = refreshedLane->id;
+            selectedSegmentId_ = target->id;
+            selectionRange_ = std::pair{targetStart, targetEnd};
+        }
+    }
+    emit selectionChanged(QString::fromStdString(laneId), cursorTick_);
+    emit statusMessage(appendRelationAwareUndo(
+        tr("%1 segment duplicated to %2–%3 · source kept")
+            .arg(QString::fromStdString(laneName))
+            .arg(formatTime(targetStart))
+            .arg(formatTime(targetEnd)),
+        relationCountBefore,
+        scenario_->relations.size()));
+    viewport()->update();
+    return true;
 }
 
 void WaveCanvas::updateLaneDragAutoScroll(const int pointerY)
