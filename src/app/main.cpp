@@ -7191,6 +7191,47 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            const auto undoTextBeforeBeatNavigation = undoAction->text();
+            canvas->revealLocation(
+                QString::fromStdString(quickBit.id),
+                0);
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_Tab);
+            QCoreApplication::processEvents();
+            const auto tabNavigatedBitBeat = canvas->selectedTimeRange();
+            if (canvas->selectedLaneId()
+                    != QString::fromStdString(quickBit.id)
+                || !tabNavigatedBitBeat
+                || tabNavigatedBitBeat->first <= 0
+                || tabNavigatedBitBeat->second
+                    - tabNavigatedBitBeat->first
+                    != sequentialBeatWidth
+                || undoAction->text() != undoTextBeforeBeatNavigation) {
+                fail(QStringLiteral("Canvas Tab did not navigate one signal beat without history"));
+                return;
+            }
+            sendKey(canvas, Qt::Key_Backtab, Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            const auto backtabNavigatedBitBeat = canvas->selectedTimeRange();
+            if (!backtabNavigatedBitBeat
+                || backtabNavigatedBitBeat->first != 0
+                || backtabNavigatedBitBeat->second
+                    - backtabNavigatedBitBeat->first
+                    != sequentialBeatWidth
+                || undoAction->text() != undoTextBeforeBeatNavigation) {
+                fail(QStringLiteral("Canvas Shift+Tab did not navigate back one signal beat"));
+                return;
+            }
+            sendKey(canvas, Qt::Key_Backtab, Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange() != backtabNavigatedBitBeat
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("start"))
+                || undoAction->text() != undoTextBeforeBeatNavigation) {
+                fail(QStringLiteral("Canvas Shift+Tab did not stop at timeline start"));
+                return;
+            }
+
             sendMouse(
                 QEvent::MouseButtonPress,
                 paletteClick,

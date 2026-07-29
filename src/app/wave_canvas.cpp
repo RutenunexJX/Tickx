@@ -785,6 +785,24 @@ void WaveCanvas::showDurationEditError(const QString& message)
     emit statusMessage(message);
 }
 
+bool WaveCanvas::event(QEvent* event)
+{
+    if (event->type() == QEvent::KeyPress && tool_ == Tool::WaveEdit) {
+        const auto* keyEvent = static_cast<QKeyEvent*>(event);
+        const auto forward = keyEvent->key() == Qt::Key_Tab
+            && keyEvent->modifiers() == Qt::NoModifier;
+        const auto backward = keyEvent->key() == Qt::Key_Backtab
+            || (keyEvent->key() == Qt::Key_Tab
+                && keyEvent->modifiers() == Qt::ShiftModifier);
+        if (forward || backward) {
+            navigateSelectedBeat(forward);
+            event->accept();
+            return true;
+        }
+    }
+    return QAbstractScrollArea::event(event);
+}
+
 bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
 {
     if (watched == durationEdit_ && event->type() == QEvent::FocusOut) {
@@ -6450,6 +6468,81 @@ std::optional<std::pair<Tick, Tick>> WaveCanvas::adjacentEditableBeatRange(
     return target.second > target.first
         ? std::optional<std::pair<Tick, Tick>>{target}
         : std::nullopt;
+}
+
+void WaveCanvas::navigateSelectedBeat(const bool forward)
+{
+    if (!scenario_ || scenario_->duration <= 0) {
+        emit statusMessage(tr("Timeline has no editable beat"));
+        return;
+    }
+    if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
+        emit statusMessage(
+            tr("Finish or cancel the current drag before navigating beats"));
+        return;
+    }
+    if (explicitRangeSelection_) {
+        emit statusMessage(
+            tr("Esc clears the selected range before navigating beats"));
+        return;
+    }
+    const auto* lane = findLane(*scenario_, selectedLaneId_);
+    if (!lane || lane->kind == LaneKind::Group) {
+        emit statusMessage(
+            tr("Select a signal before using Tab or Shift+Tab"));
+        return;
+    }
+    if (hasPendingBusValueEdit()) {
+        emit statusMessage(
+            tr("Finish or cancel the Bus/Enum draft before navigating beats"));
+        if (busValueEdit_) {
+            busValueEdit_->setFocus(Qt::OtherFocusReason);
+            busValueEdit_->selectAll();
+        }
+        return;
+    }
+
+    const auto current = editableBeatRangeAt(
+        std::clamp<Tick>(cursorTick_, 0, scenario_->duration - 1),
+        *lane);
+    const auto target = adjacentEditableBeatRange(*lane, current, forward);
+    if (!target) {
+        emit statusMessage(
+            tr("%1 · already at timeline %2 · %3")
+                .arg(QString::fromStdString(lane->name))
+                .arg(forward ? tr("End") : tr("start"))
+                .arg(forward ? tr("Shift+Tab goes back") : tr("Tab advances")));
+        return;
+    }
+
+    hideBusPresetPalette();
+    selectedLaneIds_ = {lane->id};
+    laneHeaderSelectionActive_ = false;
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    explicitRangeSelection_ = false;
+    selectionRange_ = *target;
+    cursorTick_ = target->first;
+    waveEditHoverLaneId_ = lane->id;
+    waveEditHoverRange_ = *target;
+    snapGuideTick_.reset();
+    ensureLaneVisible(lane->id);
+    ensureCursorVisible(cursorTick_);
+    emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+    emit statusMessage(
+        tr("%1 · %2–%3 · value %4 · %5")
+            .arg(QString::fromStdString(lane->name))
+            .arg(QString::fromStdString(formatTick(
+                target->first,
+                project_->timeBase)))
+            .arg(QString::fromStdString(formatTick(
+                target->second,
+                project_->timeBase)))
+            .arg(laneValueAt(*lane, cursorTick_))
+            .arg(forward
+                     ? tr("Tab advances · Shift+Tab goes back")
+                     : tr("Shift+Tab goes back · Tab advances")));
+    viewport()->update();
 }
 
 void WaveCanvas::clearWaveEditState()
