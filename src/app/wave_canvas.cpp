@@ -2471,6 +2471,21 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         }
+        if ((event->key() == Qt::Key_PageUp
+             || event->key() == Qt::Key_PageDown)
+            && event->modifiers() == Qt::NoModifier) {
+            if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
+                emit statusMessage(
+                    tr("Finish or cancel the current drag before navigating a page"));
+            } else if (explicitRangeSelection_) {
+                emit statusMessage(
+                    tr("Esc clears the selected range before navigating a page"));
+            } else {
+                navigateTimelinePage(event->key() == Qt::Key_PageDown);
+            }
+            event->accept();
+            return;
+        }
         if ((event->key() == Qt::Key_Home || event->key() == Qt::Key_End)
             && event->modifiers() == Qt::ShiftModifier) {
             const auto* focusedEditor = qobject_cast<QLineEdit*>(
@@ -6542,6 +6557,64 @@ void WaveCanvas::navigateSelectedBeat(const bool forward)
             .arg(forward
                      ? tr("Tab advances · Shift+Tab goes back")
                      : tr("Shift+Tab goes back · Tab advances")));
+    viewport()->update();
+}
+
+void WaveCanvas::navigateTimelinePage(const bool forward)
+{
+    if (!scenario_ || scenario_->duration <= 0) {
+        emit statusMessage(tr("Timeline has no navigable duration"));
+        return;
+    }
+    const auto visibleStart = std::clamp<Tick>(
+        tickAtX(headerWidth_),
+        0,
+        scenario_->duration);
+    const auto visibleEnd = std::clamp<Tick>(
+        tickAtX(viewport()->width()),
+        visibleStart,
+        scenario_->duration);
+    const auto page = std::max<Tick>(
+        cursorKeyboardStep(),
+        std::max<Tick>(1, visibleEnd - visibleStart));
+    const auto previous = cursorTick_;
+    cursorTick_ = forward
+        ? cursorTick_ + std::min(scenario_->duration - cursorTick_, page)
+        : cursorTick_ - std::min(cursorTick_, page);
+    if (cursorTick_ == previous) {
+        emit statusMessage(
+            forward
+                ? tr("Timeline End reached · PageUp goes back")
+                : tr("Timeline start reached · PageDown goes forward"));
+        return;
+    }
+
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    waveEditHoverLaneId_.clear();
+    waveEditHoverRange_.reset();
+    if (const auto* lane = findLane(*scenario_, selectedLaneId_);
+        lane && lane->kind != LaneKind::Group && cursorTick_ < scenario_->duration) {
+        const auto target = editableBeatRangeAt(cursorTick_, *lane);
+        selectionRange_ = target;
+        waveEditHoverLaneId_ = lane->id;
+        waveEditHoverRange_ = target;
+    } else {
+        selectionRange_.reset();
+    }
+    hideBusPresetPalette();
+    snapGuideTick_.reset();
+    ensureCursorVisible(cursorTick_);
+    emit selectionChanged(
+        QString::fromStdString(selectedLaneId_),
+        cursorTick_);
+    emit statusMessage(
+        tr("%1 one visible page · edit cursor %2 · %3")
+            .arg(forward ? tr("Forward") : tr("Back"))
+            .arg(QString::fromStdString(formatTick(
+                cursorTick_,
+                project_->timeBase)))
+            .arg(forward ? tr("PageUp goes back") : tr("PageDown goes forward")));
     viewport()->update();
 }
 

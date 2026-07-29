@@ -7232,6 +7232,43 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            canvas->zoomIn();
+            canvas->zoomIn();
+            canvas->zoomIn();
+            canvas->goToTick(0);
+            canvas->setFocus(Qt::OtherFocusReason);
+            QCoreApplication::processEvents();
+            sendKey(canvas, Qt::Key_PageDown);
+            QCoreApplication::processEvents();
+            const auto pageDownTick = canvas->cursorTick();
+            if (pageDownTick <= 0
+                || pageDownTick >= window.project().scenarios.front().duration
+                || canvas->selectedLaneId()
+                    != QString::fromStdString(quickBit.id)
+                || undoAction->text() != undoTextBeforeBeatNavigation
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Forward one visible page"))) {
+                fail(QStringLiteral("PageDown did not advance the edit cursor by one visible page"));
+                return;
+            }
+            sendKey(canvas, Qt::Key_PageUp);
+            QCoreApplication::processEvents();
+            if (canvas->cursorTick() != 0
+                || undoAction->text() != undoTextBeforeBeatNavigation) {
+                fail(QStringLiteral("PageUp did not return by one visible page"));
+                return;
+            }
+            sendKey(canvas, Qt::Key_PageUp);
+            QCoreApplication::processEvents();
+            if (canvas->cursorTick() != 0
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Timeline start"))) {
+                fail(QStringLiteral("PageUp did not stop at timeline start"));
+                return;
+            }
+            canvas->fitScenario();
+            QCoreApplication::processEvents();
+
             sendMouse(
                 QEvent::MouseButtonPress,
                 paletteClick,
