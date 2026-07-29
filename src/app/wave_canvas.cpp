@@ -789,9 +789,24 @@ bool WaveCanvas::event(QEvent* event)
 {
     if (event->type() == QEvent::KeyPress && tool_ == Tool::WaveEdit) {
         const auto* keyEvent = static_cast<QKeyEvent*>(event);
+        const auto segmentForward = keyEvent->key() == Qt::Key_Tab
+            && keyEvent->modifiers() == Qt::ControlModifier;
+        const auto segmentBackward =
+            (keyEvent->key() == Qt::Key_Backtab
+             && keyEvent->modifiers()
+                 == (Qt::ControlModifier | Qt::ShiftModifier))
+            || (keyEvent->key() == Qt::Key_Tab
+                && keyEvent->modifiers()
+                    == (Qt::ControlModifier | Qt::ShiftModifier));
+        if (segmentForward || segmentBackward) {
+            navigateSelectedSegment(segmentForward);
+            event->accept();
+            return true;
+        }
         const auto forward = keyEvent->key() == Qt::Key_Tab
             && keyEvent->modifiers() == Qt::NoModifier;
-        const auto backward = keyEvent->key() == Qt::Key_Backtab
+        const auto backward = (keyEvent->key() == Qt::Key_Backtab
+            && keyEvent->modifiers() == Qt::ShiftModifier)
             || (keyEvent->key() == Qt::Key_Tab
                 && keyEvent->modifiers() == Qt::ShiftModifier);
         if (forward || backward) {
@@ -6788,6 +6803,82 @@ void WaveCanvas::navigateSelectedBeat(const bool forward)
             .arg(forward
                      ? tr("Tab advances · Shift+Tab goes back")
                      : tr("Shift+Tab goes back · Tab advances")));
+    viewport()->update();
+}
+
+void WaveCanvas::navigateSelectedSegment(const bool forward)
+{
+    if (!scenario_ || tool_ != Tool::WaveEdit) return;
+    if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
+        emit statusMessage(
+            tr("Finish or cancel the current drag before navigating Segments"));
+        return;
+    }
+    if (explicitRangeSelection_) {
+        emit statusMessage(
+            tr("Esc clears the selected range before navigating Segments"));
+        return;
+    }
+    auto* lane = findLane(*scenario_, selectedSegmentLaneId_);
+    if (!lane || selectedSegmentId_.empty()) {
+        emit statusMessage(
+            tr("Select a Segment before using Ctrl+Tab or Ctrl+Shift+Tab"));
+        return;
+    }
+    const auto current = std::find_if(
+        lane->segments.begin(),
+        lane->segments.end(),
+        [this](const Segment& segment) {
+            return segment.id == selectedSegmentId_;
+        });
+    if (current == lane->segments.end()) {
+        clearWaveEditState();
+        emit statusMessage(tr("The selected Segment no longer exists"));
+        viewport()->update();
+        return;
+    }
+    const auto target = forward
+        ? std::next(current)
+        : current == lane->segments.begin()
+            ? lane->segments.end()
+            : std::prev(current);
+    if (target == lane->segments.end()) {
+        emit statusMessage(
+            forward
+                ? tr("No next Segment on %1 · Ctrl+Shift+Tab goes back")
+                      .arg(QString::fromStdString(lane->name))
+                : tr("No previous Segment on %1 · Ctrl+Tab goes forward")
+                      .arg(QString::fromStdString(lane->name)));
+        return;
+    }
+
+    selectedLaneId_ = lane->id;
+    selectedLaneIds_ = {lane->id};
+    laneHeaderSelectionActive_ = false;
+    selectedSegmentLaneId_ = lane->id;
+    selectedSegmentId_ = target->id;
+    selectionRange_ = std::pair{target->start, target->end};
+    waveEditOriginalRange_.reset();
+    waveEditPreviewRange_.reset();
+    waveEditHoverLaneId_.clear();
+    waveEditHoverRange_.reset();
+    cursorTick_ = target->start;
+    hideBusPresetPalette();
+    ensureLaneVisible(lane->id);
+    ensureCursorVisible(cursorTick_);
+    emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+    emit statusMessage(
+        (forward
+             ? tr("Next Segment on %1 · %2 · %3–%4 · Ctrl+Shift+Tab goes back")
+             : tr("Previous Segment on %1 · %2 · %3–%4 · Ctrl+Tab goes forward"))
+            .arg(QString::fromStdString(lane->name))
+            .arg(QString::fromStdString(target->value))
+            .arg(QString::fromStdString(formatTick(
+                target->start,
+                project_->timeBase)))
+            .arg(QString::fromStdString(formatTick(
+                target->end,
+                project_->timeBase))));
     viewport()->update();
 }
 

@@ -7984,6 +7984,69 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            const auto beforeSegmentNavigation =
+                window.project().scenarios.front();
+            busAfterPreset = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto navigationSource = busAfterPreset
+                ? std::find_if(
+                      busAfterPreset->segments.begin(),
+                      busAfterPreset->segments.end(),
+                      [presetStart](const wave::Segment& candidate) {
+                          return candidate.start <= presetStart
+                              && presetStart < candidate.end;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (!busAfterPreset
+                || navigationSource == busAfterPreset->segments.end()
+                || std::next(navigationSource) == busAfterPreset->segments.end()) {
+                fail(QStringLiteral("Segment navigation fixture is incomplete"));
+                return;
+            }
+            const auto navigationTargetRange = std::pair{
+                std::next(navigationSource)->start,
+                std::next(navigationSource)->end,
+            };
+            sendKey(canvas, Qt::Key_Tab, Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        navigationTargetRange}
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Next Segment"))) {
+                fail(QStringLiteral("Ctrl+Tab did not select the next explicit Segment"));
+                return;
+            }
+            sendKey(
+                canvas,
+                Qt::Key_Tab,
+                Qt::ControlModifier | Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{
+                            navigationSource->start,
+                            navigationSource->end}}
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Previous Segment"))
+                || window.project().scenarios.front()
+                    != beforeSegmentNavigation) {
+                fail(QStringLiteral("Ctrl+Shift+Tab did not return to the previous Segment"));
+                return;
+            }
+            sendKey(
+                canvas,
+                Qt::Key_Tab,
+                Qt::ControlModifier | Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (!window.statusBar()->currentMessage().contains(
+                    QStringLiteral("No previous Segment"))
+                || window.project().scenarios.front()
+                    != beforeSegmentNavigation) {
+                fail(QStringLiteral("Segment navigation boundary changed the model"));
+                return;
+            }
+
             const QPoint finalBeatPoint(
                 tickX(timelineDuration - expectedBeat / 2),
                 presetBusY);
