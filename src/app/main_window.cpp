@@ -4901,15 +4901,19 @@ void MainWindow::createToolBars()
     auto* zoomInAction = editBar->addAction(
         themedIcon(QStringLiteral("zoom-in"), style(), QStyle::SP_ArrowUp),
         tr("Zoom in"));
+    zoomInAction->setObjectName(QStringLiteral("ZoomInAction"));
     zoomInAction->setShortcut(QKeySequence::ZoomIn);
     connect(zoomInAction, &QAction::triggered, canvas_, &WaveCanvas::zoomIn);
-    zoomInAction->setToolTip(tr("Zoom in around the viewport center"));
+    zoomInAction->setToolTip(
+        tr("Zoom in around the visible edit cursor, or the viewport center"));
     auto* zoomOutAction = editBar->addAction(
         themedIcon(QStringLiteral("zoom-out"), style(), QStyle::SP_ArrowDown),
         tr("Zoom out"));
+    zoomOutAction->setObjectName(QStringLiteral("ZoomOutAction"));
     zoomOutAction->setShortcut(QKeySequence::ZoomOut);
     connect(zoomOutAction, &QAction::triggered, canvas_, &WaveCanvas::zoomOut);
-    zoomOutAction->setToolTip(tr("Zoom out around the viewport center"));
+    zoomOutAction->setToolTip(
+        tr("Zoom out around the visible edit cursor, or the viewport center"));
     auto* fitAction = editBar->addAction(
         themedIcon(QStringLiteral("zoom-fit-best"), style(), QStyle::SP_DesktopIcon),
         tr("Fit scenario"));

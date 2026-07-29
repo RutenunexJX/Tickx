@@ -2384,6 +2384,48 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                const auto zoomAnchorBaseline = scenario;
+                constexpr wave::Tick zoomAnchorTick = 75'000;
+                canvas->goToTick(zoomAnchorTick);
+                QCoreApplication::processEvents();
+                const auto zoomAnchorBefore = xAtTick(zoomAnchorTick);
+                canvas->zoomIn();
+                QCoreApplication::processEvents();
+                const auto zoomAnchorAfterIn = xAtTick(zoomAnchorTick);
+                const auto zoomInStatus = window.statusBar()->currentMessage();
+                if (std::abs(zoomAnchorAfterIn - zoomAnchorBefore) > 2
+                    || scenario != zoomAnchorBaseline
+                    || undoAction->isEnabled()
+                    || !zoomInStatus.contains(
+                        QStringLiteral("Zoomed in around edit cursor at 75 ns"))) {
+                    qCritical().noquote()
+                        << "Cursor-anchored zoom-in diagnostics"
+                        << zoomAnchorBefore << zoomAnchorAfterIn
+                        << zoomInStatus;
+                    fail(QStringLiteral(
+                        "Zoom in did not keep the visible edit cursor fixed on screen"));
+                    return;
+                }
+                canvas->zoomOut();
+                QCoreApplication::processEvents();
+                const auto zoomAnchorAfterOut = xAtTick(zoomAnchorTick);
+                const auto zoomOutStatus = window.statusBar()->currentMessage();
+                if (std::abs(zoomAnchorAfterOut - zoomAnchorBefore) > 2
+                    || scenario != zoomAnchorBaseline
+                    || undoAction->isEnabled()
+                    || !zoomOutStatus.contains(
+                        QStringLiteral("Zoomed out around edit cursor at 75 ns"))) {
+                    qCritical().noquote()
+                        << "Cursor-anchored zoom-out diagnostics"
+                        << zoomAnchorBefore << zoomAnchorAfterOut
+                        << zoomOutStatus;
+                    fail(QStringLiteral(
+                        "Zoom out did not keep the visible edit cursor fixed on screen"));
+                    return;
+                }
+                canvas->horizontalScrollBar()->setValue(0);
+                QCoreApplication::processEvents();
+
                 const auto beginRightEdgeSegmentDrag = [&] {
                     const QPoint start(xAtTick(75'000), laneY);
                     sendMouse(

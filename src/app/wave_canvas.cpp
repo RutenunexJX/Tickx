@@ -1278,12 +1278,38 @@ WaveCanvas::waveEditTransitionPreviewRange() const noexcept
 
 void WaveCanvas::zoomIn()
 {
-    setScale(pixelsPerTick_ * 1.25, headerWidth_ + waveViewportWidth() / 2);
+    if (!scenario_) return;
+    const auto anchor = zoomAnchorX();
+    const auto cursorX = xAtTick(cursorTick_);
+    const auto cursorVisible =
+        cursorX >= headerWidth_ && cursorX <= viewport()->width();
+    setScale(pixelsPerTick_ * 1.25, anchor);
+    emit statusMessage(
+        cursorVisible
+            ? tr("Zoomed in around edit cursor at %1")
+                  .arg(project_
+                           ? QString::fromStdString(
+                                 formatTick(cursorTick_, project_->timeBase))
+                           : QString::number(cursorTick_))
+            : tr("Zoomed in around viewport center"));
 }
 
 void WaveCanvas::zoomOut()
 {
-    setScale(pixelsPerTick_ / 1.25, headerWidth_ + waveViewportWidth() / 2);
+    if (!scenario_) return;
+    const auto anchor = zoomAnchorX();
+    const auto cursorX = xAtTick(cursorTick_);
+    const auto cursorVisible =
+        cursorX >= headerWidth_ && cursorX <= viewport()->width();
+    setScale(pixelsPerTick_ / 1.25, anchor);
+    emit statusMessage(
+        cursorVisible
+            ? tr("Zoomed out around edit cursor at %1")
+                  .arg(project_
+                           ? QString::fromStdString(
+                                 formatTick(cursorTick_, project_->timeBase))
+                           : QString::number(cursorTick_))
+            : tr("Zoomed out around viewport center"));
 }
 
 void WaveCanvas::fitScenario()
@@ -6602,6 +6628,16 @@ void WaveCanvas::setScale(const double scale, const int anchorX)
         static_cast<long long>(horizontalScrollBar()->maximum()))));
     positionBusPresetPalette();
     viewport()->update();
+}
+
+int WaveCanvas::zoomAnchorX() const
+{
+    const auto center = headerWidth_ + waveViewportWidth() / 2;
+    if (!scenario_) return center;
+    const auto cursorX = xAtTick(cursorTick_);
+    return cursorX >= headerWidth_ && cursorX <= viewport()->width()
+        ? cursorX
+        : center;
 }
 
 double WaveCanvas::contentWidth() const

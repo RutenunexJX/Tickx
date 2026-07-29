@@ -303,6 +303,7 @@ private:
     void stopWaveEditDragAutoScroll();
     void commitLaneReorder();
     void setScale(double scale, int anchorX);
+    [[nodiscard]] int zoomAnchorX() const;
     [[nodiscard]] double contentWidth() const;
     [[nodiscard]] int waveViewportWidth() const;
     [[nodiscard]] QRect addLaneRowRect() const;
