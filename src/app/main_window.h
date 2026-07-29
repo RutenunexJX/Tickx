@@ -136,6 +136,8 @@ private:
     [[nodiscard]] Tick latestContentTick(const Scenario& scenario) const noexcept;
     void duplicateSelectedLane();
     void duplicateLaneById(const QString& laneId);
+    void hideSelectedLane();
+    void hideLaneById(const QString& laneId);
     void renameLaneById(const QString& laneId);
     void removeLaneById(const QString& laneId);
     void showLaneContextMenu(const QString& laneId, const QPoint& globalPosition);
@@ -211,6 +213,7 @@ private:
     QAction* undoAction_{nullptr};
     QAction* redoAction_{nullptr};
     QAction* duplicateLaneAction_{nullptr};
+    QAction* hideLaneAction_{nullptr};
     QAction* moveLaneUpAction_{nullptr};
     QAction* moveLaneDownAction_{nullptr};
     QAction* showHiddenLanesAction_{nullptr};

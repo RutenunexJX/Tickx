@@ -45,7 +45,7 @@ add_test(
 add_test(
     NAME wave-hidden-lane-smoke
     COMMAND wave-workbench
-            --hidden-lane-smoke
+            "--hidden-lane-smoke=${CMAKE_BINARY_DIR}/hidden-lane-smoke-quick-hide.png"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(

@@ -107,6 +107,7 @@ int main(int argc, char* argv[])
     bool waveEditAutoScrollSmoke = false;
     QString waveEditAutoScrollScreenshotPath;
     bool hiddenLaneSmoke = false;
+    QString hiddenLaneScreenshotPath;
     bool groupHeaderSmoke = false;
     bool signalHeaderSmoke = false;
     bool canvasAddLaneSmoke = false;
@@ -151,6 +152,10 @@ int main(int argc, char* argv[])
         } else if (argument == QStringLiteral(
                        "--wave-edit-autoscroll-smoke")) {
             waveEditAutoScrollSmoke = true;
+        } else if (argument.startsWith(QStringLiteral("--hidden-lane-smoke="))) {
+            hiddenLaneSmoke = true;
+            hiddenLaneScreenshotPath = argument.mid(
+                QStringLiteral("--hidden-lane-smoke=").size());
         } else if (argument == QStringLiteral("--hidden-lane-smoke")) {
             hiddenLaneSmoke = true;
         } else if (argument == QStringLiteral("--group-header-smoke")) {
@@ -5287,7 +5292,8 @@ int main(int argc, char* argv[])
             });
         });
     } else if (hiddenLaneSmoke) {
-        QTimer::singleShot(0, &window, [&application, &window] {
+        QTimer::singleShot(
+            0, &window, [&application, &window, hiddenLaneScreenshotPath] {
             auto fail = [&application, &window](const QString& message) {
                 qCritical().noquote() << message;
                 if (auto* modal = QApplication::activeModalWidget()) modal->close();
@@ -5299,6 +5305,8 @@ int main(int argc, char* argv[])
                 QStringLiteral("CanvasShowHiddenLanesButton"));
             auto* showAction = window.findChild<QAction*>(
                 QStringLiteral("ShowHiddenLanesAction"));
+            auto* hideAction = window.findChild<QAction*>(
+                QStringLiteral("HideLaneAction"));
             auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
             auto* redoAction = window.findChild<QAction*>(QStringLiteral("RedoAction"));
             auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
@@ -5308,7 +5316,7 @@ int main(int argc, char* argv[])
             const auto* initialGroup = wave::findLane(
                 window.project().scenarios.front(),
                 "group-handshake");
-            if (!canvas || !showButton || !showAction || !undoAction || !redoAction
+            if (!canvas || !showButton || !showAction || !hideAction || !undoAction || !redoAction
                 || !saveState || !initialLane || !initialLane->visible
                 || !initialGroup || initialGroup->visible
                 || !showButton->isVisible() || !showAction->isVisible()
@@ -5329,36 +5337,98 @@ int main(int argc, char* argv[])
                 return;
             }
 
-            bool hideDialogHandled = false;
-            QTimer::singleShot(
-                0,
-                &application,
-                [&hideDialogHandled] {
-                    auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-                    auto* visible = dialog
-                        ? dialog->findChild<QCheckBox*>(
-                              QStringLiteral("LanePropertiesVisibleCheck"))
-                        : nullptr;
-                    auto* buttons = dialog
-                        ? dialog->findChild<QDialogButtonBox*>()
-                        : nullptr;
-                    auto* ok = buttons ? buttons->button(QDialogButtonBox::Ok) : nullptr;
-                    if (!dialog || !visible || !ok) {
-                        if (dialog) dialog->reject();
-                        return;
-                    }
-                    visible->setChecked(false);
-                    hideDialogHandled = true;
-                    ok->click();
-                });
-            window.openLanePropertiesPreview(QStringLiteral("lane-request"));
-            QCoreApplication::processEvents();
+            const auto sendKey = [](QObject* target,
+                                    const int key,
+                                    const Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+                QKeyEvent press(QEvent::KeyPress, key, modifiers);
+                QCoreApplication::sendEvent(target, &press);
+                QKeyEvent release(QEvent::KeyRelease, key, modifiers);
+                QCoreApplication::sendEvent(target, &release);
+            };
+            const auto sendMouse = [canvas](
+                                       const QEvent::Type type,
+                                       const QPoint position,
+                                       const Qt::MouseButton button,
+                                       const Qt::MouseButtons buttons) {
+                QMouseEvent event(
+                    type,
+                    QPointF(position),
+                    QPointF(canvas->viewport()->mapToGlobal(position)),
+                    button,
+                    buttons,
+                    Qt::NoModifier);
+                QCoreApplication::sendEvent(canvas->viewport(), &event);
+            };
+            const auto clickHeader = [&sendMouse](const QPoint position) {
+                sendMouse(
+                    QEvent::MouseButtonPress,
+                    position,
+                    Qt::LeftButton,
+                    Qt::LeftButton);
+                sendMouse(
+                    QEvent::MouseButtonRelease,
+                    position,
+                    Qt::LeftButton,
+                    Qt::NoButton);
+            };
+            const auto laneCenter = [canvas, &window](const std::string& laneId) {
+                auto y = 40 - canvas->verticalScrollBar()->value();
+                for (const auto& lane : window.project().scenarios.front().lanes) {
+                    if (!lane.visible) continue;
+                    const auto height = std::clamp(lane.height, 30, 240);
+                    if (lane.id == laneId) return y + height / 2;
+                    y += height;
+                }
+                return -1;
+            };
 
-            const auto* hiddenLane = wave::findLane(
+            canvas->verticalScrollBar()->setValue(0);
+            QCoreApplication::processEvents();
+            auto requestY = laneCenter("lane-request");
+            if (requestY < 40 || requestY >= canvas->viewport()->height()) {
+                fail(QStringLiteral("The request signal is outside the visible canvas"));
+                return;
+            }
+            canvas->setFocus(Qt::OtherFocusReason);
+            clickHeader(QPoint(80, requestY));
+            QCoreApplication::processEvents();
+            if (canvas->selectedLaneId() != QStringLiteral("lane-request")
+                || !hideAction->isEnabled()
+                || !hideAction->text().contains(QStringLiteral("Hide selected signal"))) {
+                fail(QStringLiteral("Selecting a signal did not expose the Edit hide action"));
+                return;
+            }
+
+            sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            hideAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* rangeGuardLane = wave::findLane(
                 window.project().scenarios.front(),
                 "lane-request");
-            if (!hideDialogHandled || !hiddenLane || hiddenLane->visible
+            if (!canvas->hasExplicitRangeSelection()
+                || !rangeGuardLane || !rangeGuardLane->visible
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Esc clears"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("before hiding a whole item"))) {
+                fail(QStringLiteral("Hide action discarded an explicit range instead of explaining recovery"));
+                return;
+            }
+            sendKey(canvas, Qt::Key_Escape);
+            QCoreApplication::processEvents();
+            requestY = laneCenter("lane-request");
+            clickHeader(QPoint(80, requestY));
+            QCoreApplication::processEvents();
+
+            hideAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* hiddenByEdit = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            if (!hiddenByEdit || hiddenByEdit->visible
                 || !canvas->selectedLaneId().isEmpty()
+                || hideAction->isEnabled()
                 || !showButton->isVisible()
                 || !showButton->geometry().intersects(canvas->viewport()->rect())
                 || showButton->text() != QStringLiteral("Show 2 hidden items")
@@ -5366,14 +5436,85 @@ int main(int argc, char* argv[])
                 || showAction->text() != QStringLiteral("Show 2 hidden items")
                 || saveState->text() != QStringLiteral("Unsaved changes")
                 || !window.statusBar()->currentMessage().contains(
-                    QStringLiteral("Hidden req"))
+                    QStringLiteral("Hidden signal req"))
                 || !window.statusBar()->currentMessage().contains(
-                    QStringLiteral("Show hidden items"))) {
-                fail(QStringLiteral(
-                    "Hiding a signal did not expose an immediate and discoverable recovery path"));
+                    QStringLiteral("Show 2 hidden items"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Z"))
+                || !undoAction->text().contains(QStringLiteral("Hide lane"))
+                || QApplication::activeModalWidget()) {
+                fail(QStringLiteral("Edit hide did not remove one signal with clear recovery feedback"));
+                return;
+            }
+            if (!hiddenLaneScreenshotPath.isEmpty()
+                && !window.grab().save(hiddenLaneScreenshotPath)) {
+                fail(QStringLiteral("Cannot save quick-hide screenshot"));
                 return;
             }
 
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* restoredAfterEditUndo = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            const auto* baselineHiddenGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!restoredAfterEditUndo || !restoredAfterEditUndo->visible
+                || !baselineHiddenGroup || baselineHiddenGroup->visible
+                || !showButton->isVisible()
+                || showButton->text() != QStringLiteral("Show 1 hidden item")
+                || saveState->text() != QStringLiteral("Saved")
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Undid Hide lane"))) {
+                fail(QStringLiteral("One Undo did not restore the signal and saved baseline"));
+                return;
+            }
+
+            requestY = laneCenter("lane-request");
+            clickHeader(QPoint(80, requestY));
+            QCoreApplication::processEvents();
+            bool contextHideHandled = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&contextHideHandled] {
+                    auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                    auto* hide = menu
+                        ? menu->findChild<QAction*>(
+                              QStringLiteral("HideLaneContextAction"))
+                        : nullptr;
+                    if (!menu
+                        || menu->objectName() != QStringLiteral("LaneHeaderContextMenu")
+                        || !hide
+                        || hide->text() != QStringLiteral("Hide signal")) {
+                        if (menu) menu->close();
+                        return;
+                    }
+                    contextHideHandled = true;
+                    hide->trigger();
+                    menu->close();
+                });
+            const QPoint contextPoint(80, requestY);
+            QContextMenuEvent contextEvent(
+                QContextMenuEvent::Mouse,
+                contextPoint,
+                canvas->viewport()->mapToGlobal(contextPoint));
+            QCoreApplication::sendEvent(canvas->viewport(), &contextEvent);
+            QCoreApplication::processEvents();
+            const auto* hiddenLane = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            if (!contextHideHandled || !hiddenLane || hiddenLane->visible
+                || !canvas->selectedLaneId().isEmpty()
+                || !showButton->isVisible()
+                || showButton->text() != QStringLiteral("Show 2 hidden items")
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Hidden signal req"))
+                || QApplication::activeModalWidget()) {
+                fail(QStringLiteral("Signal header context action did not hide one signal without a dialog"));
+                return;
+            }
             showButton->click();
             QCoreApplication::processEvents();
             const auto* restoredLane = wave::findLane(
@@ -5462,6 +5603,8 @@ int main(int argc, char* argv[])
             auto* canvas = window.findChild<wave::WaveCanvas*>();
             auto* showButton = window.findChild<QToolButton*>(
                 QStringLiteral("CanvasShowHiddenLanesButton"));
+            auto* hideAction = window.findChild<QAction*>(
+                QStringLiteral("HideLaneAction"));
             auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
             auto* redoAction = window.findChild<QAction*>(QStringLiteral("RedoAction"));
             auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
@@ -5475,7 +5618,8 @@ int main(int argc, char* argv[])
             const auto* initialGroup = wave::findLane(
                 window.project().scenarios.front(),
                 "group-handshake");
-            if (!canvas || !showButton || !undoAction || !redoAction || !saveState
+            if (!canvas || !showButton || !hideAction || !undoAction || !redoAction
+                || !saveState
                 || !initialGroup || initialGroup->visible
                 || !showButton->isVisible()
                 || showButton->text() != QStringLiteral("Show 1 hidden item")) {
@@ -5576,6 +5720,9 @@ int main(int argc, char* argv[])
             QCoreApplication::processEvents();
             const auto selectedStatus = window.statusBar()->currentMessage();
             if (canvas->selectedLaneId() != QStringLiteral("group-handshake")
+                || !hideAction->isEnabled()
+                || !hideAction->text().contains(
+                    QStringLiteral("Hide selected group"))
                 || !selectedStatus.contains(QStringLiteral("Selected group Handshake signals"))
                 || !selectedStatus.contains(QStringLiteral("Delete removes group"))
                 || !selectedStatus.contains(QStringLiteral("F2 renames"))) {
@@ -5668,10 +5815,21 @@ int main(int argc, char* argv[])
                     auto* action = menu
                         ? menu->findChild<QAction*>(QStringLiteral("GroupPropertiesAction"))
                         : nullptr;
+                    auto* hide = menu
+                        ? menu->findChild<QAction*>(
+                              QStringLiteral("HideLaneContextAction"))
+                        : nullptr;
+                    auto* duplicate = menu
+                        ? menu->findChild<QAction*>(
+                              QStringLiteral("DuplicateLaneContextAction"))
+                        : nullptr;
                     if (!menu
                         || menu->objectName() != QStringLiteral("LaneHeaderContextMenu")
                         || !action
-                        || action->text() != QStringLiteral("Group properties…")) {
+                        || action->text() != QStringLiteral("Group properties…")
+                        || !hide
+                        || hide->text() != QStringLiteral("Hide group")
+                        || duplicate) {
                         if (menu) menu->close();
                         return;
                     }
@@ -5713,6 +5871,65 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            groupY = laneCenter("group-handshake");
+            bool groupHideHandled = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&groupHideHandled] {
+                    auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                    auto* hide = menu
+                        ? menu->findChild<QAction*>(
+                              QStringLiteral("HideLaneContextAction"))
+                        : nullptr;
+                    if (!menu
+                        || menu->objectName() != QStringLiteral("LaneHeaderContextMenu")
+                        || !hide
+                        || hide->text() != QStringLiteral("Hide group")) {
+                        if (menu) menu->close();
+                        return;
+                    }
+                    groupHideHandled = true;
+                    hide->trigger();
+                    menu->close();
+                });
+            const QPoint hideContextPoint(80, groupY);
+            QContextMenuEvent hideContextEvent(
+                QContextMenuEvent::Mouse,
+                hideContextPoint,
+                canvas->viewport()->mapToGlobal(hideContextPoint));
+            QCoreApplication::sendEvent(canvas->viewport(), &hideContextEvent);
+            QCoreApplication::processEvents();
+            const auto* hiddenGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!groupHideHandled || !hiddenGroup || hiddenGroup->visible
+                || !canvas->selectedLaneId().isEmpty()
+                || !showButton->isVisible()
+                || showButton->text() != QStringLiteral("Show 1 hidden item")
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Hidden group Handshake I/O"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Z"))
+                || !undoAction->text().contains(QStringLiteral("Hide group"))
+                || QApplication::activeModalWidget()) {
+                fail(QStringLiteral("Group right-click hide did not provide a one-step recoverable result"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* groupAfterHideUndo = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!groupAfterHideUndo || !groupAfterHideUndo->visible
+                || showButton->isVisible()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Undid Hide group"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Y"))) {
+                fail(QStringLiteral("Group hide Undo did not restore the visible group"));
+                return;
+            }
             const auto orderBeforeMove = laneOrder();
             groupY = laneCenter("group-handshake");
             const auto acknowledgeTop = laneScreenTop("lane-ack");

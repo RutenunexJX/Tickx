@@ -8,7 +8,7 @@
 预期数字波形；同一场景模型继续支撑 SystemVerilog/SVA/cocotb、文档图、trace 导入及
 Expected/Actual 比较，这些派生与比较能力由独立 CLI 和领域模块提供。
 
-该目标已登记为长期 goal，当前状态为 `第 85 轮完成（持续迭代 Goal 进行中）`。阶段 1 至阶段 6、最终加固、Clock
+该目标已登记为长期 goal，当前状态为 `第 86 轮完成（持续迭代 Goal 进行中）`。阶段 1 至阶段 6、最终加固、Clock
 可编辑性与覆盖语义迭代、Lane/Group 属性编辑迭代以及依赖感知删除迭代均已完成并
 验收；Lane/Group 显示顺序、Relation condition 求值和画布末尾添加信号入口迭代也已
 完成，光标模式增强、Wave Edit 直接波形编辑、画布信号管理、工具收敛、纯波形工作区、
@@ -25,6 +25,7 @@ Expected/Actual 比较，这些派生与比较能力由独立 CLI 和领域模�
 当前第 83 轮已完成长信号列表的 `Ctrl+F` 即时查找、前后循环、无结果反馈、显式范围门禁及离屏双视角验收；查找只改变当前选择与纵向可见位置，不修改 Scenario、Undo 或 Saved。
 当前第 84 轮进一步完成 `Ctrl+G` 精确时间跳转、整数时间单位与周期输入、非法/越界原位反馈、显式范围门禁及离屏双视角验收；跳转只改变编辑光标和必要的水平可见位置，不修改 Scenario、Undo 或 Saved。
 当前第 85 轮进一步完成现有信号一键复制、相邻插入、唯一名称与随机颜色、ClockDomain 独立复制、单步 Undo/Redo、显式范围及文本焦点门禁和离屏双视角验收；复制保留信号属性与波形但重新生成 lane/segment 身份，不复制 Event、Relation 或 trace mapping。
+当前第 86 轮进一步完成可见信号与 Group 一步隐藏、动态 Edit/标题右键入口、显式范围无损门禁、实时恢复计数、专用单步 Undo/Redo 和离屏双视角验收；隐藏不删除模型数据或依赖，既有 `Show hidden items` 继续一次恢复全部隐藏项。
 
 ## 不变量
 
@@ -73,6 +74,7 @@ Expected/Actual 比较，这些派生与比较能力由独立 CLI 和领域模�
 | 可见信号即时查找 | 持续迭代 83 完成 | `Ctrl+F` 临时紧凑栏按可见非 Group 信号的名称/稳定 ID 大小写不敏感匹配；即时首项、Enter/Shift+Enter 与上下按钮循环、结果计数、无匹配原位反馈、最小垂直滚动、水平视图保持、显式范围门禁、关闭后选择保留及重开查询恢复均通过 offscreen 专项 |
 | 精确时间直接跳转 | 持续迭代 84 完成 | `Ctrl+G` 临时紧凑栏接受整数 ps/ns/us/ms/tick 与 `cycle N`；精确光标定位、最小水平揭示、选中信号/缩放保持、非法与越界原位反馈、显式范围及草稿门禁、Bus/Enum 浮层隔离、关闭后结果保留和重开预填均通过 offscreen 专项 |
 | 现有信号一键复制 | 持续迭代 85 完成 | Edit/标题右键/`Ctrl+D` 将非 Group 信号完整复制到原信号正下方；唯一名称、不同随机颜色、属性与波形一致、lane/segment ID 独立、ClockDomain 独立、Event/Relation 不复制、显式范围和文本焦点门禁、单步 Undo/Redo 及状态反馈均通过 offscreen 专项 |
+| 可见项一步隐藏 | 持续迭代 86 完成 | Edit 动态动作与标题右键将信号或 Group 一步隐藏；无模态窗口、显式范围无损门禁、不可见选择清理、实时 `Show N hidden items` 与恢复说明、专用 Hide lane/group 单步 Undo/Redo、Group 复制入口隔离及 Saved 基线回归均通过 offscreen 专项 |
 | 修改文件清单 | 完成 | 最终交付报告及 git 状态 |
 | 构建和测试结果 | 完成 | `PLAN.md` 最终验证证据 |
 | 性能测试结果 | 完成 | 百万 transition 可见范围基准记录于 `PLAN.md` |
@@ -83,5 +85,6 @@ Expected/Actual 比较，这些派生与比较能力由独立 CLI 和领域模�
 第 83 轮开发视角 Debug/Release 全量构建、26/26 核心测试及 26/26 CTest 均已通过，百万 transition 指标为 Debug 20 ms / Release 5 ms；全部 GUI 路径使用 offscreen。用户视角确认 Ctrl+F 在 20 条长列表中输入 `signal_1` 即时定位 `signal_10`，以 1/10 显示结果并可循环到 `signal_19`；Group/隐藏信号不进入结果，无匹配、显式范围门禁、关闭与重开均保留明确状态。紧凑查找栏、所选信号、波形、时间轴与网格通过离屏截图验收。
 第 84 轮开发视角 Debug/Release 全量构建、26/26 核心测试及 26/26 CTest 均已通过，百万 transition 指标为 Debug 21 ms / Release 5 ms；全部 GUI 路径使用 offscreen。用户视角确认 Ctrl+G 输入 `375 ns` 后精确定位并只做必要水平滚动，选中 Bus、缩放及模型状态均保持；非法/越界输入原位纠错，`cycle 25` 使用唯一 10 ns 时钟到达 250 ns，显式范围无损阻断。紧凑跳转栏、375 ns 光标、所选信号、波形、时间轴与网格通过离屏截图验收。
 第 85 轮开发视角 Debug/Release 全量构建、26/26 核心测试及 26/26 CTest 均已通过，百万 transition 指标为 Debug 19 ms / Release 4 ms；全部 GUI 路径使用 offscreen。用户视角确认右键信号标题可将 `bus` 一步复制为紧邻的 `bus_copy`，属性与波形一致、颜色和稳定身份独立，副本立即选中；Undo/Redo 精确恢复，`Ctrl+D` 复制 Clock 时生成独立 ClockDomain，显式范围无损阻断且 Event/Relation 数量不变。`bus`/`bus_copy` 相邻波形、不同颜色、选中态与状态栏通过离屏截图验收。
+第 86 轮开发视角 Debug/Release 全量构建、26/26 核心测试及 26/26 CTest 均已通过，百万 transition 指标为 Debug 19 ms / Release 4 ms；全部 GUI 路径使用 offscreen。用户视角确认 Edit 与标题右键均可将 `req` 一步隐藏，显式范围先得到无损提示，隐藏后选择清空、`Show 2 hidden items` 和恢复说明立即可见，单步 Undo 回到 Saved；Group 右键 `Hide group`、复制入口隔离、Undo 及恢复全部隐藏项同样通过。`req` 消失后的其余波形、时间轴、网格、恢复按钮和状态栏通过离屏截图验收。
 
 长期 Goal 继续保持活动：每轮完成实施、开发视角验收和用户视角验收后提交并推送，再进入下一轮；迭代过程中不打包。

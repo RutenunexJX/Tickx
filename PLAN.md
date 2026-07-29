@@ -4801,6 +4801,57 @@ Visual result: bus 与所选 bus_copy 相邻显示，DNT/CA?/X 波形在相同�
 Desktop interaction: none
 Packaging: not run during iteration
 ```
+## 持续迭代 86：可见信号与 Group 一步隐藏
+
+状态：完成，持续迭代中
+
+已交付：
+
+- 开发审计确认隐藏可见信号此前必须右键进入完整属性窗口、定位 `Visible`、取消勾选并确认；纯波形工作区中，一个临时收起操作需要四个步骤并理解属性模型，且容易与删除混淆。
+- Edit 菜单新增随选择动态命名的 `Hide selected signal` / `Hide selected group`；信号与 Group 标题右键分别新增 `Hide signal` / `Hide group`。触发后立即隐藏目标，不弹确认或属性窗口，不增加工具栏按钮。
+- 新增专用 `HideLaneCommand`：信号与 Group 分别公开 `Hide lane` / `Hide group` Undo 描述，单步 Undo/Redo 始终作用于同一稳定 ID；对已隐藏对象执行时不污染命令历史。
+- 隐藏后立即清理不可见标题选择、范围目标和便携面板，状态栏明确显示对象名称、实时 `Show N hidden items`、底部/Edit 恢复位置和 `Ctrl+Z`。显式范围存在时操作无损阻断并提示先按 Esc；既有 `Show hidden items` 继续一次恢复全部隐藏项。
+- 扩展核心命令测试、`wave-hidden-lane-smoke` 和 `wave-group-header-smoke`：覆盖动态 Edit 动作、范围门禁、信号 Edit/右键隐藏、Group 右键隐藏、Group 不出现复制入口、无模态窗口、隐藏计数、选择清理、单步 Undo/Redo、恢复全部隐藏项、Saved 基线回归和离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 19 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.07 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.94 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-hidden-lane-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.25 sec
+
+Automated QA: 选中 req 后 Edit 菜单立即显示 Hide selected signal；存在显式范围时隐藏被无损阻断并提示 Esc。清除范围后一步隐藏 req，选择同步清空、Show 2 hidden items 立即出现、状态公开恢复入口与 Ctrl+Z，且没有模态窗口；单步 Undo 回到 Saved。右键信号标题可再次一步隐藏，Show hidden items 恢复信号与既有隐藏 Group，Undo/Redo 和两步回退精确回到示例工程基线。Group 标题右键只提供 Hide group 而不提供 Duplicate signal，实际隐藏及单步 Undo 同样通过。
+Offscreen visual QA: build/qtcreator-debug/hidden-lane-smoke-quick-hide.png
+Visual result: req 行已消失，clk/reset_n/ack/data/state/transfer 及其波形、时间轴和网格保持原位置；底部 Show 2 hidden items 按钮清晰可见，状态栏同时显示 Hidden signal req、恢复位置、Ctrl+Z 和 Unsaved changes，无弹窗、遮挡、裁切或视图跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

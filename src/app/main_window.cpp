@@ -2458,6 +2458,73 @@ void MainWindow::duplicateLaneById(const QString& laneId)
     statusBar()->showMessage(result, 6'000);
 }
 
+void MainWindow::hideSelectedLane()
+{
+    hideLaneById(selectedLaneIdForEditing());
+}
+
+void MainWindow::hideLaneById(const QString& laneId)
+{
+    if (!canvas_ || laneId.isEmpty()) return;
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before hiding a whole item"),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+
+    auto* scenario = activeScenario();
+    const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
+    if (!lane) return;
+    const auto laneName = QString::fromStdString(lane->name);
+    const auto hidingGroup = lane->kind == LaneKind::Group;
+    if (!lane->visible) {
+        statusBar()->showMessage(
+            hidingGroup
+                ? tr("Group %1 is already hidden").arg(laneName)
+                : tr("Signal %1 is already hidden").arg(laneName),
+            3'000);
+        updateCommandActions();
+        return;
+    }
+
+    try {
+        if (!commandStack_.execute(std::make_unique<HideLaneCommand>(
+                *scenario,
+                lane->id))) {
+            statusBar()->showMessage(
+                hidingGroup
+                    ? tr("Group %1 is already hidden").arg(laneName)
+                    : tr("Signal %1 is already hidden").arg(laneName),
+                3'000);
+            updateCommandActions();
+            return;
+        }
+    } catch (const std::exception& exception) {
+        QMessageBox::warning(
+            this,
+            tr("Cannot hide item"),
+            QString::fromUtf8(exception.what()));
+        return;
+    }
+
+    canvas_->refreshModel();
+    updateSelection(QString{}, canvas_->cursorTick());
+    markEdited();
+    const auto hiddenCount = static_cast<std::size_t>(std::count_if(
+        scenario->lanes.begin(),
+        scenario->lanes.end(),
+        [](const Lane& candidate) { return !candidate.visible; }));
+    const auto restoreLabel = hiddenCount == 1
+        ? tr("Show 1 hidden item")
+        : tr("Show %1 hidden items").arg(static_cast<qulonglong>(hiddenCount));
+    statusBar()->showMessage(
+        tr("Hidden %1 %2 · %3 at the bottom or in Edit restores hidden items · Ctrl+Z to undo")
+            .arg(hidingGroup ? tr("group") : tr("signal"), laneName, restoreLabel),
+        8'000);
+}
+
 void MainWindow::renameLaneById(const QString& laneId)
 {
     if (!commitPendingEdits()) return;
@@ -2688,6 +2755,14 @@ void MainWindow::showLaneContextMenu(
         connect(properties, &QAction::triggered, this, [this, laneId] {
             editLaneById(laneId);
         });
+        menu.addSeparator();
+        auto* hide = menu.addAction(tr("Hide group"));
+        hide->setObjectName(QStringLiteral("HideLaneContextAction"));
+        hide->setToolTip(
+            tr("Hide this group; Show hidden items restores it"));
+        connect(hide, &QAction::triggered, this, [this, laneId] {
+            hideLaneById(laneId);
+        });
         menu.exec(globalPosition);
         return;
     }
@@ -2710,6 +2785,13 @@ void MainWindow::showLaneContextMenu(
         tr("Copy this signal and its waveform immediately below the source"));
     connect(duplicate, &QAction::triggered, this, [this, laneId] {
         duplicateLaneById(laneId);
+    });
+    auto* hide = menu.addAction(tr("Hide signal"));
+    hide->setObjectName(QStringLiteral("HideLaneContextAction"));
+    hide->setToolTip(
+        tr("Hide this signal; Show hidden items restores it"));
+    connect(hide, &QAction::triggered, this, [this, laneId] {
+        hideLaneById(laneId);
     });
     menu.exec(globalPosition);
 }
@@ -3032,6 +3114,10 @@ void MainWindow::updateLaneOrderActions()
     if (moveLaneUpAction_) moveLaneUpAction_->setEnabled(false);
     if (moveLaneDownAction_) moveLaneDownAction_->setEnabled(false);
     if (duplicateLaneAction_) duplicateLaneAction_->setEnabled(false);
+    if (hideLaneAction_) {
+        hideLaneAction_->setEnabled(false);
+        hideLaneAction_->setText(tr("&Hide selected item"));
+    }
     const auto* scenario = activeScenario();
     const auto laneId = selectedLaneIdForEditing().toStdString();
     if (!scenario || laneId.empty()) return;
@@ -3045,6 +3131,13 @@ void MainWindow::updateLaneOrderActions()
     if (duplicateLaneAction_) {
         duplicateLaneAction_->setEnabled(
             iterator->visible && iterator->kind != LaneKind::Group);
+    }
+    if (hideLaneAction_) {
+        hideLaneAction_->setEnabled(iterator->visible);
+        hideLaneAction_->setText(
+            iterator->kind == LaneKind::Group
+                ? tr("&Hide selected group")
+                : tr("&Hide selected signal"));
     }
     const auto index = std::distance(scenario->lanes.begin(), iterator);
     if (moveLaneUpAction_) moveLaneUpAction_->setEnabled(index > 0);
@@ -4450,6 +4543,14 @@ void MainWindow::createActions()
         this,
         &MainWindow::editSelectedLane);
     editLaneAction->setToolTip(tr("Edit the selected lane or group without changing its stable ID"));
+    hideLaneAction_ = editMenu_->addAction(
+        tr("&Hide selected item"),
+        this,
+        &MainWindow::hideSelectedLane);
+    hideLaneAction_->setObjectName(QStringLiteral("HideLaneAction"));
+    hideLaneAction_->setToolTip(
+        tr("Hide the selected signal or group; Show hidden items restores it"));
+    hideLaneAction_->setEnabled(false);
     showHiddenLanesAction_ = editMenu_->addAction(
         tr("Show hidden items"),
         this,
