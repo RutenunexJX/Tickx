@@ -8047,6 +8047,103 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            const auto nudgeSourceValue = navigationSource->value;
+            const auto nudgeSourceExtensions = navigationSource->extensions;
+            const auto beforeSegmentNudge =
+                window.project().scenarios.front();
+            sendKey(
+                canvas,
+                Qt::Key_Right,
+                Qt::AltModifier);
+            QCoreApplication::processEvents();
+            busAfterPreset = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto nudgedLater = busAfterPreset
+                ? std::find_if(
+                      busAfterPreset->segments.begin(),
+                      busAfterPreset->segments.end(),
+                      [presetStart, expectedBeat](
+                          const wave::Segment& candidate) {
+                          return candidate.start == presetStart + expectedBeat
+                              && candidate.end
+                                  == presetStart + 2 * expectedBeat;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (!busAfterPreset
+                || nudgedLater == busAfterPreset->segments.end()
+                || nudgedLater->value != nudgeSourceValue
+                || nudgedLater->extensions != nudgeSourceExtensions
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{
+                            presetStart + expectedBeat,
+                            presetStart + 2 * expectedBeat}}
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("nudged later"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("step %1").arg(
+                        QString::fromStdString(wave::formatTick(
+                            expectedBeat,
+                            window.project().timeBase))))) {
+                fail(QStringLiteral("Alt+Right did not nudge the selected Segment by one Sync beat"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front() != beforeSegmentNudge) {
+                fail(QStringLiteral("Alt+Right Segment nudge was not one atomic Undo"));
+                return;
+            }
+
+            sendMouse(
+                QEvent::MouseButtonPress,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            sendKey(
+                canvas,
+                Qt::Key_Left,
+                Qt::AltModifier);
+            QCoreApplication::processEvents();
+            busAfterPreset = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto nudgedEarlier = busAfterPreset
+                ? std::find_if(
+                      busAfterPreset->segments.begin(),
+                      busAfterPreset->segments.end(),
+                      [presetStart, expectedBeat](
+                          const wave::Segment& candidate) {
+                          return candidate.start == presetStart - expectedBeat
+                              && candidate.end == presetStart;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (!busAfterPreset
+                || nudgedEarlier == busAfterPreset->segments.end()
+                || nudgedEarlier->value != nudgeSourceValue
+                || nudgedEarlier->extensions != nudgeSourceExtensions
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{
+                            presetStart - expectedBeat,
+                            presetStart}}
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("nudged earlier"))) {
+                fail(QStringLiteral("Alt+Left did not nudge the selected Segment by one Sync beat"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front() != beforeSegmentNudge) {
+                fail(QStringLiteral("Alt+Left Segment nudge was not one atomic Undo"));
+                return;
+            }
+
             const QPoint finalBeatPoint(
                 tickX(timelineDuration - expectedBeat / 2),
                 presetBusY);

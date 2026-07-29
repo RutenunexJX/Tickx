@@ -290,6 +290,7 @@ private:
     void clearSelectedSegment();
     bool duplicateSelectedSegment(bool after);
     bool duplicateSelectedSegmentBefore();
+    bool nudgeSelectedSegment(bool forward);
     void updateLaneDropTarget(int y);
     void updateLaneDragAutoScroll(int pointerY);
     void advanceLaneDragAutoScroll();

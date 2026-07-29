@@ -2616,6 +2616,15 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         }
+        if ((event->key() == Qt::Key_Left
+             || event->key() == Qt::Key_Right)
+            && event->modifiers() == Qt::AltModifier
+            && !selectedSegmentId_.empty()) {
+            static_cast<void>(
+                nudgeSelectedSegment(event->key() == Qt::Key_Right));
+            event->accept();
+            return;
+        }
         if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
             const auto step = cursorKeyboardStep();
             const auto direction = event->key() == Qt::Key_Left ? Tick{-1} : Tick{1};
@@ -6121,6 +6130,122 @@ bool WaveCanvas::duplicateSelectedSegment(const bool after)
             .arg(QString::fromStdString(laneName))
             .arg(formatTime(targetStart))
             .arg(formatTime(targetEnd)),
+        relationCountBefore,
+        scenario_->relations.size()));
+    viewport()->update();
+    return true;
+}
+
+bool WaveCanvas::nudgeSelectedSegment(const bool forward)
+{
+    if (!scenario_ || !commandStack_ || selectedSegmentLaneId_.empty()
+        || selectedSegmentId_.empty()) {
+        return false;
+    }
+    auto* lane = findLane(*scenario_, selectedSegmentLaneId_);
+    const auto* segment = segmentById(
+        selectedSegmentLaneId_,
+        selectedSegmentId_);
+    if (!lane || !segment || lane->kind == LaneKind::Group) return false;
+
+    const auto current = std::find_if(
+        lane->segments.begin(),
+        lane->segments.end(),
+        [this](const Segment& candidate) {
+            return candidate.id == selectedSegmentId_;
+        });
+    if (current == lane->segments.end()) return false;
+    const auto index = static_cast<std::size_t>(
+        std::distance(lane->segments.begin(), current));
+    const auto unit = minimumWaveEditUnit(*lane);
+    const auto width = segment->end - segment->start;
+    auto lower = Tick{0};
+    auto upper = scenario_->duration - width;
+    if (index > 0) {
+        const auto& previous = lane->segments.at(index - 1);
+        lower = previous.end == segment->start
+            ? previous.start + unit
+            : previous.end;
+    }
+    if (index + 1 < lane->segments.size()) {
+        const auto& next = lane->segments.at(index + 1);
+        upper = next.start == segment->end
+            ? next.end - width - unit
+            : next.start - width;
+    }
+    const auto requestedStart = forward
+        ? segment->start + unit
+        : segment->start - unit;
+    const auto formatTime = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : QString::number(tick);
+    };
+    if (upper < lower
+        || requestedStart < lower
+        || requestedStart > upper) {
+        emit statusMessage(
+            forward
+                ? tr("%1 Segment cannot move later by %2 · next content or End blocks it")
+                      .arg(QString::fromStdString(lane->name))
+                      .arg(formatTime(unit))
+                : tr("%1 Segment cannot move earlier by %2 · previous content or start blocks it")
+                      .arg(QString::fromStdString(lane->name))
+                      .arg(formatTime(unit)));
+        return false;
+    }
+
+    const auto targetStart = requestedStart;
+    const auto targetEnd = targetStart + width;
+    const auto laneId = lane->id;
+    const auto laneName = lane->name;
+    const auto segmentId = segment->id;
+    const auto segmentValue = segment->value;
+    const auto relationCountBefore = scenario_->relations.size();
+    bool changed = false;
+    try {
+        changed = commandStack_->execute(std::make_unique<EditSegmentCommand>(
+            *scenario_,
+            laneId,
+            segmentId,
+            targetStart,
+            targetEnd,
+            segmentValue));
+    } catch (const std::exception& exception) {
+        emit statusMessage(QString::fromUtf8(exception.what()));
+        return false;
+    }
+    if (!changed) {
+        emit statusMessage(
+            tr("%1 Segment position is unchanged").arg(
+                QString::fromStdString(laneName)));
+        return false;
+    }
+
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    refreshModel();
+    selectedLaneId_ = laneId;
+    selectedLaneIds_ = {laneId};
+    laneHeaderSelectionActive_ = false;
+    cursorTick_ = targetStart;
+    if (const auto* refreshedLane = findLane(*scenario_, laneId)) {
+        const auto midpoint = targetStart + width / 2;
+        if (const auto* target = segmentAtTick(*refreshedLane, midpoint)) {
+            selectedSegmentLaneId_ = laneId;
+            selectedSegmentId_ = target->id;
+            selectionRange_ = std::pair{targetStart, targetEnd};
+        }
+    }
+    ensureCursorVisible(cursorTick_);
+    emit selectionChanged(QString::fromStdString(laneId), cursorTick_);
+    emit statusMessage(appendRelationAwareUndo(
+        tr("%1 Segment nudged %2 to %3–%4 · step %5")
+            .arg(QString::fromStdString(laneName))
+            .arg(forward ? tr("later") : tr("earlier"))
+            .arg(formatTime(targetStart))
+            .arg(formatTime(targetEnd))
+            .arg(formatTime(unit)),
         relationCountBefore,
         scenario_->relations.size()));
     viewport()->update();
