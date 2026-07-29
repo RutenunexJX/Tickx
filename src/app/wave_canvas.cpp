@@ -2139,6 +2139,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     QAction* clockGated = nullptr;
     QAction* clockDisabled = nullptr;
     QAction* clockRun = nullptr;
+    QAction* duplicateBefore = nullptr;
     QAction* duplicateAfter = nullptr;
 
     if (lane->kind == LaneKind::Bit) {
@@ -2171,6 +2172,10 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     }
     if (segment
         && (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum)) {
+        duplicateBefore = menu.addAction(tr("Duplicate segment before"));
+        duplicateBefore->setObjectName(QStringLiteral("DuplicateSegmentBeforeAction"));
+        duplicateBefore->setToolTip(
+            tr("Copy this complete segment into the immediately preceding interval"));
         duplicateAfter = menu.addAction(tr("Duplicate segment after"));
         duplicateAfter->setObjectName(QStringLiteral("DuplicateSegmentAfterAction"));
         duplicateAfter->setToolTip(
@@ -2193,6 +2198,8 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         pasteAtCursor();
     } else if (chosen == editValue) {
         editSegmentAt(event->pos());
+    } else if (chosen == duplicateBefore) {
+        static_cast<void>(duplicateSelectedSegmentBefore());
     } else if (chosen == duplicateAfter) {
         static_cast<void>(duplicateSelectedSegmentAfter());
     } else if (chosen == clearValue) {
@@ -2271,6 +2278,17 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
         viewport()->setCursor(defaultCursorShape());
         viewport()->update();
         emit statusMessage(cancellation);
+        event->accept();
+        return;
+    }
+
+    if (scenario_
+        && event->key() == Qt::Key_D
+        && event->modifiers()
+            == (Qt::ControlModifier | Qt::ShiftModifier)
+        && tool_ == Tool::WaveEdit
+        && !selectedSegmentId_.empty()) {
+        static_cast<void>(duplicateSelectedSegmentBefore());
         event->accept();
         return;
     }
@@ -5990,6 +6008,16 @@ void WaveCanvas::clearSelectedSegment()
 
 bool WaveCanvas::duplicateSelectedSegmentAfter()
 {
+    return duplicateSelectedSegment(true);
+}
+
+bool WaveCanvas::duplicateSelectedSegmentBefore()
+{
+    return duplicateSelectedSegment(false);
+}
+
+bool WaveCanvas::duplicateSelectedSegment(const bool after)
+{
     if (!scenario_ || !commandStack_ || selectedSegmentLaneId_.empty()
         || selectedSegmentId_.empty()) {
         return false;
@@ -6005,7 +6033,9 @@ bool WaveCanvas::duplicateSelectedSegmentAfter()
     const auto laneName = lane->name;
     const auto sourceSegmentId = segment->id;
     const auto width = segment->end - segment->start;
-    const auto targetStart = segment->end;
+    const auto targetStart = after
+        ? segment->end
+        : segment->start - std::max<Tick>(0, width);
     const auto formatTime = [this](const Tick tick) {
         return project_
             ? QString::fromStdString(formatTick(tick, project_->timeBase))
@@ -6017,11 +6047,16 @@ bool WaveCanvas::duplicateSelectedSegmentAfter()
         || width > scenario_->duration - targetStart) {
         const auto targetEnd = targetStart + std::max<Tick>(0, width);
         emit statusMessage(
-            tr("%1 segment not duplicated · next interval %2–%3 exceeds End %4")
-                .arg(QString::fromStdString(laneName))
-                .arg(formatTime(targetStart))
-                .arg(formatTime(targetEnd))
-                .arg(formatTime(scenario_->duration)));
+            after
+                ? tr("%1 segment not duplicated · next interval %2–%3 exceeds End %4")
+                      .arg(QString::fromStdString(laneName))
+                      .arg(formatTime(targetStart))
+                      .arg(formatTime(targetEnd))
+                      .arg(formatTime(scenario_->duration))
+                : tr("%1 segment not duplicated · previous interval %2–%3 precedes start 0")
+                      .arg(QString::fromStdString(laneName))
+                      .arg(formatTime(targetStart))
+                      .arg(formatTime(targetEnd)));
         return false;
     }
 
@@ -6065,7 +6100,9 @@ bool WaveCanvas::duplicateSelectedSegmentAfter()
     }
     emit selectionChanged(QString::fromStdString(laneId), cursorTick_);
     emit statusMessage(appendRelationAwareUndo(
-        tr("%1 segment duplicated to %2–%3 · source kept")
+        (after
+             ? tr("%1 segment duplicated after to %2–%3 · source kept")
+             : tr("%1 segment duplicated before to %2–%3 · source kept"))
             .arg(QString::fromStdString(laneName))
             .arg(formatTime(targetStart))
             .arg(formatTime(targetEnd)),

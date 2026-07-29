@@ -288,6 +288,8 @@ private:
         JsonExtensions extensions = {});
     bool clearSelectedBitRange();
     void clearSelectedSegment();
+    bool duplicateSelectedSegment(bool after);
+    bool duplicateSelectedSegmentBefore();
     void updateLaneDropTarget(int y);
     void updateLaneDragAutoScroll(int pointerY);
     void advanceLaneDragAutoScroll();

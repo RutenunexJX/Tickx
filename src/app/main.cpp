@@ -7892,6 +7892,98 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            if (presetStart < expectedBeat) {
+                fail(QStringLiteral("Segment fixture has no room for duplicate-before"));
+                return;
+            }
+            sendMouse(
+                QEvent::MouseButtonPress,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            const auto beforePreviousDuplicate =
+                window.project().scenarios.front();
+            sendKey(
+                canvas,
+                Qt::Key_D,
+                Qt::ControlModifier | Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            const auto previousStart = presetStart - expectedBeat;
+            busAfterPreset = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto previousDuplicate = busAfterPreset
+                ? std::find_if(
+                      busAfterPreset->segments.begin(),
+                      busAfterPreset->segments.end(),
+                      [previousStart](const wave::Segment& candidate) {
+                          return candidate.start <= previousStart
+                              && previousStart < candidate.end;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (!busAfterPreset
+                || previousDuplicate == busAfterPreset->segments.end()
+                || previousDuplicate->value != "0bxxxxxxxx"
+                || previousDuplicate->extensions.find(
+                       "waveWorkbench.busPreset")
+                    == previousDuplicate->extensions.end()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("duplicated before"))) {
+                fail(QStringLiteral("Ctrl+Shift+D did not duplicate the Segment before"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front() != beforePreviousDuplicate) {
+                fail(QStringLiteral("Duplicate-before was not one atomic Undo"));
+                return;
+            }
+
+            bool duplicateDirectionsVisible = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&duplicateDirectionsVisible] {
+                    auto* menu = qobject_cast<QMenu*>(
+                        QApplication::activePopupWidget());
+                    auto hasBefore = false;
+                    auto hasAfter = false;
+                    if (menu
+                        && menu->objectName()
+                            == QStringLiteral("WaveformContextMenu")) {
+                        for (auto* action : menu->actions()) {
+                            if (!action) continue;
+                            hasBefore = hasBefore
+                                || action->objectName()
+                                    == QStringLiteral(
+                                        "DuplicateSegmentBeforeAction");
+                            hasAfter = hasAfter
+                                || action->objectName()
+                                    == QStringLiteral(
+                                        "DuplicateSegmentAfterAction");
+                        }
+                    }
+                    duplicateDirectionsVisible = hasBefore && hasAfter;
+                    if (menu) menu->close();
+                });
+            QContextMenuEvent duplicateDirectionsContext(
+                QContextMenuEvent::Mouse,
+                copySourcePoint,
+                canvas->viewport()->mapToGlobal(copySourcePoint));
+            QCoreApplication::sendEvent(
+                canvas->viewport(),
+                &duplicateDirectionsContext);
+            QCoreApplication::processEvents();
+            if (!duplicateDirectionsVisible) {
+                fail(QStringLiteral("Segment context menu does not expose both duplicate directions"));
+                return;
+            }
+
             const QPoint finalBeatPoint(
                 tickX(timelineDuration - expectedBeat / 2),
                 presetBusY);
