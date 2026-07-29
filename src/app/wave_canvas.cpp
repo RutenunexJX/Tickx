@@ -1855,6 +1855,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
             selectionMessage.append(
                 tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
                     .arg(laneValueAt(*lane, cursorTick_)));
+            selectionMessage.append(tr(" · Shift+Left/Right selects time"));
             if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                 selectionMessage.append(tr(" · Enter edits value"));
             }
@@ -2316,6 +2317,18 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         }
+        if ((event->key() == Qt::Key_Left
+             || event->key() == Qt::Key_Right)
+            && event->modifiers() == Qt::ShiftModifier) {
+            if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
+                emit statusMessage(
+                    tr("Finish or cancel the current drag before selecting a time range"));
+            } else {
+                adjustTimeRangeByKeyboard(event->key() == Qt::Key_Right);
+            }
+            event->accept();
+            return;
+        }
         if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
             const auto step = cursorKeyboardStep();
             const auto direction = event->key() == Qt::Key_Left ? Tick{-1} : Tick{1};
@@ -2733,6 +2746,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             selectionMessage.append(
                 tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
                     .arg(laneValueAt(*lane, cursorTick_)));
+            selectionMessage.append(tr(" · Shift+Left/Right selects time"));
             if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                 selectionMessage.append(tr(" · Enter edits value"));
             }
@@ -5526,6 +5540,124 @@ Tick WaveCanvas::cursorKeyboardStep() const
         toTicks(10, TimeUnit::Nanosecond, project_->timeBase).value_or(1));
 }
 
+void WaveCanvas::adjustTimeRangeByKeyboard(const bool forward)
+{
+    if (!scenario_ || scenario_->duration <= 0) {
+        emit statusMessage(tr("Timeline has no editable time range"));
+        return;
+    }
+    const auto* lane = findLane(*scenario_, selectedLaneId_);
+    if (!lane || !lane->visible || lane->kind == LaneKind::Group) {
+        emit statusMessage(
+            tr("Select a signal before using Shift+Left or Shift+Right"));
+        return;
+    }
+    if (rangeValueEdit_
+        && rangeValueEdit_->isVisible()
+        && rangeValueEdit_->isModified()
+        && rangeValueEdit_->hasFocus()) {
+        rangeValueEdit_->setFocus(Qt::OtherFocusReason);
+        emit statusMessage(
+            tr("Finish the selected range value or press Esc before adjusting its time"));
+        return;
+    }
+
+    Tick anchor = cursorTick_;
+    Tick active = cursorTick_;
+    if (explicitRangeSelection_
+        && selectionRange_
+        && selectionRange_->second > selectionRange_->first) {
+        const auto [start, end] = *selectionRange_;
+        if (cursorTick_ == end) {
+            anchor = start;
+            active = end;
+        } else if (cursorTick_ == start) {
+            anchor = end;
+            active = start;
+        } else {
+            const auto startDistance = cursorTick_ >= start
+                ? cursorTick_ - start
+                : start - cursorTick_;
+            const auto endDistance = cursorTick_ >= end
+                ? cursorTick_ - end
+                : end - cursorTick_;
+            if (endDistance < startDistance) {
+                anchor = start;
+                active = end;
+            } else {
+                anchor = end;
+                active = start;
+            }
+        }
+    } else if (selectedLaneIds_.empty()
+               || std::find(
+                      selectedLaneIds_.begin(),
+                      selectedLaneIds_.end(),
+                      selectedLaneId_)
+                   == selectedLaneIds_.end()) {
+        selectedLaneIds_ = {selectedLaneId_};
+    }
+
+    const auto step = cursorKeyboardStep();
+    const auto next = forward
+        ? active + std::min(scenario_->duration - active, step)
+        : active - std::min(active, step);
+    if (next == active) {
+        emit statusMessage(
+            forward
+                ? tr("Timeline end reached · range unchanged · Shift+Left moves back")
+                : tr("Timeline start reached · range unchanged · Shift+Right moves forward"));
+        return;
+    }
+
+    cursorTick_ = next;
+    ensureCursorVisible(cursorTick_);
+    snapGuideTick_.reset();
+    laneHeaderSelectionActive_ = false;
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    waveEditHoverLaneId_.clear();
+    waveEditHoverRange_.reset();
+    hideBusPresetPalette();
+
+    const auto format = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : QString::number(tick);
+    };
+    if (next == anchor) {
+        clearExplicitRangeSelection(false);
+        emit selectionChanged(
+            QString::fromStdString(selectedLaneId_),
+            cursorTick_);
+        emit statusMessage(
+            tr("Range collapsed at %1 · %2 signal(s) remain selected · "
+               "Shift+Left/Right starts a new range")
+                .arg(format(cursorTick_))
+                .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
+        viewport()->update();
+        return;
+    }
+
+    selectionRange_ = std::pair{
+        std::min(anchor, next),
+        std::max(anchor, next),
+    };
+    explicitRangeSelection_ = true;
+    showRangeEditPalette();
+    emit selectionChanged(
+        QString::fromStdString(selectedLaneId_),
+        cursorTick_);
+    emit statusMessage(
+        tr("Keyboard range %1 to %2 · %3 · %4 signal(s) · "
+           "Shift+Left/Right adjusts the active edge · Esc clears")
+            .arg(format(selectionRange_->first))
+            .arg(format(selectionRange_->second))
+            .arg(format(selectionRange_->second - selectionRange_->first))
+            .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
+    viewport()->update();
+}
+
 std::optional<Tick> WaveCanvas::adjacentEdgeTick(
     const Lane& lane,
     const Tick from,
@@ -5649,6 +5781,7 @@ void WaveCanvas::selectAdjacentLane(const bool downward)
                        .arg(ordinal)
                        .arg(total)
                        .arg(laneValueAt(*target, cursorTick_));
+    message.append(tr(" · Shift+Left/Right selects time"));
     if (target->kind == LaneKind::Bus || target->kind == LaneKind::Enum) {
         message.append(tr(" · Enter edits value"));
     }

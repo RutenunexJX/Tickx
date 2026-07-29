@@ -4322,6 +4322,58 @@ Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-enum-range
 Desktop interaction: none
 ```
 
+## 持续迭代 77：键盘时间范围选择
+
+状态：完成，持续迭代中
+
+已交付：
+
+- 开发审计确认第 70–76 轮已形成“Up/Down 选信号、Ctrl+Left/Right 跳边沿、Enter 编辑 Bus/Enum”的键盘路径，但建立多拍范围仍只能 Shift 拖动鼠标。用户在键盘定位到目标信号和时间后必须切回鼠标，属于高频工作流断点。
+- Wave Edit 画布获得焦点后，`Shift+Left` / `Shift+Right` 从当前编辑光标建立显式范围，并以既有 10 ns 键盘步长移动活动端点。重复按键可向任一方向扩展或收缩，回到固定锚点时折叠范围；时间轴首尾原位提示且不产生空操作。
+- 键盘创建与调整复用既有固定范围栏、范围手柄、Copy/Cut/Paste/Clear 和 Bit/Bus/Enum 批量赋值，不增加模式或按钮。已有多 lane 范围保留完整目标集合；折叠后保留当前信号但清除标题 Delete 武装，避免下一次 Delete 误删整条信号。
+- 范围调整只改变选择和视口，不写 Scenario、不进入 Undo、不触发 autosave、不改变 Saved。范围值输入框实际持有焦点时继续由文本编辑消费 Shift 方向键；画布重新获得焦点后才执行时间范围调整，未提交草稿门禁保持有效。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：信号选中状态必须公开快捷键；对 `state/state_next` 的 50–100 ns 双 Enum 范围执行 Shift+Left 扩至 40 ns、Shift+Right 收回 50 ns；Esc 后从 Bus/0 ns 用 Shift+Right 创建 0–10 ns 范围，断言固定栏显示 `1 Bus`，保存第七张离屏截图，再用 Shift+Left 折叠并验证信号目标保留。所有阶段精确比较 Scenario、Undo、Saved 和范围栏状态。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 25 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 15.39 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.26 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed; isolated final run 2.30 sec; full Debug run 1.85 sec
+
+Automated QA: 选中信号后状态栏直接公开 Shift+Left/Right；双 Enum 既有范围可从活动端点扩至 40–100 ns 并收回 50–100 ns，
+              lane 集合和固定栏保持不变。Esc 清理后，Bus 在 0 ns 通过 Shift+Right 建立 0–10 ns 范围，反向按键折叠范围但保留 Bus 目标；
+              全程模型仍为 Saved、无 Undo；折叠后 Delete 也不会误删信号。范围值输入框焦点与画布快捷键互不劫持。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-keyboard-range.png
+Visual result: 固定栏显示 1 Bus 与 0–10 ns，Copy/Cut/Paste/Clear、首拍选区、端点手柄、信号行和网格同时可见，无遮挡或画布跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

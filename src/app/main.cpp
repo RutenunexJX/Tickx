@@ -2725,6 +2725,8 @@ int main(int argc, char* argv[])
                 if (!window.statusBar()->currentMessage().contains(
                         QStringLiteral("Ctrl+Left/Right jumps edges"))
                     || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Shift+Left/Right selects time"))
+                    || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Enter edits value"))
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("value X"))) {
@@ -3327,6 +3329,64 @@ int main(int argc, char* argv[])
                     return;
                 }
                 canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Left, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto keyboardExtendedEnumRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{40'000, 100'000}};
+                const auto keyboardExtendStatus =
+                    window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != keyboardExtendedEnumRange
+                    || canvas->selectedLaneIds() != selectedEnumLanes
+                    || canvas->cursorTick() != 40'000
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || !enumRangeContext->text().contains(QStringLiteral("2 Enum"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !keyboardExtendStatus.contains(
+                        QStringLiteral("Keyboard range"))
+                    || !keyboardExtendStatus.contains(
+                        QStringLiteral("active edge"))) {
+                    qCritical().noquote()
+                        << "Keyboard Enum range diagnostics"
+                        << "range"
+                        << (canvas->selectedTimeRange()
+                                ? QStringLiteral("%1-%2")
+                                      .arg(canvas->selectedTimeRange()->first)
+                                      .arg(canvas->selectedTimeRange()->second)
+                                : QStringLiteral("<none>"))
+                        << "lanes" << canvas->selectedLaneIds().join(QLatin1Char(','))
+                        << "cursor" << canvas->cursorTick()
+                        << "palette" << enumRangePalette->isVisibleTo(&window)
+                        << "context" << enumRangeContext->text()
+                        << "modified" << enumRangeValueEdit->isModified()
+                        << "focus" << enumRangeValueEdit->hasFocus()
+                        << "scenarioEqual" << (scenario == originalScenario)
+                        << "undo" << undoAction->isEnabled()
+                        << "save" << saveState->text()
+                        << "status" << keyboardExtendStatus;
+                    fail(QStringLiteral(
+                        "Shift+Left did not extend the active Enum range edge without editing the model"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != selectedEnumRange
+                    || canvas->selectedLaneIds() != selectedEnumLanes
+                    || canvas->cursorTick() != 50'000
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Shift+Right did not shrink the active Enum range edge back to its original time"));
+                    return;
+                }
+                canvas->setFocus(Qt::OtherFocusReason);
                 sendKey(canvas, Qt::Key_Escape);
                 QCoreApplication::processEvents();
                 if (canvas->hasExplicitRangeSelection()
@@ -3339,6 +3399,94 @@ int main(int argc, char* argv[])
                     return;
                 }
 
+                sendKey(canvas, Qt::Key_Home);
+                clickSignalHeader(laneY);
+                if (!window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Shift+Left/Right selects time"))) {
+                    fail(QStringLiteral(
+                        "Signal selection did not disclose keyboard time-range selection"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto keyboardBusRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{0, 10'000}};
+                const auto keyboardCreateStatus =
+                    window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != keyboardBusRange
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-scroll")}
+                    || canvas->cursorTick() != 10'000
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || !enumRangeContext->text().contains(QStringLiteral("1 Bus"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !keyboardCreateStatus.contains(
+                        QStringLiteral("Keyboard range"))
+                    || !keyboardCreateStatus.contains(
+                        QStringLiteral("Esc clears"))) {
+                    fail(QStringLiteral(
+                        "Shift+Right did not create a visible one-step Bus range without editing the model"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto keyboardRangeScreenshotPath =
+                        waveEditAutoScrollScreenshotPath;
+                    const auto suffix = keyboardRangeScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        keyboardRangeScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-keyboard-range"));
+                    } else {
+                        keyboardRangeScreenshotPath.append(
+                            QStringLiteral("-keyboard-range.png"));
+                    }
+                    if (!window.grab().save(keyboardRangeScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save keyboard time-range screenshot"));
+                        return;
+                    }
+                }
+                sendKey(canvas, Qt::Key_Left, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto keyboardCollapseStatus =
+                    window.statusBar()->currentMessage();
+                if (canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange()
+                    || enumRangePalette->isVisibleTo(&window)
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-scroll")}
+                    || canvas->cursorTick() != 0
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !keyboardCollapseStatus.contains(
+                        QStringLiteral("Range collapsed"))
+                    || !keyboardCollapseStatus.contains(
+                        QStringLiteral("starts a new range"))) {
+                    fail(QStringLiteral(
+                        "Shift+Left did not collapse the keyboard range while preserving the signal target"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Delete);
+                QCoreApplication::processEvents();
+                if (scenario != originalScenario
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Collapsed keyboard range left whole-signal Delete armed"));
+                    return;
+                }
                 sendKey(canvas, Qt::Key_Home);
                 const auto clockLaneY = 40
                     + scenario.lanes.front().height
