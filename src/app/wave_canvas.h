@@ -254,6 +254,7 @@ private:
         std::optional<std::pair<Tick, Tick>> exactRange = std::nullopt,
         BusEditScope exactRangeScope = BusEditScope::Segment);
     void hideBusPresetPalette();
+    bool editSelectedSegmentValue(const QString& seed = {});
     bool advanceBusValueEdit(
         const std::string& laneId,
         const std::pair<Tick, Tick>& currentRange,

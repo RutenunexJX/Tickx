@@ -2485,6 +2485,8 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                     emit statusMessage(
                         tr("Esc clears the selected range before editing one signal beat"));
                 }
+            } else if (!selectedSegmentId_.empty()
+                       && editSelectedSegmentValue()) {
             } else if (!lane
                        || (lane->kind != LaneKind::Bus
                            && lane->kind != LaneKind::Enum)) {
@@ -4619,6 +4621,66 @@ void WaveCanvas::hideBusPresetPalette()
     }
     if (busPresetPalette_) busPresetPalette_->hide();
     if (restoreCanvasFocus) viewport()->setFocus(Qt::OtherFocusReason);
+}
+
+bool WaveCanvas::editSelectedSegmentValue(const QString& seed)
+{
+    if (!scenario_ || selectedSegmentLaneId_.empty()
+        || selectedSegmentId_.empty()) {
+        return false;
+    }
+    const auto* lane = findLane(*scenario_, selectedSegmentLaneId_);
+    const auto* segment = segmentById(
+        selectedSegmentLaneId_,
+        selectedSegmentId_);
+    if (!lane || !segment
+        || (lane->kind != LaneKind::Bus && lane->kind != LaneKind::Enum)) {
+        return false;
+    }
+
+    selectedLaneId_ = lane->id;
+    selectedLaneIds_ = {lane->id};
+    laneHeaderSelectionActive_ = false;
+    showBusPresetPalette(
+        *lane,
+        QPoint(xAtTick(segment->start), 0),
+        segment->start,
+        std::pair{segment->start, segment->end},
+        BusEditScope::Segment);
+    if (busValueEdit_) {
+        if (!seed.isNull()) {
+            busValueEdit_->setText(seed);
+            busValueEdit_->setModified(true);
+        }
+        busValueEdit_->setFocus(Qt::OtherFocusReason);
+        busValueEdit_->selectAll();
+        const auto laneId = lane->id;
+        QTimer::singleShot(0, busValueEdit_, [this, laneId] {
+            if (busPresetLaneId_ == laneId
+                && busEditScope_ == BusEditScope::Segment
+                && busValueEdit_) {
+                busValueEdit_->setFocus(Qt::OtherFocusReason);
+                busValueEdit_->selectAll();
+            }
+        });
+    }
+    ensureLaneVisible(lane->id);
+    ensureCursorVisible(segment->start);
+    emit selectionChanged(
+        QString::fromStdString(lane->id),
+        segment->start);
+    emit statusMessage(
+        tr("Edit %1 Segment · %2–%3 · current value %4 · Enter applies · Esc cancels")
+            .arg(QString::fromStdString(lane->name))
+            .arg(QString::fromStdString(formatTick(
+                segment->start,
+                project_->timeBase)))
+            .arg(QString::fromStdString(formatTick(
+                segment->end,
+                project_->timeBase)))
+            .arg(QString::fromStdString(segment->value)));
+    viewport()->update();
+    return true;
 }
 
 bool WaveCanvas::advanceBusValueEdit(

@@ -7989,6 +7989,45 @@ int main(int argc, char* argv[])
                     "Single-click Segment selection did not provide exact, history-free feedback"));
                 return;
             }
+            const auto selectedSegmentBeforeEnter =
+                canvas->selectedSegmentId();
+            sendKey(canvas, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            if (!presetPalette->isVisible()
+                || directValue->text() != QStringLiteral("0bxxxxxxxx")
+                || canvas->selectedSegmentId() != selectedSegmentBeforeEnter
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{
+                            presetStart,
+                            presetStart + expectedBeat}}
+                || window.project().scenarios.front()
+                    != beforeExactSegmentSelection
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Edit %1 Segment").arg(
+                        QString::fromStdString(quickBus.name)))) {
+                qCritical().noquote()
+                    << "Selected Segment Enter diagnostics"
+                    << "palette" << presetPalette->isVisible()
+                    << "value" << directValue->text()
+                    << "segmentBefore" << selectedSegmentBeforeEnter
+                    << "segmentAfter" << canvas->selectedSegmentId()
+                    << "range"
+                    << (canvas->selectedTimeRange()
+                            ? QStringLiteral("%1-%2")
+                                  .arg(canvas->selectedTimeRange()->first)
+                                  .arg(canvas->selectedTimeRange()->second)
+                            : QStringLiteral("<none>"))
+                    << "modelChanged"
+                    << (window.project().scenarios.front()
+                        != beforeExactSegmentSelection)
+                    << "status" << window.statusBar()->currentMessage();
+                fail(QStringLiteral(
+                    "Enter did not open the selected Segment value in place"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Escape);
+            QCoreApplication::processEvents();
             QHelpEvent segmentTooltip(
                 QEvent::ToolTip,
                 copySourcePoint,
