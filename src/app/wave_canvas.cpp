@@ -2775,6 +2775,20 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                 return;
             }
             const auto* lane = findLane(*scenario_, selectedLaneId_);
+            if (lane
+                && (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum)
+                && !selectedSegmentId_.empty()
+                && editSelectedSegmentValue(QString::fromLatin1(
+                    event->key() == Qt::Key_0
+                        ? "0"
+                        : event->key() == Qt::Key_1
+                            ? "1"
+                            : event->key() == Qt::Key_X
+                                ? "X"
+                                : "Z"))) {
+                event->accept();
+                return;
+            }
             if (lane && lane->kind == LaneKind::Bit) {
                 const auto [start, end] = editableBeatRangeAt(cursorTick_, *lane);
                 setLaneRangeValue(lane->id, start, end, value);
@@ -2809,13 +2823,23 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
         }
         if (event->modifiers() == Qt::NoModifier) {
             const auto* lane = findLane(*scenario_, selectedLaneId_);
+            const auto text = event->text();
+            if (lane
+                && (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum)
+                && !selectedSegmentId_.empty()
+                && text.size() == 1
+                && !text.front().isSpace()
+                && text.front().isPrint()
+                && editSelectedSegmentValue(text)) {
+                event->accept();
+                return;
+            }
             if (lane && lane->kind == LaneKind::Bus
                 && event->key() == Qt::Key_Question) {
                 applyBusPreset(lane->id, "dont-care", cursorTick_, false);
                 event->accept();
                 return;
             }
-            const auto text = event->text();
             if (lane
                 && (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum)
                 && text.size() == 1

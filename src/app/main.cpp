@@ -8028,6 +8028,25 @@ int main(int argc, char* argv[])
             }
             sendKey(directValue, Qt::Key_Escape);
             QCoreApplication::processEvents();
+            sendKey(canvas, Qt::Key_1);
+            QCoreApplication::processEvents();
+            if (!presetPalette->isVisible()
+                || directValue->text() != QStringLiteral("1")
+                || !directValue->isModified()
+                || canvas->selectedSegmentId() != selectedSegmentBeforeEnter
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{
+                            presetStart,
+                            presetStart + expectedBeat}}
+                || window.project().scenarios.front()
+                    != beforeExactSegmentSelection) {
+                fail(QStringLiteral(
+                    "Typing did not start an in-place draft for the selected Segment"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Escape);
+            QCoreApplication::processEvents();
             QHelpEvent segmentTooltip(
                 QEvent::ToolTip,
                 copySourcePoint,
