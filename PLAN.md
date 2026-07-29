@@ -4483,6 +4483,60 @@ Desktop interaction: none
 Packaging: not run during iteration
 ```
 
+## 持续迭代 80：当前信号范围一键全选
+
+状态：完成，持续迭代中
+
+已交付：
+
+- 开发审计确认剪切、复制、粘贴、撤销以及时间/信号范围扩缩均已有标准键盘路径，但缺少用户普遍预期的 `Ctrl+A`。在 1 µs 等长时间轴上，要从当前信号建立完整 0–End 范围仍需先定位到一端再扩展，且已有多信号目标容易在重建过程中丢失。
+- Edit 菜单新增 `Select full signal range`，使用平台标准 `QKeySequence::SelectAll`。Wave Edit 中触发后，将当前信号或既有有效多信号目标集合的时间范围直接设为 0–Scenario End；不自动选择其他异类信号，避免一次全选产生不可赋值的混合目标。
+- 全选保留当前编辑光标、缩放和水平视口，固定范围栏立即刷新信号数量、类型、时间与 Enum 共有符号；状态栏明确显示完整范围及后续 Copy/Delete/Esc 路径。选择只改变编辑上下文，不写 Scenario、不进入 Undo、不改变 Saved。
+- 任何 `QLineEdit` 持有焦点时，Edit 菜单和 `Ctrl+A` 仍委托输入框全选文本；未提交的 Bus/Enum 范围值草稿也会阻止程序化范围变化并恢复输入焦点。拖动或标题重排期间要求先完成或取消当前手势。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：验证单 Bus 从无范围直接选中 0–1 us、光标和视口保持、范围值输入框仅选择 `0xa5` 文本；随后重建两条 Enum 的 0–10 ns 目标并以 Ctrl+A 扩展完整时间，断言活动信号、目标顺序、共同符号、固定栏、Scenario、Undo、Saved 与无模态窗口，并保存第十张离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --target wave-workbench
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 38 ms / Release 5 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.47 sec
+
+cmake --build build/qtcreator-release --target wave-workbench
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.45 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 2.00 sec
+
+Automated QA: data[7:0] 在 0 ns、无时间范围时按 Ctrl+A，立即得到完整 0–1 us 的 1 Bus 范围，光标和水平视图保持在起点；
+              范围值输入框中的 Ctrl+A 只选中 0xa5 文本。state/state_next 的 0–10 ns 两信号目标按 Ctrl+A 后保留活动信号与顺序，
+              固定栏更新为 2 Enum 与 0 ps–1 us，共有符号仍为 DONE/IDLE。Esc 清理后模型保持 Saved 且无 Undo。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-keyboard-select-all-range.png
+Visual result: 固定范围栏显示 2 Enum 与 0 ps–1 us；两条 Enum 行的完整透明选区、名称、采样值、波形、Clock 与纵横网格均可辨识，无视口跳动或模态窗口。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

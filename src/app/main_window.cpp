@@ -3903,6 +3903,18 @@ void MainWindow::createActions()
         }
         canvas_->pasteAtCursor();
     });
+    auto* selectAllAction = editMenu_->addAction(tr("Select &full signal range"));
+    selectAllAction->setObjectName(QStringLiteral("SelectFullRangeAction"));
+    selectAllAction->setShortcut(QKeySequence::SelectAll);
+    selectAllAction->setToolTip(
+        tr("Select the complete timeline for the current signal range"));
+    connect(selectAllAction, &QAction::triggered, this, [this] {
+        if (auto* editor = qobject_cast<QLineEdit*>(focusWidget())) {
+            editor->selectAll();
+            return;
+        }
+        canvas_->selectEntireTimeline();
+    });
     editMenu_->addSeparator();
     auto* addLaneAction = editMenu_->addAction(
         tr("Add &lane…"),

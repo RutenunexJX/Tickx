@@ -2212,6 +2212,8 @@ int main(int argc, char* argv[])
                     QStringLiteral("UndoAction"));
                 auto* fitAction = window.findChild<QAction*>(
                     QStringLiteral("FitScenarioAction"));
+                auto* selectFullRangeAction = window.findChild<QAction*>(
+                    QStringLiteral("SelectFullRangeAction"));
                 auto* durationEdit = window.findChild<QLineEdit*>(
                     QStringLiteral("TimelineDurationEdit"));
                 auto* saveState = window.findChild<QLabel*>(
@@ -2221,7 +2223,8 @@ int main(int argc, char* argv[])
                     window.hide();
                     application.exit(4);
                 };
-                if (!canvas || !undoAction || !fitAction || !durationEdit || !saveState
+                if (!canvas || !undoAction || !fitAction || !selectFullRangeAction
+                    || !durationEdit || !saveState
                     || window.project().scenarios.empty()) {
                     fail(QStringLiteral(
                         "Wave Edit autoscroll smoke prerequisites are missing"));
@@ -2240,6 +2243,8 @@ int main(int argc, char* argv[])
                     || window.project().clockDomains.size() != 1
                     || saveState->text() != QStringLiteral("Saved")
                     || undoAction->isEnabled()
+                    || selectFullRangeAction->shortcut()
+                        != QKeySequence::SelectAll
                     || fitAction->text() != QStringLiteral("Fit scenario")
                     || !fitAction->toolTip().contains(
                         QStringLiteral("complete scenario"))) {
@@ -3822,6 +3827,140 @@ int main(int argc, char* argv[])
                     || saveState->text() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Collapsed keyboard range left whole-signal Delete armed"));
+                    return;
+                }
+
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_A, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                const auto fullTimelineRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{
+                            0,
+                            scenario.duration,
+                        }};
+                const auto singleSignalSelectAllStatus =
+                    window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != fullTimelineRange
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-scroll")}
+                    || canvas->cursorTick() != 0
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || !enumRangeContext->text().contains(QStringLiteral("1 Bus"))
+                    || !enumRangeContext->toolTip().contains(
+                        QStringLiteral("Ctrl+A selects the full timeline"))
+                    || QApplication::activeModalWidget()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !singleSignalSelectAllStatus.contains(
+                        QStringLiteral("Ctrl+A selected full timeline"))
+                    || !singleSignalSelectAllStatus.contains(
+                        QStringLiteral("1 signal(s)"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+A did not select the full timeline for the current Bus without editing the model"));
+                    return;
+                }
+
+                enumRangeValueEdit->setText(QStringLiteral("0xa5"));
+                enumRangeValueEdit->setModified(false);
+                enumRangeValueEdit->setCursorPosition(
+                    enumRangeValueEdit->text().size());
+                enumRangeValueEdit->setFocus(Qt::OtherFocusReason);
+                sendKey(enumRangeValueEdit, Qt::Key_A, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (enumRangeValueEdit->selectedText()
+                        != QStringLiteral("0xa5")
+                    || canvas->selectedTimeRange() != fullTimelineRange
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-scroll")}
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Ctrl+A escaped the range value field instead of selecting its text"));
+                    return;
+                }
+                enumRangeValueEdit->clear();
+                enumRangeValueEdit->setModified(false);
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Escape);
+                sendKey(canvas, Qt::Key_Home);
+                clickSignalHeader(enumLaneY);
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+                sendKey(canvas, Qt::Key_Down, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                if (canvas->selectedLaneIds() != selectedEnumLanes
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-enum-next")
+                    || canvas->selectedTimeRange() != keyboardSingleEnumRange) {
+                    fail(QStringLiteral(
+                        "Multi-Enum range prerequisites were not restored before Ctrl+A"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_A, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                const auto multiSignalSelectAllStatus =
+                    window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != fullTimelineRange
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-enum-next")
+                    || canvas->selectedLaneIds() != selectedEnumLanes
+                    || canvas->cursorTick() != 10'000
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || !enumRangeContext->text().contains(QStringLiteral("2 Enum"))
+                    || !enumRangeContext->toolTip().contains(
+                        QStringLiteral("Shared symbols: DONE, IDLE"))
+                    || QApplication::activeModalWidget()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !multiSignalSelectAllStatus.contains(
+                        QStringLiteral("Ctrl+A selected full timeline"))
+                    || !multiSignalSelectAllStatus.contains(
+                        QStringLiteral("2 signal(s)"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+A did not preserve the existing multi-Enum signal target range"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto selectAllScreenshotPath =
+                        waveEditAutoScrollScreenshotPath;
+                    const auto suffix = selectAllScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        selectAllScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-keyboard-select-all-range"));
+                    } else {
+                        selectAllScreenshotPath.append(
+                            QStringLiteral("-keyboard-select-all-range.png"));
+                    }
+                    if (!window.grab().save(selectAllScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save keyboard select-all range screenshot"));
+                        return;
+                    }
+                }
+                sendKey(canvas, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange()
+                    || enumRangePalette->isVisibleTo(&window)
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Escape did not clear the Ctrl+A multi-signal selection"));
                     return;
                 }
                 sendKey(canvas, Qt::Key_Home);

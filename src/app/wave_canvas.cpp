@@ -1229,6 +1229,85 @@ void WaveCanvas::fitSelection()
     viewport()->update();
 }
 
+void WaveCanvas::selectEntireTimeline()
+{
+    if (tool_ != Tool::WaveEdit) {
+        emit statusMessage(
+            tr("Enter Wave Edit before selecting a waveform range"));
+        return;
+    }
+    if (!scenario_ || scenario_->duration <= 0) {
+        emit statusMessage(tr("Timeline has no editable time range"));
+        return;
+    }
+    if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
+        emit statusMessage(
+            tr("Finish or cancel the current drag before selecting the full timeline"));
+        return;
+    }
+    if (hasPendingRangeValueEdit()) {
+        if (rangeValueEdit_) {
+            rangeValueEdit_->setFocus(Qt::OtherFocusReason);
+            rangeValueEdit_->selectAll();
+        }
+        emit statusMessage(
+            tr("Finish the selected range value or press Esc before changing its time"));
+        return;
+    }
+
+    const auto* lane = findLane(*scenario_, selectedLaneId_);
+    if (!lane || !lane->visible || lane->kind == LaneKind::Group) {
+        emit statusMessage(tr("Select a signal before using Ctrl+A"));
+        return;
+    }
+
+    const auto validTargets = !selectedLaneIds_.empty()
+        && std::find(
+               selectedLaneIds_.begin(),
+               selectedLaneIds_.end(),
+               selectedLaneId_)
+            != selectedLaneIds_.end()
+        && std::all_of(
+            selectedLaneIds_.begin(),
+            selectedLaneIds_.end(),
+            [this](const std::string& laneId) {
+                const auto* selected = findLane(*scenario_, laneId);
+                return selected
+                    && selected->visible
+                    && selected->kind != LaneKind::Group;
+            });
+    if (!validTargets) {
+        selectedLaneIds_ = {selectedLaneId_};
+    }
+
+    laneHeaderSelectionActive_ = false;
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    waveEditHoverLaneId_.clear();
+    waveEditHoverRange_.reset();
+    hideBusPresetPalette();
+    snapGuideTick_.reset();
+    selectionRange_ = std::pair<Tick, Tick>{0, scenario_->duration};
+    explicitRangeSelection_ = true;
+    showRangeEditPalette();
+
+    const auto format = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : QString::number(tick);
+    };
+    emit selectionChanged(
+        QString::fromStdString(selectedLaneId_),
+        cursorTick_);
+    emit statusMessage(
+        tr("Ctrl+A selected full timeline %1 to %2 · %3 signal(s) · "
+           "Ctrl+C copies · Delete clears · Esc cancels")
+            .arg(format(0))
+            .arg(format(scenario_->duration))
+            .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
+    viewport()->update();
+}
+
 void WaveCanvas::refreshModel()
 {
     rebuildLaneLayout();
@@ -1855,7 +1934,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
             selectionMessage.append(
                 tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
                     .arg(laneValueAt(*lane, cursorTick_)));
-            selectionMessage.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary"));
+            selectionMessage.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary · Ctrl+A selects full timeline"));
             if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                 selectionMessage.append(tr(" · Enter edits value"));
             }
@@ -2780,7 +2859,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             selectionMessage.append(
                 tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
                     .arg(laneValueAt(*lane, cursorTick_)));
-            selectionMessage.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary"));
+            selectionMessage.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary · Ctrl+A selects full timeline"));
             if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                 selectionMessage.append(tr(" · Enter edits value"));
             }
@@ -4200,7 +4279,7 @@ void WaveCanvas::showRangeEditPalette()
                   .arg(format(selectionRange_->second))
             : tr("Batch assignment requires only Bit, only Bus, or only Enum signals");
         contextHelp.append(
-            tr("\nShift+Up/Down adjusts signals; Shift+Left/Right adjusts time; Shift+Home/End selects to a timeline boundary"));
+            tr("\nShift+Up/Down adjusts signals; Shift+Left/Right adjusts time; Shift+Home/End selects to a timeline boundary; Ctrl+A selects the full timeline"));
         if (enumRange) {
             contextHelp.append(
                 enumSymbols.isEmpty()
@@ -5950,7 +6029,7 @@ void WaveCanvas::selectAdjacentLane(const bool downward)
                        .arg(ordinal)
                        .arg(total)
                        .arg(laneValueAt(*target, cursorTick_));
-    message.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary"));
+    message.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary · Ctrl+A selects full timeline"));
     if (target->kind == LaneKind::Bus || target->kind == LaneKind::Enum) {
         message.append(tr(" · Enter edits value"));
     }
