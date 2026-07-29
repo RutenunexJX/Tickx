@@ -8259,6 +8259,70 @@ int main(int argc, char* argv[])
                 std::next(navigationSource)->start,
                 std::next(navigationSource)->end,
             };
+            const auto navigationTargetValue =
+                std::next(navigationSource)->value;
+            sendMouse(
+                QEvent::MouseButtonPress,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::NoButton);
+            sendKey(canvas, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            const auto beforeSegmentTab =
+                window.project().scenarios.front();
+            sendKey(directValue, Qt::Key_Tab);
+            QCoreApplication::processEvents();
+            if (!presetPalette->isVisible()
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        navigationTargetRange}
+                || directValue->text()
+                    != QString::fromStdString(navigationTargetValue)
+                || window.project().scenarios.front()
+                    != beforeSegmentTab
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("next Segment opened"))) {
+                qCritical().noquote()
+                    << "Segment Tab diagnostics"
+                    << "palette" << presetPalette->isVisible()
+                    << "range"
+                    << (canvas->selectedTimeRange()
+                            ? QStringLiteral("%1-%2")
+                                  .arg(canvas->selectedTimeRange()->first)
+                                  .arg(canvas->selectedTimeRange()->second)
+                            : QStringLiteral("<none>"))
+                    << "expected"
+                    << QStringLiteral("%1-%2")
+                           .arg(navigationTargetRange.first)
+                           .arg(navigationTargetRange.second)
+                    << "draft" << directValue->text()
+                    << "expectedValue"
+                    << QString::fromStdString(navigationTargetValue)
+                    << "modelChanged"
+                    << (window.project().scenarios.front()
+                        != beforeSegmentTab)
+                    << "status" << window.statusBar()->currentMessage();
+                fail(QStringLiteral(
+                    "Tab did not confirm the selected Segment and open the next Segment"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Escape);
+            sendMouse(
+                QEvent::MouseButtonPress,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
             sendKey(canvas, Qt::Key_Tab, Qt::ControlModifier);
             QCoreApplication::processEvents();
             if (canvas->selectedTimeRange()

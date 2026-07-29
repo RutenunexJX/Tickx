@@ -184,6 +184,7 @@ private:
         Stay,
         PreviousBeat,
         NextBeat,
+        NextSegment,
     };
     enum class KeyboardRangeTarget {
         Step,
@@ -256,6 +257,10 @@ private:
     void hideBusPresetPalette();
     bool editSelectedSegmentValue(const QString& seed = {});
     bool advanceBusValueEdit(
+        const std::string& laneId,
+        const std::pair<Tick, Tick>& currentRange,
+        bool forward);
+    bool advanceBusSegmentValueEdit(
         const std::string& laneId,
         const std::pair<Tick, Tick>& currentRange,
         bool forward);
