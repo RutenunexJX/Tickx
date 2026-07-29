@@ -274,7 +274,7 @@ private:
     [[nodiscard]] QString markerLocationText(const Marker& marker) const;
     [[nodiscard]] std::string nextLockedMarkerName(bool interval) const;
     [[nodiscard]] Tick cursorKeyboardStep() const;
-    void adjustTimeRangeByKeyboard(bool forward);
+    void adjustTimeRangeByKeyboard(bool forward, bool toBoundary = false);
     void adjustRangeSignalsByKeyboard(bool downward);
     [[nodiscard]] std::optional<Tick> adjacentEdgeTick(
         const Lane& lane,

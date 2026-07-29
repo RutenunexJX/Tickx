@@ -4429,6 +4429,60 @@ Desktop interaction: none
 Packaging: not run during iteration
 ```
 
+## 持续迭代 79：键盘范围直达时间轴边界
+
+状态：完成，持续迭代中
+
+已交付：
+
+- 开发审计确认第 77–78 轮已经能用键盘逐步扩缩时间与信号目标，但长时间轴上从当前锚点选到 0 或 End 仍需重复按 10 ns 步进键，或重新用鼠标跨视口拖动。整段初始化、复制和清除因此仍存在明显等待与定位成本。
+- Wave Edit 画布获得焦点后，`Shift+Home` / `Shift+End` 复用既有活动端与固定锚点语义，一次将活动时间端移到 0 或 Scenario End。跨过锚点时范围翻向另一侧，回到锚点时按既有规则折叠并保留信号目标；已有多信号集合、固定范围栏和水平视口均保持同步。
+- 信号选中状态、键盘范围状态及固定范围栏提示公开边界快捷键。活动端已经位于目标边界时不改变选区，并明确提示反向快捷键；选择和边界无效果均不写 Scenario、不进入 Undo、不改变 Saved。
+- 范围值、End、重命名等 `QLineEdit` 持有焦点时继续自行消费 Shift+Home/End，只改变文本选区，不触发时间轴操作。拖动、标题按压或重排期间仍要求先结束当前手势。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：在 Bus 0–10 ns 键盘范围上验证范围值输入框 Shift+Home 只选中文本；画布 Shift+End 精确扩展至 0–1 us 并滚到末端；重复 Shift+End 保持模型和选区不变且给出边界反馈；Shift+Home 折叠至锚点，再次 Shift+Right 可正常重建一拍范围。全过程断言信号目标、固定栏、滚动位置、Scenario、Undo、Saved 与无模态窗口，并保存第九张离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 19 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 15.70 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.82 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 2.05 sec
+
+Automated QA: data[7:0] 的 0–10 ns 范围可由 Shift+End 一次扩展到完整 0–1 us，视口滚至末端且固定栏仍显示 1 Bus；
+              再按 Shift+End 保持选区不变并提示已到 End。Shift+Home 回到 0 后折叠范围但保留 Bus 目标，随后可立即重建一拍范围。
+              范围值输入框中的 Shift+Home 只选中 0xa5 文本，不移动时间光标。全程模型保持 Saved 且无 Undo。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-keyboard-boundary-range.png
+Visual result: 固定范围栏显示 1 Bus 与 0 ps–1 us；末端视口中整条 Bus 保持透明蓝色选区，End 手柄、采样值、波形和网格均清晰可见，无覆盖、跳动或模态窗口。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

@@ -1855,7 +1855,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
             selectionMessage.append(
                 tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
                     .arg(laneValueAt(*lane, cursorTick_)));
-            selectionMessage.append(tr(" · Shift+Left/Right selects time"));
+            selectionMessage.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary"));
             if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                 selectionMessage.append(tr(" · Enter edits value"));
             }
@@ -2254,6 +2254,23 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                     tr("Esc clears the selected range before changing signals"));
             } else {
                 selectAdjacentLane(event->key() == Qt::Key_Down);
+            }
+            event->accept();
+            return;
+        }
+        if ((event->key() == Qt::Key_Home || event->key() == Qt::Key_End)
+            && event->modifiers() == Qt::ShiftModifier) {
+            const auto* focusedEditor = qobject_cast<QLineEdit*>(
+                QApplication::focusWidget());
+            if (focusedEditor && isAncestorOf(focusedEditor)) {
+                event->accept();
+                return;
+            }
+            if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
+                emit statusMessage(
+                    tr("Finish or cancel the current drag before selecting to a timeline boundary"));
+            } else {
+                adjustTimeRangeByKeyboard(event->key() == Qt::Key_End, true);
             }
             event->accept();
             return;
@@ -2763,7 +2780,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             selectionMessage.append(
                 tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
                     .arg(laneValueAt(*lane, cursorTick_)));
-            selectionMessage.append(tr(" · Shift+Left/Right selects time"));
+            selectionMessage.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary"));
             if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                 selectionMessage.append(tr(" · Enter edits value"));
             }
@@ -4183,7 +4200,7 @@ void WaveCanvas::showRangeEditPalette()
                   .arg(format(selectionRange_->second))
             : tr("Batch assignment requires only Bit, only Bus, or only Enum signals");
         contextHelp.append(
-            tr("\nShift+Up/Down adjusts signals; Shift+Left/Right adjusts time"));
+            tr("\nShift+Up/Down adjusts signals; Shift+Left/Right adjusts time; Shift+Home/End selects to a timeline boundary"));
         if (enumRange) {
             contextHelp.append(
                 enumSymbols.isEmpty()
@@ -5559,7 +5576,9 @@ Tick WaveCanvas::cursorKeyboardStep() const
         toTicks(10, TimeUnit::Nanosecond, project_->timeBase).value_or(1));
 }
 
-void WaveCanvas::adjustTimeRangeByKeyboard(const bool forward)
+void WaveCanvas::adjustTimeRangeByKeyboard(
+    const bool forward,
+    const bool toBoundary)
 {
     if (!scenario_ || scenario_->duration <= 0) {
         emit statusMessage(tr("Timeline has no editable time range"));
@@ -5568,7 +5587,7 @@ void WaveCanvas::adjustTimeRangeByKeyboard(const bool forward)
     const auto* lane = findLane(*scenario_, selectedLaneId_);
     if (!lane || !lane->visible || lane->kind == LaneKind::Group) {
         emit statusMessage(
-            tr("Select a signal before using Shift+Left or Shift+Right"));
+            tr("Select a signal before using Shift with Left, Right, Home, or End"));
         return;
     }
     if (rangeValueEdit_
@@ -5618,14 +5637,20 @@ void WaveCanvas::adjustTimeRangeByKeyboard(const bool forward)
     }
 
     const auto step = cursorKeyboardStep();
-    const auto next = forward
-        ? active + std::min(scenario_->duration - active, step)
-        : active - std::min(active, step);
+    const auto next = toBoundary
+        ? (forward ? scenario_->duration : Tick{0})
+        : (forward
+              ? active + std::min(scenario_->duration - active, step)
+              : active - std::min(active, step));
     if (next == active) {
-        emit statusMessage(
-            forward
-                ? tr("Timeline end reached · range unchanged · Shift+Left moves back")
-                : tr("Timeline start reached · range unchanged · Shift+Right moves forward"));
+        const auto message = toBoundary
+            ? (forward
+                   ? tr("Timeline end reached · range unchanged · Shift+Home moves the active edge back")
+                   : tr("Timeline start reached · range unchanged · Shift+End moves the active edge forward"))
+            : (forward
+                   ? tr("Timeline end reached · range unchanged · Shift+Left moves back")
+                   : tr("Timeline start reached · range unchanged · Shift+Right moves forward"));
+        emit statusMessage(message);
         return;
     }
 
@@ -5651,7 +5676,7 @@ void WaveCanvas::adjustTimeRangeByKeyboard(const bool forward)
             cursorTick_);
         emit statusMessage(
             tr("Range collapsed at %1 · %2 signal(s) remain selected · "
-               "Shift+Left/Right starts a new range")
+               "Shift+Left/Right or Shift+Home/End starts a new range")
                 .arg(format(cursorTick_))
                 .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
         viewport()->update();
@@ -5669,7 +5694,7 @@ void WaveCanvas::adjustTimeRangeByKeyboard(const bool forward)
         cursorTick_);
     emit statusMessage(
         tr("Keyboard range %1 to %2 · %3 · %4 signal(s) · "
-           "Shift+Left/Right adjusts the active edge · Shift+Up/Down adjusts signals · Esc clears")
+           "Shift+Left/Right adjusts the active edge · Shift+Home/End selects to boundary · Shift+Up/Down adjusts signals · Esc clears")
             .arg(format(selectionRange_->first))
             .arg(format(selectionRange_->second))
             .arg(format(selectionRange_->second - selectionRange_->first))
@@ -5795,7 +5820,7 @@ void WaveCanvas::adjustRangeSignalsByKeyboard(const bool downward)
         : tr("mixed");
     emit statusMessage(
         tr("Keyboard signal range · %1 %2 signal(s) · active %3 · "
-           "Shift+Up/Down adjusts signals · Shift+Left/Right adjusts time · Esc clears")
+           "Shift+Up/Down adjusts signals · Shift+Left/Right adjusts time · Shift+Home/End selects to boundary · Esc clears")
             .arg(static_cast<qulonglong>(selectedLaneIds_.size()))
             .arg(type)
             .arg(QString::fromStdString(selectableLanes.at(targetIndex)->name)));
@@ -5925,7 +5950,7 @@ void WaveCanvas::selectAdjacentLane(const bool downward)
                        .arg(ordinal)
                        .arg(total)
                        .arg(laneValueAt(*target, cursorTick_));
-    message.append(tr(" · Shift+Left/Right selects time"));
+    message.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary"));
     if (target->kind == LaneKind::Bus || target->kind == LaneKind::Enum) {
         message.append(tr(" · Enter edits value"));
     }

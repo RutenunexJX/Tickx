@@ -3584,7 +3584,9 @@ int main(int argc, char* argv[])
                 sendKey(canvas, Qt::Key_Home);
                 clickSignalHeader(laneY);
                 if (!window.statusBar()->currentMessage().contains(
-                        QStringLiteral("Shift+Left/Right selects time"))) {
+                        QStringLiteral("Shift+Left/Right selects time"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Shift+Home/End selects to boundary"))) {
                     fail(QStringLiteral(
                         "Signal selection did not disclose keyboard time-range selection"));
                     return;
@@ -3634,6 +3636,159 @@ int main(int argc, char* argv[])
                             "Cannot save keyboard time-range screenshot"));
                         return;
                     }
+                }
+                enumRangeValueEdit->setText(QStringLiteral("0xa5"));
+                enumRangeValueEdit->setModified(false);
+                enumRangeValueEdit->setCursorPosition(
+                    enumRangeValueEdit->text().size());
+                enumRangeValueEdit->setFocus(Qt::OtherFocusReason);
+                sendKey(enumRangeValueEdit, Qt::Key_Home, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                if (enumRangeValueEdit->selectedText() != QStringLiteral("0xa5")
+                    || enumRangeValueEdit->cursorPosition() != 0
+                    || canvas->selectedTimeRange() != keyboardBusRange
+                    || canvas->cursorTick() != 10'000
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Shift+Home escaped the range value field instead of selecting its text"));
+                    return;
+                }
+                enumRangeValueEdit->clear();
+                enumRangeValueEdit->setModified(false);
+
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                const auto boundaryScrollMaximum =
+                    canvas->horizontalScrollBar()->maximum();
+                sendKey(canvas, Qt::Key_End, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto keyboardBoundaryRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{0, scenario.duration}};
+                const auto keyboardBoundaryStatus =
+                    window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != keyboardBoundaryRange
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-scroll")}
+                    || canvas->cursorTick() != scenario.duration
+                    || boundaryScrollMaximum <= 0
+                    || canvas->horizontalScrollBar()->value()
+                        != boundaryScrollMaximum
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || !enumRangeContext->text().contains(QStringLiteral("1 Bus"))
+                    || !enumRangeContext->toolTip().contains(
+                        QStringLiteral("Shift+Home/End selects to a timeline boundary"))
+                    || enumRangeValueEdit->isModified()
+                    || QApplication::activeModalWidget()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !keyboardBoundaryStatus.contains(
+                        QStringLiteral("Keyboard range"))
+                    || !keyboardBoundaryStatus.contains(
+                        QStringLiteral("Shift+Home/End selects to boundary"))) {
+                    qCritical().noquote()
+                        << "Keyboard boundary range diagnostics"
+                        << "range"
+                        << (canvas->selectedTimeRange()
+                                ? QStringLiteral("%1-%2")
+                                      .arg(canvas->selectedTimeRange()->first)
+                                      .arg(canvas->selectedTimeRange()->second)
+                                : QStringLiteral("<none>"))
+                        << "cursor" << canvas->cursorTick()
+                        << "scroll" << canvas->horizontalScrollBar()->value()
+                        << "maximum" << boundaryScrollMaximum
+                        << "context" << enumRangeContext->text()
+                        << "help" << enumRangeContext->toolTip()
+                        << "status" << keyboardBoundaryStatus;
+                    fail(QStringLiteral(
+                        "Shift+End did not extend the active range edge to timeline End"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto keyboardBoundaryScreenshotPath =
+                        waveEditAutoScrollScreenshotPath;
+                    const auto suffix = keyboardBoundaryScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        keyboardBoundaryScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-keyboard-boundary-range"));
+                    } else {
+                        keyboardBoundaryScreenshotPath.append(
+                            QStringLiteral("-keyboard-boundary-range.png"));
+                    }
+                    if (!window.grab().save(keyboardBoundaryScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save keyboard boundary-range screenshot"));
+                        return;
+                    }
+                }
+
+                sendKey(canvas, Qt::Key_End, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto keyboardBoundaryNoEffectStatus =
+                    window.statusBar()->currentMessage();
+                if (canvas->selectedTimeRange() != keyboardBoundaryRange
+                    || canvas->cursorTick() != scenario.duration
+                    || canvas->horizontalScrollBar()->value()
+                        != boundaryScrollMaximum
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !keyboardBoundaryNoEffectStatus.contains(
+                        QStringLiteral("Timeline end reached"))
+                    || !keyboardBoundaryNoEffectStatus.contains(
+                        QStringLiteral("Shift+Home moves the active edge back"))) {
+                    fail(QStringLiteral(
+                        "Repeated Shift+End changed the range or omitted boundary feedback"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_Home, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto keyboardBoundaryCollapseStatus =
+                    window.statusBar()->currentMessage();
+                if (canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange()
+                    || enumRangePalette->isVisibleTo(&window)
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-scroll")}
+                    || canvas->cursorTick() != 0
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !keyboardBoundaryCollapseStatus.contains(
+                        QStringLiteral("Range collapsed"))
+                    || !keyboardBoundaryCollapseStatus.contains(
+                        QStringLiteral("Shift+Home/End starts a new range"))) {
+                    fail(QStringLiteral(
+                        "Shift+Home did not collapse the boundary range at its anchor"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != keyboardBusRange
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-scroll")}
+                    || canvas->cursorTick() != 10'000
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Keyboard range could not restart after boundary collapse"));
+                    return;
                 }
                 sendKey(canvas, Qt::Key_Left, Qt::ShiftModifier);
                 QCoreApplication::processEvents();
