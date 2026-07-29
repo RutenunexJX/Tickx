@@ -7935,6 +7935,45 @@ int main(int argc, char* argv[])
                     "Single-click Segment selection did not provide exact, history-free feedback"));
                 return;
             }
+            QHelpEvent segmentTooltip(
+                QEvent::ToolTip,
+                copySourcePoint,
+                canvas->viewport()->mapToGlobal(copySourcePoint));
+            QCoreApplication::sendEvent(
+                canvas->viewport(),
+                &segmentTooltip);
+            QCoreApplication::processEvents();
+            const auto segmentTooltipText = QToolTip::text();
+            if (window.project().scenarios.front()
+                    != beforeExactSegmentSelection
+                || !segmentTooltipText.contains(
+                    QString::fromStdString(quickBus.name))
+                || !segmentTooltipText.contains(
+                    QStringLiteral("value 0bxxxxxxxx"))
+                || !segmentTooltipText.contains(
+                    QStringLiteral("%1–%2")
+                        .arg(
+                            QString::fromStdString(wave::formatTick(
+                                presetStart,
+                                window.project().timeBase)),
+                            QString::fromStdString(wave::formatTick(
+                                presetStart + expectedBeat,
+                                window.project().timeBase))))
+                || !segmentTooltipText.contains(
+                    QStringLiteral("width %1").arg(QString::fromStdString(
+                        wave::formatTick(
+                            expectedBeat,
+                            window.project().timeBase))))
+                || !segmentTooltipText.contains(
+                    QStringLiteral("Ctrl+drag copies"))) {
+                qCritical().noquote()
+                    << "Segment tooltip diagnostics"
+                    << segmentTooltipText;
+                fail(QStringLiteral(
+                    "Wave Edit Segment hover did not expose exact value, range, width, and actions"));
+                return;
+            }
+            QToolTip::hideText();
             const auto laneCountBeforeSegmentShortcut =
                 window.project().scenarios.front().lanes.size();
             const auto beforeSegmentShortcut =

@@ -2010,6 +2010,45 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                 return true;
             }
         }
+        if (tool_ == Tool::WaveEdit
+            && scenario_
+            && project_
+            && help->pos().x() >= headerWidth_) {
+            if (const auto* lane = laneAtY(help->pos().y());
+                lane
+                && lane->kind != LaneKind::Group
+                && lane->kind != LaneKind::Bit) {
+                const auto tick = scenario_->duration > 0
+                    ? std::clamp<Tick>(
+                          tickAtX(help->pos().x()),
+                          0,
+                          scenario_->duration - 1)
+                    : Tick{0};
+                if (const auto* segment = segmentAtTick(*lane, tick)) {
+                    const auto details =
+                        tr("%1 · value %2\n%3–%4 · width %5\nClick selects · drag moves · double-click edits")
+                            .arg(
+                                QString::fromStdString(lane->name),
+                                QString::fromStdString(segment->value),
+                                QString::fromStdString(formatTick(
+                                    segment->start,
+                                    project_->timeBase)),
+                                QString::fromStdString(formatTick(
+                                    segment->end,
+                                    project_->timeBase)),
+                                QString::fromStdString(formatTick(
+                                    segment->end - segment->start,
+                                    project_->timeBase)));
+                    QToolTip::showText(
+                        help->globalPos(),
+                        lane->kind == LaneKind::Clock
+                            ? details
+                            : details + tr("\nCtrl+drag copies"),
+                        viewport());
+                    return true;
+                }
+            }
+        }
         QToolTip::hideText();
         event->ignore();
         return true;
