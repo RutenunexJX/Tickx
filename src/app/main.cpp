@@ -6968,6 +6968,28 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            directValue->setText(QStringLiteral("0x0a"));
+            directValue->setModified(true);
+            sendKey(directValue, Qt::Key_Return, Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            if (!busHasExactValue(*firstSequentialBeat, "0x0a")
+                || canvas->selectedTimeRange() != firstSequentialBeat
+                || !presetPalette->isVisible()
+                || !directValue->hasFocus()
+                || directValue->text() != QStringLiteral("0x0a")
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("target kept"))) {
+                fail(QStringLiteral("Ctrl+Enter did not apply the Bus draft while keeping its target"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Return, Qt::ControlModifier);
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (!assertBusEmpty()) {
+                fail(QStringLiteral("Repeated Ctrl+Enter created empty Bus history"));
+                return;
+            }
+
             directValue->setText(QStringLiteral("0x11"));
             directValue->setModified(true);
             sendKey(directValue, Qt::Key_Tab);
@@ -7016,10 +7038,10 @@ int main(int argc, char* argv[])
 
             sendKey(directValue, Qt::Key_Down, Qt::ControlModifier);
             QCoreApplication::processEvents();
-            if (directValue->text() != QStringLiteral("0x2a")
+            if (directValue->text() != QStringLiteral("0x0a")
                 || !directValue->isModified()
                 || !directValue->hasFocus()
-                || recentValues->currentText() != QStringLiteral("0x2a")
+                || recentValues->currentText() != QStringLiteral("0x0a")
                 || !busHasExactValue(*firstSequentialBeat, "0x11")) {
                 fail(QStringLiteral("Ctrl+Down did not cycle to the next recent Bus value as a draft"));
                 return;

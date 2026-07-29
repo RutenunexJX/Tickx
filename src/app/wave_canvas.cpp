@@ -849,6 +849,12 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
             && stepBusEditorValue(keyEvent->key() == Qt::Key_Up)) {
             return true;
         }
+        if (watched == busValueEdit_
+            && acceptKey
+            && keyEvent->modifiers() == Qt::ControlModifier) {
+            submitBusValue(BusEditCommitAction::Stay);
+            return true;
+        }
         if (busNextBeat || busPreviousBeat) {
             submitBusValue(
                 busNextBeat
@@ -4396,7 +4402,8 @@ void WaveCanvas::showBusPresetPalette(
         }
         busValueEdit_->setToolTip(
             busValueEdit_->toolTip()
-            + tr("\nCtrl+Up/Down cycles this signal's recent values"));
+            + tr("\nCtrl+Up/Down cycles this signal's recent values")
+            + tr("\nCtrl+Enter applies and keeps the current target open"));
         busValueEdit_->setStyleSheet({});
     }
     positionBusPresetPalette();
@@ -5280,7 +5287,8 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
         return;
     }
     const auto navigateWithoutValue = busEditScope_ == BusEditScope::Beat
-        && action != BusEditCommitAction::Close
+        && (action == BusEditCommitAction::PreviousBeat
+            || action == BusEditCommitAction::NextBeat)
         && busValueEdit_->text().trimmed().isEmpty()
         && !busValueEdit_->isModified();
     if (navigateWithoutValue) {
@@ -5375,8 +5383,11 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
     const auto laneId = busPresetLaneId_;
     const auto laneName = lane->name;
     const auto [start, end] = *busEditRange_;
-    const auto navigateAfterCommit = busEditScope_ == BusEditScope::Beat
-        && action != BusEditCommitAction::Close;
+    const auto editorScope = busEditScope_;
+    const auto navigateAfterCommit = editorScope == BusEditScope::Beat
+        && (action == BusEditCommitAction::PreviousBeat
+            || action == BusEditCommitAction::NextBeat);
+    const auto stayAfterCommit = action == BusEditCommitAction::Stay;
     const auto historySizeBefore = commandStack_ ? commandStack_->size() : 0;
     bool applied = false;
     if (busEditScope_ == BusEditScope::Segment) {
@@ -5446,6 +5457,31 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
         busValueEdit_->setText(QString::fromStdString(validation.normalizedValue));
         busValueEdit_->setModified(false);
         busValueEdit_->setStyleSheet({});
+        if (stayAfterCommit) {
+            if (const auto* refreshedLane = findLane(*scenario_, laneId)) {
+                showBusPresetPalette(
+                    *refreshedLane,
+                    QPoint(xAtTick(start), 0),
+                    start,
+                    std::pair{start, end},
+                    editorScope);
+            }
+            if (busValueEdit_) {
+                busValueEdit_->setFocus(Qt::OtherFocusReason);
+                busValueEdit_->selectAll();
+            }
+            const auto changed = commandStack_
+                && commandStack_->size() != historySizeBefore;
+            emit statusMessage(
+                tr("%1 · %2 %3 · target kept · Enter finishes")
+                    .arg(QString::fromStdString(laneName))
+                    .arg(QString::fromStdString(validation.normalizedValue))
+                    .arg(changed
+                             ? tr("applied · Ctrl+Z")
+                             : tr("confirmed · no values changed")));
+            viewport()->update();
+            return;
+        }
         if (navigateAfterCommit) {
             const auto forward = action == BusEditCommitAction::NextBeat;
             if (advanceBusValueEdit(laneId, {start, end}, forward)) return;

@@ -179,6 +179,7 @@ private:
     };
     enum class BusEditCommitAction {
         Close,
+        Stay,
         PreviousBeat,
         NextBeat,
     };
