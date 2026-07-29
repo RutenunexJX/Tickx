@@ -164,6 +164,13 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   间前后导航；`Alt+Left` / `Alt+Right` 按 Sync 一拍或 Async 一 tick 微移当前 Segment。导航不修改
   模型，微移保持值与扩展语义并各自产生一个 Undo。Wave Edit 指针状态使用实际指针位置显示
   `pointer <signal> · value <value>`，不把吸附到下一边界的值误报为指针下结果。
+- 选中 Bus/Enum Segment 后，按 `Enter` 或直接输入字符会编辑该完整 Segment，不会退回当前拍。
+  Segment 值栏内 `Tab` / `Shift+Tab` 提交并打开下一/上一显式 Segment；到达首尾时保留当前目标并
+  明确提示，确认原值不会移除预设元数据或产生空历史。只有信号与编辑光标目标时，
+  `Ctrl+Space` 选择光标处 Segment，`Ctrl+Tab` / `Ctrl+Shift+Tab` 可从光标直接进入后/前一段。
+  `[` / `]` 按当前编辑单位向外扩展左/右边界，`Shift+[` / `Shift+]` 向内收缩；每次只产生一个
+  Undo，并沿用相邻内容和最小宽度约束。按 Esc 清除 Segment 编辑状态时保留当前信号与精确时间，
+  可继续导航或用 `Ctrl+Space` 恢复选段。
 - 放大长时间轴后，Wave Edit 的 Shift 范围选择、范围端点、Bit 多拍、Bit 边沿、Segment 移动与左右边界拖动在进入波形区左右 48 px 时持续自动滚动；每次滚动都会更新真实时间、吸附与预览，状态栏显示方向。释放后停留在目标视图，仍只提交原手势对应的一个命令；Esc 或异常失去左键会停止滚动、恢复起始视图，并保持模型、Undo 与 Saved 状态不变。
 - 建立显式时间范围后，现有单个 `Fit scenario` 动作会就地改为 `Fit selection`；点击或按 `Ctrl+0`
   让范围左右端点准确占满波形视口，同时保留选区、固定范围栏和编辑能力。状态栏说明 Esc 可清除选区；
@@ -409,6 +416,10 @@ exports/
   第 85 轮继续覆盖 Edit/右键/`Ctrl+D` 复制、相邻插入、唯一名称、不同随机颜色、属性与波形一致、lane/segment ID 独立、ClockDomain 独立、Event/Relation 不复制、显式范围门禁、单步 Undo/Redo 和状态反馈；离屏截图验证 `bus`/`bus_copy` 相邻、波形一致且副本已选中。
   第 86 轮继续覆盖 Edit/右键信号与 Group 一步隐藏、动态动作名称、显式范围无损门禁、选择清理、实时隐藏计数、无模态窗口、单步 Undo/Redo、恢复全部隐藏项及 Saved 基线回归；离屏截图验证 `req` 已隐藏、其余波形与视图保持且 `Show 2 hidden items` 和恢复说明同时可见。
   第 87 轮继续覆盖多个隐藏项按名称单独恢复、主体按钮恢复全部、单隐藏项直达模式、原顺序和水平视图保持、恢复后选中、显式范围无损门禁、单步 Undo/Redo 及 Saved 基线回归；离屏截图验证恢复菜单同时列出隐藏 Group、`req` 与全部恢复，单独恢复 `req` 后 Group 仍隐藏且 `Show 1 hidden item`、选中态和结果反馈同时可见。
+  第 110–119 轮继续覆盖已选 Bus/Enum Segment 的 Enter/直接输入、Tab/Shift+Tab 连续显式段录入、
+  首尾目标保留、原值与预设元数据零变化、Ctrl+Space 光标选段、无预选时的双向 Ctrl+Tab、
+  `[ ]`/Shift 变体按 Sync 拍调整左右边界、元数据保持、每次单步 Undo，以及 Esc 退出后保留
+  信号和时间并可立即恢复选段；全程比较 Scenario、选择范围、状态反馈和历史。
 - Measure 离屏回归覆盖活动/临时光标、持久锁定点/区间、精确 `Δ`、创建/选择/拖动/方向键/删除
   结果、活动光标单击与方向键最终值、Shift 参考点、正负拖动的 Reference/Cursor/Δ、边界无效果
   反馈、一次 Undo 直达前一真实移动、Delete 的 Undo/Redo 恢复提示、删除较早点后的名称冲突规避、
@@ -477,7 +488,8 @@ exports/
   `Unsaved changes`。若 Undo 发生在 autosave 正在写入或已经完成之后，过期恢复快照会在后台结果
   返回后或当场删除；新分支不会因与旧分支栈深度相同而被误判为 Saved。
 最近一次验证结果：默认、Qt Creator Debug、Qt Creator Release 三套构建均成功，三套各
-26/26 CTest 通过；核心入口 26/26，百万 transition 指标为 Debug 20 ms、Release 4 ms。
+26/26 CTest 通过；核心入口 Debug/Release 各 26/26，百万 transition 指标为 Debug 21 ms、
+Release 4 ms。
 全部 GUI 路径使用 offscreen，迭代期间未操作桌面且未打包。完整验收记录见 [PLAN.md](PLAN.md)。
 
 ## 当前限制

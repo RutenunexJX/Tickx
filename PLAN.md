@@ -5370,6 +5370,160 @@ Desktop interaction: none
 Packaging: not run during iteration
 ```
 
+## 持续迭代 110：Enter 编辑已选 Segment
+
+状态：完成
+
+已交付：
+
+- Wave Edit 中已选 Bus/Enum Segment 时，`Enter` 打开该完整 Segment 的固定值编辑栏，不再退回
+  编辑光标所在 Beat。
+- 编辑栏预填当前值并保持精确范围、Segment ID、信号目标和模型不变。
+- `wave-canvas-add-lane-smoke` 覆盖固定栏、预填值、精确范围和零历史。
+
+## 持续迭代 111：直接输入编辑已选 Segment
+
+状态：完成
+
+已交付：
+
+- 已选 Bus/Enum Segment 后输入 `0` / `1` / `X` / `Z` 或其他可打印字符，直接以该字符启动
+  Segment 草稿，不再修改单拍。
+- 草稿提交前仅改变编辑器文本；Esc 可取消且 Scenario、选择和历史保持不变。
+- offscreen 回归覆盖直接输入、修改态、精确目标和零模型变化。
+
+## 持续迭代 112：Segment 值连续向后录入
+
+状态：完成
+
+已交付：
+
+- Segment 值编辑栏内按 `Tab` 提交当前值并打开同信号的下一显式 Segment。
+- 确认原值会保留 Bus preset 扩展元数据，不产生隐性命令或空历史。
+- 固定栏占位、提示与状态反馈公开下一 Segment 路径；offscreen 回归覆盖值、范围、元数据和
+  Scenario 零变化。
+
+## 持续迭代 113：Segment 值连续向前录入
+
+状态：完成
+
+已交付：
+
+- Segment 值编辑栏内按 `Shift+Tab` 提交当前值并打开上一显式 Segment。
+- 到达首段或末段时，编辑栏保留当前目标，状态栏给出可返回方向，不丢草稿、不改变历史。
+- offscreen 回归覆盖双向连续录入、首段边界、目标保持和原值零变化。
+
+## 持续迭代 114：按编辑光标选中 Segment
+
+状态：完成
+
+已交付：
+
+- 当前信号与时间已知时，`Ctrl+Space` 直接选中光标处的 Bus/Enum/Clock Segment，并公开值、
+  精确范围和后续操作。
+- 位于间隙边界时可选中恰好结束于该位置的左侧 Segment；Bit 继续保持拍级编辑语义。
+- 修正无修饰 Space 平移与 `Ctrl+Space` 的快捷键分流；选择过程不修改 Scenario 或历史。
+
+## 持续迭代 115：从光标进入后续 Segment
+
+状态：完成
+
+已交付：
+
+- 只有信号和编辑光标、尚未选中 Segment 时，`Ctrl+Tab` 选择光标处或其后的最近显式 Segment。
+- 结果同步更新精确范围、编辑光标和最小视图揭示；无后续段时原位说明。
+- offscreen 回归覆盖间隙起点、结果选择、光标位置和 Scenario 零变化。
+
+## 持续迭代 116：从光标进入前序 Segment
+
+状态：完成
+
+已交付：
+
+- 只有信号和编辑光标时，`Ctrl+Shift+Tab` 选择严格位于光标之前的最近显式 Segment。
+- 与正向路径共用 Bus/Enum/Clock 类型门禁、选择、视图和边界反馈；Bit 不被误切换为 Segment
+  语义。
+- offscreen 回归覆盖边界光标、前序结果和模型零变化。
+
+## 持续迭代 117：键盘调整 Segment 左边界
+
+状态：完成
+
+已交付：
+
+- 已选 Segment 可用 `[` 向左扩展、`Shift+[` 向右收缩左边界；Sync 使用一拍，Async 使用
+  一个整数 tick。
+- 调整沿用相邻 Segment、时间轴起点和最小宽度约束，保持值、扩展元数据与 Event/Relation
+  一致。
+- 每次按键只产生一个 Undo；offscreen 回归覆盖扩展、收缩、精确范围、元数据和逐步撤销。
+
+## 持续迭代 118：键盘调整 Segment 右边界
+
+状态：完成
+
+已交付：
+
+- 已选 Segment 可用 `]` 向右扩展、`Shift+]` 向左收缩右边界，编辑单位与左边界一致。
+- 相邻内容、Scenario End 和最小宽度阻挡时不写模型；成功调整保持当前 Segment 选中。
+- offscreen 回归覆盖扩展、收缩、值与元数据保持，以及两个独立原子 Undo。
+
+## 持续迭代 119：退出 Segment 编辑后保留工作位置
+
+状态：完成，达到本轮可用版本；按用户要求验收并推送后结束，不执行打包
+
+已交付：
+
+- 画布中按 Esc 清除 Segment 选择和编辑状态，但保留当前信号与精确编辑光标；随后可继续边沿
+  导航或按 `Ctrl+Space` 恢复选段。
+- 拖动取消仍恢复起始视图，并在保留信号/时间时明确说明；没有 Segment 上下文时维持既有
+  清空语义。
+- Segment 选中状态和悬浮提示公开 Enter、边界快捷键及 Esc 保留目标语义。
+
+开发视角验收：
+
+```text
+cmake --build build --parallel 4
+cmake --build build/qtcreator-debug --parallel 4
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+26/26 tests passed
+Total Test time: 17.28 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 17.22 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 16.59 sec
+
+Core test executable: Debug 26/26, Release 26/26
+Million-transition metric: Debug 21 ms / Release 4 ms
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+Automated QA: 单击 Bus Segment 后，Enter 和直接输入均打开完整 Segment 草稿；Tab/Shift+Tab
+在显式段间连续录入，并在首尾保留当前目标。Ctrl+Space 可按编辑光标选段；未预选时，
+Ctrl+Tab/Ctrl+Shift+Tab 从信号和时间位置直接进入后/前一段。[、] 及 Shift 变体按一拍调整
+左右边界，值与 preset 元数据保持，每次为一个 Undo。Esc 退出后信号和时间不丢失，并可立即
+Ctrl+Space 恢复。
+
+Offscreen visual QA:
+build/qtcreator-release/canvas-signal-management-smoke-bus-sequential-entry.png
+build/qtcreator-release/canvas-signal-management-smoke.png
+
+Visual result: 固定 Segment/Beat 编辑栏、当前拍透明高亮、Bus 显式值与隐式 X、编辑光标、
+信号名称、波形和网格均清晰；新增键盘路径不引入弹窗、遮挡、裁切、桌面抢焦点或视图跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
