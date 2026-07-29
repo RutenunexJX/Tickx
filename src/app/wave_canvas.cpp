@@ -2068,7 +2068,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                     : Tick{0};
                 if (const auto* segment = segmentAtTick(*lane, tick)) {
                     const auto details =
-                        tr("%1 · value %2\n%3–%4 · width %5\nClick selects · drag moves · double-click edits")
+                        tr("%1 · value %2\n%3–%4 · width %5\nClick selects · drag moves · double-click edits\n[ / ] expand edges · Shift+[ / Shift+] trim · Esc keeps signal/time")
                             .arg(
                                 QString::fromStdString(lane->name),
                                 QString::fromStdString(segment->value),
@@ -2085,7 +2085,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                         help->globalPos(),
                         lane->kind == LaneKind::Clock
                             ? details
-                            : details + tr("\nCtrl+drag copies"),
+                            : details + tr("\nEnter edits value · Ctrl+drag copies"),
                         viewport());
                     return true;
                 }
@@ -2460,6 +2460,15 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             const auto cancelledWaveEditDrag = drawing_;
             const auto restoredViewport = cancelledWaveEditDrag
                 && waveEditDragAutoScrolled_;
+            const auto keepWaveTarget = !selectedSegmentId_.empty();
+            const auto keptLaneId = selectedLaneId_;
+            const auto keptCursorTick = cursorTick_;
+            const auto* keptLane = keepWaveTarget
+                ? findLane(*scenario_, keptLaneId)
+                : nullptr;
+            const auto keptLaneName = keptLane
+                ? QString::fromStdString(keptLane->name)
+                : QString{};
             stopWaveEditDragAutoScroll();
             if (restoredViewport) {
                 horizontalScrollBar()->setValue(
@@ -2467,18 +2476,42 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             }
             panning_ = false;
             clearWaveEditState();
-            selectedLaneId_.clear();
-            selectedLaneIds_.clear();
+            if (keepWaveTarget && !keptLaneId.empty()) {
+                selectedLaneId_ = keptLaneId;
+                selectedLaneIds_ = {keptLaneId};
+                cursorTick_ = keptCursorTick;
+                emit selectionChanged(
+                    QString::fromStdString(keptLaneId),
+                    cursorTick_);
+            } else {
+                selectedLaneId_.clear();
+                selectedLaneIds_.clear();
+            }
             laneHeaderSelectionActive_ = false;
             hideBusPresetPalette();
             snapGuideTick_.reset();
             viewport()->setCursor(Qt::PointingHandCursor);
             viewport()->update();
             if (cancelledWaveEditDrag) {
+                auto message = restoredViewport
+                    ? tr("Waveform drag cancelled · view restored")
+                    : tr("Waveform drag cancelled");
+                if (keepWaveTarget && !keptLaneName.isEmpty()) {
+                    message.append(
+                        tr(" · %1 and edit cursor %2 kept")
+                            .arg(keptLaneName)
+                            .arg(QString::fromStdString(formatTick(
+                                cursorTick_,
+                                project_->timeBase))));
+                }
+                emit statusMessage(message);
+            } else if (keepWaveTarget && !keptLaneName.isEmpty()) {
                 emit statusMessage(
-                    restoredViewport
-                        ? tr("Waveform drag cancelled · view restored")
-                        : tr("Waveform drag cancelled"));
+                    tr("Segment selection cleared · signal %1 and edit cursor %2 kept · Ctrl+Space selects the Segment here")
+                        .arg(keptLaneName)
+                        .arg(QString::fromStdString(formatTick(
+                            cursorTick_,
+                            project_->timeBase))));
             }
             event->accept();
             return;
@@ -7624,6 +7657,15 @@ void WaveCanvas::selectSegmentAtCursor()
     const auto* segment = cursorTick_ < scenario_->duration
         ? segmentAtTick(*lane, cursorTick_)
         : nullptr;
+    if (!segment) {
+        const auto previous = std::find_if(
+            lane->segments.rbegin(),
+            lane->segments.rend(),
+            [this](const Segment& candidate) {
+                return candidate.end == cursorTick_;
+            });
+        if (previous != lane->segments.rend()) segment = &*previous;
+    }
     const auto formatTime = [this](const Tick tick) {
         return project_
             ? QString::fromStdString(formatTick(tick, project_->timeBase))
@@ -8948,9 +8990,9 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
             formatTick(end - start, project_->timeBase));
         emit statusMessage(
             lane->kind == LaneKind::Clock
-                ? tr("%1 Segment selected · value %2 · %3–%4 · width %5 · Alt+Left/Right moves · double-click edits · Delete removes")
+                ? tr("%1 Segment selected · value %2 · %3–%4 · width %5 · Alt+Left/Right moves · [ / ] expands edges · Shift+[ / Shift+] trims · double-click edits · Delete removes · Esc keeps signal/time")
                       .arg(laneName, value, startText, endText, widthText)
-                : tr("%1 Segment selected · value %2 · %3–%4 · width %5 · Alt+Left/Right moves · Ctrl+D copies after · Ctrl+Shift+D copies before · double-click edits · Delete removes")
+                : tr("%1 Segment selected · value %2 · %3–%4 · width %5 · Enter edits · Alt+Left/Right moves · [ / ] expands edges · Shift+[ / Shift+] trims · Ctrl+D copies after · Ctrl+Shift+D copies before · Delete removes · Esc keeps signal/time")
                       .arg(laneName, value, startText, endText, widthText));
     }
     waveEditOriginalRange_.reset();

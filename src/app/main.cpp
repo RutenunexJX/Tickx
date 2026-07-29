@@ -8750,6 +8750,64 @@ int main(int argc, char* argv[])
                 Qt::NoButton);
             QCoreApplication::processEvents();
 
+            const auto laneBeforeSegmentEscape =
+                canvas->selectedLaneId();
+            const auto cursorBeforeSegmentEscape =
+                canvas->cursorTick();
+            const auto beforeSegmentEscape =
+                window.project().scenarios.front();
+            sendKey(canvas, Qt::Key_Escape);
+            QCoreApplication::processEvents();
+            if (!canvas->selectedSegmentId().isEmpty()
+                || canvas->selectedTimeRange().has_value()
+                || canvas->selectedLaneId() != laneBeforeSegmentEscape
+                || canvas->cursorTick() != cursorBeforeSegmentEscape
+                || window.project().scenarios.front()
+                    != beforeSegmentEscape
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Segment selection cleared"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("signal %1").arg(
+                        QString::fromStdString(quickBus.name)))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("edit cursor"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("kept"))) {
+                fail(QStringLiteral(
+                    "Esc did not leave Segment editing while preserving the signal and edit cursor"));
+                return;
+            }
+            sendKey(
+                canvas,
+                Qt::Key_Space,
+                Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        navigationSourceRange}
+                || window.project().scenarios.front()
+                    != beforeSegmentEscape) {
+                qCritical().noquote()
+                    << "Segment Escape resume diagnostics"
+                    << "cursorBefore" << cursorBeforeSegmentEscape
+                    << "cursorAfter" << canvas->cursorTick()
+                    << "range"
+                    << (canvas->selectedTimeRange()
+                            ? QStringLiteral("%1-%2")
+                                  .arg(canvas->selectedTimeRange()->first)
+                                  .arg(canvas->selectedTimeRange()->second)
+                            : QStringLiteral("<none>"))
+                    << "expected"
+                    << QStringLiteral("%1-%2")
+                           .arg(navigationSourceRange.first)
+                           .arg(navigationSourceRange.second)
+                    << "lane" << canvas->selectedLaneId()
+                    << "status" << window.statusBar()->currentMessage();
+                fail(QStringLiteral(
+                    "Ctrl+Space could not resume Segment editing after Esc"));
+                return;
+            }
+
             const auto nudgeSourceValue = navigationSourceValue;
             const auto nudgeSourceExtensions =
                 navigationSourceExtensions;
