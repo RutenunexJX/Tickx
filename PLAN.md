@@ -4591,6 +4591,60 @@ Desktop interaction: none
 Packaging: not run during iteration
 ```
 
+## 持续迭代 82：显式范围粘贴落点一致性
+
+状态：完成，持续迭代中
+
+已交付：
+
+- 开发审计确认固定范围栏一直提示 `Paste ... at the selected start`，但实际实现统一使用活动光标。键盘从 0 ps 向右建立 0–10 ns 范围时，固定栏公开起点为 0 ps、活动光标位于 10 ns，旧行为会把内容错误粘贴到 10 ns，形成可见提示与实际写入不一致。
+- `pasteAtCursor()` 现在先校验显式范围，并在显式范围存在时严格使用 `selectionRange.first`；没有显式范围时继续使用编辑光标，右键 `Paste copied range here` 的点击定位语义不变。单/多信号目标映射、类型与位宽原子校验、End 自动延长和命令栈语义均保持不变。
+- 固定栏按钮提示、`Ctrl+V`、粘贴完成状态、粘贴后的持久范围现在使用同一左端点。活动端点仍可停在右侧用于继续扩缩范围，不再暗中改变粘贴目标；真实修改保持一个 Undo，原位无变化仍不制造空历史。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：从 data[7:0] 的 50–100 ns 复制 `0x35`，再用键盘建立 0–10 ns 目标，使活动光标明确停在 10 ns；断言固定栏公开 `selected targets at 0 ps`，`Ctrl+V` 后 5 ns 已为 `0x35`、结果范围为 0–50 ns、状态显示 `at 0 ps` 与 `Ctrl+Z`。单步 Undo 精确恢复原 Scenario 与 Saved，并保存第十二张离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --target wave-workbench
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 25 ms / Release 7 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.29 sec
+
+cmake --build build/qtcreator-release --target wave-workbench
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.53 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 2.13 sec
+
+Automated QA: data[7:0] 的 50–100 ns 范围复制后，以 Shift+Right 建立 0–10 ns 目标，活动光标位于 10 ns；
+              固定栏 Paste 明确显示目标起点 0 ps。Ctrl+V 后 5 ns 采样为 0x35，结果选区为 0–50 ns，
+              状态栏报告 Pasted at 0 ps 与 Ctrl+Z；一次 Undo 恢复原波形、Saved 与空 Undo 栈。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-keyboard-paste-start.png
+Visual result: 固定范围栏显示 1 Bus 与 0 ps–50 ns；蓝色活动光标仍清晰位于 10 ns，data[7:0] 从 0 ps 起显示 0x35，
+               50 ns 结果边界、100 ns 后的隐式 X、透明选区、其余波形与网格均可辨识，无模态窗口或视口跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

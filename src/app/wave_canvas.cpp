@@ -1528,7 +1528,19 @@ void WaveCanvas::pasteAtCursor()
     const auto duration = root.value(QStringLiteral("durationTick"))
                               .toString()
                               .toLongLong(&validDuration);
-    if (!validDuration || duration <= 0 || cursorTick_ > scenario_->duration) {
+    if (explicitRangeSelection_
+        && (!selectionRange_
+            || selectionRange_->second <= selectionRange_->first)) {
+        emit statusMessage(tr("Selected paste target is no longer valid."));
+        return;
+    }
+    const auto pasteStart = explicitRangeSelection_
+        ? selectionRange_->first
+        : cursorTick_;
+    if (!validDuration
+        || duration <= 0
+        || pasteStart < 0
+        || pasteStart > scenario_->duration) {
         emit statusMessage(tr("Clipboard range duration or destination is invalid."));
         return;
     }
@@ -1715,7 +1727,6 @@ void WaveCanvas::pasteAtCursor()
         }
     }
 
-    const auto pasteStart = cursorTick_;
     const auto durationBeforePaste = scenario_->duration;
     const auto relationCountBefore = scenario_->relations.size();
     bool changed = false;

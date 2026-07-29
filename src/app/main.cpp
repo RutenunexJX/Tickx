@@ -4107,6 +4107,133 @@ int main(int argc, char* argv[])
                         "Escape did not clear the keyboard edge range"));
                     return;
                 }
+                auto* keyboardRangeCopyButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditCopyButton"));
+                auto* keyboardRangePasteButton = window.findChild<QToolButton*>(
+                    QStringLiteral("RangeEditPasteButton"));
+                if (!keyboardRangeCopyButton || !keyboardRangePasteButton) {
+                    fail(QStringLiteral(
+                        "Keyboard range Paste controls are missing"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_Home);
+                clickSignalHeader(laneY);
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);
+                sendKey(canvas, Qt::Key_Right, edgeRangeModifiers);
+                QCoreApplication::processEvents();
+                const auto keyboardCopiedBusRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{50'000, 100'000}};
+                if (canvas->selectedTimeRange() != keyboardCopiedBusRange
+                    || canvas->cursorTick() != 100'000
+                    || !keyboardRangeCopyButton->isVisibleTo(&window)
+                    || !keyboardRangeCopyButton->isEnabled()) {
+                    fail(QStringLiteral(
+                        "Keyboard Paste source range was not selected at the Bus edges"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_C, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (!window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Copied 1 lane(s), 50 ns"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Ctrl+C did not copy the selected Bus source range without editing"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_Escape);
+                sendKey(canvas, Qt::Key_Home);
+                clickSignalHeader(laneY);
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto keyboardPasteTargetRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{0, 10'000}};
+                const auto keyboardPasteTooltip =
+                    keyboardRangePasteButton->toolTip();
+                if (canvas->selectedTimeRange() != keyboardPasteTargetRange
+                    || canvas->cursorTick() != 10'000
+                    || !keyboardRangePasteButton->isVisibleTo(&window)
+                    || !keyboardRangePasteButton->isEnabled()
+                    || !keyboardPasteTooltip.contains(
+                        QStringLiteral("selected targets at 0 ps"))) {
+                    fail(QStringLiteral(
+                        "Keyboard Paste target did not disclose the selected start independently of the active edge"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_V, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                const auto keyboardPastedRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{0, 50'000}};
+                const auto* keyboardPastedBus = wave::findLane(
+                    scenario,
+                    "lane-wave-edit-scroll");
+                const auto keyboardPasteStatus =
+                    window.statusBar()->currentMessage();
+                if (enumValueAt(keyboardPastedBus, 5'000) != "0x35"
+                    || canvas->selectedTimeRange() != keyboardPastedRange
+                    || canvas->cursorTick() != 10'000
+                    || scenario == originalScenario
+                    || !undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || !keyboardPasteStatus.contains(QStringLiteral("Pasted"))
+                    || !keyboardPasteStatus.contains(QStringLiteral("at 0 ps"))
+                    || !keyboardPasteStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+V used the keyboard range active edge instead of its disclosed start"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto keyboardPasteScreenshotPath =
+                        waveEditAutoScrollScreenshotPath;
+                    const auto suffix = keyboardPasteScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        keyboardPasteScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-keyboard-paste-start"));
+                    } else {
+                        keyboardPasteScreenshotPath.append(
+                            QStringLiteral("-keyboard-paste-start.png"));
+                    }
+                    if (!window.grab().save(keyboardPasteScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save keyboard range Paste start screenshot"));
+                        return;
+                    }
+                }
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+                if (scenario != originalScenario
+                    || enumValueAt(
+                           wave::findLane(scenario, "lane-wave-edit-scroll"),
+                           5'000)
+                        != std::string{}
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Undo did not restore the pre-Paste Bus and Saved state"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange()
+                    || enumRangePalette->isVisibleTo(&window)) {
+                    fail(QStringLiteral(
+                        "Escape did not clear the pasted keyboard range"));
+                    return;
+                }
                 sendKey(canvas, Qt::Key_Home);
                 const auto clockLaneY = 40
                     + scenario.lanes.front().height
