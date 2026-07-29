@@ -7974,6 +7974,30 @@ int main(int argc, char* argv[])
                 return;
             }
             QToolTip::hideText();
+            sendMouse(
+                QEvent::MouseMove,
+                copySourcePoint,
+                Qt::NoButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            const auto pointerContextStatus =
+                window.statusBar()->currentMessage();
+            if (window.project().scenarios.front()
+                    != beforeExactSegmentSelection
+                || !pointerContextStatus.contains(
+                    QStringLiteral("Wave Edit"))
+                || !pointerContextStatus.contains(
+                    QStringLiteral("pointer %1").arg(
+                        QString::fromStdString(quickBus.name)))
+                || !pointerContextStatus.contains(
+                    QStringLiteral("value 0bxxxxxxxx"))) {
+                qCritical().noquote()
+                    << "Wave Edit pointer context diagnostics"
+                    << pointerContextStatus;
+                fail(QStringLiteral(
+                    "Wave Edit pointer status did not expose the lane and current value"));
+                return;
+            }
             const auto laneCountBeforeSegmentShortcut =
                 window.project().scenarios.front().lanes.size();
             const auto beforeSegmentShortcut =

@@ -3797,6 +3797,15 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
         }
         auto message = tr("Wave Edit %1").arg(QString::fromStdString(
             formatTick(cursorTick_, project_->timeBase)));
+        if (!drawing_
+            && position.x() >= headerWidth_
+            && lane
+            && lane->kind != LaneKind::Group) {
+            message += tr("  |  pointer %1 · value %2")
+                           .arg(
+                               QString::fromStdString(lane->name),
+                               laneValueAt(*lane, boundedRaw));
+        }
         if (drawing_
             && waveEditInteraction_ == WaveEditInteraction::MoveTransition) {
             message += tr("  |  Move edge to %1").arg(QString::fromStdString(
