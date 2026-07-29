@@ -532,6 +532,40 @@ void testLaneAndGroupPropertyEditing()
     expect(
         !wave::findLane(scenario, "lane-request")->visible,
         "hide lane redo did not hide the signal again");
+    expect(
+        stack.execute(std::make_unique<wave::ShowLaneCommand>(
+            scenario,
+            "lane-request")),
+        "show lane command reported no effect");
+    expect(
+        wave::findLane(scenario, "lane-request")->visible,
+        "show lane command left the signal hidden");
+    expectEqual(
+        stack.undoDescription(),
+        std::string{"Show lane"},
+        "show lane command exposed the wrong Undo description");
+    const auto shownSignalStateId = stack.stateId();
+    expect(
+        !stack.execute(std::make_unique<wave::ShowLaneCommand>(
+            scenario,
+            "lane-request")),
+        "showing an already visible signal reported an effect");
+    expectEqual(
+        stack.stateId(),
+        shownSignalStateId,
+        "no-effect show lane command changed history state");
+    expect(stack.undo(), "show lane undo failed");
+    expect(
+        !wave::findLane(scenario, "lane-request")->visible,
+        "show lane undo did not hide the signal again");
+    expect(stack.redo(), "show lane redo failed");
+    expect(
+        wave::findLane(scenario, "lane-request")->visible,
+        "show lane redo did not restore the signal");
+    expect(stack.undo(), "second show lane undo failed");
+    expect(
+        !wave::findLane(scenario, "lane-request")->visible,
+        "second show lane undo did not restore hidden state");
     expect(stack.undo(), "second hide lane undo failed");
     expectEqual(
         stack.stateId(),
@@ -550,6 +584,22 @@ void testLaneAndGroupPropertyEditing()
         stack.undoDescription(),
         std::string{"Hide group"},
         "hide group command exposed the wrong Undo description");
+    expect(
+        stack.execute(std::make_unique<wave::ShowLaneCommand>(
+            scenario,
+            group.id)),
+        "show group command reported no effect");
+    expect(
+        wave::findLane(scenario, group.id)->visible,
+        "show group command left the group hidden");
+    expectEqual(
+        stack.undoDescription(),
+        std::string{"Show group"},
+        "show group command exposed the wrong Undo description");
+    expect(stack.undo(), "show group undo failed");
+    expect(
+        !wave::findLane(scenario, group.id)->visible,
+        "show group undo did not hide the group again");
     expect(stack.undo(), "hide group undo failed");
     expect(
         wave::findLane(scenario, group.id)->visible,

@@ -42,11 +42,15 @@ add_test(
             "--lane-autoscroll-smoke=${CMAKE_BINARY_DIR}/lane-autoscroll-smoke.png"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
+configure_file(
+    "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
+    "${CMAKE_BINARY_DIR}/hidden-lane-smoke-project.wave.json"
+    COPYONLY)
 add_test(
     NAME wave-hidden-lane-smoke
     COMMAND wave-workbench
             "--hidden-lane-smoke=${CMAKE_BINARY_DIR}/hidden-lane-smoke-quick-hide.png"
-            "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
+            "${CMAKE_BINARY_DIR}/hidden-lane-smoke-project.wave.json"
 )
 add_test(
     NAME wave-group-header-smoke

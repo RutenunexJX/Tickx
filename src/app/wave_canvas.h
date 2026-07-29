@@ -25,6 +25,7 @@ class QFrame;
 class QKeyEvent;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QStringListModel;
 class QMouseEvent;
 class QPaintEvent;
@@ -99,6 +100,7 @@ public slots:
     void fitSelection();
     void refreshModel();
     void revealLocation(const QString& laneId, qint64 tick);
+    void revealLane(const QString& laneId);
     void goToTick(qint64 tick);
     void dismissInlineValueEditor();
     void selectEntireTimeline();
@@ -110,6 +112,7 @@ public slots:
 signals:
     void addLaneRequested(LaneKind kind);
     void showHiddenLanesRequested();
+    void showHiddenLaneRequested(const QString& laneId);
     void duplicateLaneRequested(const QString& laneId);
     void renameLaneRequested(const QString& laneId);
     void removeLaneRequested(const QString& laneId);
@@ -374,6 +377,7 @@ private:
     CommandStack* commandStack_{nullptr};
     std::array<QToolButton*, 3> addLaneButtons_{};
     QToolButton* showHiddenLanesButton_{nullptr};
+    QMenu* hiddenLanesMenu_{nullptr};
     QFrame* quickLaneSetupPanel_{nullptr};
     QLineEdit* quickLaneNameEdit_{nullptr};
     QLineEdit* quickLaneParameterEdit_{nullptr};

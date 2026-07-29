@@ -4852,6 +4852,63 @@ Visual result: req 行已消失，clk/reset_n/ack/data/state/transfer 及其波�
 Desktop interaction: none
 Packaging: not run during iteration
 ```
+## 持续迭代 87：多个隐藏项按名称单独恢复
+
+状态：完成，按用户要求在本轮推送后暂停后续迭代
+
+已交付：
+
+- 用户路径审计确认已有 `Show N hidden items` 只能一次恢复全部；当用户只想找回一个信号时，必须先恢复全部，再逐个重新隐藏其余项目。多个隐藏项时，画布末尾按钮改为分离式入口：主体继续一键恢复全部，箭头菜单按原顺序列出每个隐藏信号或 Group，并保留明确的 `Show all N hidden items`。
+- 只剩一个隐藏项时，按钮自动回到无箭头的单击直达模式。菜单动作使用对象名称、类型和稳定 ID，不要求用户记住隐藏顺序或进入完整属性窗口。
+- 新增专用 `ShowLaneCommand`。单项恢复保持原顺序与稳定 ID，立即选中并仅做必要的纵向揭示；水平滚动、缩放和编辑光标保持不变。状态栏公开恢复对象、剩余隐藏数量和 `Ctrl+Z`，单步 Undo/Redo 精确作用于同一项目。
+- 显式范围存在时，单项恢复无损阻断并提示 Esc；范围、模型、Undo 与 Saved 均不变化。隐藏项专项改用构建目录内的示例工程副本，测试中断产生的 autosave 不再污染源码示例。
+- 扩展核心命令测试和 `wave-hidden-lane-smoke`：覆盖信号/Group 单项恢复命令、无效果命令、菜单标签与类型、主体恢复全部、范围门禁、单项恢复后的选择/顺序/剩余计数/水平视图保持、Undo/Redo、单隐藏项直达模式、Saved 基线回归及两张离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 24 ms / Release 5 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.03 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.80 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-hidden-lane-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.34 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-group-header-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.29 sec
+
+Automated QA: 两个隐藏项时，按钮主体仍恢复全部，箭头菜单按名称提供 Show group Handshake signals、Show signal req 和 Show all 2 hidden items。显式范围存在时单项恢复保持范围并提示 Esc；清除范围后仅恢复 req，Group 继续隐藏，req 回到原顺序并被选中，水平滚动范围与位置不变，入口自动切换为 Show 1 hidden item。单步 Undo/Redo/Undo 精确恢复单项状态，随后既有全部恢复路径和 Saved 基线回归继续通过。
+Offscreen visual QA: build/qtcreator-release/hidden-lane-smoke-quick-hide-restore-menu.png
+                     build/qtcreator-release/hidden-lane-smoke-quick-hide-single-restore.png
+Visual result: 紧凑菜单完整列出两个隐藏对象和全部恢复；单独恢复 req 后，req 行在原位置以选中态显示，Handshake signals 仍隐藏，Show 1 hidden item、剩余计数、Ctrl+Z 和 Unsaved changes 同时可见。时间轴、波形、网格、缩放与水平视图无跳动，无弹窗、遮挡或裁切。
+Desktop interaction: none
+Packaging: not run during iteration
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

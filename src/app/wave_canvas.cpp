@@ -246,6 +246,9 @@ WaveCanvas::WaveCanvas(QWidget* parent)
 
     showHiddenLanesButton_ = new QToolButton(viewport());
     showHiddenLanesButton_->setObjectName(QStringLiteral("CanvasShowHiddenLanesButton"));
+    hiddenLanesMenu_ = new QMenu(showHiddenLanesButton_);
+    hiddenLanesMenu_->setObjectName(QStringLiteral("HiddenLanesMenu"));
+    hiddenLanesMenu_->setTitle(tr("Restore one hidden item"));
     showHiddenLanesButton_->setText(tr("Show hidden items"));
     showHiddenLanesButton_->setToolTip(
         tr("Restore every hidden signal or group as one undoable edit"));
@@ -1404,6 +1407,28 @@ void WaveCanvas::revealLocation(const QString& laneId, const qint64 tick)
             0,
             verticalScrollBar()->maximum()));
     }
+    emit selectionChanged(laneId, cursorTick_);
+    viewport()->update();
+}
+
+void WaveCanvas::revealLane(const QString& laneId)
+{
+    if (!scenario_) return;
+    const auto* lane = findLane(*scenario_, laneId.toStdString());
+    if (!lane || !lane->visible) return;
+    if (explicitRangeSelection_) clearExplicitRangeSelection();
+    if (tool_ == Tool::WaveEdit) {
+        clearWaveEditState();
+    } else if (tool_ == Tool::Marker) {
+        selectedMarkerId_.clear();
+        cursorInteraction_ = CursorInteraction::None;
+        lockedMarkerOriginalRange_.reset();
+    }
+    selectedLaneId_ = lane->id;
+    selectedLaneIds_ = {lane->id};
+    laneHeaderSelectionActive_ = true;
+    snapGuideTick_.reset();
+    ensureLaneVisible(lane->id);
     emit selectionChanged(laneId, cursorTick_);
     viewport()->update();
 }
@@ -3992,8 +4017,53 @@ void WaveCanvas::updateAddLaneButtonGeometry()
         ? tr("Show 1 hidden item")
         : tr("Show %1 hidden items").arg(static_cast<qulonglong>(hiddenCount));
     showHiddenLanesButton_->setText(label);
+    showHiddenLanesButton_->setAccessibleName(label);
+    if (hiddenLanesMenu_) {
+        hiddenLanesMenu_->clear();
+        showHiddenLanesButton_->setMenu(nullptr);
+        showHiddenLanesButton_->setPopupMode(QToolButton::DelayedPopup);
+        if (hiddenCount > 1) {
+            for (const auto& lane : scenario_->lanes) {
+                if (lane.visible) continue;
+                const auto name = QString::fromStdString(lane.name);
+                auto escapedName = name;
+                escapedName.replace(QLatin1Char('&'), QStringLiteral("&&"));
+                auto* action = hiddenLanesMenu_->addAction(
+                    lane.kind == LaneKind::Group
+                        ? tr("Show group %1").arg(escapedName)
+                        : tr("Show signal %1").arg(escapedName));
+                action->setObjectName(QStringLiteral("ShowHiddenLaneAction"));
+                action->setData(QString::fromStdString(lane.id));
+                action->setToolTip(
+                    tr("Restore only %1 in its original position").arg(name));
+                connect(
+                    action,
+                    &QAction::triggered,
+                    this,
+                    [this, laneId = QString::fromStdString(lane.id)] {
+                        emit showHiddenLaneRequested(laneId);
+                    },
+                    Qt::QueuedConnection);
+            }
+            hiddenLanesMenu_->addSeparator();
+            auto* showAll = hiddenLanesMenu_->addAction(
+                tr("Show all %1 hidden items").arg(
+                    static_cast<qulonglong>(hiddenCount)));
+            showAll->setObjectName(QStringLiteral("ShowAllHiddenLanesMenuAction"));
+            connect(
+                showAll,
+                &QAction::triggered,
+                this,
+                [this] { emit showHiddenLanesRequested(); },
+                Qt::QueuedConnection);
+            showHiddenLanesButton_->setMenu(hiddenLanesMenu_);
+            showHiddenLanesButton_->setPopupMode(QToolButton::MenuButtonPopup);
+        }
+    }
     showHiddenLanesButton_->setToolTip(
-        tr("Restore every hidden signal or group as one undoable edit"));
+        hiddenCount > 1
+            ? tr("Click to restore all; use the arrow to restore one by name")
+            : tr("Restore the hidden signal or group as one undoable edit"));
     const auto hiddenWidth = std::clamp(
         showHiddenLanesButton_->sizeHint().width() + 12,
         142,

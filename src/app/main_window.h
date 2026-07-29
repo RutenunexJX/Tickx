@@ -72,6 +72,7 @@ private slots:
     void updateCommandActions();
     void addLane();
     void showHiddenLanes();
+    void showHiddenLane(const QString& laneId);
     void addGroup();
     void editSelectedLane();
     void removeSelectedLane();

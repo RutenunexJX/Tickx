@@ -1257,6 +1257,40 @@ bool HideLaneCommand::hasEffect() const noexcept
     return wasVisible_;
 }
 
+ShowLaneCommand::ShowLaneCommand(Scenario& scenario, std::string laneId)
+    : scenario_(&scenario)
+    , laneId_(std::move(laneId))
+{
+    const auto* lane = findLane(scenario, laneId_);
+    if (!lane) throw std::invalid_argument("lane does not exist");
+    wasVisible_ = lane->visible;
+    showsGroup_ = lane->kind == LaneKind::Group;
+}
+
+void ShowLaneCommand::redo()
+{
+    auto* lane = findLane(*scenario_, laneId_);
+    if (!lane) throw std::runtime_error("lane was removed before command execution");
+    lane->visible = true;
+}
+
+void ShowLaneCommand::undo()
+{
+    auto* lane = findLane(*scenario_, laneId_);
+    if (!lane) throw std::runtime_error("lane was removed before undo");
+    lane->visible = wasVisible_;
+}
+
+std::string ShowLaneCommand::description() const
+{
+    return showsGroup_ ? "Show group" : "Show lane";
+}
+
+bool ShowLaneCommand::hasEffect() const noexcept
+{
+    return !wasVisible_;
+}
+
 ShowHiddenLanesCommand::ShowHiddenLanesCommand(Scenario& scenario)
     : scenario_(&scenario)
 {

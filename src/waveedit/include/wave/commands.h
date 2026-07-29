@@ -334,6 +334,22 @@ private:
     bool hidesGroup_{false};
 };
 
+class ShowLaneCommand final : public EditCommand {
+public:
+    ShowLaneCommand(Scenario& scenario, std::string laneId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::string laneId_;
+    bool wasVisible_{true};
+    bool showsGroup_{false};
+};
+
 class ShowHiddenLanesCommand final : public EditCommand {
 public:
     explicit ShowHiddenLanesCommand(Scenario& scenario);

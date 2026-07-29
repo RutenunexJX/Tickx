@@ -1013,6 +1013,11 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
         &MainWindow::showHiddenLanes);
     connect(
         canvas_,
+        &WaveCanvas::showHiddenLaneRequested,
+        this,
+        &MainWindow::showHiddenLane);
+    connect(
+        canvas_,
         &WaveCanvas::quickLaneSetupAccepted,
         this,
         &MainWindow::completeQuickLaneSetup);
@@ -1959,6 +1964,70 @@ void MainWindow::showHiddenLanes()
             : tr("Restored %1 hidden items · Ctrl+Z to undo")
                   .arg(static_cast<qulonglong>(hiddenCount)),
         5'000);
+}
+
+void MainWindow::showHiddenLane(const QString& laneId)
+{
+    if (!canvas_ || laneId.isEmpty()) return;
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before restoring and selecting a hidden item"),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+
+    auto* scenario = activeScenario();
+    const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
+    if (!lane) return;
+    const auto laneName = QString::fromStdString(lane->name);
+    const auto showingGroup = lane->kind == LaneKind::Group;
+    if (lane->visible) {
+        statusBar()->showMessage(
+            showingGroup
+                ? tr("Group %1 is already visible").arg(laneName)
+                : tr("Signal %1 is already visible").arg(laneName),
+            3'000);
+        return;
+    }
+
+    try {
+        if (!commandStack_.execute(std::make_unique<ShowLaneCommand>(
+                *scenario,
+                lane->id))) {
+            statusBar()->showMessage(
+                showingGroup
+                    ? tr("Group %1 is already visible").arg(laneName)
+                    : tr("Signal %1 is already visible").arg(laneName),
+                3'000);
+            return;
+        }
+    } catch (const std::exception& exception) {
+        QMessageBox::warning(
+            this,
+            tr("Cannot restore item"),
+            QString::fromUtf8(exception.what()));
+        return;
+    }
+
+    canvas_->refreshModel();
+    markEdited();
+    canvas_->revealLane(laneId);
+    selectLaneItem(signalTree_, laneId);
+    selectLaneItem(groupTree_, laneId);
+    const auto remaining = static_cast<std::size_t>(std::count_if(
+        scenario->lanes.begin(),
+        scenario->lanes.end(),
+        [](const Lane& candidate) { return !candidate.visible; }));
+    const auto remainder = remaining == 0
+        ? tr("no hidden items remain")
+        : remaining == 1
+            ? tr("1 hidden item remains")
+            : tr("%1 hidden items remain").arg(static_cast<qulonglong>(remaining));
+    statusBar()->showMessage(
+        tr("Restored %1 %2 in its original position · selected · %3 · Ctrl+Z to undo")
+            .arg(showingGroup ? tr("group") : tr("signal"), laneName, remainder),
+        8'000);
 }
 
 void MainWindow::addLane()

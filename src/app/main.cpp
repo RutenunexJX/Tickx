@@ -5515,6 +5515,233 @@ int main(int argc, char* argv[])
                 fail(QStringLiteral("Signal header context action did not hide one signal without a dialog"));
                 return;
             }
+            auto* hiddenMenu = showButton->menu();
+            QAction* requestRestoreAction = nullptr;
+            QAction* groupRestoreAction = nullptr;
+            QAction* showAllMenuAction = nullptr;
+            if (hiddenMenu) {
+                for (auto* action : hiddenMenu->actions()) {
+                    if (!action) continue;
+                    if (action->objectName()
+                        == QStringLiteral("ShowAllHiddenLanesMenuAction")) {
+                        showAllMenuAction = action;
+                    } else if (action->objectName()
+                               == QStringLiteral("ShowHiddenLaneAction")) {
+                        if (action->data().toString()
+                            == QStringLiteral("lane-request")) {
+                            requestRestoreAction = action;
+                        } else if (action->data().toString()
+                                   == QStringLiteral("group-handshake")) {
+                            groupRestoreAction = action;
+                        }
+                    }
+                }
+            }
+            if (!hiddenMenu
+                || hiddenMenu->objectName() != QStringLiteral("HiddenLanesMenu")
+                || showButton->popupMode() != QToolButton::MenuButtonPopup
+                || !showButton->toolTip().contains(QStringLiteral("arrow"))
+                || !requestRestoreAction
+                || requestRestoreAction->text() != QStringLiteral("Show signal req")
+                || !groupRestoreAction
+                || groupRestoreAction->text()
+                    != QStringLiteral("Show group Handshake signals")
+                || !showAllMenuAction
+                || showAllMenuAction->text()
+                    != QStringLiteral("Show all 2 hidden items")) {
+                fail(QStringLiteral("Multiple hidden items did not expose one-item and show-all choices on the same button"));
+                return;
+            }
+
+            const auto resetY = laneCenter("lane-reset");
+            if (resetY < 40 || resetY >= canvas->viewport()->height()) {
+                fail(QStringLiteral("The reset signal is outside the visible canvas"));
+                return;
+            }
+            clickHeader(QPoint(80, resetY));
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (!canvas->hasExplicitRangeSelection()) {
+                fail(QStringLiteral("Cannot establish a range before selective restore"));
+                return;
+            }
+            const auto horizontalBeforeRestore =
+                canvas->horizontalScrollBar()->value();
+            const auto horizontalMaximumBeforeRestore =
+                canvas->horizontalScrollBar()->maximum();
+            bool restoreMenuOpened = false;
+            bool restoreMenuScreenshotSaved = hiddenLaneScreenshotPath.isEmpty();
+            QTimer::singleShot(
+                0,
+                &application,
+                [&] {
+                    auto* popup = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                    restoreMenuOpened = popup == hiddenMenu
+                        && hiddenMenu->isVisible();
+                    if (restoreMenuOpened && !hiddenLaneScreenshotPath.isEmpty()) {
+                        auto menuScreenshotPath = hiddenLaneScreenshotPath;
+                        const auto suffix = menuScreenshotPath.lastIndexOf(
+                            QLatin1Char('.'));
+                        if (suffix >= 0) {
+                            menuScreenshotPath.insert(
+                                suffix,
+                                QStringLiteral("-restore-menu"));
+                        } else {
+                            menuScreenshotPath.append(
+                                QStringLiteral("-restore-menu.png"));
+                        }
+                        restoreMenuScreenshotSaved =
+                            hiddenMenu->grab().save(menuScreenshotPath);
+                    }
+                    if (restoreMenuOpened) requestRestoreAction->trigger();
+                    if (popup) popup->close();
+                });
+            showButton->showMenu();
+            QCoreApplication::processEvents();
+            QCoreApplication::processEvents();
+            if (!restoreMenuOpened || !restoreMenuScreenshotSaved) {
+                fail(QStringLiteral("The hidden-item arrow did not open and render its named restore menu"));
+                return;
+            }
+            const auto* rangeGuardHiddenLane = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            if (!rangeGuardHiddenLane || rangeGuardHiddenLane->visible
+                || !canvas->hasExplicitRangeSelection()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Esc clears"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("before restoring and selecting"))) {
+                fail(QStringLiteral("Selective restore discarded an explicit range instead of explaining recovery"));
+                return;
+            }
+            sendKey(canvas, Qt::Key_Escape);
+            QCoreApplication::processEvents();
+
+            hiddenMenu = showButton->menu();
+            requestRestoreAction = nullptr;
+            if (hiddenMenu) {
+                for (auto* action : hiddenMenu->actions()) {
+                    if (action
+                        && action->objectName()
+                            == QStringLiteral("ShowHiddenLaneAction")
+                        && action->data().toString()
+                            == QStringLiteral("lane-request")) {
+                        requestRestoreAction = action;
+                        break;
+                    }
+                }
+            }
+            if (!hiddenMenu || !requestRestoreAction) {
+                fail(QStringLiteral("Selective restore choice disappeared after range recovery"));
+                return;
+            }
+            bool selectiveMenuOpened = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&] {
+                    auto* popup = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                    selectiveMenuOpened = popup == hiddenMenu
+                        && hiddenMenu->isVisible();
+                    if (selectiveMenuOpened) requestRestoreAction->trigger();
+                    if (popup) popup->close();
+                });
+            showButton->showMenu();
+            QCoreApplication::processEvents();
+            QCoreApplication::processEvents();
+            if (!selectiveMenuOpened) {
+                fail(QStringLiteral("The hidden-item arrow did not reopen after range recovery"));
+                return;
+            }
+            const auto* selectivelyRestoredLane = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            const auto* stillHiddenGroup = wave::findLane(
+                window.project().scenarios.front(),
+                "group-handshake");
+            if (!selectivelyRestoredLane || !selectivelyRestoredLane->visible
+                || !stillHiddenGroup || stillHiddenGroup->visible
+                || canvas->selectedLaneId() != QStringLiteral("lane-request")
+                || !showButton->isVisible()
+                || showButton->text() != QStringLiteral("Show 1 hidden item")
+                || showButton->menu()
+                || showButton->popupMode() != QToolButton::DelayedPopup
+                || !showAction->isVisible()
+                || showAction->text() != QStringLiteral("Show 1 hidden item")
+                || canvas->horizontalScrollBar()->value()
+                    != horizontalBeforeRestore
+                || canvas->horizontalScrollBar()->maximum()
+                    != horizontalMaximumBeforeRestore
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Restored signal req in its original position"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("selected"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("1 hidden item remains"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Z"))
+                || !undoAction->text().contains(QStringLiteral("Show lane"))
+                || QApplication::activeModalWidget()) {
+                fail(QStringLiteral("Named restore did not reveal only req in place with stable view and feedback"));
+                return;
+            }
+            if (!hiddenLaneScreenshotPath.isEmpty()) {
+                auto restoredScreenshotPath = hiddenLaneScreenshotPath;
+                const auto suffix = restoredScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                if (suffix >= 0) {
+                    restoredScreenshotPath.insert(
+                        suffix,
+                        QStringLiteral("-single-restore"));
+                } else {
+                    restoredScreenshotPath.append(
+                        QStringLiteral("-single-restore.png"));
+                }
+                if (!window.grab().save(restoredScreenshotPath)) {
+                    fail(QStringLiteral("Cannot save selective restore screenshot"));
+                    return;
+                }
+            }
+
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* hiddenAfterSelectiveUndo = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            if (!hiddenAfterSelectiveUndo || hiddenAfterSelectiveUndo->visible
+                || !showButton->menu()
+                || showButton->text() != QStringLiteral("Show 2 hidden items")
+                || canvas->horizontalScrollBar()->value()
+                    != horizontalBeforeRestore
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Undid Show lane"))) {
+                fail(QStringLiteral("Selective restore Undo did not return to two hidden items"));
+                return;
+            }
+            redoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* visibleAfterSelectiveRedo = wave::findLane(
+                window.project().scenarios.front(),
+                "lane-request");
+            if (!visibleAfterSelectiveRedo || !visibleAfterSelectiveRedo->visible
+                || showButton->text() != QStringLiteral("Show 1 hidden item")
+                || canvas->horizontalScrollBar()->value()
+                    != horizontalBeforeRestore
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Redid Show lane"))) {
+                fail(QStringLiteral("Selective restore Redo did not restore only req"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (wave::findLane(
+                    window.project().scenarios.front(),
+                    "lane-request")->visible
+                || showButton->text() != QStringLiteral("Show 2 hidden items")) {
+                fail(QStringLiteral("Second selective restore Undo did not prepare show-all baseline"));
+                return;
+            }
             showButton->click();
             QCoreApplication::processEvents();
             const auto* restoredLane = wave::findLane(
