@@ -4918,6 +4918,8 @@ void MainWindow::createToolBars()
         themedIcon(QStringLiteral("zoom-fit-best"), style(), QStyle::SP_DesktopIcon),
         tr("Fit scenario"));
     fitAction->setObjectName(QStringLiteral("FitScenarioAction"));
+    fitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
+    fitAction->setShortcutContext(Qt::WindowShortcut);
     fitAction->setToolTip(tr("Fit the complete scenario"));
     connect(fitAction, &QAction::triggered, this, [this] {
         if (canvas_->hasExplicitRangeSelection()) {

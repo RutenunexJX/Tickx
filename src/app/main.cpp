@@ -2272,6 +2272,10 @@ int main(int argc, char* argv[])
                     || fitAction->text() != QStringLiteral("Fit scenario")
                     || !fitAction->toolTip().contains(
                         QStringLiteral("complete scenario"))
+                    || fitAction->shortcut().matches(
+                           QKeySequence(Qt::CTRL | Qt::Key_0))
+                        != QKeySequence::ExactMatch
+                    || fitAction->shortcutContext() != Qt::WindowShortcut
                     || goToTimeAction->shortcut().matches(
                            QKeySequence(Qt::CTRL | Qt::Key_G))
                         != QKeySequence::ExactMatch
@@ -2604,7 +2608,11 @@ int main(int argc, char* argv[])
                     return;
                 }
 
-                fitAction->trigger();
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(
+                    canvas,
+                    Qt::Key_0,
+                    Qt::ControlModifier);
                 QCoreApplication::processEvents();
                 const auto fittedRange = canvas->selectedTimeRange();
                 const auto fittedContentWidth = static_cast<double>(waveWidth())
@@ -2695,7 +2703,11 @@ int main(int argc, char* argv[])
                         "Range cleanup did not restore the Fit scenario action"));
                     return;
                 }
-                fitAction->trigger();
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(
+                    canvas,
+                    Qt::Key_0,
+                    Qt::ControlModifier);
                 QCoreApplication::processEvents();
                 if (canvas->horizontalScrollBar()->value() != 0
                     || canvas->horizontalScrollBar()->maximum() != 0
