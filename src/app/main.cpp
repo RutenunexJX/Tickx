@@ -6870,6 +6870,243 @@ int main(int argc, char* argv[])
                 fail(QStringLiteral("Bus recent values did not retain the normalized per-signal value"));
                 return;
             }
+            sendKey(directValue, Qt::Key_Escape);
+            QCoreApplication::processEvents();
+
+            const auto busHasExactValue = [&window, &quickBus](
+                                              const std::pair<wave::Tick, wave::Tick>& range,
+                                              const std::string_view value) {
+                const auto* lane = wave::findLane(
+                    window.project().scenarios.front(),
+                    quickBus.id);
+                return lane
+                    && std::any_of(
+                        lane->segments.begin(),
+                        lane->segments.end(),
+                        [&range, value](const wave::Segment& segment) {
+                            return segment.start == range.first
+                                && segment.end == range.second
+                                && segment.value == value;
+                        });
+            };
+            const auto assertBusEmpty = [&window, &quickBus]() {
+                const auto* lane = wave::findLane(
+                    window.project().scenarios.front(),
+                    quickBus.id);
+                return lane && lane->segments.empty();
+            };
+
+            const auto sequentialStart = wave::Tick{100'000};
+            canvas->revealLocation(
+                QString::fromStdString(quickBus.id),
+                sequentialStart);
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            const auto firstSequentialBeat = canvas->selectedTimeRange();
+            if (!presetPalette->isVisible()
+                || !directValue->hasFocus()
+                || !firstSequentialBeat
+                || firstSequentialBeat->second <= firstSequentialBeat->first
+                || !contextLabel->toolTip().contains(
+                    QStringLiteral("Tab applies and advances"))) {
+                fail(QStringLiteral("Enter did not open an explicit sequential Bus beat target"));
+                return;
+            }
+
+            directValue->setText(QStringLiteral("0x11"));
+            directValue->setModified(true);
+            sendKey(directValue, Qt::Key_Tab);
+            QCoreApplication::processEvents();
+            const auto secondSequentialBeat = canvas->selectedTimeRange();
+            const auto sequentialBeatWidth =
+                firstSequentialBeat->second - firstSequentialBeat->first;
+            if (!busHasExactValue(*firstSequentialBeat, "0x11")
+                || !presetPalette->isVisible()
+                || !directValue->hasFocus()
+                || !secondSequentialBeat
+                || secondSequentialBeat->first != firstSequentialBeat->second
+                || secondSequentialBeat->second
+                    != firstSequentialBeat->second + sequentialBeatWidth) {
+                fail(QStringLiteral("Tab did not apply and advance by one Sync Bus beat"));
+                return;
+            }
+            if (!canvasAddLaneScreenshotPath.isEmpty()) {
+                auto sequentialScreenshotPath = canvasAddLaneScreenshotPath;
+                const auto suffix = sequentialScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                if (suffix >= 0) {
+                    sequentialScreenshotPath.insert(
+                        suffix,
+                        QStringLiteral("-bus-sequential-entry"));
+                } else {
+                    sequentialScreenshotPath.append(
+                        QStringLiteral("-bus-sequential-entry.png"));
+                }
+                if (!window.grab().save(sequentialScreenshotPath)) {
+                    fail(QStringLiteral("Cannot save Bus sequential-entry screenshot"));
+                    return;
+                }
+            }
+
+            directValue->setText(QStringLiteral("0x22"));
+            directValue->setModified(true);
+            sendKey(directValue, Qt::Key_Backtab, Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (!busHasExactValue(*secondSequentialBeat, "0x22")
+                || canvas->selectedTimeRange() != firstSequentialBeat
+                || directValue->text() != QStringLiteral("0x11")
+                || !directValue->hasFocus()) {
+                fail(QStringLiteral("Shift+Tab did not apply and return to the previous Bus beat"));
+                return;
+            }
+
+            directValue->setText(QStringLiteral("0x1ff"));
+            directValue->setModified(true);
+            sendKey(directValue, Qt::Key_Tab);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange() != firstSequentialBeat
+                || !directValue->hasFocus()
+                || !directValue->isModified()
+                || directValue->toolTip().isEmpty()
+                || !busHasExactValue(*firstSequentialBeat, "0x11")) {
+                fail(QStringLiteral("Invalid sequential Bus input navigated away or changed the model"));
+                return;
+            }
+
+            directValue->setText(QStringLiteral("0x11"));
+            directValue->setModified(false);
+            sendKey(directValue, Qt::Key_Tab);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange() != secondSequentialBeat) {
+                fail(QStringLiteral("Confirming an unchanged Bus beat did not advance"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Escape);
+            undoAction->trigger();
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (!assertBusEmpty()) {
+                fail(QStringLiteral("Sequential Bus entry created empty history or was not independently undoable"));
+                return;
+            }
+
+            asyncTimingAction->trigger();
+            QCoreApplication::processEvents();
+            const auto asyncStart = wave::Tick{123'456};
+            canvas->revealLocation(
+                QString::fromStdString(quickBus.id),
+                asyncStart);
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            const auto firstAsyncBeat = canvas->selectedTimeRange();
+            const auto syncOffset =
+                ((firstSequentialBeat->first % sequentialBeatWidth)
+                 + sequentialBeatWidth)
+                % sequentialBeatWidth;
+            const auto asyncOffset = firstAsyncBeat
+                ? ((firstAsyncBeat->first % sequentialBeatWidth)
+                   + sequentialBeatWidth)
+                    % sequentialBeatWidth
+                : syncOffset;
+            if (!canvas->asynchronousEditing()
+                || !firstAsyncBeat
+                || asyncOffset == syncOffset
+                || firstAsyncBeat->second <= firstAsyncBeat->first) {
+                fail(QStringLiteral("Async Bus entry did not preserve its off-grid start"));
+                return;
+            }
+            directValue->setText(QStringLiteral("0x33"));
+            directValue->setModified(true);
+            sendKey(directValue, Qt::Key_Tab);
+            QCoreApplication::processEvents();
+            const auto secondAsyncBeat = canvas->selectedTimeRange();
+            if (!busHasExactValue(*firstAsyncBeat, "0x33")
+                || !secondAsyncBeat
+                || secondAsyncBeat->first != firstAsyncBeat->second
+                || secondAsyncBeat->second - secondAsyncBeat->first
+                    != firstAsyncBeat->second - firstAsyncBeat->first) {
+                fail(QStringLiteral("Async Tab advance lost the off-grid beat offset"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Escape);
+            undoAction->trigger();
+            asyncTimingAction->trigger();
+            QCoreApplication::processEvents();
+            if (canvas->asynchronousEditing() || !assertBusEmpty()) {
+                fail(QStringLiteral("Async sequential Bus entry did not restore cleanly"));
+                return;
+            }
+
+            canvas->revealLocation(
+                QString::fromStdString(quickBus.id),
+                window.project().scenarios.front().duration - 1);
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            const auto finalBusBeat = canvas->selectedTimeRange();
+            directValue->setText(QStringLiteral("0x44"));
+            directValue->setModified(true);
+            sendKey(directValue, Qt::Key_Tab);
+            QCoreApplication::processEvents();
+            if (!finalBusBeat
+                || !busHasExactValue(*finalBusBeat, "0x44")
+                || canvas->selectedTimeRange() != finalBusBeat
+                || !presetPalette->isVisible()
+                || !directValue->hasFocus()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("End"))) {
+                fail(QStringLiteral("Tab at timeline End did not apply in place with clear feedback"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Escape);
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (!assertBusEmpty()) {
+                fail(QStringLiteral("Timeline-end Bus entry was not undoable"));
+                return;
+            }
+
+            canvas->revealLocation(
+                QString::fromStdString(quickBus.id),
+                0);
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_Return);
+            QCoreApplication::processEvents();
+            const auto initialBusBeat = canvas->selectedTimeRange();
+            directValue->setText(QStringLiteral("0x55"));
+            directValue->setModified(true);
+            sendKey(directValue, Qt::Key_Backtab, Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (!initialBusBeat
+                || !busHasExactValue(*initialBusBeat, "0x55")
+                || canvas->selectedTimeRange() != initialBusBeat
+                || !presetPalette->isVisible()
+                || !directValue->hasFocus()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("start"))) {
+                fail(QStringLiteral("Shift+Tab at timeline start did not apply in place with clear feedback"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Escape);
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (!assertBusEmpty()) {
+                fail(QStringLiteral("Timeline-start Bus entry was not undoable"));
+                return;
+            }
+
+            sendMouse(
+                QEvent::MouseButtonPress,
+                paletteClick,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                paletteClick,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
             directValue->setText(QStringLiteral("0x3c"));
             directValue->setModified(true);
             clickHeader(QPoint(80, laneCenter(quickBit.id)));

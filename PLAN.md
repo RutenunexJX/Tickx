@@ -4981,6 +4981,78 @@ Desktop interaction: none
 Packaging: not run during iteration
 ```
 
+## 持续迭代 89：Bus/Enum 连续拍录入
+
+状态：完成，达到本轮可用版本；按用户要求完成验收并推送后结束本轮，不执行打包
+
+已交付：
+
+- 固定 Bus/Enum 编辑栏的 Beat 目标新增连续录入：`Tab` 提交当前拍并进入下一拍，
+  `Shift+Tab` 提交当前拍并回到上一拍；`Enter` 保留“提交并结束”，Segment 整段编辑不参与
+  连续拍导航，不增加新的模式或常驻按钮。
+- 当前 Beat 同时由固定栏中的精确时间范围和画布上的透明琥珀边框标明。高亮保持网格、波形和
+  隐式 `X` 可见，避免用户在连续录入时猜测下一次写入位置。
+- Sync 模式按关联时钟的一拍边界推进；Async 模式从当前范围连续前后移动并保留非同步偏移。
+  到达时间轴首尾时，当前值正常提交，编辑器和目标保持原位，状态栏明确给出反向导航按键。
+- 非法值不再通过重新定位清除当前选择；草稿、焦点、目标范围和既有模型值均原位保留。
+  未修改的相同值可以继续导航，但不新增空 Undo 或清除 Redo；每个真实拍写入保持独立 Undo。
+- 扩展 `wave-canvas-add-lane-smoke`，覆盖打开 Beat 目标、Tab/Shift+Tab、Sync/Async、
+  非法值、相同值、首尾边界、逐拍 Undo、编辑器焦点和离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build --parallel 4
+Result: success
+
+cmake --build build/qtcreator-debug --parallel 4
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+26/26 tests passed
+Total Test time: 16.63 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.31 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.89 sec
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 20 ms / Release 4 ms
+
+Targeted high-risk test:
+wave-canvas-add-lane-smoke 1/1 passed
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+Automated QA: 选中 Bus 后按 Enter，固定栏和画布共同标明当前 Beat。输入 0x11 并按 Tab 后，
+0x11 写入当前拍，焦点留在输入框且目标前进一拍；输入 0x22 并按 Shift+Tab 后，第二拍写入且
+目标返回第一拍。确认未修改的 0x11 只导航，不产生空历史；两次 Undo 精确清除两个真实写入。
+0x1ff 超过 8 bit 时不跳拍、不覆盖既有 0x11，并保留错误草稿和焦点。
+
+Sync 下目标严格前进一拍；切换 Async 后，从非同步边界开始的拍在 Tab 后保持相同偏移。
+末拍按 Tab、首拍按 Shift+Tab 均提交当前值但不越界，状态栏分别提示 End/start 和可用反向键。
+
+Offscreen visual QA:
+build/canvas-signal-management-smoke-bus-sequential-entry.png
+
+Visual result: 固定栏清晰显示 `bus · Beat · 110 ns–120 ns` 和 `Value · Tab next`；画布中
+110–120 ns 目标以低透明度琥珀框显示，前一拍 0x11、隐式 X、红色虚线、网格和时间刻度均可辨认。
+无弹窗、遮挡、裁切、桌面抢焦点或视图跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

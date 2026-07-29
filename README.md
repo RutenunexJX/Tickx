@@ -179,8 +179,11 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   Segment 边沿直接使用整数 tick，不经过像素往返，因此不会误取边沿前的隐式 `X`。Enum 隐藏
   Bus 专用预设，输入框提供已声明
   符号的补全与完整提示。非法 Enum 值保留草稿和焦点并列出可用符号。编辑条内按 Enter 提交一个
-  可撤销的一拍写值，Esc 放弃草稿且不改变模型、Undo 或 Saved 状态；位于 Scenario End 时明确
-  提示先向左移动，不会静默改写末拍。已有 Bus/Enum Segment 的双击仍用于编辑完整 Segment。
+  可撤销的一拍写值并结束；按 `Tab` 提交后直接进入下一拍，按 `Shift+Tab` 提交后回到上一拍。
+  当前 Beat 同时由编辑栏中的精确范围和画布上的透明琥珀框标明。Sync 下按关联时钟拍推进，Async
+  下保持当前非对齐偏移；非法值保留原拍、草稿和焦点。到达时间轴首尾时写值仍会提交，但目标保持
+  原位并提示可用的反向按键；重复确认相同值不产生空历史。Esc 放弃草稿且不改变模型、Undo 或
+  Saved 状态。已有 Bus/Enum Segment 的双击仍用于编辑完整 Segment，连续拍导航只作用于 Beat。
 - Clock 波形右键可对一拍执行 Gate、Drive X 或 Run。Run 清除该拍覆盖后保持拍级选择，并显示
   `restored normal clock waveform` 与撤销提示；已正常运行时显示 `no values changed`，不新增
   Undo 或清除 Redo。
@@ -411,7 +414,9 @@ exports/
   Enter 在 50 ns Segment 精确预填 `0x35`、焦点与上下文提示、Esc 零修改取消、再次 Enter 提交
   `0x5a`、单步 Undo 精确恢复 Scenario 与 Saved，以及编辑条离屏截图。第 88 轮继续覆盖裸 HEX
   输入规范化、最近自定义值、Don’t-care 比较语义、Sync/Async 边沿约束、Alt 绕过轻吸附、
-  Ctrl+拖动复制预览/提交/Undo/Redo、相同范围空历史抑制和 Segment 扩展元数据保留。
+  Ctrl+拖动复制预览/提交/Undo/Redo、相同范围空历史抑制和 Segment 扩展元数据保留。第 89 轮
+  继续覆盖 Beat 当前目标高亮、Tab/Shift+Tab 前后连续录入、Enter 完成、Sync 一拍推进、Async
+  偏移保持、非法值原位纠错、时间轴首尾反馈、重复确认空历史抑制及逐拍独立 Undo。
 - Waveform 工具栏离屏检查确认常驻动作仅有临时 Measure、缩放和 Fit；持久选择期间的批量赋值栏
   固定在工具栏中，960 像素宽度下无裁切且显隐不移动画布。不存在 Edit、Transition、Export 与
   Undo/Redo 按钮，菜单快捷键仍存在。

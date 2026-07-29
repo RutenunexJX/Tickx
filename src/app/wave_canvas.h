@@ -177,6 +177,11 @@ private:
         Beat,
         Segment,
     };
+    enum class BusEditCommitAction {
+        Close,
+        PreviousBeat,
+        NextBeat,
+    };
     enum class KeyboardRangeTarget {
         Step,
         TimelineBoundary,
@@ -227,7 +232,7 @@ private:
     void cancelQuickLaneSetup();
     void submitLaneRename();
     void cancelLaneRename();
-    void submitBusValue();
+    void submitBusValue(BusEditCommitAction action = BusEditCommitAction::Close);
     void submitRangeValue();
     void submitDurationEdit(bool preserveMouseFocusTarget = false);
     [[nodiscard]] bool hasPendingBusValueEdit() const noexcept;
@@ -239,8 +244,13 @@ private:
         const Lane& lane,
         const QPoint& anchor,
         std::optional<Tick> exactTick = std::nullopt,
-        std::optional<std::pair<Tick, Tick>> exactRange = std::nullopt);
+        std::optional<std::pair<Tick, Tick>> exactRange = std::nullopt,
+        BusEditScope exactRangeScope = BusEditScope::Segment);
     void hideBusPresetPalette();
+    bool advanceBusValueEdit(
+        const std::string& laneId,
+        const std::pair<Tick, Tick>& currentRange,
+        bool forward);
     void rememberBusValue(const std::string& laneId, const QString& value);
     [[nodiscard]] QString busEditorValue(const Lane& lane) const;
     void showRangeEditPalette();
@@ -334,6 +344,11 @@ private:
         Tick first,
         Tick second,
         const Lane& lane) const;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    adjacentEditableBeatRange(
+        const Lane& lane,
+        const std::pair<Tick, Tick>& currentRange,
+        bool forward) const;
     void clearWaveEditState();
     void commitWaveEdit(const QPoint& releasePosition);
     [[nodiscard]] Tick constrainedTransitionTick(const Event& event, Tick requested) const;
