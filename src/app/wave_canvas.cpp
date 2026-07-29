@@ -8338,6 +8338,21 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
                 .arg(QString::fromStdString(formatTick(end, project_->timeBase))),
             relationCountBefore,
             scenario_->relations.size()));
+    } else {
+        const auto laneName = QString::fromStdString(editedLaneName);
+        const auto value = QString::fromStdString(segmentValue);
+        const auto startText = QString::fromStdString(
+            formatTick(start, project_->timeBase));
+        const auto endText = QString::fromStdString(
+            formatTick(end, project_->timeBase));
+        const auto widthText = QString::fromStdString(
+            formatTick(end - start, project_->timeBase));
+        emit statusMessage(
+            lane->kind == LaneKind::Clock
+                ? tr("%1 Segment selected · value %2 · %3–%4 · width %5 · Alt+Left/Right moves · double-click edits · Delete removes")
+                      .arg(laneName, value, startText, endText, widthText)
+                : tr("%1 Segment selected · value %2 · %3–%4 · width %5 · Alt+Left/Right moves · Ctrl+D copies after · Ctrl+Shift+D copies before · double-click edits · Delete removes")
+                      .arg(laneName, value, startText, endText, widthText));
     }
     waveEditOriginalRange_.reset();
     waveEditPreviewRange_.reset();

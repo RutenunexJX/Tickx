@@ -7880,6 +7880,8 @@ int main(int argc, char* argv[])
             undoAction->trigger();
             QCoreApplication::processEvents();
 
+            const auto beforeExactSegmentSelection =
+                window.project().scenarios.front();
             sendMouse(
                 QEvent::MouseButtonPress,
                 copySourcePoint,
@@ -7891,6 +7893,48 @@ int main(int argc, char* argv[])
                 Qt::LeftButton,
                 Qt::NoButton);
             QCoreApplication::processEvents();
+            const auto exactSegmentSelectionStatus =
+                window.statusBar()->currentMessage();
+            if (window.project().scenarios.front()
+                    != beforeExactSegmentSelection
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{
+                            presetStart,
+                            presetStart + expectedBeat}}
+                || !exactSegmentSelectionStatus.contains(
+                    QString::fromStdString(quickBus.name))
+                || !exactSegmentSelectionStatus.contains(
+                    QStringLiteral("value 0bxxxxxxxx"))
+                || !exactSegmentSelectionStatus.contains(
+                    QStringLiteral("width %1").arg(QString::fromStdString(
+                        wave::formatTick(
+                            expectedBeat,
+                            window.project().timeBase))))
+                || !exactSegmentSelectionStatus.contains(
+                    QStringLiteral("Ctrl+D copies after"))
+                || !exactSegmentSelectionStatus.contains(
+                    QStringLiteral("Ctrl+Shift+D copies before"))) {
+                qCritical().noquote()
+                    << "Exact Segment selection diagnostics"
+                    << "modelChanged"
+                    << (window.project().scenarios.front()
+                        != beforeExactSegmentSelection)
+                    << "range"
+                    << (canvas->selectedTimeRange()
+                            ? QStringLiteral("%1-%2")
+                                  .arg(canvas->selectedTimeRange()->first)
+                                  .arg(canvas->selectedTimeRange()->second)
+                            : QStringLiteral("<none>"))
+                    << "expected"
+                    << QStringLiteral("%1-%2")
+                           .arg(presetStart)
+                           .arg(presetStart + expectedBeat)
+                    << "status" << exactSegmentSelectionStatus;
+                fail(QStringLiteral(
+                    "Single-click Segment selection did not provide exact, history-free feedback"));
+                return;
+            }
             const auto laneCountBeforeSegmentShortcut =
                 window.project().scenarios.front().lanes.size();
             const auto beforeSegmentShortcut =
