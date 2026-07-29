@@ -8474,6 +8474,52 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            sendKey(
+                canvas,
+                Qt::Key_Right,
+                Qt::ControlModifier);
+            sendKey(canvas, Qt::Key_Up);
+            sendKey(canvas, Qt::Key_Down);
+            QCoreApplication::processEvents();
+            if (canvas->selectedLaneId()
+                    != QString::fromStdString(quickBus.id)
+                || !canvas->selectedSegmentId().isEmpty()) {
+                fail(QStringLiteral(
+                    "Could not prepare a lane-and-cursor-only Segment navigation target"));
+                return;
+            }
+            const auto beforeCursorForwardNavigation =
+                window.project().scenarios.front();
+            sendKey(
+                canvas,
+                Qt::Key_Tab,
+                Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        navigationTargetRange}
+                || canvas->cursorTick() != navigationTargetRange.first
+                || window.project().scenarios.front()
+                    != beforeCursorForwardNavigation
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Next Segment from edit cursor"))) {
+                fail(QStringLiteral(
+                    "Ctrl+Tab did not enter the next Segment from a lane-and-cursor target"));
+                return;
+            }
+            sendKey(
+                canvas,
+                Qt::Key_Tab,
+                Qt::ControlModifier | Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        navigationSourceRange}) {
+                fail(QStringLiteral(
+                    "Could not return after cursor-based forward Segment navigation"));
+                return;
+            }
+
             const auto nudgeSourceValue = navigationSourceValue;
             const auto nudgeSourceExtensions = navigationSource->extensions;
             const auto beforeSegmentNudge =

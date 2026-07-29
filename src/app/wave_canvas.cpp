@@ -7307,8 +7307,61 @@ void WaveCanvas::navigateSelectedSegment(const bool forward)
     }
     auto* lane = findLane(*scenario_, selectedSegmentLaneId_);
     if (!lane || selectedSegmentId_.empty()) {
+        if (!forward) {
+            emit statusMessage(
+                tr("Select a Segment before using Ctrl+Shift+Tab"));
+            return;
+        }
+        lane = findLane(*scenario_, selectedLaneId_);
+        if (!lane || lane->kind == LaneKind::Group
+            || lane->kind == LaneKind::Bit) {
+            emit statusMessage(
+                tr("Select a Bus, Enum or Clock signal before using Ctrl+Tab"));
+            return;
+        }
+        const auto target = std::find_if(
+            lane->segments.begin(),
+            lane->segments.end(),
+            [this](const Segment& segment) {
+                return segment.end > cursorTick_;
+            });
+        if (target == lane->segments.end()) {
+            emit statusMessage(
+                tr("No Segment at or after edit cursor %1 on %2")
+                    .arg(QString::fromStdString(formatTick(
+                        cursorTick_,
+                        project_->timeBase)))
+                    .arg(QString::fromStdString(lane->name)));
+            return;
+        }
+        selectedLaneId_ = lane->id;
+        selectedLaneIds_ = {lane->id};
+        laneHeaderSelectionActive_ = false;
+        selectedSegmentLaneId_ = lane->id;
+        selectedSegmentId_ = target->id;
+        selectionRange_ = std::pair{target->start, target->end};
+        waveEditOriginalRange_.reset();
+        waveEditPreviewRange_.reset();
+        waveEditHoverLaneId_.clear();
+        waveEditHoverRange_.reset();
+        cursorTick_ = target->start;
+        hideBusPresetPalette();
+        ensureLaneVisible(lane->id);
+        ensureCursorVisible(cursorTick_);
+        emit selectionChanged(
+            QString::fromStdString(lane->id),
+            cursorTick_);
         emit statusMessage(
-            tr("Select a Segment before using Ctrl+Tab or Ctrl+Shift+Tab"));
+            tr("Next Segment from edit cursor on %1 · %2 · %3–%4 · Ctrl+Shift+Tab goes back")
+                .arg(QString::fromStdString(lane->name))
+                .arg(QString::fromStdString(target->value))
+                .arg(QString::fromStdString(formatTick(
+                    target->start,
+                    project_->timeBase)))
+                .arg(QString::fromStdString(formatTick(
+                    target->end,
+                    project_->timeBase))));
+        viewport()->update();
         return;
     }
     const auto current = std::find_if(
