@@ -252,6 +252,7 @@ private:
         const std::pair<Tick, Tick>& currentRange,
         bool forward);
     bool stepBusEditorValue(bool upward);
+    bool cycleBusRecentValue(bool forward);
     void rememberBusValue(const std::string& laneId, const QString& value);
     [[nodiscard]] QString busEditorValue(const Lane& lane) const;
     void showRangeEditPalette();

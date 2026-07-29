@@ -836,6 +836,13 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
                 || (keyEvent->key() == Qt::Key_Tab
                     && keyEvent->modifiers() == Qt::ShiftModifier));
         if (watched == busValueEdit_
+            && keyEvent->modifiers() == Qt::ControlModifier
+            && (keyEvent->key() == Qt::Key_Up
+                || keyEvent->key() == Qt::Key_Down)
+            && cycleBusRecentValue(keyEvent->key() == Qt::Key_Down)) {
+            return true;
+        }
+        if (watched == busValueEdit_
             && keyEvent->modifiers() == Qt::NoModifier
             && (keyEvent->key() == Qt::Key_Up
                 || keyEvent->key() == Qt::Key_Down)
@@ -4387,6 +4394,9 @@ void WaveCanvas::showBusPresetPalette(
                 busValueEdit_->toolTip()
                 + tr("\nUp/Down adjusts a known numeric draft by one"));
         }
+        busValueEdit_->setToolTip(
+            busValueEdit_->toolTip()
+            + tr("\nCtrl+Up/Down cycles this signal's recent values"));
         busValueEdit_->setStyleSheet({});
     }
     positionBusPresetPalette();
@@ -4613,6 +4623,51 @@ bool WaveCanvas::stepBusEditorValue(const bool upward)
         tr("%1 · draft %2 · Up/Down adjusts · Tab applies and advances")
             .arg(QString::fromStdString(lane->name))
             .arg(QString::fromStdString(display)));
+    return true;
+}
+
+bool WaveCanvas::cycleBusRecentValue(const bool forward)
+{
+    if (!scenario_ || !busValueEdit_ || busPresetLaneId_.empty()) return false;
+    const auto* lane = findLane(*scenario_, busPresetLaneId_);
+    if (!lane
+        || (lane->kind != LaneKind::Bus && lane->kind != LaneKind::Enum)) {
+        return false;
+    }
+    const auto recent = busRecentValues_.find(lane->id);
+    if (recent == busRecentValues_.end() || recent->second.isEmpty()) {
+        busValueEdit_->setFocus(Qt::OtherFocusReason);
+        busValueEdit_->selectAll();
+        emit statusMessage(
+            tr("%1 · no recent values yet · enter and apply a value first")
+                .arg(QString::fromStdString(lane->name)));
+        return true;
+    }
+
+    const auto& values = recent->second;
+    auto index = values.indexOf(busValueEdit_->text().trimmed());
+    if (index < 0) {
+        index = 0;
+    } else if (forward) {
+        index = (index + 1) % values.size();
+    } else {
+        index = (index + values.size() - 1) % values.size();
+    }
+    const auto value = values.at(index);
+    busValueEdit_->setText(value);
+    busValueEdit_->setModified(true);
+    busValueEdit_->setStyleSheet({});
+    busValueEdit_->setFocus(Qt::OtherFocusReason);
+    busValueEdit_->selectAll();
+    if (busRecentValuesCombo_) {
+        busRecentValuesCombo_->setCurrentIndex(index + 1);
+    }
+    emit statusMessage(
+        tr("%1 · recent value %2 of %3: %4 · Ctrl+Up/Down cycles")
+            .arg(QString::fromStdString(lane->name))
+            .arg(index + 1)
+            .arg(values.size())
+            .arg(value));
     return true;
 }
 

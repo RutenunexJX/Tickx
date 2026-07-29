@@ -7014,6 +7014,25 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            sendKey(directValue, Qt::Key_Down, Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            if (directValue->text() != QStringLiteral("0x2a")
+                || !directValue->isModified()
+                || !directValue->hasFocus()
+                || recentValues->currentText() != QStringLiteral("0x2a")
+                || !busHasExactValue(*firstSequentialBeat, "0x11")) {
+                fail(QStringLiteral("Ctrl+Down did not cycle to the next recent Bus value as a draft"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Up, Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            if (directValue->text() != QStringLiteral("0x11")
+                || recentValues->currentText() != QStringLiteral("0x11")
+                || !busHasExactValue(*firstSequentialBeat, "0x11")) {
+                fail(QStringLiteral("Ctrl+Up did not cycle back through recent Bus values"));
+                return;
+            }
+
             directValue->setText(QStringLiteral("0x1ff"));
             directValue->setModified(true);
             sendKey(directValue, Qt::Key_Tab);
