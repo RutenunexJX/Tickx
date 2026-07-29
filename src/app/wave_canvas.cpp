@@ -835,6 +835,13 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
             && (keyEvent->key() == Qt::Key_Backtab
                 || (keyEvent->key() == Qt::Key_Tab
                     && keyEvent->modifiers() == Qt::ShiftModifier));
+        if (watched == busValueEdit_
+            && keyEvent->modifiers() == Qt::NoModifier
+            && (keyEvent->key() == Qt::Key_Up
+                || keyEvent->key() == Qt::Key_Down)
+            && stepBusEditorValue(keyEvent->key() == Qt::Key_Up)) {
+            return true;
+        }
         if (busNextBeat || busPreviousBeat) {
             submitBusValue(
                 busNextBeat
@@ -4375,6 +4382,11 @@ void WaveCanvas::showBusPresetPalette(
                 busValueEdit_->toolTip()
                 + tr("\nCurrent value is implicit X · Tab or Shift+Tab skips it without writing"));
         }
+        if (!enumLane) {
+            busValueEdit_->setToolTip(
+                busValueEdit_->toolTip()
+                + tr("\nUp/Down adjusts a known numeric draft by one"));
+        }
         busValueEdit_->setStyleSheet({});
     }
     positionBusPresetPalette();
@@ -4425,6 +4437,182 @@ bool WaveCanvas::advanceBusValueEdit(
         busValueEdit_->selectAll();
     }
     viewport()->update();
+    return true;
+}
+
+bool WaveCanvas::stepBusEditorValue(const bool upward)
+{
+    if (!scenario_ || !busValueEdit_ || busPresetLaneId_.empty()) return false;
+    const auto* lane = findLane(*scenario_, busPresetLaneId_);
+    if (!lane || lane->kind != LaneKind::Bus) return false;
+
+    const auto validation = validateLaneValue(
+        *lane,
+        busEditorValue(*lane).toStdString());
+    const auto bits = validation.valid
+        ? laneValueBits(*lane, validation.normalizedValue)
+        : std::nullopt;
+    if (!bits
+        || bits->empty()
+        || std::any_of(
+            bits->begin(),
+            bits->end(),
+            [](const char bit) { return bit != '0' && bit != '1'; })) {
+        busValueEdit_->setFocus(Qt::OtherFocusReason);
+        busValueEdit_->selectAll();
+        emit statusMessage(
+            tr("%1 · numeric step needs a known 0/1 value · draft unchanged")
+                .arg(QString::fromStdString(lane->name)));
+        return true;
+    }
+
+    auto steppedBits = *bits;
+    const auto allAfterSign = [&steppedBits](const char expected) {
+        return std::all_of(
+            std::next(steppedBits.begin()),
+            steppedBits.end(),
+            [expected](const char bit) { return bit == expected; });
+    };
+    const auto atMaximum = lane->isSigned
+        ? steppedBits.front() == '0' && allAfterSign('1')
+        : std::all_of(
+              steppedBits.begin(),
+              steppedBits.end(),
+              [](const char bit) { return bit == '1'; });
+    const auto atMinimum = lane->isSigned
+        ? steppedBits.front() == '1' && allAfterSign('0')
+        : std::all_of(
+              steppedBits.begin(),
+              steppedBits.end(),
+              [](const char bit) { return bit == '0'; });
+    if ((upward && atMaximum) || (!upward && atMinimum)) {
+        busValueEdit_->setFocus(Qt::OtherFocusReason);
+        busValueEdit_->selectAll();
+        emit statusMessage(
+            tr("%1 · draft already at %2 · no values changed")
+                .arg(QString::fromStdString(lane->name))
+                .arg(upward ? tr("maximum") : tr("minimum")));
+        return true;
+    }
+
+    if (upward) {
+        for (auto iterator = steppedBits.rbegin();
+             iterator != steppedBits.rend();
+             ++iterator) {
+            if (*iterator == '0') {
+                *iterator = '1';
+                break;
+            }
+            *iterator = '0';
+        }
+    } else {
+        for (auto iterator = steppedBits.rbegin();
+             iterator != steppedBits.rend();
+             ++iterator) {
+            if (*iterator == '1') {
+                *iterator = '0';
+                break;
+            }
+            *iterator = '1';
+        }
+    }
+
+    const auto unsignedDecimal = [](const std::string& binary) {
+        std::string decimal{"0"};
+        for (const auto bit : binary) {
+            auto carry = bit == '1' ? 1 : 0;
+            for (auto iterator = decimal.rbegin();
+                 iterator != decimal.rend();
+                 ++iterator) {
+                const auto value = (*iterator - '0') * 2 + carry;
+                *iterator = static_cast<char>('0' + value % 10);
+                carry = value / 10;
+            }
+            if (carry > 0) {
+                decimal.insert(decimal.begin(), static_cast<char>('0' + carry));
+            }
+        }
+        return decimal;
+    };
+    const auto compactDigits = [](std::string digits) {
+        const auto first = digits.find_first_not_of('0');
+        return first == std::string::npos
+            ? std::string{"0"}
+            : digits.substr(first);
+    };
+    const auto groupedDigits = [&compactDigits](
+                                   const std::string& binary,
+                                   const int groupWidth,
+                                   const std::string_view alphabet) {
+        auto padded = binary;
+        const auto remainder = padded.size() % static_cast<std::size_t>(groupWidth);
+        if (remainder != 0) {
+            padded.insert(
+                padded.begin(),
+                static_cast<std::ptrdiff_t>(
+                    static_cast<std::size_t>(groupWidth) - remainder),
+                '0');
+        }
+        std::string digits;
+        digits.reserve(padded.size() / static_cast<std::size_t>(groupWidth));
+        for (std::size_t index = 0; index < padded.size();
+             index += static_cast<std::size_t>(groupWidth)) {
+            unsigned value = 0;
+            for (int offset = 0; offset < groupWidth; ++offset) {
+                value = value * 2
+                    + static_cast<unsigned>(
+                        padded.at(index + static_cast<std::size_t>(offset)) - '0');
+            }
+            digits.push_back(alphabet.at(value));
+        }
+        return compactDigits(std::move(digits));
+    };
+
+    const auto radix = busRadixCombo_
+        ? static_cast<Radix>(busRadixCombo_->currentData().toInt())
+        : lane->radix;
+    std::string display;
+    switch (radix) {
+    case Radix::Binary:
+        display = "0b" + steppedBits;
+        break;
+    case Radix::Octal:
+        display = "0o"
+            + groupedDigits(steppedBits, 3, "01234567");
+        break;
+    case Radix::Hexadecimal:
+        display = "0x"
+            + groupedDigits(steppedBits, 4, "0123456789abcdef");
+        break;
+    case Radix::Decimal: {
+        auto magnitude = steppedBits;
+        const auto negative = lane->isSigned && magnitude.front() == '1';
+        if (negative) {
+            for (auto& bit : magnitude) bit = bit == '0' ? '1' : '0';
+            for (auto iterator = magnitude.rbegin();
+                 iterator != magnitude.rend();
+                 ++iterator) {
+                if (*iterator == '0') {
+                    *iterator = '1';
+                    break;
+                }
+                *iterator = '0';
+            }
+        }
+        display = (negative ? "-" : "") + unsignedDecimal(magnitude);
+        break;
+    }
+    }
+
+    busValueEdit_->setText(QString::fromStdString(display));
+    busValueEdit_->setModified(true);
+    busValueEdit_->setStyleSheet({});
+    busValueEdit_->setFocus(Qt::OtherFocusReason);
+    busValueEdit_->selectAll();
+    emit statusMessage(
+        tr("%1 · draft %2 · Up/Down adjusts · Tab applies and advances")
+            .arg(QString::fromStdString(lane->name))
+            .arg(QString::fromStdString(display)));
     return true;
 }
 

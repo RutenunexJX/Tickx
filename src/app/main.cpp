@@ -6937,6 +6937,37 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            directValue->setText(QStringLiteral("0x0f"));
+            directValue->setModified(true);
+            sendKey(directValue, Qt::Key_Up);
+            QCoreApplication::processEvents();
+            if (directValue->text() != QStringLiteral("0x10")
+                || !directValue->isModified()
+                || !directValue->hasFocus()
+                || !assertBusEmpty()) {
+                fail(QStringLiteral("Bus Up did not increment a known draft without committing"));
+                return;
+            }
+            sendKey(directValue, Qt::Key_Down);
+            QCoreApplication::processEvents();
+            if (directValue->text() != QStringLiteral("0xf")
+                || !directValue->isModified()
+                || !assertBusEmpty()) {
+                fail(QStringLiteral("Bus Down did not decrement a known draft without committing"));
+                return;
+            }
+            directValue->setText(QStringLiteral("0xff"));
+            directValue->setModified(true);
+            sendKey(directValue, Qt::Key_Up);
+            QCoreApplication::processEvents();
+            if (directValue->text() != QStringLiteral("0xff")
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("maximum"))
+                || !assertBusEmpty()) {
+                fail(QStringLiteral("Bus numeric stepping did not stop at the width maximum"));
+                return;
+            }
+
             directValue->setText(QStringLiteral("0x11"));
             directValue->setModified(true);
             sendKey(directValue, Qt::Key_Tab);
