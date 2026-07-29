@@ -258,6 +258,7 @@ private:
         const std::string& laneId,
         const std::pair<Tick, Tick>& currentRange,
         bool forward);
+    bool cycleEnumEditorSymbol(bool forward);
     bool stepBusEditorValue(bool upward);
     bool cycleBusRecentValue(bool forward);
     void rememberBusValue(const std::string& laneId, const QString& value);

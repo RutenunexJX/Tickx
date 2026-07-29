@@ -879,6 +879,13 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
             && keyEvent->modifiers() == Qt::NoModifier
             && (keyEvent->key() == Qt::Key_Up
                 || keyEvent->key() == Qt::Key_Down)
+            && cycleEnumEditorSymbol(keyEvent->key() == Qt::Key_Down)) {
+            return true;
+        }
+        if (watched == busValueEdit_
+            && keyEvent->modifiers() == Qt::NoModifier
+            && (keyEvent->key() == Qt::Key_Up
+                || keyEvent->key() == Qt::Key_Down)
             && stepBusEditorValue(keyEvent->key() == Qt::Key_Up)) {
             return true;
         }
@@ -4568,6 +4575,60 @@ bool WaveCanvas::advanceBusValueEdit(
         busValueEdit_->selectAll();
     }
     viewport()->update();
+    return true;
+}
+
+bool WaveCanvas::cycleEnumEditorSymbol(const bool forward)
+{
+    if (!scenario_ || !busValueEdit_ || busPresetLaneId_.empty()) return false;
+    const auto* lane = findLane(*scenario_, busPresetLaneId_);
+    if (!lane || lane->kind != LaneKind::Enum) return false;
+
+    QStringList symbols;
+    for (const auto& [symbol, value] : lane->enumMap) {
+        Q_UNUSED(value);
+        symbols.append(QString::fromStdString(symbol));
+    }
+    if (symbols.isEmpty()) {
+        emit statusMessage(
+            tr("%1 · no declared Enum symbols · draft unchanged")
+                .arg(QString::fromStdString(lane->name)));
+        return true;
+    }
+
+    const auto current = busValueEdit_->text().trimmed();
+    auto index = symbols.indexOf(current);
+    if (index < 0) {
+        for (auto candidate = 0; candidate < symbols.size(); ++candidate) {
+            if (symbols.at(candidate).compare(
+                    current,
+                    Qt::CaseInsensitive)
+                == 0) {
+                index = candidate;
+                break;
+            }
+        }
+    }
+    if (index < 0) {
+        index = forward ? 0 : symbols.size() - 1;
+    } else if (forward) {
+        index = (index + 1) % symbols.size();
+    } else {
+        index = (index + symbols.size() - 1) % symbols.size();
+    }
+
+    const auto symbol = symbols.at(index);
+    busValueEdit_->setText(symbol);
+    busValueEdit_->setModified(true);
+    busValueEdit_->setStyleSheet({});
+    busValueEdit_->setFocus(Qt::OtherFocusReason);
+    busValueEdit_->selectAll();
+    emit statusMessage(
+        tr("%1 · Enum symbol %2 of %3: %4 · Up/Down cycles · Enter applies")
+            .arg(QString::fromStdString(lane->name))
+            .arg(index + 1)
+            .arg(symbols.size())
+            .arg(symbol));
     return true;
 }
 

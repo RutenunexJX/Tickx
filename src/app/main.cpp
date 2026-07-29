@@ -3277,6 +3277,39 @@ int main(int argc, char* argv[])
                     }
                 }
 
+                const auto enumCycleBaseline = scenario;
+                sendKey(busValueEdit, Qt::Key_Down);
+                QCoreApplication::processEvents();
+                const auto enumCycleForwardStatus =
+                    window.statusBar()->currentMessage();
+                if (busValueEdit->text() != QStringLiteral("DONE")
+                    || !busValueEdit->isModified()
+                    || scenario != enumCycleBaseline
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !enumCycleForwardStatus.contains(
+                        QStringLiteral("Enum symbol 1 of 3: DONE"))) {
+                    fail(QStringLiteral(
+                        "Enum Down key did not cycle to the next declared symbol without editing the model"));
+                    return;
+                }
+                sendKey(busValueEdit, Qt::Key_Up);
+                QCoreApplication::processEvents();
+                const auto enumCycleBackwardStatus =
+                    window.statusBar()->currentMessage();
+                if (busValueEdit->text() != QStringLiteral("WAIT_ACK")
+                    || scenario != enumCycleBaseline
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !enumCycleBackwardStatus.contains(
+                        QStringLiteral("Enum symbol 3 of 3: WAIT_ACK"))
+                    || !enumCycleBackwardStatus.contains(
+                        QStringLiteral("Up/Down cycles"))) {
+                    fail(QStringLiteral(
+                        "Enum Up key did not cycle back through declared symbols"));
+                    return;
+                }
+
                 busValueEdit->setText(QStringLiteral("MISSING"));
                 busValueEdit->setModified(true);
                 sendKey(busValueEdit, Qt::Key_Return);
