@@ -1,6 +1,6 @@
 # Wave Workbench 实施计划
 
-更新时间：2026-07-29
+更新时间：2026-07-30
 
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
@@ -5213,6 +5213,159 @@ build/qtcreator-debug/wave-edit-smoke-range-selection.png
 Visual result: 固定编辑栏的隐式 X/跳拍说明、当前拍琥珀框、Ctrl 复制虚线目标、110–120 ns 与
 width 10 ns 标签、20–40 ns 固定范围栏、透明选区、手柄、波形和网格均可辨认。无模态窗口、
 遮挡、裁切、桌面抢焦点或视图跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+## 持续迭代 100：Ctrl+D 优先复制已选 Segment
+
+状态：完成
+
+已交付：
+
+- Wave Edit 中存在已选 Bus/Enum Segment 时，`Ctrl+D` 复制该 Segment 到下一等宽区间，不再误复制
+  整条信号；没有 Segment 目标时仍保留既有信号复制语义。
+- 全局 Duplicate 动作与画布快捷键共用同一路径，结果立即选中并保持单步 Undo。
+- `wave-canvas-add-lane-smoke` 通过真实 QAction 验证 lane 数量不变、Segment 值与元数据保留。
+
+## 持续迭代 101：Segment 双向相邻复制
+
+状态：完成
+
+已交付：
+
+- Bus/Enum Segment 右键菜单同时提供 `Duplicate segment before` 与 `Duplicate segment after`；
+  `Ctrl+Shift+D` 可一步复制到前一等宽区间。
+- 起点或 End 边界不可容纳目标时，状态栏说明阻挡方向且不创建空历史。
+- offscreen 回归覆盖前后复制、菜单可发现性、语义元数据、选择与单步 Undo。
+
+## 持续迭代 102：显式 Segment 键盘导航
+
+状态：完成
+
+已交付：
+
+- 已选 Segment 可用 `Ctrl+Tab` / `Ctrl+Shift+Tab` 跳到同一信号的下一/上一显式 Segment。
+- 导航同步更新选择范围、编辑光标和最小水平揭示；到达首尾时原位说明，不修改模型或历史。
+- `wave-canvas-add-lane-smoke` 覆盖双向导航、边界与 Scenario 零变化。
+
+## 持续迭代 103：按编辑单位微移 Segment
+
+状态：完成
+
+已交付：
+
+- 已选 Segment 可用 `Alt+Left` / `Alt+Right` 前后微移；Sync 使用当前信号的一拍，Async 使用
+  一个整数 tick。
+- 微移沿用拖动的相邻 Segment 与 Scenario 边界约束，值、扩展语义和 Event/Relation 同步保持，
+  每次按键只产生一个可撤销命令。
+- offscreen 回归覆盖双向一拍移动、精确范围、元数据、选择和单步 Undo。
+
+## 持续迭代 104：Enum 声明符号直接轮换
+
+状态：完成
+
+已交付：
+
+- Enum 就地值编辑器中，`Down` / `Up` 按声明顺序前后循环符号；未知草稿分别从首项/末项开始。
+- 轮换只修改可见草稿，保留焦点并显示当前位置与总数；Enter 前不修改模型、Undo 或 Saved。
+- `wave-wave-edit-autoscroll-smoke` 覆盖 `WAIT_ACK → DONE → WAIT_ACK` 及零模型变化。
+
+## 持续迭代 105：Segment 选中精确反馈
+
+状态：完成
+
+已交付：
+
+- 单击非 Bit Segment 后，状态栏显示信号名、当前值、精确起止、宽度，以及移动、双向复制、
+  双击编辑和 Delete 入口。
+- 单击仍仅改变编辑上下文，不写波形、不创建历史。
+- `wave-canvas-add-lane-smoke` 覆盖精确范围、值、宽度、快捷键提示和 Scenario 零变化。
+
+## 持续迭代 106：Segment 精确悬浮提示
+
+状态：完成
+
+已交付：
+
+- Wave Edit 下悬浮 Bus/Enum/Clock Segment 即显示信号名、值、精确起止、宽度和直接操作提示；
+  Bus/Enum 同时公开 `Ctrl+drag copies`。
+- Bit 继续使用拍级悬浮反馈，不与 Segment 语义混淆。
+- offscreen `QHelpEvent` 回归验证提示内容完整且模型不变。
+
+## 持续迭代 107：指针下信号和值
+
+状态：完成
+
+已交付：
+
+- Wave Edit 状态栏在指针停留于波形区时显示 `pointer <signal> · value <value>`。
+- 值按实际指针位置采样，与同步模式中吸附后的编辑时间分开；指针位于 Segment 中部时不再误报
+  下一边界的隐式值。
+- offscreen 回归覆盖 Bus 显式值、同步半拍吸附与 Scenario 零变化。
+
+## 持续迭代 108：可见编辑光标锚定缩放
+
+状态：完成
+
+已交付：
+
+- Zoom in/out 在编辑光标可见时围绕该光标缩放并保持其屏幕位置；光标离屏时回退到视口中心。
+- 工具提示和状态栏明确当前缩放锚点；缩放不修改模型、选择或历史。
+- `wave-wave-edit-autoscroll-smoke` 以屏幕坐标断言放大和缩小误差不超过 2 px。
+
+## 持续迭代 109：Ctrl+0 上下文 Fit
+
+状态：完成，达到本轮可用版本；按用户要求验收并推送后结束，不执行打包
+
+已交付：
+
+- 单一 Fit 动作增加窗口级 `Ctrl+0`；存在显式范围时适配该范围，否则适配完整 Scenario。
+- 快捷键沿用既有 `Fit selection` / `Fit scenario` 动态文本、固定范围栏和无模型修改语义。
+- `wave-wave-edit-autoscroll-smoke` 通过真实快捷键路径验证选区满宽与完整概览恢复。
+
+开发视角验收：
+
+```text
+cmake --build build --parallel 4
+cmake --build build/qtcreator-debug --parallel 4
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+26/26 tests passed
+Total Test time: 16.99 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.88 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 16.47 sec
+
+Core test executable: Debug 26/26, Release 26/26
+Million-transition metric: Debug 20 ms / Release 7 ms
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+Automated QA: Ctrl+D/Shift 变体按当前 Segment 上下文执行双向相邻复制；Ctrl+Tab 双向浏览显式
+Segment；Alt+Left/Right 以当前编辑单位微移并保持单步 Undo。Enum 编辑器 Up/Down 直接循环声明
+符号。单击、悬浮和指针状态均公开当前 Segment 的值、起止与宽度。Zoom 围绕可见编辑光标保持
+屏幕位置，Ctrl+0 在选区与完整场景之间使用同一 Fit 动作。
+
+Offscreen visual QA:
+build/qtcreator-release/canvas-signal-management-smoke-ctrl-drag-copy-preview.png
+build/qtcreator-release/wave-edit-autoscroll-smoke-keyboard-enum-edit.png
+build/qtcreator-release/wave-edit-autoscroll-smoke-fit-selection.png
+
+Visual result: Ctrl 复制源段与虚线目标、精确 110–120 ns/width 10 ns 标签、Enum 固定编辑栏、
+透明拍级目标、Fit selection 满宽选区、信号值标签、波形和网格均清晰可辨。无模态窗口、遮挡、
+裁切、桌面抢焦点或视图跳动。
 Desktop interaction: none
 Packaging: not run during iteration
 ```
