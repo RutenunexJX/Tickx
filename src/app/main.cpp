@@ -8520,6 +8520,45 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            sendKey(
+                canvas,
+                Qt::Key_Right,
+                Qt::ControlModifier);
+            sendKey(
+                canvas,
+                Qt::Key_Right,
+                Qt::ControlModifier);
+            sendKey(canvas, Qt::Key_Up);
+            sendKey(canvas, Qt::Key_Down);
+            QCoreApplication::processEvents();
+            if (canvas->cursorTick() != navigationTargetRange.first
+                || canvas->selectedLaneId()
+                    != QString::fromStdString(quickBus.id)
+                || !canvas->selectedSegmentId().isEmpty()) {
+                fail(QStringLiteral(
+                    "Could not prepare a lane-and-cursor-only backward Segment target"));
+                return;
+            }
+            const auto beforeCursorBackwardNavigation =
+                window.project().scenarios.front();
+            sendKey(
+                canvas,
+                Qt::Key_Tab,
+                Qt::ControlModifier | Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        navigationSourceRange}
+                || canvas->cursorTick() != navigationSourceRange.first
+                || window.project().scenarios.front()
+                    != beforeCursorBackwardNavigation
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Previous Segment from edit cursor"))) {
+                fail(QStringLiteral(
+                    "Ctrl+Shift+Tab did not enter the previous Segment from a lane-and-cursor target"));
+                return;
+            }
+
             const auto nudgeSourceValue = navigationSourceValue;
             const auto nudgeSourceExtensions = navigationSource->extensions;
             const auto beforeSegmentNudge =

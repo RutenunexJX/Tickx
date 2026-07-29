@@ -7307,27 +7307,37 @@ void WaveCanvas::navigateSelectedSegment(const bool forward)
     }
     auto* lane = findLane(*scenario_, selectedSegmentLaneId_);
     if (!lane || selectedSegmentId_.empty()) {
-        if (!forward) {
-            emit statusMessage(
-                tr("Select a Segment before using Ctrl+Shift+Tab"));
-            return;
-        }
         lane = findLane(*scenario_, selectedLaneId_);
         if (!lane || lane->kind == LaneKind::Group
             || lane->kind == LaneKind::Bit) {
             emit statusMessage(
-                tr("Select a Bus, Enum or Clock signal before using Ctrl+Tab"));
+                tr("Select a Bus, Enum or Clock signal before navigating Segments"));
             return;
         }
-        const auto target = std::find_if(
-            lane->segments.begin(),
-            lane->segments.end(),
-            [this](const Segment& segment) {
-                return segment.end > cursorTick_;
-            });
+        auto target = lane->segments.end();
+        if (forward) {
+            target = std::find_if(
+                lane->segments.begin(),
+                lane->segments.end(),
+                [this](const Segment& segment) {
+                    return segment.end > cursorTick_;
+                });
+        } else {
+            const auto reverseTarget = std::find_if(
+                lane->segments.rbegin(),
+                lane->segments.rend(),
+                [this](const Segment& segment) {
+                    return segment.start < cursorTick_;
+                });
+            if (reverseTarget != lane->segments.rend()) {
+                target = std::prev(reverseTarget.base());
+            }
+        }
         if (target == lane->segments.end()) {
             emit statusMessage(
-                tr("No Segment at or after edit cursor %1 on %2")
+                (forward
+                     ? tr("No Segment at or after edit cursor %1 on %2")
+                     : tr("No Segment before edit cursor %1 on %2"))
                     .arg(QString::fromStdString(formatTick(
                         cursorTick_,
                         project_->timeBase)))
@@ -7352,7 +7362,9 @@ void WaveCanvas::navigateSelectedSegment(const bool forward)
             QString::fromStdString(lane->id),
             cursorTick_);
         emit statusMessage(
-            tr("Next Segment from edit cursor on %1 · %2 · %3–%4 · Ctrl+Shift+Tab goes back")
+            (forward
+                 ? tr("Next Segment from edit cursor on %1 · %2 · %3–%4 · Ctrl+Shift+Tab goes back")
+                 : tr("Previous Segment from edit cursor on %1 · %2 · %3–%4 · Ctrl+Tab goes forward"))
                 .arg(QString::fromStdString(lane->name))
                 .arg(QString::fromStdString(target->value))
                 .arg(QString::fromStdString(formatTick(
