@@ -5053,6 +5053,170 @@ Desktop interaction: none
 Packaging: not run during iteration
 ```
 
+## 持续迭代 90：隐式 X 拍无写入跳过
+
+状态：完成
+
+已交付：
+
+- Bus/Enum Beat 编辑器中，未修改的隐式 `X` 明确显示为 `X (implicit) · Tab skips`。
+- `Tab` / `Shift+Tab` 可直接移动到相邻拍，不把隐式值写成显式 Segment，不改变 Scenario、
+  Undo、Redo 或 Saved；首尾仍保留当前目标并给出反向按键。
+- `wave-canvas-add-lane-smoke` 覆盖前后跳过、目标高亮、模型与历史零变化。
+
+## 持续迭代 91：Bus 数值草稿键盘步进
+
+状态：完成
+
+已交付：
+
+- Bus 数值草稿可用 `Up` / `Down` 按当前进制加减 1，支持任意位宽二进制运算、signed decimal
+  显示及 0/最大值边界钳制。
+- 含 `X` / `Z` / 通配位的草稿不被猜测转换，保持原值并提示先输入确定数值；操作只改草稿，
+  提交前不修改模型和历史。
+- 定向 offscreen smoke 覆盖 HEX/BIN/DEC/OCT、上下界和非确定值拒绝。
+
+## 持续迭代 92：每信号最近值键盘循环
+
+状态：完成
+
+已交付：
+
+- Bus 编辑框内 `Ctrl+Up` / `Ctrl+Down` 按当前 lane 的最近自定义值前后循环；不同信号的历史
+  相互隔离，快捷预设不进入最近值列表。
+- 循环仅替换可见草稿并保留焦点、目标范围和模型状态，用户确认前不创建 Undo。
+- `wave-canvas-add-lane-smoke` 覆盖前后循环、lane 隔离和零模型修改。
+
+## 持续迭代 93：应用并保留当前编辑目标
+
+状态：完成
+
+已交付：
+
+- `Ctrl+Enter` 提交当前 Bus/Enum 值后，固定编辑栏保持同一 Beat 或 Segment 打开，并重新读取
+  已提交的规范化值；普通 Enter 继续提交并结束。
+- 非法值继续原位纠错；真实写入只产生一个 Undo，相同值不产生空历史。
+- 定向 offscreen smoke 覆盖 Beat/Segment 留驻、规范化结果、Undo 与焦点保持。
+
+## 持续迭代 94：画布 Tab 拍级导航
+
+状态：完成
+
+已交付：
+
+- Wave Edit 画布获得焦点且已有信号目标时，`Tab` / `Shift+Tab` 导航下一拍/上一拍，使用拍级
+  高亮显示新目标；无需先打开 Bus/Enum 编辑器。
+- 导航保留当前信号、缩放和水平视图，只改变编辑上下文，不写值、不创建命令；文本输入框继续
+  使用标准 Tab 焦点语义。
+- `wave-canvas-add-lane-smoke` 覆盖双向导航、首尾反馈及模型/历史零变化。
+
+## 持续迭代 95：可见时间页导航
+
+状态：完成
+
+已交付：
+
+- Wave Edit 画布上的 `PageDown` / `PageUp` 按当前可见时间跨度向后/向前移动编辑目标，并只做
+  必要的水平揭示；不要求改变缩放或拖动滚动条。
+- 到达 Scenario 首尾时保持原位并提示反向键；信号目标、Scenario、Undo 和 Saved 均保持。
+- 定向 offscreen smoke 覆盖双向翻页、边界、选择与水平视图。
+
+## 持续迭代 96：Clock 周期直接键盘编辑
+
+状态：完成
+
+已交付：
+
+- Wave Edit 选中 Clock 后，`G`、`X`、`R` 分别对当前完整周期执行 Gate、Drive X、Run；状态栏和
+  标题选择提示公开快捷键。
+- 三个入口复用既有拍级命令与覆盖清理路径，保持周期选中、Event/Relation 同步和单步 Undo；
+  重复 Run 不制造空历史。
+- `wave-canvas-add-lane-smoke` 覆盖三种结果、周期范围、Undo/Redo 和无效果反馈。
+
+## 持续迭代 97：Segment 拖动精确时序反馈
+
+状态：完成
+
+已交付：
+
+- Segment 主体移动、左右边界缩放和 Ctrl 复制的实时预览直接显示值、目标起点、终点和
+  `width`；状态栏同步同一组数据。
+- 标签按实际文本宽度绘制并限制在波形视口内；普通静态选择仍保持简洁值标签。
+- `wave-canvas-add-lane-smoke` 断言精确宽度并生成
+  `canvas-signal-management-smoke-ctrl-drag-copy-preview.png`。
+
+## 持续迭代 98：范围拖动精确宽度反馈
+
+状态：完成
+
+已交付：
+
+- Shift 拖出范围及拖动左右端点时，画布就地显示 `起点–终点 · width`；释放后的状态栏继续显示
+  完整范围和信号数量。
+- 标签使用高对比背景、受波形视口约束，不遮挡固定范围工具栏；选择过程不修改模型或历史。
+- `wave-wave-edit-smoke` 覆盖 20–40 ns 双信号范围、左右端点调整、精确宽度反馈和离屏截图。
+
+## 持续迭代 99：Segment 一步复制到下一段
+
+状态：完成，达到本轮可用版本；按用户要求验收并推送后结束，不执行打包
+
+已交付：
+
+- Bus/Enum Segment 右键菜单新增 `Duplicate segment after`，将完整值和扩展语义复制到紧邻的
+  同宽区间，源段保留，结果立即选中。
+- 复制通过 `CopySegmentCommand` 原子提交，Event/Relation 继续同步；一次 Undo/Redo 精确恢复。
+  目标已相同不产生空历史，目标越过 End 时明确显示目标区间和 End，Scenario 与命令历史零变化。
+- 修正同步模式右键命中：编辑光标仍按拍量化，但 Segment 菜单按真实点击时间命中，片段中部右键
+  不再误判到下一拍。
+- `wave-canvas-add-lane-smoke` 真实选择菜单动作，覆盖相邻复制、语义元数据、选择、单步
+  Undo/Redo、End 边界反馈、无历史和同步模式中点命中。
+
+开发视角验收：
+
+```text
+cmake --build build --parallel 4
+cmake --build build/qtcreator-debug --parallel 4
+cmake --build build/qtcreator-release --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+26/26 tests passed
+Total Test time: 16.83 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 17.00 sec
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.94 sec
+
+Core test executable: Debug 26/26, Release 26/26
+Million-transition metric: Debug 20 ms / Release 4 ms
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+Automated QA: 隐式 X 可无写入跳拍；Bus 草稿支持加减、最近值循环和 Ctrl+Enter 留驻；画布
+Tab/Shift+Tab 与 PageUp/PageDown 可连续导航；Clock G/X/R 可直接修改一个周期。Segment
+移动/缩放/复制及范围拖动均公开精确起止和宽度。Bus Segment 右键一步复制到下一段，保留
+值与 Don’t-care 元数据，单步 Undo/Redo；末段复制明确提示 exceeds End 且历史不变。
+
+Offscreen visual QA:
+build/qtcreator-debug/canvas-signal-management-smoke-bus-sequential-entry.png
+build/qtcreator-debug/canvas-signal-management-smoke-ctrl-drag-copy-preview.png
+build/qtcreator-debug/wave-edit-smoke-range-selection.png
+
+Visual result: 固定编辑栏的隐式 X/跳拍说明、当前拍琥珀框、Ctrl 复制虚线目标、110–120 ns 与
+width 10 ns 标签、20–40 ns 固定范围栏、透明选区、手柄、波形和网格均可辨认。无模态窗口、
+遮挡、裁切、桌面抢焦点或视图跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
