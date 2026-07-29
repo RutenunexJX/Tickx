@@ -7678,6 +7678,12 @@ int main(int argc, char* argv[])
                 fail(QStringLiteral("Ctrl+drag did not show a one-beat Sync copy preview"));
                 return;
             }
+            if (!window.statusBar()->currentMessage().contains(
+                    QStringLiteral("width %1").arg(QString::fromStdString(
+                        wave::formatTick(expectedBeat, window.project().timeBase))))) {
+                fail(QStringLiteral("Segment drag preview did not expose its exact width"));
+                return;
+            }
             if (!canvasAddLaneScreenshotPath.isEmpty()) {
                 auto copyPreviewScreenshotPath = canvasAddLaneScreenshotPath;
                 const auto suffix = copyPreviewScreenshotPath.lastIndexOf(QLatin1Char('.'));

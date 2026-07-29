@@ -3670,9 +3670,17 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
             ? waveEditPreviewRange_
             : waveEditHoverRange_;
         if (displayedRange) {
-            message += tr("  |  %1 to %2").arg(
-                QString::fromStdString(formatTick(displayedRange->first, project_->timeBase)),
-                QString::fromStdString(formatTick(displayedRange->second, project_->timeBase)));
+            message += tr("  |  %1 to %2 · width %3")
+                           .arg(
+                               QString::fromStdString(formatTick(
+                                   displayedRange->first,
+                                   project_->timeBase)),
+                               QString::fromStdString(formatTick(
+                                   displayedRange->second,
+                                   project_->timeBase)),
+                               QString::fromStdString(formatTick(
+                                   displayedRange->second - displayedRange->first,
+                                   project_->timeBase)));
         }
         if (waveEditDragAutoScrollDirection_ != 0) {
             message += waveEditDragAutoScrollDirection_ < 0
@@ -9008,11 +9016,35 @@ void WaveCanvas::drawWaveEditOverlay(QPainter& painter)
                 const auto y = RulerHeight + layout->top
                     - verticalScrollBar()->value();
                 painter.setPen(QColor(222, 237, 255));
-                const auto previewLabel = waveEditCopyDrag_
-                    ? tr("Copy · %1").arg(QString::fromStdString(segment->value))
-                    : QString::fromStdString(segment->value);
+                const auto valueLabel = QString::fromStdString(segment->value);
+                const auto timingLabel = tr("%1–%2 · width %3")
+                    .arg(
+                        QString::fromStdString(formatTick(
+                            range.first,
+                            project_->timeBase)),
+                        QString::fromStdString(formatTick(
+                            range.second,
+                            project_->timeBase)),
+                        QString::fromStdString(formatTick(
+                            range.second - range.first,
+                            project_->timeBase)));
+                const auto previewLabel = previewing
+                    ? waveEditCopyDrag_
+                        ? tr("Copy · %1 · %2").arg(valueLabel, timingLabel)
+                        : tr("%1 · %2").arg(valueLabel, timingLabel)
+                    : valueLabel;
+                const auto labelLeft = xAtTick(range.first) + 8;
+                const auto labelWidth = std::max(
+                    180,
+                    painter.fontMetrics().horizontalAdvance(previewLabel) + 8);
                 painter.drawText(
-                    QRect(xAtTick(range.first) + 8, y + 3, 180, 18),
+                    QRect(
+                        labelLeft,
+                        y + 3,
+                        std::max(0, std::min(
+                            labelWidth,
+                            viewport()->width() - labelLeft - 4)),
+                        18),
                     Qt::AlignLeft | Qt::AlignVCenter,
                     previewLabel);
             }
