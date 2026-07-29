@@ -76,6 +76,7 @@ public:
     [[nodiscard]] QWidget* busEditPaletteWidget() const noexcept;
     [[nodiscard]] QWidget* rangeEditPaletteWidget() const noexcept;
     [[nodiscard]] bool asynchronousEditing() const noexcept;
+    bool duplicateSelectedSegmentAfter();
 
     void beginQuickLaneSetup(
         const QString& laneId,
@@ -287,7 +288,6 @@ private:
         JsonExtensions extensions = {});
     bool clearSelectedBitRange();
     void clearSelectedSegment();
-    bool duplicateSelectedSegmentAfter();
     void updateLaneDropTarget(int y);
     void updateLaneDragAutoScroll(int pointerY);
     void advanceLaneDragAutoScroll();

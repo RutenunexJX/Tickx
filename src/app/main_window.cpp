@@ -4605,6 +4605,12 @@ void MainWindow::createActions()
                 4'000);
             return;
         }
+        if (canvas_
+            && canvas_->tool() == WaveCanvas::Tool::WaveEdit
+            && !canvas_->selectedSegmentId().isEmpty()) {
+            static_cast<void>(canvas_->duplicateSelectedSegmentAfter());
+            return;
+        }
         duplicateSelectedLane();
     });
     auto* editLaneAction = editMenu_->addAction(

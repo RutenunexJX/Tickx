@@ -7847,6 +7847,51 @@ int main(int argc, char* argv[])
             undoAction->trigger();
             QCoreApplication::processEvents();
 
+            sendMouse(
+                QEvent::MouseButtonPress,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            const auto laneCountBeforeSegmentShortcut =
+                window.project().scenarios.front().lanes.size();
+            const auto beforeSegmentShortcut =
+                window.project().scenarios.front();
+            duplicateLaneAction->trigger();
+            QCoreApplication::processEvents();
+            busAfterPreset = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto shortcutDuplicate = busAfterPreset
+                ? std::find_if(
+                      busAfterPreset->segments.begin(),
+                      busAfterPreset->segments.end(),
+                      [adjacentStart](const wave::Segment& candidate) {
+                          return candidate.start <= adjacentStart
+                              && adjacentStart < candidate.end;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (window.project().scenarios.front().lanes.size()
+                    != laneCountBeforeSegmentShortcut
+                || !busAfterPreset
+                || shortcutDuplicate == busAfterPreset->segments.end()
+                || shortcutDuplicate->value != "0bxxxxxxxx"
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("segment duplicated"))) {
+                fail(QStringLiteral("Ctrl+D copied the lane instead of the selected Segment"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front() != beforeSegmentShortcut) {
+                fail(QStringLiteral("Ctrl+D Segment duplicate was not one atomic Undo"));
+                return;
+            }
+
             const QPoint finalBeatPoint(
                 tickX(timelineDuration - expectedBeat / 2),
                 presetBusY);

@@ -2277,13 +2277,19 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
 
     if (scenario_
         && event->key() == Qt::Key_D
-        && event->modifiers() == Qt::ControlModifier
-        && !selectedLaneId_.empty()) {
-        const auto* lane = findLane(*scenario_, selectedLaneId_);
-        if (lane && lane->kind != LaneKind::Group) {
-            emit duplicateLaneRequested(QString::fromStdString(lane->id));
+        && event->modifiers() == Qt::ControlModifier) {
+        if (tool_ == Tool::WaveEdit && !selectedSegmentId_.empty()) {
+            static_cast<void>(duplicateSelectedSegmentAfter());
             event->accept();
             return;
+        }
+        if (!selectedLaneId_.empty()) {
+            const auto* lane = findLane(*scenario_, selectedLaneId_);
+            if (lane && lane->kind != LaneKind::Group) {
+                emit duplicateLaneRequested(QString::fromStdString(lane->id));
+                event->accept();
+                return;
+            }
         }
     }
 
