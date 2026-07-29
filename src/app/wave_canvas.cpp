@@ -885,7 +885,7 @@ void WaveCanvas::cancelLaneRename()
             : renamingGroup
                 ? tr("Rename cancelled · Selected group %1 · Delete removes group · F2 renames")
                       .arg(laneName)
-                : tr("Rename cancelled · Selected signal %1 · Delete removes signal · F2 renames")
+                : tr("Rename cancelled · Selected signal %1 · Delete removes signal · F2 renames · Ctrl+D duplicates")
                       .arg(laneName));
 }
 
@@ -1955,7 +1955,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         auto selectionMessage = lane->kind == LaneKind::Group
             ? tr("Selected group %1 · Delete removes group · F2 renames")
                   .arg(QString::fromStdString(lane->name))
-            : tr("Selected signal %1 · Delete removes signal · F2 renames")
+            : tr("Selected signal %1 · Delete removes signal · F2 renames · Ctrl+D duplicates")
                   .arg(QString::fromStdString(lane->name));
         if (tool_ == Tool::WaveEdit && lane->kind != LaneKind::Group) {
             selectionMessage.append(
@@ -2217,6 +2217,18 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
         emit statusMessage(cancellation);
         event->accept();
         return;
+    }
+
+    if (scenario_
+        && event->key() == Qt::Key_D
+        && event->modifiers() == Qt::ControlModifier
+        && !selectedLaneId_.empty()) {
+        const auto* lane = findLane(*scenario_, selectedLaneId_);
+        if (lane && lane->kind != LaneKind::Group) {
+            emit duplicateLaneRequested(QString::fromStdString(lane->id));
+            event->accept();
+            return;
+        }
     }
 
     if (scenario_ && event->key() == Qt::Key_F2 && !selectedLaneId_.empty()) {
@@ -2903,7 +2915,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         auto selectionMessage = lane->kind == LaneKind::Group
             ? tr("Selected group %1 · Delete removes group · F2 renames")
                   .arg(QString::fromStdString(lane->name))
-            : tr("Selected signal %1 · Delete removes signal · F2 renames")
+            : tr("Selected signal %1 · Delete removes signal · F2 renames · Ctrl+D duplicates")
                   .arg(QString::fromStdString(lane->name));
         if (tool_ == Tool::WaveEdit && lane->kind != LaneKind::Group) {
             selectionMessage.append(

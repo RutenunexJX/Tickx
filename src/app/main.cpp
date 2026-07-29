@@ -6104,6 +6104,8 @@ int main(int argc, char* argv[])
             auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
             auto* redoAction = window.findChild<QAction*>(QStringLiteral("RedoAction"));
             auto* cutRangeAction = window.findChild<QAction*>(QStringLiteral("CutRangeAction"));
+            auto* duplicateLaneAction = window.findChild<QAction*>(
+                QStringLiteral("DuplicateLaneAction"));
             auto* measureAction = window.findChild<QAction*>(
                 QStringLiteral("MeasureToolAction"));
             const auto toolbarActions = waveformToolbar
@@ -6133,6 +6135,7 @@ int main(int argc, char* argv[])
                 || !undoAction
                 || !redoAction
                 || !cutRangeAction
+                || !duplicateLaneAction
                 || !measureAction
                 || window.findChild<QAction*>(QStringLiteral("WaveEditToolAction"))
                 || checkableModeCount != 1
@@ -6142,14 +6145,18 @@ int main(int argc, char* argv[])
                 || canvas->tool() != wave::WaveCanvas::Tool::WaveEdit
                 || toolbarActions.contains(undoAction)
                 || toolbarActions.contains(redoAction)
+                || toolbarActions.contains(duplicateLaneAction)
                 || hasRemovedTool
                 || undoAction->shortcut().matches(QKeySequence(QKeySequence::Undo))
                     != QKeySequence::ExactMatch
                 || redoAction->shortcut().matches(QKeySequence(QKeySequence::Redo))
                     != QKeySequence::ExactMatch
                 || cutRangeAction->shortcut().matches(QKeySequence(QKeySequence::Cut))
+                    != QKeySequence::ExactMatch
+                || duplicateLaneAction->shortcut().matches(
+                       QKeySequence(Qt::CTRL | Qt::Key_D))
                     != QKeySequence::ExactMatch) {
-                fail(QStringLiteral("Toolbar convergence or Undo/Redo/Cut menu shortcuts are incorrect"));
+                fail(QStringLiteral("Toolbar convergence or Edit menu shortcuts are incorrect"));
                 return;
             }
 
@@ -7669,6 +7676,315 @@ int main(int argc, char* argv[])
                 fail(QStringLiteral("Second Undo did not remove the committed quick signal"));
                 return;
             }
+
+            const auto* busSourcePointer = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            if (!busSourcePointer || busSourcePointer->segments.empty()) {
+                fail(QStringLiteral("Bus source has no waveform to duplicate"));
+                return;
+            }
+            const auto busSource = *busSourcePointer;
+            const auto orderBeforeDuplicate = laneOrder();
+            const auto busSourcePosition = std::find(
+                orderBeforeDuplicate.begin(),
+                orderBeforeDuplicate.end(),
+                quickBus.id);
+            if (busSourcePosition == orderBeforeDuplicate.end()) {
+                fail(QStringLiteral("Bus source is missing from display order before duplicate"));
+                return;
+            }
+            const auto busSourceIndex = static_cast<std::size_t>(
+                std::distance(orderBeforeDuplicate.begin(), busSourcePosition));
+            const auto laneCountBeforeDuplicate = orderBeforeDuplicate.size();
+            const auto clockCountBeforeBusDuplicate = window.project().clockDomains.size();
+            const auto eventCountBeforeDuplicate =
+                window.project().scenarios.front().events.size();
+            const auto relationCountBeforeDuplicate =
+                window.project().scenarios.front().relations.size();
+
+            canvas->revealLocation(
+                QString::fromStdString(quickBus.id),
+                busSource.segments.front().start);
+            QCoreApplication::processEvents();
+            const auto duplicateBusY = laneCenter(quickBus.id);
+            bool duplicateContextHandled = false;
+            QTimer::singleShot(
+                0,
+                &application,
+                [&application, &duplicateContextHandled] {
+                    auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                    auto* action = menu
+                        ? menu->findChild<QAction*>(
+                              QStringLiteral("DuplicateLaneContextAction"))
+                        : nullptr;
+                    if (!menu
+                        || menu->objectName()
+                            != QStringLiteral("LaneHeaderContextMenu")
+                        || !action
+                        || action->text() != QStringLiteral("Duplicate signal")) {
+                        if (menu) menu->close();
+                        return;
+                    }
+                    duplicateContextHandled = true;
+                    action->trigger();
+                    menu->close();
+                });
+            const QPoint duplicateContextPoint(80, duplicateBusY);
+            QContextMenuEvent duplicateContextEvent(
+                QContextMenuEvent::Mouse,
+                duplicateContextPoint,
+                canvas->viewport()->mapToGlobal(duplicateContextPoint));
+            QCoreApplication::sendEvent(canvas->viewport(), &duplicateContextEvent);
+            QCoreApplication::processEvents();
+
+            const auto& lanesAfterBusDuplicate =
+                window.project().scenarios.front().lanes;
+            if (!duplicateContextHandled
+                || lanesAfterBusDuplicate.size() != laneCountBeforeDuplicate + 1
+                || busSourceIndex + 1 >= lanesAfterBusDuplicate.size()) {
+                fail(QStringLiteral("Signal header context action did not duplicate one adjacent lane"));
+                return;
+            }
+            const auto duplicatedBus = lanesAfterBusDuplicate.at(busSourceIndex + 1);
+            const auto duplicateNameCount = std::count_if(
+                lanesAfterBusDuplicate.begin(),
+                lanesAfterBusDuplicate.end(),
+                [&duplicatedBus](const wave::Lane& lane) {
+                    return QString::compare(
+                               QString::fromStdString(lane.name),
+                               QString::fromStdString(duplicatedBus.name),
+                               Qt::CaseInsensitive)
+                        == 0;
+                });
+            auto busSegmentsCopied = duplicatedBus.segments.size()
+                == busSource.segments.size();
+            for (std::size_t index = 0;
+                 busSegmentsCopied && index < busSource.segments.size();
+                 ++index) {
+                const auto& sourceSegment = busSource.segments.at(index);
+                const auto& copySegment = duplicatedBus.segments.at(index);
+                busSegmentsCopied = copySegment.id != sourceSegment.id
+                    && copySegment.start == sourceSegment.start
+                    && copySegment.end == sourceSegment.end
+                    && copySegment.value == sourceSegment.value
+                    && copySegment.extensions == sourceSegment.extensions;
+            }
+            const auto duplicateStatus = window.statusBar()->currentMessage();
+            if (duplicatedBus.id == busSource.id
+                || duplicatedBus.name.find(busSource.name + "_copy") != 0
+                || duplicateNameCount != 1
+                || duplicatedBus.kind != busSource.kind
+                || duplicatedBus.width != busSource.width
+                || duplicatedBus.isSigned != busSource.isSigned
+                || duplicatedBus.radix != busSource.radix
+                || duplicatedBus.enumMap != busSource.enumMap
+                || duplicatedBus.clockDomainId != busSource.clockDomainId
+                || duplicatedBus.groupId != busSource.groupId
+                || duplicatedBus.height != busSource.height
+                || !duplicatedBus.visible
+                || !QColor(QString::fromStdString(duplicatedBus.color)).isValid()
+                || QString::compare(
+                       QString::fromStdString(duplicatedBus.color),
+                       QString::fromStdString(busSource.color),
+                       Qt::CaseInsensitive)
+                    == 0
+                || !busSegmentsCopied
+                || window.project().clockDomains.size()
+                    != clockCountBeforeBusDuplicate
+                || window.project().scenarios.front().events.size()
+                    != eventCountBeforeDuplicate
+                || window.project().scenarios.front().relations.size()
+                    != relationCountBeforeDuplicate
+                || canvas->selectedLaneId()
+                    != QString::fromStdString(duplicatedBus.id)
+                || !duplicateStatus.contains(
+                    QString::fromStdString(busSource.name))
+                || !duplicateStatus.contains(
+                    QString::fromStdString(duplicatedBus.name))
+                || !duplicateStatus.contains(QStringLiteral("below the source"))
+                || !duplicateStatus.contains(QStringLiteral("Ctrl+Z"))
+                || !undoAction->text().contains(QStringLiteral("Duplicate lane"))
+                || QApplication::activeModalWidget()) {
+                fail(QStringLiteral("Bus duplicate did not preserve waveform/properties with independent identity and feedback"));
+                return;
+            }
+
+            if (!canvasAddLaneScreenshotPath.isEmpty()) {
+                auto duplicateScreenshotPath = canvasAddLaneScreenshotPath;
+                const auto suffix = duplicateScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                if (suffix >= 0) {
+                    duplicateScreenshotPath.insert(
+                        suffix,
+                        QStringLiteral("-duplicate-signal"));
+                } else {
+                    duplicateScreenshotPath.append(
+                        QStringLiteral("-duplicate-signal.png"));
+                }
+                if (!window.grab().save(duplicateScreenshotPath)) {
+                    fail(QStringLiteral("Cannot save duplicated-signal screenshot"));
+                    return;
+                }
+            }
+
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* busAfterDuplicateUndo = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            if (wave::findLane(
+                    window.project().scenarios.front(), duplicatedBus.id)
+                || laneOrder() != orderBeforeDuplicate
+                || !busAfterDuplicateUndo
+                || *busAfterDuplicateUndo != busSource
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Undid Duplicate lane"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Y"))) {
+                fail(QStringLiteral("Bus duplicate was not removed by one Undo"));
+                return;
+            }
+            redoAction->trigger();
+            QCoreApplication::processEvents();
+            const auto* busAfterDuplicateRedo = wave::findLane(
+                window.project().scenarios.front(), duplicatedBus.id);
+            const auto orderAfterDuplicateRedo = laneOrder();
+            if (!busAfterDuplicateRedo
+                || busSourceIndex + 1 >= orderAfterDuplicateRedo.size()
+                || orderAfterDuplicateRedo.at(busSourceIndex + 1)
+                    != duplicatedBus.id
+                || *busAfterDuplicateRedo != duplicatedBus
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Redid Duplicate lane"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Ctrl+Z"))) {
+                fail(QStringLiteral("Bus duplicate Redo did not restore stable identity and position"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+
+            canvas->revealLocation(QString::fromStdString(quickBus.id), 0);
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            const auto laneCountBeforeRangeGuard =
+                window.project().scenarios.front().lanes.size();
+            duplicateLaneAction->trigger();
+            QCoreApplication::processEvents();
+            if (!canvas->hasExplicitRangeSelection()
+                || window.project().scenarios.front().lanes.size()
+                    != laneCountBeforeRangeGuard
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Esc clears"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("duplicating a whole signal"))) {
+                fail(QStringLiteral("Duplicate action discarded an explicit range instead of explaining recovery"));
+                return;
+            }
+            sendKey(canvas, Qt::Key_Escape);
+            QCoreApplication::processEvents();
+
+            const auto* clockSourceLanePointer = wave::findLane(
+                window.project().scenarios.front(), quickClock.id);
+            const auto* clockSourceDomainPointer = clockSourceLanePointer
+                ? wave::findClock(
+                      window.project(),
+                      clockSourceLanePointer->clockDomainId)
+                : nullptr;
+            if (!clockSourceLanePointer || !clockSourceDomainPointer) {
+                fail(QStringLiteral("Clock source is unavailable before Ctrl+D duplicate"));
+                return;
+            }
+            const auto clockSourceLane = *clockSourceLanePointer;
+            const auto clockSourceDomain = *clockSourceDomainPointer;
+            const auto clockOrderBeforeDuplicate = laneOrder();
+            const auto clockSourcePosition = std::find(
+                clockOrderBeforeDuplicate.begin(),
+                clockOrderBeforeDuplicate.end(),
+                quickClock.id);
+            if (clockSourcePosition == clockOrderBeforeDuplicate.end()) {
+                fail(QStringLiteral("Clock source is missing from display order"));
+                return;
+            }
+            const auto clockSourceIndex = static_cast<std::size_t>(
+                std::distance(
+                    clockOrderBeforeDuplicate.begin(),
+                    clockSourcePosition));
+            const auto clockDomainCountBeforeDuplicate =
+                window.project().clockDomains.size();
+            canvas->revealLocation(QString::fromStdString(quickClock.id), 0);
+            QCoreApplication::processEvents();
+            clickHeader(QPoint(80, laneCenter(quickClock.id)));
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_D, Qt::ControlModifier);
+            QCoreApplication::processEvents();
+
+            const auto clockOrderAfterDuplicate = laneOrder();
+            if (clockOrderAfterDuplicate.size()
+                    != clockOrderBeforeDuplicate.size() + 1
+                || clockSourceIndex + 1 >= clockOrderAfterDuplicate.size()) {
+                fail(QStringLiteral("Ctrl+D did not add one adjacent Clock duplicate"));
+                return;
+            }
+            const auto duplicatedClockLaneId =
+                clockOrderAfterDuplicate.at(clockSourceIndex + 1);
+            const auto* duplicatedClockLane = wave::findLane(
+                window.project().scenarios.front(), duplicatedClockLaneId);
+            const auto* duplicatedClockDomain = duplicatedClockLane
+                ? wave::findClock(window.project(), duplicatedClockLane->clockDomainId)
+                : nullptr;
+            if (!duplicatedClockLane
+                || duplicatedClockLane->id == clockSourceLane.id
+                || duplicatedClockLane->clockDomainId
+                    == clockSourceLane.clockDomainId
+                || duplicatedClockLane->name.find(clockSourceLane.name + "_copy")
+                    != 0
+                || QString::compare(
+                       QString::fromStdString(duplicatedClockLane->color),
+                       QString::fromStdString(clockSourceLane.color),
+                       Qt::CaseInsensitive)
+                    == 0
+                || !duplicatedClockDomain
+                || duplicatedClockDomain->id == clockSourceDomain.id
+                || duplicatedClockDomain->name != duplicatedClockLane->name
+                || duplicatedClockDomain->period != clockSourceDomain.period
+                || duplicatedClockDomain->phase != clockSourceDomain.phase
+                || duplicatedClockDomain->dutyCycle != clockSourceDomain.dutyCycle
+                || duplicatedClockDomain->activeEdge != clockSourceDomain.activeEdge
+                || duplicatedClockDomain->resetRelation
+                    != clockSourceDomain.resetRelation
+                || window.project().clockDomains.size()
+                    != clockDomainCountBeforeDuplicate + 1
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("independent clock settings"))) {
+                fail(QStringLiteral("Ctrl+D Clock duplicate did not create an adjacent independent clock"));
+                return;
+            }
+            const auto duplicatedClockDomainId = duplicatedClockDomain->id;
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (wave::findLane(
+                    window.project().scenarios.front(), duplicatedClockLaneId)
+                || wave::findClock(
+                    window.project(), duplicatedClockDomainId)
+                || window.project().clockDomains.size()
+                    != clockDomainCountBeforeDuplicate
+                || !wave::findClock(window.project(), clockSourceDomain.id)
+                || *wave::findClock(window.project(), clockSourceDomain.id)
+                    != clockSourceDomain) {
+                fail(QStringLiteral("Clock duplicate Undo did not remove only the clone and domain"));
+                return;
+            }
+            redoAction->trigger();
+            QCoreApplication::processEvents();
+            if (!wave::findLane(
+                    window.project().scenarios.front(), duplicatedClockLaneId)
+                || window.project().clockDomains.size()
+                    != clockDomainCountBeforeDuplicate + 1) {
+                fail(QStringLiteral("Clock duplicate Redo did not restore lane and domain"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
 
             canvas->revealLocation(QString::fromStdString(quickBit.id), 0);
             QCoreApplication::processEvents();

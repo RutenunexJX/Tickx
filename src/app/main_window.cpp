@@ -110,7 +110,9 @@ std::string uniqueLaneName(const Scenario& scenario, const std::string_view base
     }
 }
 
-std::string randomReadableLaneColor(const Scenario& scenario)
+std::string randomReadableLaneColor(
+    const Scenario& scenario,
+    const std::string_view excludedColor = {})
 {
     static constexpr std::array<std::string_view, 12> palette{
         "#4fc3f7",
@@ -126,11 +128,20 @@ std::string randomReadableLaneColor(const Scenario& scenario)
         "#90a4ae",
         "#7986cb",
     };
+    const auto excluded = QString::fromLatin1(
+        excludedColor.data(),
+        static_cast<qsizetype>(excludedColor.size()));
+    std::vector<std::size_t> candidates;
     std::vector<std::size_t> unused;
     for (std::size_t index = 0; index < palette.size(); ++index) {
         const auto color = QString::fromLatin1(
             palette.at(index).data(),
             static_cast<qsizetype>(palette.at(index).size()));
+        if (!excluded.isEmpty()
+            && QString::compare(color, excluded, Qt::CaseInsensitive) == 0) {
+            continue;
+        }
+        candidates.push_back(index);
         const auto used = std::any_of(
             scenario.lanes.begin(),
             scenario.lanes.end(),
@@ -143,11 +154,12 @@ std::string randomReadableLaneColor(const Scenario& scenario)
             });
         if (!used) unused.push_back(index);
     }
-    const auto paletteIndex = unused.empty()
-        ? QRandomGenerator::global()->bounded(static_cast<int>(palette.size()))
-        : static_cast<int>(unused.at(static_cast<std::size_t>(
-              QRandomGenerator::global()->bounded(static_cast<int>(unused.size())))));
-    return std::string(palette.at(static_cast<std::size_t>(paletteIndex)));
+    const auto& pool = unused.empty() ? candidates : unused;
+    const auto paletteIndex = pool.empty()
+        ? std::size_t{0}
+        : pool.at(static_cast<std::size_t>(
+              QRandomGenerator::global()->bounded(static_cast<int>(pool.size()))));
+    return std::string(palette.at(paletteIndex));
 }
 
 QString actionText(const EventAction action)
@@ -1024,6 +1036,11 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
         canvas_->setTool(WaveCanvas::Tool::WaveEdit);
         statusBar()->showMessage(tr("Direct waveform editing active"), 3'000);
     });
+    connect(
+        canvas_,
+        &WaveCanvas::duplicateLaneRequested,
+        this,
+        &MainWindow::duplicateLaneById);
     connect(canvas_, &WaveCanvas::renameLaneRequested, this, &MainWindow::renameLaneById);
     connect(canvas_, &WaveCanvas::removeLaneRequested, this, &MainWindow::removeLaneById);
     connect(
@@ -2345,6 +2362,102 @@ void MainWindow::editSelectedLane()
     editLaneById(selectedLaneIdForEditing());
 }
 
+void MainWindow::duplicateSelectedLane()
+{
+    duplicateLaneById(selectedLaneIdForEditing());
+}
+
+void MainWindow::duplicateLaneById(const QString& laneId)
+{
+    if (!canvas_ || laneId.isEmpty()) return;
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before duplicating a whole signal"),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+
+    auto* scenario = activeScenario();
+    if (!scenario) return;
+    const auto source = std::find_if(
+        scenario->lanes.begin(),
+        scenario->lanes.end(),
+        [&laneId](const Lane& lane) {
+            return lane.id == laneId.toStdString();
+        });
+    if (source == scenario->lanes.end()) return;
+    if (source->kind == LaneKind::Group) {
+        statusBar()->showMessage(
+            tr("Select a signal, not a group, before duplicating"),
+            4'000);
+        return;
+    }
+
+    const auto sourceName = QString::fromStdString(source->name);
+    const auto insertionIndex = static_cast<std::size_t>(
+        std::distance(scenario->lanes.begin(), source)) + 1;
+    Lane duplicate = *source;
+    duplicate.id = makeStableId("lane");
+    const auto duplicateBaseName = source->name + "_copy";
+    duplicate.name = uniqueLaneName(*scenario, duplicateBaseName);
+    duplicate.color = randomReadableLaneColor(*scenario, source->color);
+    duplicate.visible = true;
+    for (auto& segment : duplicate.segments) {
+        segment.id = makeStableId("segment");
+    }
+
+    std::optional<ClockDomain> duplicateClock;
+    if (duplicate.kind == LaneKind::Clock) {
+        const auto* sourceClock = findClock(project_, source->clockDomainId);
+        if (!sourceClock) {
+            QMessageBox::warning(
+                this,
+                tr("Cannot duplicate clock"),
+                tr("The selected clock does not reference a valid clock domain."));
+            return;
+        }
+        duplicateClock = *sourceClock;
+        duplicateClock->id = makeStableId("clock");
+        duplicateClock->name = duplicate.name;
+        duplicate.clockDomainId = duplicateClock->id;
+    }
+
+    try {
+        if (duplicateClock) {
+            commandStack_.execute(std::make_unique<DuplicateLaneCommand>(
+                project_,
+                *scenario,
+                duplicate,
+                *duplicateClock,
+                insertionIndex));
+        } else {
+            commandStack_.execute(std::make_unique<DuplicateLaneCommand>(
+                *scenario,
+                duplicate,
+                insertionIndex));
+        }
+    } catch (const std::exception& exception) {
+        QMessageBox::warning(
+            this,
+            tr("Cannot duplicate signal"),
+            QString::fromUtf8(exception.what()));
+        return;
+    }
+
+    canvas_->refreshModel();
+    markEdited();
+    const auto duplicateId = QString::fromStdString(duplicate.id);
+    canvas_->revealLocation(duplicateId, canvas_->cursorTick());
+    selectLaneItem(signalTree_, duplicateId);
+    selectLaneItem(groupTree_, duplicateId);
+    auto result = tr("Duplicated %1 as %2 below the source · waveform and properties copied")
+                      .arg(sourceName, QString::fromStdString(duplicate.name));
+    if (duplicateClock) result.append(tr(" · independent clock settings"));
+    result.append(tr(" · Ctrl+Z to undo · F2 renames"));
+    statusBar()->showMessage(result, 6'000);
+}
+
 void MainWindow::renameLaneById(const QString& laneId)
 {
     if (!commitPendingEdits()) return;
@@ -2589,6 +2702,14 @@ void MainWindow::showLaneContextMenu(
     parameters->setObjectName(QStringLiteral("QuickLaneParametersAction"));
     connect(parameters, &QAction::triggered, this, [this, laneId] {
         editLaneKeyParameters(laneId);
+    });
+    menu.addSeparator();
+    auto* duplicate = menu.addAction(tr("Duplicate signal"));
+    duplicate->setObjectName(QStringLiteral("DuplicateLaneContextAction"));
+    duplicate->setToolTip(
+        tr("Copy this signal and its waveform immediately below the source"));
+    connect(duplicate, &QAction::triggered, this, [this, laneId] {
+        duplicateLaneById(laneId);
     });
     menu.exec(globalPosition);
 }
@@ -2908,9 +3029,9 @@ void MainWindow::moveSelectedLaneBy(const int offset)
 
 void MainWindow::updateLaneOrderActions()
 {
-    if (!moveLaneUpAction_ || !moveLaneDownAction_) return;
-    moveLaneUpAction_->setEnabled(false);
-    moveLaneDownAction_->setEnabled(false);
+    if (moveLaneUpAction_) moveLaneUpAction_->setEnabled(false);
+    if (moveLaneDownAction_) moveLaneDownAction_->setEnabled(false);
+    if (duplicateLaneAction_) duplicateLaneAction_->setEnabled(false);
     const auto* scenario = activeScenario();
     const auto laneId = selectedLaneIdForEditing().toStdString();
     if (!scenario || laneId.empty()) return;
@@ -2921,9 +3042,15 @@ void MainWindow::updateLaneOrderActions()
             return lane.id == laneId;
         });
     if (iterator == scenario->lanes.end()) return;
+    if (duplicateLaneAction_) {
+        duplicateLaneAction_->setEnabled(
+            iterator->visible && iterator->kind != LaneKind::Group);
+    }
     const auto index = std::distance(scenario->lanes.begin(), iterator);
-    moveLaneUpAction_->setEnabled(index > 0);
-    moveLaneDownAction_->setEnabled(std::next(iterator) != scenario->lanes.end());
+    if (moveLaneUpAction_) moveLaneUpAction_->setEnabled(index > 0);
+    if (moveLaneDownAction_) {
+        moveLaneDownAction_->setEnabled(std::next(iterator) != scenario->lanes.end());
+    }
 }
 
 void MainWindow::editLaneById(const QString& laneId)
@@ -4302,6 +4429,22 @@ void MainWindow::createActions()
         this,
         &MainWindow::addGroup);
     addGroupAction->setToolTip(tr("Add a stable-ID signal group"));
+    duplicateLaneAction_ = editMenu_->addAction(
+        tr("&Duplicate selected signal"));
+    duplicateLaneAction_->setObjectName(QStringLiteral("DuplicateLaneAction"));
+    duplicateLaneAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_D));
+    duplicateLaneAction_->setToolTip(
+        tr("Copy the selected signal, properties, and waveform below the source"));
+    duplicateLaneAction_->setEnabled(false);
+    connect(duplicateLaneAction_, &QAction::triggered, this, [this] {
+        if (qobject_cast<QLineEdit*>(focusWidget())) {
+            statusBar()->showMessage(
+                tr("Finish or cancel the text edit before duplicating a signal"),
+                4'000);
+            return;
+        }
+        duplicateSelectedLane();
+    });
     auto* editLaneAction = editMenu_->addAction(
         tr("Lane / group &properties…"),
         this,

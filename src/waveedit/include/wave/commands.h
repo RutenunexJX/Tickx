@@ -209,12 +209,16 @@ private:
 
 class AddLaneCommand final : public EditCommand {
 public:
-    AddLaneCommand(Scenario& scenario, Lane lane);
+    AddLaneCommand(
+        Scenario& scenario,
+        Lane lane,
+        std::optional<std::size_t> insertionIndex = std::nullopt);
     AddLaneCommand(
         Project& project,
         Scenario& scenario,
         Lane lane,
-        ClockDomain clockDomain);
+        ClockDomain clockDomain,
+        std::optional<std::size_t> insertionIndex = std::nullopt);
 
     void redo() override;
     void undo() override;
@@ -226,6 +230,27 @@ private:
     Lane lane_;
     std::optional<ClockDomain> clockDomain_;
     std::size_t insertionIndex_{0};
+};
+
+class DuplicateLaneCommand final : public EditCommand {
+public:
+    DuplicateLaneCommand(
+        Scenario& scenario,
+        Lane lane,
+        std::size_t insertionIndex);
+    DuplicateLaneCommand(
+        Project& project,
+        Scenario& scenario,
+        Lane lane,
+        ClockDomain clockDomain,
+        std::size_t insertionIndex);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    AddLaneCommand addLaneCommand_;
 };
 
 class RemoveLaneCommand final : public EditCommand {

@@ -835,10 +835,13 @@ std::string ToggleBitRangeCommand::description() const
     return beatRanges_.size() == 1 ? "Toggle bit beat" : "Toggle bit beats";
 }
 
-AddLaneCommand::AddLaneCommand(Scenario& scenario, Lane lane)
+AddLaneCommand::AddLaneCommand(
+    Scenario& scenario,
+    Lane lane,
+    const std::optional<std::size_t> insertionIndex)
     : scenario_(&scenario)
     , lane_(std::move(lane))
-    , insertionIndex_(scenario.lanes.size())
+    , insertionIndex_(insertionIndex.value_or(scenario.lanes.size()))
 {
     if (lane_.id.empty()) {
         lane_.id = makeStableId("lane");
@@ -849,8 +852,9 @@ AddLaneCommand::AddLaneCommand(
     Project& project,
     Scenario& scenario,
     Lane lane,
-    ClockDomain clockDomain)
-    : AddLaneCommand(scenario, std::move(lane))
+    ClockDomain clockDomain,
+    const std::optional<std::size_t> insertionIndex)
+    : AddLaneCommand(scenario, std::move(lane), insertionIndex)
 {
     project_ = &project;
     if (clockDomain.id.empty()) clockDomain.id = makeStableId("clock");
@@ -912,6 +916,44 @@ void AddLaneCommand::undo()
 std::string AddLaneCommand::description() const
 {
     return lane_.kind == LaneKind::Group ? "Add group" : "Add lane";
+}
+
+DuplicateLaneCommand::DuplicateLaneCommand(
+    Scenario& scenario,
+    Lane lane,
+    const std::size_t insertionIndex)
+    : addLaneCommand_(scenario, std::move(lane), insertionIndex)
+{
+}
+
+DuplicateLaneCommand::DuplicateLaneCommand(
+    Project& project,
+    Scenario& scenario,
+    Lane lane,
+    ClockDomain clockDomain,
+    const std::size_t insertionIndex)
+    : addLaneCommand_(
+          project,
+          scenario,
+          std::move(lane),
+          std::move(clockDomain),
+          insertionIndex)
+{
+}
+
+void DuplicateLaneCommand::redo()
+{
+    addLaneCommand_.redo();
+}
+
+void DuplicateLaneCommand::undo()
+{
+    addLaneCommand_.undo();
+}
+
+std::string DuplicateLaneCommand::description() const
+{
+    return "Duplicate lane";
 }
 
 RemoveLaneCommand::RemoveLaneCommand(

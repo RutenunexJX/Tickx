@@ -590,6 +590,72 @@ void testLaneAndGroupPropertyEditing()
     expect(!wave::findClock(quickProject, quickClock.id), "quick clock domain survived undo");
     expect(quickStack.redo(), "quick clock add redo failed");
 
+    wave::Lane tailLane;
+    tailLane.id = "lane-after-duplicate";
+    tailLane.name = "after_duplicate";
+    tailLane.kind = wave::LaneKind::Bit;
+    quickScenario.lanes.push_back(tailLane);
+
+    auto duplicatedClockLane = *wave::findLane(quickScenario, quickClockLane.id);
+    duplicatedClockLane.id = "lane-quick-clock-copy";
+    duplicatedClockLane.name = "clk_copy";
+    duplicatedClockLane.clockDomainId = "clock-quick-copy";
+    auto duplicatedClock = *wave::findClock(quickProject, quickClock.id);
+    duplicatedClock.id = duplicatedClockLane.clockDomainId;
+    duplicatedClock.name = duplicatedClockLane.name;
+    expect(
+        quickStack.execute(std::make_unique<wave::DuplicateLaneCommand>(
+            quickProject,
+            quickScenario,
+            duplicatedClockLane,
+            duplicatedClock,
+            1)),
+        "clock duplicate command reported no effect");
+    expectEqual(
+        quickScenario.lanes.at(1).id,
+        duplicatedClockLane.id,
+        "clock duplicate was not inserted at the requested adjacent position");
+    expect(
+        wave::findClock(quickProject, duplicatedClock.id) != nullptr,
+        "clock duplicate did not create its independent domain");
+    expectEqual(
+        quickStack.undoDescription(),
+        std::string{"Duplicate lane"},
+        "clock duplicate did not expose a specific Undo description");
+    expect(quickStack.undo(), "clock duplicate undo failed");
+    expect(
+        wave::findLane(quickScenario, duplicatedClockLane.id) == nullptr
+            && wave::findClock(quickProject, duplicatedClock.id) == nullptr
+            && wave::findLane(quickScenario, quickClockLane.id) != nullptr
+            && wave::findLane(quickScenario, tailLane.id) != nullptr,
+        "clock duplicate undo did not remove only the clone and its domain");
+    expect(quickStack.redo(), "clock duplicate redo failed");
+    expect(
+        quickScenario.lanes.at(1).id == duplicatedClockLane.id
+            && wave::findClock(quickProject, duplicatedClock.id) != nullptr,
+        "clock duplicate redo did not restore stable IDs and position");
+
+    auto duplicatedBitLane = tailLane;
+    duplicatedBitLane.id = "lane-after-duplicate-copy";
+    duplicatedBitLane.name = "after_duplicate_copy";
+    expect(
+        quickStack.execute(std::make_unique<wave::DuplicateLaneCommand>(
+            quickScenario,
+            duplicatedBitLane,
+            quickScenario.lanes.size())),
+        "non-clock duplicate command reported no effect");
+    expect(
+        wave::findLane(quickScenario, duplicatedBitLane.id) != nullptr,
+        "non-clock duplicate was not added");
+    expect(quickStack.undo(), "non-clock duplicate undo failed");
+    expect(
+        wave::findLane(quickScenario, duplicatedBitLane.id) == nullptr,
+        "non-clock duplicate survived undo");
+    expect(quickStack.redo(), "non-clock duplicate redo failed");
+    expect(
+        wave::findLane(quickScenario, duplicatedBitLane.id) != nullptr,
+        "non-clock duplicate redo failed");
+
     const auto roundTrip = wave::deserializeProject(wave::serializeProject(project));
     expect(roundTrip.ok(), "lane/group property project failed to reload");
     expectEqual(*roundTrip.project, project, "lane/group properties changed on reload");

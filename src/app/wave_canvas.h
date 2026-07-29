@@ -110,6 +110,7 @@ public slots:
 signals:
     void addLaneRequested(LaneKind kind);
     void showHiddenLanesRequested();
+    void duplicateLaneRequested(const QString& laneId);
     void renameLaneRequested(const QString& laneId);
     void removeLaneRequested(const QString& laneId);
     void editLaneParametersRequested(const QString& laneId, const QPoint& globalPosition);

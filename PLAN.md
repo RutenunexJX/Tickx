@@ -4749,6 +4749,58 @@ Desktop interaction: none
 Packaging: not run during iteration
 ```
 
+## 持续迭代 85：现有信号一键复制
+
+状态：完成，持续迭代中
+
+已交付：
+
+- 开发审计确认复制现有信号此前需要“新增、重命名、全范围复制、选择目标、粘贴”多个步骤，且 Clock 还需要额外配置时钟域；该流程不适合快速建立相似激励。
+- Edit 菜单新增 `Duplicate selected signal`，使用平台标准 `Ctrl+D`；信号标题右键同时提供 `Duplicate signal`。副本立即插入原信号正下方并成为当前选择，名称按 `<原名>_copy`、`_2` 等规则自动保证唯一，状态栏公开结果、`Ctrl+Z` 与 `F2` 入口。
+- 副本保留 lane 类型、显示参数、分组、普通时钟关联和完整波形；lane 与 segment stable ID 全部重新生成，颜色从可读调色板重新随机分配且不与源信号相同。Clock 同时获得参数一致但身份独立的新 ClockDomain，后续修改不会联动原时钟。
+- Event、Relation 与 trace mapping 不随波形复制，避免产生没有明确语义的关系副本。显式范围存在时操作无损阻断并提示先按 Esc；文本输入框获得焦点时 `Ctrl+D` 保持文本语义；Group 不提供复制入口。
+- 新增 `DuplicateLaneCommand` 并扩展 `AddLaneCommand` 的显式插入位置；复制、撤销和重做均维持相邻顺序与稳定身份，整个用户动作只占一个 Undo。
+- 扩展 `wave-canvas-add-lane-smoke` 与核心命令测试：覆盖 Edit/右键/画布 `Ctrl+D`、Bus 和 Clock 复制、相邻插入、唯一名称、不同随机颜色、属性与波形一致、lane/segment ID 独立、ClockDomain 独立、Event/Relation 不复制、显式范围门禁、单步 Undo/Redo、状态反馈及无模态窗口，并保存离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 19 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.95 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.80 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-canvas-add-lane-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 0.93 sec
+
+Automated QA: 右键信号标题复制 bus 后，只新增一个紧邻的 bus_copy；名称、类型、宽度、符号、进制、分组、可见性和波形保持一致，颜色及 lane/segment ID 独立，副本立即选中。Undo 精确移除副本，Redo 恢复同一身份和位置。Ctrl+D 复制 Clock 时生成参数一致的独立时钟域；显式范围保持并得到 Esc 提示，Event/Relation 数量不变。
+Offscreen visual QA: build/qtcreator-debug/canvas-signal-management-smoke-duplicate-signal.png
+Visual result: bus 与所选 bus_copy 相邻显示，DNT/CA?/X 波形在相同时间位置一致，副本使用不同颜色；状态栏明确显示复制结果、相邻位置、Ctrl+Z 和 F2，无模态窗口、遮挡、裁切或视图跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

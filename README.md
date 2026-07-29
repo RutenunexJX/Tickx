@@ -123,6 +123,12 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   不清除 Redo，也不标记未保存。标题拖动期间按 Esc 会立即清除插入反馈并取消重排，随后释放
   鼠标不会提交 `MoveLaneCommand`；成功放下会显示信号名、原位置→新位置和 `Ctrl+Z`，原位放下
   明确显示顺序未改变且不增加 Undo。
+- 选中非 Group 信号后，可通过 Edit 菜单的 `Duplicate selected signal`、`Ctrl+D` 或信号标题右键
+  `Duplicate signal` 在原信号正下方立即创建完整副本。名称自动使用 `<原名>_copy` 并保证唯一，颜色重新
+  随机分配；显示参数、分组和波形保持一致，但 lane/segment stable ID 独立。Clock 同时复制为独立时钟域，
+  后续修改周期不会影响原时钟；普通信号保留原时钟关联。Event、Relation 与 trace mapping 不随波形复制。
+  整个动作只产生一个 Undo，副本立即选中并可按 `F2` 改名；显式范围存在时先提示按 Esc，文本框焦点不会触发复制。
+
 - 在高级 Lane/Group 属性中关闭 `Visible` 后，画布末尾和 Edit 菜单会显示
   `Show N hidden items`；一次操作恢复当前场景的全部隐藏项，并作为单个命令支持 Undo/Redo。
   被隐藏信号的标题选择、波形选择和 Bus 便携面板会立即清除，状态栏同时说明恢复入口。
@@ -354,6 +360,7 @@ exports/
   第 82 轮继续覆盖从 50–100 ns 复制 Bus 值、以键盘建立 0–10 ns 目标且活动光标停在 10 ns，再由 `Ctrl+V` 按固定栏公开的 0 ps 起点写入；断言 5 ns 已为 `0x35`、结果范围为 0–50 ns、状态显示 0 ps、单步 Undo 回到 Saved。离屏截图同时显示 `1 Bus · 0 ps–50 ns` 与 10 ns 活动光标。
   第 83 轮继续覆盖 `Ctrl+F` 按可见信号名称/ID 即时定位、Group 排除、大小写不敏感、首项/前后项/循环、无匹配、长列表最小滚动、水平视图保持、显式范围门禁、关闭/重开与 Scenario/Undo/Saved 零变化；离屏截图验证紧凑查找栏、结果计数、所选信号、波形和时间轴同时可见。
   第 84 轮继续覆盖 `Ctrl+G` 精确时间跳转、整数单位与 `cycle N`、非法/越界输入原位反馈、当前信号与缩放保持、最小水平滚动、显式范围门禁、关闭/重开、Bus/Enum 内联编辑隔离及 Scenario/Undo/Saved 零变化；离屏截图验证紧凑跳转栏、375 ns 光标、所选 Bus 信号、波形、时间轴和网格同时可见。
+  第 85 轮继续覆盖 Edit/右键/`Ctrl+D` 复制、相邻插入、唯一名称、不同随机颜色、属性与波形一致、lane/segment ID 独立、ClockDomain 独立、Event/Relation 不复制、显式范围门禁、单步 Undo/Redo 和状态反馈；离屏截图验证 `bus`/`bus_copy` 相邻、波形一致且副本已选中。
 - Measure 离屏回归覆盖活动/临时光标、持久锁定点/区间、精确 `Δ`、创建/选择/拖动/方向键/删除
   结果、活动光标单击与方向键最终值、Shift 参考点、正负拖动的 Reference/Cursor/Δ、边界无效果
   反馈、一次 Undo 直达前一真实移动、Delete 的 Undo/Redo 恢复提示、删除较早点后的名称冲突规避、
