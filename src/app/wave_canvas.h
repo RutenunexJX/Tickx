@@ -371,6 +371,7 @@ private:
         const std::pair<Tick, Tick>& currentRange,
         bool forward) const;
     void navigateSelectedBeat(bool forward);
+    void selectSegmentAtCursor();
     void navigateSelectedSegment(bool forward);
     void navigateTimelinePage(bool forward);
     void clearWaveEditState();

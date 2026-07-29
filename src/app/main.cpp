@@ -8406,6 +8406,74 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            const auto sourceSegmentIdBeforeCursorSelection =
+                canvas->selectedSegmentId();
+            sendKey(
+                canvas,
+                Qt::Key_Right,
+                Qt::ControlModifier);
+            sendKey(
+                canvas,
+                Qt::Key_Right,
+                Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            const auto beforeCursorSegmentSelection =
+                window.project().scenarios.front();
+            sendKey(
+                canvas,
+                Qt::Key_Space,
+                Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            if (canvas->cursorTick() != navigationTargetRange.first
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        navigationTargetRange}
+                || canvas->selectedSegmentId().isEmpty()
+                || canvas->selectedSegmentId()
+                    == sourceSegmentIdBeforeCursorSelection
+                || window.project().scenarios.front()
+                    != beforeCursorSegmentSelection
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("Segment selected at edit cursor"))) {
+                qCritical().noquote()
+                    << "Ctrl+Space diagnostics"
+                    << "cursor" << canvas->cursorTick()
+                    << "expectedCursor" << navigationTargetRange.first
+                    << "range"
+                    << (canvas->selectedTimeRange()
+                            ? QStringLiteral("%1-%2")
+                                  .arg(canvas->selectedTimeRange()->first)
+                                  .arg(canvas->selectedTimeRange()->second)
+                            : QStringLiteral("<none>"))
+                    << "expectedRange"
+                    << QStringLiteral("%1-%2")
+                           .arg(navigationTargetRange.first)
+                           .arg(navigationTargetRange.second)
+                    << "sourceId" << sourceSegmentIdBeforeCursorSelection
+                    << "selectedId" << canvas->selectedSegmentId()
+                    << "modelChanged"
+                    << (window.project().scenarios.front()
+                        != beforeCursorSegmentSelection)
+                    << "status" << window.statusBar()->currentMessage();
+                fail(QStringLiteral(
+                    "Ctrl+Space did not select the explicit Segment under the edit cursor"));
+                return;
+            }
+            sendKey(
+                canvas,
+                Qt::Key_Tab,
+                Qt::ControlModifier | Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        navigationSourceRange}
+                || window.project().scenarios.front()
+                    != beforeCursorSegmentSelection) {
+                fail(QStringLiteral(
+                    "Could not return from Ctrl+Space selection to the source Segment"));
+                return;
+            }
+
             const auto nudgeSourceValue = navigationSourceValue;
             const auto nudgeSourceExtensions = navigationSource->extensions;
             const auto beforeSegmentNudge =

@@ -2341,7 +2341,9 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
 
 void WaveCanvas::keyPressEvent(QKeyEvent* event)
 {
-    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
+    if (event->key() == Qt::Key_Space
+        && event->modifiers() == Qt::NoModifier
+        && !event->isAutoRepeat()) {
         spaceHeld_ = true;
         viewport()->setCursor(Qt::OpenHandCursor);
         event->accept();
@@ -2478,6 +2480,12 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                         ? tr("Waveform drag cancelled · view restored")
                         : tr("Waveform drag cancelled"));
             }
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Space
+            && event->modifiers() == Qt::ControlModifier) {
+            selectSegmentAtCursor();
             event->accept();
             return;
         }
@@ -2925,7 +2933,9 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
 
 void WaveCanvas::keyReleaseEvent(QKeyEvent* event)
 {
-    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
+    if (event->key() == Qt::Key_Space
+        && event->modifiers() == Qt::NoModifier
+        && !event->isAutoRepeat()) {
         spaceHeld_ = false;
         if (!panning_) {
             viewport()->setCursor(defaultCursorShape());
@@ -7355,6 +7365,77 @@ void WaveCanvas::navigateSelectedSegment(const bool forward)
             .arg(QString::fromStdString(formatTick(
                 target->end,
                 project_->timeBase))));
+    viewport()->update();
+}
+
+void WaveCanvas::selectSegmentAtCursor()
+{
+    if (!scenario_ || tool_ != Tool::WaveEdit) return;
+    if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
+        emit statusMessage(
+            tr("Finish or cancel the current drag before selecting a Segment"));
+        return;
+    }
+    if (explicitRangeSelection_) {
+        emit statusMessage(
+            tr("Esc clears the selected range before selecting a Segment"));
+        return;
+    }
+    const auto* lane = findLane(*scenario_, selectedLaneId_);
+    if (!lane || lane->kind == LaneKind::Group) {
+        emit statusMessage(
+            tr("Select a signal before pressing Ctrl+Space"));
+        return;
+    }
+    if (lane->kind == LaneKind::Bit) {
+        emit statusMessage(
+            tr("%1 uses beat editing · click or use the arrow keys to target one beat")
+                .arg(QString::fromStdString(lane->name)));
+        return;
+    }
+    const auto* segment = cursorTick_ < scenario_->duration
+        ? segmentAtTick(*lane, cursorTick_)
+        : nullptr;
+    const auto formatTime = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : QString::number(tick);
+    };
+    if (!segment) {
+        emit statusMessage(
+            tr("No explicit Segment on %1 at %2 · signal and edit cursor kept")
+                .arg(QString::fromStdString(lane->name))
+                .arg(formatTime(cursorTick_)));
+        return;
+    }
+
+    hideBusPresetPalette();
+    selectedLaneIds_ = {lane->id};
+    laneHeaderSelectionActive_ = false;
+    selectedSegmentLaneId_ = lane->id;
+    selectedSegmentId_ = segment->id;
+    selectionRange_ = std::pair{segment->start, segment->end};
+    waveEditOriginalRange_.reset();
+    waveEditPreviewRange_.reset();
+    waveEditHoverLaneId_.clear();
+    waveEditHoverRange_.reset();
+    snapGuideTick_.reset();
+    ensureLaneVisible(lane->id);
+    ensureCursorVisible(cursorTick_);
+    emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
+    auto message =
+        tr("%1 Segment selected at edit cursor %2 · value %3 · %4–%5")
+            .arg(QString::fromStdString(lane->name))
+            .arg(formatTime(cursorTick_))
+            .arg(QString::fromStdString(segment->value))
+            .arg(formatTime(segment->start))
+            .arg(formatTime(segment->end));
+    if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
+        message.append(tr(" · Enter edits"));
+    }
+    message.append(
+        tr(" · Ctrl+Tab next · Ctrl+Shift+Tab previous · Delete removes"));
+    emit statusMessage(message);
     viewport()->update();
 }
 
