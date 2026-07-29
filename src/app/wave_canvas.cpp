@@ -2851,6 +2851,42 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
             painter.setPen(QColor(111, 168, 255));
             painter.drawRect(
                 QRect(QPoint(left, top), QPoint(std::max(left + 1, right), bottom - 1)));
+            if (rangeSelecting && right > left) {
+                const auto rangeStart = std::min(drawStart_, drawCurrent_);
+                const auto rangeEnd = std::max(drawStart_, drawCurrent_);
+                const auto timingLabel = tr("%1–%2 · width %3")
+                    .arg(
+                        QString::fromStdString(formatTick(
+                            rangeStart,
+                            project_->timeBase)),
+                        QString::fromStdString(formatTick(
+                            rangeEnd,
+                            project_->timeBase)),
+                        QString::fromStdString(formatTick(
+                            rangeEnd - rangeStart,
+                            project_->timeBase)));
+                const auto labelWidth = std::min(
+                    painter.fontMetrics().horizontalAdvance(timingLabel) + 16,
+                    std::max(0, viewport()->width() - headerWidth_ - 8));
+                const auto maximumLeft = std::max(
+                    headerWidth_ + 4,
+                    viewport()->width() - labelWidth - 4);
+                const auto labelLeft = std::clamp(
+                    left + 8,
+                    headerWidth_ + 4,
+                    maximumLeft);
+                const QRect labelRect(
+                    labelLeft,
+                    std::max(RulerHeight + 3, top + 3),
+                    labelWidth,
+                    22);
+                painter.fillRect(labelRect, QColor(16, 25, 39, 224));
+                painter.setPen(QColor(225, 239, 255));
+                painter.drawText(
+                    labelRect.adjusted(8, 0, -8, 0),
+                    Qt::AlignLeft | Qt::AlignVCenter,
+                    timingLabel);
+            }
         }
     }
 
@@ -3668,6 +3704,10 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
         }
         const auto displayedRange = waveEditPreviewRange_
             ? waveEditPreviewRange_
+            : drawing_
+                    && waveEditInteraction_ == WaveEditInteraction::SelectRange
+                    && selectionRange_
+                ? selectionRange_
             : waveEditHoverRange_;
         if (displayedRange) {
             message += tr("  |  %1 to %2 · width %3")
@@ -7630,7 +7670,7 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
                 QString::fromStdString(selectedLaneId_),
                 cursorTick_);
             emit statusMessage(
-                tr("Adjusted range to %1–%2 · %3 · %4 signals")
+                tr("Adjusted range to %1–%2 · width %3 · %4 signals")
                     .arg(QString::fromStdString(
                         formatTick(selectionRange_->first, project_->timeBase)))
                     .arg(QString::fromStdString(
@@ -7709,18 +7749,43 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
         if (const auto rangeKind = explicitRangeKind()) {
             emit statusMessage(
                 *rangeKind == LaneKind::Enum
-                    ? tr("Selected %1 · %2 Enum signals · type a shared symbol in the range toolbar · Shift+Up/Down adjusts signals · Esc clears")
-                          .arg(QString::fromStdString(
-                              formatTick(duration, project_->timeBase)))
+                    ? tr("Selected %1–%2 · width %3 · %4 Enum signals · type a shared symbol in the range toolbar · Shift+Up/Down adjusts signals · Esc clears")
+                          .arg(
+                              QString::fromStdString(formatTick(
+                                  selectionRange_->first,
+                                  project_->timeBase)),
+                              QString::fromStdString(formatTick(
+                                  selectionRange_->second,
+                                  project_->timeBase)),
+                              QString::fromStdString(formatTick(
+                                  duration,
+                                  project_->timeBase)))
                           .arg(static_cast<qulonglong>(selectedLaneIds_.size()))
-                    : tr("Selected %1 · %2 signals · use 0/1/X/Z or the range toolbar · Shift+Up/Down adjusts signals · Esc clears")
-                          .arg(QString::fromStdString(
-                              formatTick(duration, project_->timeBase)))
+                    : tr("Selected %1–%2 · width %3 · %4 signals · use 0/1/X/Z or the range toolbar · Shift+Up/Down adjusts signals · Esc clears")
+                          .arg(
+                              QString::fromStdString(formatTick(
+                                  selectionRange_->first,
+                                  project_->timeBase)),
+                              QString::fromStdString(formatTick(
+                                  selectionRange_->second,
+                                  project_->timeBase)),
+                              QString::fromStdString(formatTick(
+                                  duration,
+                                  project_->timeBase)))
                           .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
         } else {
             emit statusMessage(
-                tr("Selected %1 · mixed/unsupported signal types · Copy, Cut, or Delete to clear · Shift+Up/Down adjusts signals")
-                    .arg(QString::fromStdString(formatTick(duration, project_->timeBase))));
+                tr("Selected %1–%2 · width %3 · mixed/unsupported signal types · Copy, Cut, or Delete to clear · Shift+Up/Down adjusts signals")
+                    .arg(
+                        QString::fromStdString(formatTick(
+                            selectionRange_->first,
+                            project_->timeBase)),
+                        QString::fromStdString(formatTick(
+                            selectionRange_->second,
+                            project_->timeBase)),
+                        QString::fromStdString(formatTick(
+                            duration,
+                            project_->timeBase))));
         }
         emit selectionChanged(QString::fromStdString(selectedLaneId_), cursorTick_);
         viewport()->update();
@@ -8928,6 +8993,45 @@ void WaveCanvas::drawWaveEditOverlay(QPainter& painter)
         for (std::size_t index = 0; index < selectedLaneIds_.size(); ++index) {
             const auto handles = index == 0 || index + 1 == selectedLaneIds_.size();
             drawRange(selectedLaneIds_[index], *selectionRange_, handles, resizing);
+        }
+        if (resizing && !selectedLaneIds_.empty()) {
+            const auto layout = layoutForLane(selectedLaneIds_.front());
+            if (layout != laneLayout_.end()) {
+                const auto timingLabel = tr("%1–%2 · width %3")
+                    .arg(
+                        QString::fromStdString(formatTick(
+                            selectionRange_->first,
+                            project_->timeBase)),
+                        QString::fromStdString(formatTick(
+                            selectionRange_->second,
+                            project_->timeBase)),
+                        QString::fromStdString(formatTick(
+                            selectionRange_->second - selectionRange_->first,
+                            project_->timeBase)));
+                const auto labelWidth = std::min(
+                    painter.fontMetrics().horizontalAdvance(timingLabel) + 16,
+                    std::max(0, viewport()->width() - headerWidth_ - 8));
+                const auto maximumLeft = std::max(
+                    headerWidth_ + 4,
+                    viewport()->width() - labelWidth - 4);
+                const auto labelLeft = std::clamp(
+                    xAtTick(selectionRange_->first) + 8,
+                    headerWidth_ + 4,
+                    maximumLeft);
+                const auto y = RulerHeight + layout->top
+                    - verticalScrollBar()->value();
+                const QRect labelRect(
+                    labelLeft,
+                    std::max(RulerHeight + 3, y + 3),
+                    labelWidth,
+                    22);
+                painter.fillRect(labelRect, QColor(16, 25, 39, 224));
+                painter.setPen(QColor(225, 239, 255));
+                painter.drawText(
+                    labelRect.adjusted(8, 0, -8, 0),
+                    Qt::AlignLeft | Qt::AlignVCenter,
+                    timingLabel);
+            }
         }
     }
     const auto persistentBitSelection = !drawing_ && hasBitRangeSelection();

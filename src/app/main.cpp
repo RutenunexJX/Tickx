@@ -11325,9 +11325,11 @@ int main(int argc, char* argv[])
                 if (!canvas->hasExplicitRangeSelection()
                     || canvas->selectedTimeRange() != multiLaneRange
                     || canvas->selectedLaneIds() != multiLaneIds
-                    || scenario != beforeRangeBoundaryAdjustment) {
+                    || scenario != beforeRangeBoundaryAdjustment
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("width 20 ns"))) {
                     qCritical().noquote()
-                        << "Re-selecting the original range after handle adjustment failed";
+                        << "Re-selecting the original range did not expose its exact width";
                     window.hide();
                     application.exit(4);
                     return;
