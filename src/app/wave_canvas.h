@@ -184,6 +184,7 @@ private:
         Stay,
         PreviousBeat,
         NextBeat,
+        PreviousSegment,
         NextSegment,
     };
     enum class KeyboardRangeTarget {

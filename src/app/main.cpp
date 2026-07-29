@@ -8261,6 +8261,11 @@ int main(int argc, char* argv[])
             };
             const auto navigationTargetValue =
                 std::next(navigationSource)->value;
+            const auto navigationSourceRange = std::pair{
+                navigationSource->start,
+                navigationSource->end,
+            };
+            const auto navigationSourceValue = navigationSource->value;
             sendMouse(
                 QEvent::MouseButtonPress,
                 copySourcePoint,
@@ -8311,6 +8316,46 @@ int main(int argc, char* argv[])
                     "Tab did not confirm the selected Segment and open the next Segment"));
                 return;
             }
+            sendKey(
+                directValue,
+                Qt::Key_Backtab,
+                Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (!presetPalette->isVisible()
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        navigationSourceRange}
+                || directValue->text()
+                    != QString::fromStdString(navigationSourceValue)
+                || window.project().scenarios.front()
+                    != beforeSegmentTab
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("previous Segment opened"))) {
+                fail(QStringLiteral(
+                    "Shift+Tab did not confirm the selected Segment and open the previous Segment"));
+                return;
+            }
+            const auto beforePreviousSegmentBoundary =
+                window.project().scenarios.front();
+            sendKey(
+                directValue,
+                Qt::Key_Backtab,
+                Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            if (!presetPalette->isVisible()
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        navigationSourceRange}
+                || window.project().scenarios.front()
+                    != beforePreviousSegmentBoundary
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("no previous Segment"))
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("target kept"))) {
+                fail(QStringLiteral(
+                    "Shift+Tab Segment boundary did not keep the current target without history"));
+                return;
+            }
             sendKey(directValue, Qt::Key_Escape);
             sendMouse(
                 QEvent::MouseButtonPress,
@@ -8340,9 +8385,7 @@ int main(int argc, char* argv[])
             QCoreApplication::processEvents();
             if (canvas->selectedTimeRange()
                     != std::optional<std::pair<wave::Tick, wave::Tick>>{
-                        std::pair<wave::Tick, wave::Tick>{
-                            navigationSource->start,
-                            navigationSource->end}}
+                        navigationSourceRange}
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Previous Segment"))
                 || window.project().scenarios.front()
@@ -8363,7 +8406,7 @@ int main(int argc, char* argv[])
                 return;
             }
 
-            const auto nudgeSourceValue = navigationSource->value;
+            const auto nudgeSourceValue = navigationSourceValue;
             const auto nudgeSourceExtensions = navigationSource->extensions;
             const auto beforeSegmentNudge =
                 window.project().scenarios.front();

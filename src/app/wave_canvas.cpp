@@ -872,6 +872,11 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
             && busEditScope_ == BusEditScope::Segment
             && keyEvent->key() == Qt::Key_Tab
             && keyEvent->modifiers() == Qt::NoModifier;
+        const auto busPreviousSegment = watched == busValueEdit_
+            && busEditScope_ == BusEditScope::Segment
+            && (keyEvent->key() == Qt::Key_Backtab
+                || (keyEvent->key() == Qt::Key_Tab
+                    && keyEvent->modifiers() == Qt::ShiftModifier));
         if (watched == busValueEdit_
             && keyEvent->modifiers() == Qt::ControlModifier
             && (keyEvent->key() == Qt::Key_Up
@@ -906,8 +911,11 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
                     : BusEditCommitAction::PreviousBeat);
             return true;
         }
-        if (busNextSegment) {
-            submitBusValue(BusEditCommitAction::NextSegment);
+        if (busNextSegment || busPreviousSegment) {
+            submitBusValue(
+                busNextSegment
+                    ? BusEditCommitAction::NextSegment
+                    : BusEditCommitAction::PreviousSegment);
             return true;
         }
         if (watched == busValueEdit_ && acceptKey) {
@@ -4580,7 +4588,8 @@ void WaveCanvas::showBusPresetPalette(
             contextHelp.append(
                 tr("\nTab applies and advances · Shift+Tab applies and goes back"));
         } else {
-            contextHelp.append(tr("\nTab applies and opens the next Segment"));
+            contextHelp.append(
+                tr("\nTab applies and opens the next Segment · Shift+Tab opens the previous Segment"));
         }
         if (!enumSymbols.isEmpty()) {
             contextHelp.append(
@@ -4601,8 +4610,8 @@ void WaveCanvas::showBusPresetPalette(
                         : tr("Value · Tab next")
                     : tr("X (implicit) · Tab skips")
                 : enumLane
-                    ? tr("Symbol or value · Tab next")
-                    : tr("Value · Tab next"));
+                    ? tr("Symbol or value · Tab next · Shift+Tab previous")
+                    : tr("Value · Tab next · Shift+Tab previous"));
         busValueEdit_->setAccessibleName(
             enumLane ? tr("Enum value") : tr("Bus value"));
         busValueEdit_->setToolTip(
@@ -4610,16 +4619,16 @@ void WaveCanvas::showBusPresetPalette(
                 ? busEditScope_ == BusEditScope::Beat
                     ? tr("Type a symbol or numeric value · Tab applies and advances · Shift+Tab goes back · Enter finishes · symbols: %1")
                           .arg(enumSymbols.join(QStringLiteral(", ")))
-                    : tr("Type a symbol or numeric value · Tab applies and opens the next Segment · Enter finishes · symbols: %1")
+                    : tr("Type a symbol or numeric value · Tab opens the next Segment · Shift+Tab opens the previous Segment · Enter finishes · symbols: %1")
                       .arg(enumSymbols.join(QStringLiteral(", ")))
                 : enumLane
                     ? busEditScope_ == BusEditScope::Beat
                         ? tr("Type a value · Tab applies and advances · Shift+Tab goes back · Enter finishes")
-                        : tr("Type a value · Tab applies and opens the next Segment · Enter finishes")
+                        : tr("Type a value · Tab opens the next Segment · Shift+Tab opens the previous Segment · Enter finishes")
                     : busEditScope_ == BusEditScope::Beat
                         ? tr("Type a value · Tab applies and advances · Shift+Tab goes back · Enter finishes · bare input uses the selected radix · width %1 bit(s)")
                               .arg(lane.width)
-                        : tr("Type a value · Tab applies and opens the next Segment · Enter finishes · bare input uses the selected radix · width %1 bit(s)")
+                        : tr("Type a value · Tab opens the next Segment · Shift+Tab opens the previous Segment · Enter finishes · bare input uses the selected radix · width %1 bit(s)")
                           .arg(lane.width));
         if (busEditScope_ == BusEditScope::Beat && !existing) {
             busValueEdit_->setToolTip(
@@ -5779,7 +5788,8 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
             || action == BusEditCommitAction::NextBeat);
     const auto navigateSegmentAfterCommit =
         editorScope == BusEditScope::Segment
-        && action == BusEditCommitAction::NextSegment;
+        && (action == BusEditCommitAction::PreviousSegment
+            || action == BusEditCommitAction::NextSegment);
     const auto stayAfterCommit = action == BusEditCommitAction::Stay;
     const auto historySizeBefore = commandStack_ ? commandStack_->size() : 0;
     bool applied = false;
@@ -5908,14 +5918,18 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
             return;
         }
         if (navigateSegmentAfterCommit) {
+            const auto forward =
+                action == BusEditCommitAction::NextSegment;
             const auto changed = commandStack_
                 && commandStack_->size() != historySizeBefore;
             if (advanceBusSegmentValueEdit(
                     laneId,
                     {start, end},
-                    true)) {
+                    forward)) {
                 emit statusMessage(
-                    tr("%1 · %2 %3 · next Segment opened · Shift+Tab goes back")
+                    (forward
+                         ? tr("%1 · %2 %3 · next Segment opened · Shift+Tab goes back")
+                         : tr("%1 · %2 %3 · previous Segment opened · Tab goes forward"))
                         .arg(QString::fromStdString(laneName))
                         .arg(QString::fromStdString(
                             validation.normalizedValue))
@@ -5939,7 +5953,9 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
                 busValueEdit_->selectAll();
             }
             emit statusMessage(
-                tr("%1 · %2 %3 · no next Segment · Enter finishes")
+                (forward
+                     ? tr("%1 · %2 %3 · no next Segment · Shift+Tab goes back · target kept")
+                     : tr("%1 · %2 %3 · no previous Segment · Tab goes forward · target kept"))
                     .arg(QString::fromStdString(laneName))
                     .arg(QString::fromStdString(
                         validation.normalizedValue))
