@@ -2734,6 +2734,17 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         }
+        if ((event->key() == Qt::Key_BracketRight
+             || event->key() == Qt::Key_BraceRight)
+            && (event->modifiers() == Qt::NoModifier
+                || event->modifiers() == Qt::ShiftModifier)
+            && !selectedSegmentId_.empty()) {
+            static_cast<void>(resizeSelectedSegmentBoundary(
+                SegmentBoundary::End,
+                event->modifiers() == Qt::NoModifier));
+            event->accept();
+            return;
+        }
         if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
             const auto step = cursorKeyboardStep();
             const auto direction = event->key() == Qt::Key_Left ? Tick{-1} : Tick{1};

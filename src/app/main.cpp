@@ -8656,6 +8656,100 @@ int main(int argc, char* argv[])
                 Qt::NoButton);
             QCoreApplication::processEvents();
 
+            const auto beforeRightBoundaryKeyboardEdit =
+                window.project().scenarios.front();
+            sendKey(canvas, Qt::Key_BracketRight);
+            QCoreApplication::processEvents();
+            auto* busAfterRightBoundary = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto expandedRightSegment = busAfterRightBoundary
+                ? std::find_if(
+                      busAfterRightBoundary->segments.begin(),
+                      busAfterRightBoundary->segments.end(),
+                      [presetStart, expectedBeat](
+                          const wave::Segment& candidate) {
+                          return candidate.start == presetStart
+                              && candidate.end
+                                  == presetStart + 2 * expectedBeat;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (!busAfterRightBoundary
+                || expandedRightSegment
+                    == busAfterRightBoundary->segments.end()
+                || expandedRightSegment->value != navigationSourceValue
+                || expandedRightSegment->extensions
+                    != navigationSourceExtensions
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{
+                            presetStart,
+                            presetStart + 2 * expectedBeat}}
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("right boundary moved later"))) {
+                fail(QStringLiteral(
+                    "] did not expand the selected Segment right boundary by one Sync beat"));
+                return;
+            }
+            const auto afterRightBoundaryExpansion =
+                window.project().scenarios.front();
+            sendKey(
+                canvas,
+                Qt::Key_BracketRight,
+                Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            busAfterRightBoundary = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto trimmedRightSegment = busAfterRightBoundary
+                ? std::find_if(
+                      busAfterRightBoundary->segments.begin(),
+                      busAfterRightBoundary->segments.end(),
+                      [presetStart, expectedBeat](
+                          const wave::Segment& candidate) {
+                          return candidate.start == presetStart
+                              && candidate.end
+                                  == presetStart + expectedBeat;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (!busAfterRightBoundary
+                || trimmedRightSegment
+                    == busAfterRightBoundary->segments.end()
+                || trimmedRightSegment->value != navigationSourceValue
+                || trimmedRightSegment->extensions
+                    != navigationSourceExtensions
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("right boundary moved earlier"))) {
+                fail(QStringLiteral(
+                    "Shift+] did not trim the selected Segment right boundary by one Sync beat"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front()
+                != afterRightBoundaryExpansion) {
+                fail(QStringLiteral(
+                    "Right-boundary trim was not one atomic Undo"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front()
+                != beforeRightBoundaryKeyboardEdit) {
+                fail(QStringLiteral(
+                    "Right-boundary expansion was not one atomic Undo"));
+                return;
+            }
+            sendMouse(
+                QEvent::MouseButtonPress,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+
             const auto nudgeSourceValue = navigationSourceValue;
             const auto nudgeSourceExtensions =
                 navigationSourceExtensions;
