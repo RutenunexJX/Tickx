@@ -4348,13 +4348,31 @@ int main(int argc, char* argv[])
                 auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
                 auto* durationEdit = window.findChild<QLineEdit*>(
                     QStringLiteral("TimelineDurationEdit"));
+                auto* findSignalAction = window.findChild<QAction*>(
+                    QStringLiteral("FindSignalAction"));
+                auto* findToolbarAction = window.findChild<QAction*>(
+                    QStringLiteral("SignalFindToolbarAction"));
+                auto* findBar = window.findChild<QFrame*>(
+                    QStringLiteral("SignalFindBar"));
+                auto* findEdit = window.findChild<QLineEdit*>(
+                    QStringLiteral("SignalFindEdit"));
+                auto* findResult = window.findChild<QLabel*>(
+                    QStringLiteral("SignalFindResultLabel"));
+                auto* findPrevious = window.findChild<QToolButton*>(
+                    QStringLiteral("SignalFindPreviousButton"));
+                auto* findNext = window.findChild<QToolButton*>(
+                    QStringLiteral("SignalFindNextButton"));
+                auto* findClose = window.findChild<QToolButton*>(
+                    QStringLiteral("SignalFindCloseButton"));
                 auto fail = [&application, &window](const QString& message) {
                     qCritical().noquote() << message;
                     window.hide();
                     application.exit(4);
                 };
                 if (!canvas || !undoAction || !saveState || !durationEdit
-                    || window.project().scenarios.empty()) {
+                    || !findSignalAction || !findToolbarAction || !findBar
+                    || !findEdit || !findResult || !findPrevious || !findNext
+                    || !findClose || window.project().scenarios.empty()) {
                     fail(QStringLiteral("Lane autoscroll smoke prerequisites are missing"));
                     return;
                 }
@@ -4364,6 +4382,16 @@ int main(int argc, char* argv[])
                     || originalLanes.front().id != "lane-scroll-00"
                     || originalLanes.back().id != "lane-scroll-19"
                     || canvas->verticalScrollBar()->maximum() <= 0
+                    || findSignalAction->shortcut().matches(QKeySequence::Find)
+                        != QKeySequence::ExactMatch
+                    || findToolbarAction->isVisible()
+                    || findBar->isVisibleTo(&window)
+                    || findEdit->placeholderText()
+                        != QStringLiteral("Visible signal name or ID")
+                    || findEdit->accessibleName()
+                        != QStringLiteral("Find visible signal")
+                    || findResult->text() != QStringLiteral("0/0")
+                    || QApplication::activeModalWidget()
                     || saveState->text() != QStringLiteral("Saved")
                     || undoAction->isEnabled()) {
                     fail(QStringLiteral("Lane autoscroll smoke did not start from a long Saved list"));
@@ -4384,10 +4412,13 @@ int main(int argc, char* argv[])
                         Qt::NoModifier);
                     QCoreApplication::sendEvent(canvas->viewport(), &event);
                 };
-                const auto sendKey = [](QObject* target, const int key) {
-                    QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier);
+                const auto sendKey = [](
+                                         QObject* target,
+                                         const int key,
+                                         const Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+                    QKeyEvent press(QEvent::KeyPress, key, modifiers);
                     QCoreApplication::sendEvent(target, &press);
-                    QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier);
+                    QKeyEvent release(QEvent::KeyRelease, key, modifiers);
                     QCoreApplication::sendEvent(target, &release);
                 };
                 const auto waitForScroll = [](const int milliseconds) {
@@ -4677,6 +4708,250 @@ int main(int argc, char* argv[])
                     || window.windowTitle().contains(QStringLiteral(" *"))) {
                     fail(QStringLiteral(
                         "Keyboard signal navigation armed an unintended signal deletion"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                if (!canvas->hasExplicitRangeSelection()
+                    || findToolbarAction->isVisible()
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Signal search range guard did not start from a read-only explicit range"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_F, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (findToolbarAction->isVisible()
+                    || !canvas->hasExplicitRangeSelection()
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Esc clears the selected range"))
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Ctrl+F discarded an explicit range instead of explaining how to continue"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (canvas->hasExplicitRangeSelection()
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(
+                        QStringLiteral(
+                            "Escape did not safely clear the range before signal search: range=%1 lane=%2 lanesSame=%3 undo=%4 save=%5")
+                            .arg(canvas->hasExplicitRangeSelection())
+                            .arg(canvas->selectedLaneId())
+                            .arg(scenario.lanes == originalLanes)
+                            .arg(undoAction->isEnabled())
+                            .arg(saveState->text()));
+                    return;
+                }
+                const auto selectedBeforeFind = canvas->selectedLaneId();
+
+                sendKey(canvas, Qt::Key_F, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (!findToolbarAction->isVisible()
+                    || !findBar->isVisibleTo(&window)
+                    || !findEdit->hasFocus()
+                    || !findEdit->text().isEmpty()
+                    || findResult->text() != QStringLiteral("0/0")
+                    || findPrevious->isEnabled()
+                    || findNext->isEnabled()
+                    || canvas->selectedLaneId() != selectedBeforeFind
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Find visible signal"))
+                    || QApplication::activeModalWidget()) {
+                    fail(QStringLiteral(
+                        "Ctrl+F did not open an empty non-modal signal search"));
+                    return;
+                }
+
+                findEdit->setText(QStringLiteral("signal_0"));
+                QCoreApplication::processEvents();
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-00")
+                    || findResult->text() != QStringLiteral("1/9")
+                    || !findPrevious->isEnabled()
+                    || !findNext->isEnabled()
+                    || canvas->verticalScrollBar()->value() != 0
+                    || canvas->horizontalScrollBar()->value()
+                        != originalHorizontalScroll
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Found signal signal_00"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("1 of 9"))) {
+                    fail(QStringLiteral(
+                        "Typing a signal query did not select the first visible match"));
+                    return;
+                }
+
+                findNext->click();
+                QCoreApplication::processEvents();
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-01")
+                    || findResult->text() != QStringLiteral("2/9")) {
+                    fail(QStringLiteral(
+                        "Signal search Next button did not advance in display order"));
+                    return;
+                }
+                sendKey(findEdit, Qt::Key_Return);
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-02")
+                    || findResult->text() != QStringLiteral("3/9")) {
+                    fail(QStringLiteral(
+                        "Enter did not advance to the next signal match"));
+                    return;
+                }
+                sendKey(findEdit, Qt::Key_Return, Qt::ShiftModifier);
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-01")
+                    || findResult->text() != QStringLiteral("2/9")) {
+                    fail(QStringLiteral(
+                        "Shift+Enter did not return to the previous signal match"));
+                    return;
+                }
+                findPrevious->click();
+                sendKey(findEdit, Qt::Key_Return, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-09")
+                    || findResult->text() != QStringLiteral("9/9")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("wrapped"))) {
+                    fail(QStringLiteral(
+                        "Previous signal search did not wrap while skipping the Group"));
+                    return;
+                }
+
+                findEdit->setText(QStringLiteral("group_05"));
+                QCoreApplication::processEvents();
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-09")
+                    || findResult->text() != QStringLiteral("0/0")
+                    || findPrevious->isEnabled()
+                    || findNext->isEnabled()
+                    || findEdit->styleSheet().isEmpty()
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("No visible signal matches"))) {
+                    fail(QStringLiteral(
+                        "Signal search treated a Group as a selectable match or hid no-result feedback"));
+                    return;
+                }
+
+                findEdit->setText(QStringLiteral("LANE-SCROLL-19"));
+                QCoreApplication::processEvents();
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-19")
+                    || findResult->text() != QStringLiteral("1/1")
+                    || !findEdit->styleSheet().isEmpty()
+                    || !findPrevious->isEnabled()
+                    || !findNext->isEnabled()
+                    || canvas->verticalScrollBar()->value() <= 0
+                    || canvas->horizontalScrollBar()->value()
+                        != originalHorizontalScroll) {
+                    fail(QStringLiteral(
+                        "Case-insensitive signal ID search did not reveal the exact match"));
+                    return;
+                }
+
+                findEdit->setText(QStringLiteral("signal_1"));
+                QCoreApplication::processEvents();
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-10")
+                    || findResult->text() != QStringLiteral("1/10")) {
+                    fail(QStringLiteral(
+                        "Changing the query did not restart at its first signal match"));
+                    return;
+                }
+                sendKey(findEdit, Qt::Key_Return, Qt::ShiftModifier);
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-19")
+                    || findResult->text() != QStringLiteral("10/10")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("wrapped"))) {
+                    fail(QStringLiteral(
+                        "Shift+Enter did not wrap to the final signal match"));
+                    return;
+                }
+                sendKey(findEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-10")
+                    || findResult->text() != QStringLiteral("1/10")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("wrapped"))
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || window.windowTitle().contains(QStringLiteral(" *"))
+                    || QApplication::activeModalWidget()) {
+                    fail(QStringLiteral(
+                        "Signal search changed the model or failed to wrap forward"));
+                    return;
+                }
+                if (!laneAutoScrollScreenshotPath.isEmpty()) {
+                    auto findScreenshotPath = laneAutoScrollScreenshotPath;
+                    const auto suffix = findScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        findScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-signal-find"));
+                    } else {
+                        findScreenshotPath.append(
+                            QStringLiteral("-signal-find.png"));
+                    }
+                    if (!window.grab().save(findScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save signal search screenshot"));
+                        return;
+                    }
+                }
+
+                sendKey(findEdit, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (findToolbarAction->isVisible()
+                    || findBar->isVisibleTo(&window)
+                    || !canvas->viewport()->hasFocus()
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-10")
+                    || findEdit->text() != QStringLiteral("signal_1")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("signal_10 remains selected"))
+                    || canvas->horizontalScrollBar()->value()
+                        != originalHorizontalScroll
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Escape did not close signal search while retaining its result safely"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_F, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (!findToolbarAction->isVisible()
+                    || !findEdit->hasFocus()
+                    || findEdit->selectedText() != QStringLiteral("signal_1")) {
+                    fail(QStringLiteral(
+                        "Ctrl+F did not reopen signal search with the prior query selected"));
+                    return;
+                }
+                findClose->click();
+                QCoreApplication::processEvents();
+                if (findToolbarAction->isVisible()
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-scroll-10")
+                    || scenario.lanes != originalLanes
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Signal search close button did not preserve the selected match and Saved state"));
                     return;
                 }
                 window.hide();

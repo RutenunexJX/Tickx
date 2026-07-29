@@ -4645,6 +4645,58 @@ Desktop interaction: none
 Packaging: not run during iteration
 ```
 
+## 持续迭代 83：长信号列表即时查找
+
+状态：完成，持续迭代中
+
+已交付：
+
+- 开发审计确认长列表虽已支持 `Up` / `Down` 逐条选择与最小滚动，但缺少直接查找入口；在 20 条或更多信号中定位末端目标仍需反复按键，完整名称即使可通过悬浮查看也不能直接作为导航条件。
+- Edit 菜单新增平台标准 `Ctrl+F` 的 `Find signal…`。触发后只在 Waveform 工具栏临时显示紧凑查找栏；输入时按显示顺序即时匹配当前可见的非 Group 信号，名称和稳定 ID 均支持大小写不敏感的包含匹配。
+- 首个结果立即选中并仅做必要垂直滚动，编辑光标、缩放与水平视图保持不变。`Enter` / `Down` 前进，`Shift+Enter` / `Up` 后退；首尾循环、当前序号与总数均可见。无匹配时输入框原位标红并保留原选择，不打开模态窗口。
+- Esc 或关闭按钮收起查找栏并保留找到的信号；再次打开保留并全选上次查询。进入 Measure、新建或打开工程会安全收起查找栏。显式时间范围存在时 Ctrl+F 不会静默清除范围，而是提示先按 Esc；查找不写 Scenario、不进入 Undo、不改变 Saved。
+- 扩展 `wave-lane-autoscroll-smoke`：20 条长列表中验证空查询、`signal_0` 的 9 个结果、`signal_1` 的 10 个结果、Group 排除、大小写不敏感 ID、前后按钮与 Enter/Shift+Enter、首尾循环、无结果、顶部/底部最小滚动、水平视图保持、显式范围门禁、Esc/关闭/重开、无模态窗口及 Scenario/Undo/Saved 零变化，并保存离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 20 ms / Release 5 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 15.77 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.59 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-lane-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 2.53 sec
+
+Automated QA: Ctrl+F 在 20 条信号中以 signal_1 立即定位 signal_10，并以 1/10 显示位置；Enter/Shift+Enter 可顺序与循环导航到 signal_19，Group 不进入结果。名称/ID 不区分大小写，无结果时保留当前信号；Esc/关闭后结果仍被选中，重开保留查询。显式范围先得到无损提示，模型保持 Saved 且无 Undo。
+Offscreen visual QA: build/qtcreator-debug/lane-autoscroll-smoke-signal-find.png
+Visual result: 查找标签、输入框、1/10 计数、前后与关闭按钮紧凑排列；signal_10 被选中，20 条信号、波形、时间轴和网格同时可见，无裁切、遮挡、模态窗口或水平视图跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

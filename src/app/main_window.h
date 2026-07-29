@@ -9,6 +9,7 @@
 #include <QMainWindow>
 #include <QPair>
 
+#include <QStringList>
 #include <QString>
 
 #include <atomic>
@@ -28,9 +29,11 @@ class QLabel;
 class QLineEdit;
 class QMenu;
 class QProgressBar;
-class QTabWidget;
 class QTableWidget;
+class QTabWidget;
+class QToolButton;
 class QTimer;
+class QWidget;
 class QTreeWidget;
 
 namespace wave {
@@ -100,6 +103,12 @@ private slots:
 private:
     void createActions();
     void createToolBars();
+    void showSignalFind();
+    void closeSignalFind(bool announce = true);
+    void updateSignalFind();
+    void stepSignalFind(int direction);
+    [[nodiscard]] QStringList matchingVisibleSignals(const QString& query) const;
+    void activateSignalFindMatch(const QStringList& matches, int index, bool wrapped);
     void createDocks();
     void populateSignalTree();
     void populateClockTree();
@@ -199,6 +208,13 @@ private:
     QAction* moveLaneUpAction_{nullptr};
     QAction* moveLaneDownAction_{nullptr};
     QAction* showHiddenLanesAction_{nullptr};
+    QWidget* signalFindWidget_{nullptr};
+    QLineEdit* signalFindEdit_{nullptr};
+    QLabel* signalFindResultLabel_{nullptr};
+    QToolButton* signalFindPreviousButton_{nullptr};
+    QToolButton* signalFindNextButton_{nullptr};
+    QToolButton* signalFindCloseButton_{nullptr};
+    int signalFindMatchIndex_{-1};
     QAction* selectAction_{nullptr};
     QAction* drawAction_{nullptr};
     QAction* markerAction_{nullptr};
@@ -210,6 +226,8 @@ private:
     QAction* compareModeAction_{nullptr};
     QMenu* editMenu_{nullptr};
     QMenu* recentProjectsMenu_{nullptr};
+    QAction* signalFindAction_{nullptr};
+    QAction* signalFindWidgetAction_{nullptr};
     QAction* pinloomAction_{nullptr};
     bool populatingTables_{false};
     bool populatingTraceMapping_{false};

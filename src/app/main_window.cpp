@@ -23,12 +23,15 @@
 #include <QDockWidget>
 #include <QFile>
 #include <QFileDialog>
+#include <QFrame>
 #include <QFileInfo>
+#include <QHBoxLayout>
 #include <QFormLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QKeyEvent>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
@@ -38,6 +41,7 @@
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSplitter>
@@ -48,6 +52,7 @@
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QTreeWidgetItemIterator>
@@ -1126,6 +1131,190 @@ void MainWindow::openEditMenuPreview()
     }
 }
 
+QStringList MainWindow::matchingVisibleSignals(const QString& query) const
+{
+    QStringList matches;
+    const auto* scenario = activeScenario();
+    const auto normalized = query.trimmed();
+    if (!scenario || normalized.isEmpty()) return matches;
+
+    for (const auto& lane : scenario->lanes) {
+        if (!lane.visible || lane.kind == LaneKind::Group) continue;
+        const auto name = QString::fromStdString(lane.name);
+        const auto id = QString::fromStdString(lane.id);
+        if (name.contains(normalized, Qt::CaseInsensitive)
+            || id.contains(normalized, Qt::CaseInsensitive)) {
+            matches.append(id);
+        }
+    }
+    return matches;
+}
+
+void MainWindow::showSignalFind()
+{
+    if (!canvas_ || !signalFindWidgetAction_ || !signalFindEdit_
+        || !signalFindResultLabel_) {
+        return;
+    }
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before Ctrl+F finds another signal"),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+    if (markerAction_ && markerAction_->isChecked()) {
+        markerAction_->setChecked(false);
+    }
+
+    signalFindWidgetAction_->setVisible(true);
+    signalFindMatchIndex_ = -1;
+    signalFindEdit_->setFocus(Qt::ShortcutFocusReason);
+    signalFindEdit_->selectAll();
+    updateSignalFind();
+}
+
+void MainWindow::closeSignalFind(const bool announce)
+{
+    if (!signalFindWidgetAction_ || !signalFindWidgetAction_->isVisible()) return;
+    signalFindWidgetAction_->setVisible(false);
+    signalFindMatchIndex_ = -1;
+    if (canvas_ && canvas_->viewport()) {
+        canvas_->viewport()->setFocus(Qt::OtherFocusReason);
+    }
+    if (!announce) return;
+
+    QString selectedName;
+    const auto selectedId = canvas_ ? canvas_->selectedLaneId() : QString{};
+    if (const auto* scenario = activeScenario(); scenario && !selectedId.isEmpty()) {
+        const auto selected = std::find_if(
+            scenario->lanes.begin(),
+            scenario->lanes.end(),
+            [&selectedId](const Lane& lane) {
+                return QString::fromStdString(lane.id) == selectedId;
+            });
+        if (selected != scenario->lanes.end()) {
+            selectedName = QString::fromStdString(selected->name);
+        }
+    }
+    statusBar()->showMessage(
+        selectedName.isEmpty()
+            ? tr("Signal search closed · Ctrl+F opens it again")
+            : tr("Signal search closed · %1 remains selected · Ctrl+F finds another")
+                  .arg(selectedName),
+        5'000);
+}
+
+void MainWindow::activateSignalFindMatch(
+    const QStringList& matches,
+    const int index,
+    const bool wrapped)
+{
+    if (!canvas_ || !signalFindEdit_ || !signalFindResultLabel_
+        || index < 0 || index >= matches.size()) {
+        return;
+    }
+    const auto* scenario = activeScenario();
+    if (!scenario) return;
+    const auto laneId = matches.at(index);
+    const auto lane = std::find_if(
+        scenario->lanes.begin(),
+        scenario->lanes.end(),
+        [&laneId](const Lane& candidate) {
+            return QString::fromStdString(candidate.id) == laneId;
+        });
+    if (lane == scenario->lanes.end() || !lane->visible
+        || lane->kind == LaneKind::Group) {
+        updateSignalFind();
+        return;
+    }
+
+    const auto horizontalScroll = canvas_->horizontalScrollBar()->value();
+    const auto cursor = canvas_->cursorTick();
+    canvas_->revealLocation(laneId, cursor);
+    canvas_->horizontalScrollBar()->setValue(horizontalScroll);
+    signalFindMatchIndex_ = index;
+    signalFindResultLabel_->setText(
+        tr("%1/%2").arg(index + 1).arg(matches.size()));
+    signalFindEdit_->setStyleSheet({});
+    if (signalFindPreviousButton_) signalFindPreviousButton_->setEnabled(true);
+    if (signalFindNextButton_) signalFindNextButton_->setEnabled(true);
+
+    auto message = tr("Found signal %1 · %2 of %3 · Enter next · Shift+Enter previous · Esc closes")
+                       .arg(QString::fromStdString(lane->name))
+                       .arg(index + 1)
+                       .arg(matches.size());
+    if (wrapped) message.append(tr(" · wrapped"));
+    statusBar()->showMessage(message);
+}
+
+void MainWindow::updateSignalFind()
+{
+    if (!signalFindWidgetAction_ || !signalFindWidgetAction_->isVisible()
+        || !signalFindEdit_ || !signalFindResultLabel_) {
+        return;
+    }
+    const auto query = signalFindEdit_->text().trimmed();
+    if (query.isEmpty()) {
+        signalFindMatchIndex_ = -1;
+        signalFindResultLabel_->setText(QStringLiteral("0/0"));
+        signalFindEdit_->setStyleSheet({});
+        if (signalFindPreviousButton_) signalFindPreviousButton_->setEnabled(false);
+        if (signalFindNextButton_) signalFindNextButton_->setEnabled(false);
+        statusBar()->showMessage(
+            tr("Find visible signal · type a name or ID · Enter next · Shift+Enter previous · Esc closes"));
+        return;
+    }
+
+    const auto matches = matchingVisibleSignals(query);
+    if (matches.isEmpty()) {
+        signalFindMatchIndex_ = -1;
+        signalFindResultLabel_->setText(QStringLiteral("0/0"));
+        signalFindEdit_->setStyleSheet(
+            QStringLiteral("QLineEdit { border: 1px solid #c96d6d; }"));
+        if (signalFindPreviousButton_) signalFindPreviousButton_->setEnabled(false);
+        if (signalFindNextButton_) signalFindNextButton_->setEnabled(false);
+        statusBar()->showMessage(
+            tr("No visible signal matches “%1” · edit the query or press Esc")
+                .arg(query),
+            5'000);
+        return;
+    }
+
+    const auto index = signalFindMatchIndex_ >= 0
+            && signalFindMatchIndex_ < matches.size()
+        ? signalFindMatchIndex_
+        : 0;
+    activateSignalFindMatch(matches, index, false);
+}
+
+void MainWindow::stepSignalFind(const int direction)
+{
+    if (!signalFindWidgetAction_ || !signalFindWidgetAction_->isVisible()
+        || !signalFindEdit_) {
+        return;
+    }
+    const auto matches = matchingVisibleSignals(signalFindEdit_->text());
+    if (matches.isEmpty()) {
+        updateSignalFind();
+        signalFindEdit_->setFocus(Qt::OtherFocusReason);
+        return;
+    }
+
+    auto current = matches.indexOf(canvas_ ? canvas_->selectedLaneId() : QString{});
+    if (current < 0) current = signalFindMatchIndex_;
+    auto next = 0;
+    auto wrapped = false;
+    if (current < 0) {
+        next = direction < 0 ? matches.size() - 1 : 0;
+    } else {
+        const auto candidate = current + (direction < 0 ? -1 : 1);
+        wrapped = candidate < 0 || candidate >= matches.size();
+        next = (candidate % matches.size() + matches.size()) % matches.size();
+    }
+    activateSignalFindMatch(matches, next, wrapped && matches.size() > 1);
+    signalFindEdit_->setFocus(Qt::OtherFocusReason);
+}
 void MainWindow::closeEvent(QCloseEvent* event)
 {
     if (!commitPendingEdits()) {
@@ -1143,6 +1332,24 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if (watched == signalFindEdit_ && event
+        && event->type() == QEvent::KeyPress) {
+        const auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (keyEvent->key() == Qt::Key_Escape) {
+            closeSignalFind();
+            return true;
+        }
+        if (keyEvent->key() == Qt::Key_Return
+            || keyEvent->key() == Qt::Key_Enter) {
+            stepSignalFind(
+                keyEvent->modifiers().testFlag(Qt::ShiftModifier) ? -1 : 1);
+            return true;
+        }
+        if (keyEvent->key() == Qt::Key_Up || keyEvent->key() == Qt::Key_Down) {
+            stepSignalFind(keyEvent->key() == Qt::Key_Up ? -1 : 1);
+            return true;
+        }
+    }
     const auto watchesCanvas = canvas_
         && (watched == canvas_ || watched == canvas_->viewport());
     if (watchesCanvas && event) {
@@ -1532,6 +1739,7 @@ void MainWindow::newProject()
     commandStack_.clear();
     resetEditTracking(true);
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
+    closeSignalFind(false);
     canvas_->setTool(WaveCanvas::Tool::WaveEdit);
     if (markerAction_) markerAction_->setChecked(false);
     updateCommandActions();
@@ -3915,6 +4123,13 @@ void MainWindow::createActions()
         }
         canvas_->selectEntireTimeline();
     });
+    signalFindAction_ = editMenu_->addAction(tr("&Find signal…"));
+    signalFindAction_->setObjectName(QStringLiteral("FindSignalAction"));
+    signalFindAction_->setShortcut(QKeySequence::Find);
+    signalFindAction_->setToolTip(
+        tr("Find a visible signal by name or ID without changing the edit cursor"));
+    connect(signalFindAction_, &QAction::triggered, this, &MainWindow::showSignalFind);
+
     editMenu_->addSeparator();
     auto* addLaneAction = editMenu_->addAction(
         tr("Add &lane…"),
@@ -3988,6 +4203,7 @@ void MainWindow::createToolBars()
             markerAction_->setChecked(false);
             return;
         }
+        if (checked) closeSignalFind(false);
         canvas_->setTool(checked ? WaveCanvas::Tool::Marker : WaveCanvas::Tool::WaveEdit);
         statusBar()->showMessage(
             checked
@@ -4009,6 +4225,91 @@ void MainWindow::createToolBars()
         rangeEditPaletteAction_,
         &QAction::setVisible);
 
+    signalFindWidget_ = new QFrame(editBar);
+    signalFindWidget_->setObjectName(QStringLiteral("SignalFindBar"));
+    auto* signalFindLayout = new QHBoxLayout(signalFindWidget_);
+    signalFindLayout->setContentsMargins(0, 0, 0, 0);
+    signalFindLayout->setSpacing(4);
+    signalFindLayout->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    auto* signalFindLabel = new QLabel(tr("Find signal"), signalFindWidget_);
+    signalFindLabel->setObjectName(QStringLiteral("SignalFindLabel"));
+    signalFindLayout->addWidget(signalFindLabel);
+
+    signalFindEdit_ = new QLineEdit(signalFindWidget_);
+    signalFindEdit_->setObjectName(QStringLiteral("SignalFindEdit"));
+    signalFindEdit_->setPlaceholderText(tr("Visible signal name or ID"));
+    signalFindEdit_->setAccessibleName(tr("Find visible signal"));
+    signalFindEdit_->setToolTip(
+        tr("Type to select a visible signal; Enter finds next, Shift+Enter finds previous"));
+    signalFindEdit_->setClearButtonEnabled(true);
+    signalFindEdit_->setMinimumWidth(210);
+    signalFindEdit_->setMaximumWidth(300);
+    signalFindEdit_->installEventFilter(this);
+    signalFindLayout->addWidget(signalFindEdit_);
+
+    signalFindResultLabel_ = new QLabel(QStringLiteral("0/0"), signalFindWidget_);
+    signalFindResultLabel_->setObjectName(QStringLiteral("SignalFindResultLabel"));
+    signalFindResultLabel_->setAlignment(Qt::AlignCenter);
+    signalFindResultLabel_->setMinimumWidth(42);
+    signalFindResultLabel_->setAccessibleName(tr("Signal search result position"));
+    signalFindLayout->addWidget(signalFindResultLabel_);
+
+    const auto makeFindButton = [signalFindLayout, this](
+                                    const QString& text,
+                                    const QString& objectName,
+                                    const QString& accessibleName,
+                                    const QString& toolTip) {
+        auto* button = new QToolButton(signalFindWidget_);
+        button->setText(text);
+        button->setObjectName(objectName);
+        button->setAccessibleName(accessibleName);
+        button->setToolTip(toolTip);
+        button->setAutoRaise(true);
+        button->setFocusPolicy(Qt::NoFocus);
+        signalFindLayout->addWidget(button);
+        return button;
+    };
+    signalFindPreviousButton_ = makeFindButton(
+        QStringLiteral("↑"),
+        QStringLiteral("SignalFindPreviousButton"),
+        tr("Previous matching signal"),
+        tr("Previous matching signal (Shift+Enter)"));
+    signalFindNextButton_ = makeFindButton(
+        QStringLiteral("↓"),
+        QStringLiteral("SignalFindNextButton"),
+        tr("Next matching signal"),
+        tr("Next matching signal (Enter)"));
+    signalFindCloseButton_ = makeFindButton(
+        QStringLiteral("×"),
+        QStringLiteral("SignalFindCloseButton"),
+        tr("Close signal search"),
+        tr("Close signal search (Esc)"));
+
+    signalFindWidgetAction_ = editBar->addWidget(signalFindWidget_);
+    signalFindWidgetAction_->setObjectName(QStringLiteral("SignalFindToolbarAction"));
+    signalFindWidgetAction_->setVisible(false);
+    connect(signalFindEdit_, &QLineEdit::textChanged, this, [this] {
+        signalFindMatchIndex_ = -1;
+        updateSignalFind();
+    });
+    connect(signalFindPreviousButton_, &QToolButton::clicked, this, [this] {
+        stepSignalFind(-1);
+    });
+    connect(signalFindNextButton_, &QToolButton::clicked, this, [this] {
+        stepSignalFind(1);
+    });
+    connect(signalFindCloseButton_, &QToolButton::clicked, this, [this] {
+        closeSignalFind();
+    });
+    connect(
+        canvas_,
+        &WaveCanvas::rangeEditPaletteVisibilityChanged,
+        this,
+        [this](const bool visible) {
+            if (visible && signalFindWidgetAction_ && signalFindWidgetAction_->isVisible()) {
+                closeSignalFind(false);
+            }
+        });
     editBar->addSeparator();
     auto* zoomInAction = editBar->addAction(
         themedIcon(QStringLiteral("zoom-in"), style(), QStyle::SP_ArrowUp),
@@ -4835,6 +5136,7 @@ bool MainWindow::loadFromPath(const QString& path)
     commandStack_.clear();
     resetEditTracking(!result.migrated && !recoveredSnapshot);
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
+    closeSignalFind(false);
     updateCommandActions();
     updateWindowTitle();
     if (recoveredSnapshot) {
