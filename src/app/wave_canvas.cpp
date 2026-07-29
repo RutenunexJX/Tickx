@@ -2222,6 +2222,23 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             return;
         }
         if ((event->key() == Qt::Key_Up || event->key() == Qt::Key_Down)
+            && event->modifiers() == Qt::ShiftModifier) {
+            const auto* focusedEditor = qobject_cast<QLineEdit*>(
+                QApplication::focusWidget());
+            if (focusedEditor && isAncestorOf(focusedEditor)) {
+                event->accept();
+                return;
+            }
+            if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
+                emit statusMessage(
+                    tr("Finish or cancel the current drag before changing range signals"));
+            } else {
+                adjustRangeSignalsByKeyboard(event->key() == Qt::Key_Down);
+            }
+            event->accept();
+            return;
+        }
+        if ((event->key() == Qt::Key_Up || event->key() == Qt::Key_Down)
             && event->modifiers() == Qt::NoModifier) {
             const auto* focusedEditor = qobject_cast<QLineEdit*>(
                 QApplication::focusWidget());
@@ -4165,6 +4182,8 @@ void WaveCanvas::showRangeEditPalette()
                   .arg(format(selectionRange_->first))
                   .arg(format(selectionRange_->second))
             : tr("Batch assignment requires only Bit, only Bus, or only Enum signals");
+        contextHelp.append(
+            tr("\nShift+Up/Down adjusts signals; Shift+Left/Right adjusts time"));
         if (enumRange) {
             contextHelp.append(
                 enumSymbols.isEmpty()
@@ -5650,11 +5669,136 @@ void WaveCanvas::adjustTimeRangeByKeyboard(const bool forward)
         cursorTick_);
     emit statusMessage(
         tr("Keyboard range %1 to %2 · %3 · %4 signal(s) · "
-           "Shift+Left/Right adjusts the active edge · Esc clears")
+           "Shift+Left/Right adjusts the active edge · Shift+Up/Down adjusts signals · Esc clears")
             .arg(format(selectionRange_->first))
             .arg(format(selectionRange_->second))
             .arg(format(selectionRange_->second - selectionRange_->first))
             .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
+    viewport()->update();
+}
+
+void WaveCanvas::adjustRangeSignalsByKeyboard(const bool downward)
+{
+    if (!scenario_ || !explicitRangeSelection_ || !selectionRange_
+        || selectionRange_->second <= selectionRange_->first) {
+        emit statusMessage(
+            tr("Use Shift+Left or Shift+Right to select time before adding signals"));
+        return;
+    }
+    if (hasPendingRangeValueEdit()) {
+        if (rangeValueEdit_) rangeValueEdit_->setFocus(Qt::OtherFocusReason);
+        emit statusMessage(
+            tr("Finish the selected range value or press Esc before changing signals"));
+        return;
+    }
+
+    std::vector<const Lane*> selectableLanes;
+    selectableLanes.reserve(scenario_->lanes.size());
+    for (const auto& lane : scenario_->lanes) {
+        if (lane.visible && lane.kind != LaneKind::Group) {
+            selectableLanes.push_back(&lane);
+        }
+    }
+    const auto signalIndex = [&selectableLanes](const std::string& laneId)
+        -> std::optional<std::size_t> {
+        const auto found = std::find_if(
+            selectableLanes.begin(),
+            selectableLanes.end(),
+            [&laneId](const Lane* lane) { return lane->id == laneId; });
+        if (found == selectableLanes.end()) return std::nullopt;
+        return static_cast<std::size_t>(found - selectableLanes.begin());
+    };
+    const auto activeIndex = signalIndex(selectedLaneId_);
+    if (!activeIndex || selectedLaneIds_.empty()) {
+        emit statusMessage(
+            tr("The selected time range has no active signal · press Esc and select it again"));
+        return;
+    }
+
+    std::vector<std::size_t> selectedIndices;
+    selectedIndices.reserve(selectedLaneIds_.size());
+    for (const auto& laneId : selectedLaneIds_) {
+        const auto index = signalIndex(laneId);
+        if (!index) {
+            emit statusMessage(
+                tr("Keyboard signal adjustment requires visible signal targets"));
+            return;
+        }
+        selectedIndices.push_back(*index);
+    }
+    std::sort(selectedIndices.begin(), selectedIndices.end());
+    selectedIndices.erase(
+        std::unique(selectedIndices.begin(), selectedIndices.end()),
+        selectedIndices.end());
+    if (selectedIndices.size() != selectedLaneIds_.size()
+        || selectedIndices.back() - selectedIndices.front() + 1
+            != selectedIndices.size()) {
+        emit statusMessage(
+            tr("Keyboard signal adjustment requires one contiguous signal block"));
+        return;
+    }
+
+    auto anchorIndex = *activeIndex;
+    if (selectedIndices.size() > 1) {
+        if (*activeIndex == selectedIndices.front()) {
+            anchorIndex = selectedIndices.back();
+        } else if (*activeIndex == selectedIndices.back()) {
+            anchorIndex = selectedIndices.front();
+        } else {
+            emit statusMessage(
+                tr("The active signal is inside the selected block · press Esc and select it again"));
+            return;
+        }
+    }
+
+    if ((!downward && *activeIndex == 0)
+        || (downward && *activeIndex + 1 >= selectableLanes.size())) {
+        const auto* active = selectableLanes.at(*activeIndex);
+        emit statusMessage(
+            downward
+                ? tr("No signal below %1 · range unchanged · Shift+Up moves back")
+                      .arg(QString::fromStdString(active->name))
+                : tr("No signal above %1 · range unchanged · Shift+Down moves forward")
+                      .arg(QString::fromStdString(active->name)));
+        return;
+    }
+
+    const auto targetIndex = downward ? *activeIndex + 1 : *activeIndex - 1;
+    const auto firstIndex = std::min(anchorIndex, targetIndex);
+    const auto lastIndex = std::max(anchorIndex, targetIndex);
+    selectedLaneIds_.clear();
+    selectedLaneIds_.reserve(lastIndex - firstIndex + 1);
+    for (auto index = firstIndex; index <= lastIndex; ++index) {
+        selectedLaneIds_.push_back(selectableLanes.at(index)->id);
+    }
+    selectedLaneId_ = selectableLanes.at(targetIndex)->id;
+    laneHeaderSelectionActive_ = false;
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    waveEditHoverLaneId_.clear();
+    waveEditHoverRange_.reset();
+    hideBusPresetPalette();
+    snapGuideTick_.reset();
+    ensureLaneVisible(selectedLaneId_);
+    showRangeEditPalette();
+    emit selectionChanged(
+        QString::fromStdString(selectedLaneId_),
+        cursorTick_);
+
+    const auto kind = explicitRangeKind();
+    const auto type = kind
+        ? *kind == LaneKind::Bit
+            ? tr("Bit")
+            : *kind == LaneKind::Bus
+                ? tr("Bus")
+                : tr("Enum")
+        : tr("mixed");
+    emit statusMessage(
+        tr("Keyboard signal range · %1 %2 signal(s) · active %3 · "
+           "Shift+Up/Down adjusts signals · Shift+Left/Right adjusts time · Esc clears")
+            .arg(static_cast<qulonglong>(selectedLaneIds_.size()))
+            .arg(type)
+            .arg(QString::fromStdString(selectableLanes.at(targetIndex)->name)));
     viewport()->update();
 }
 
@@ -6243,10 +6387,17 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
                     std::max(first - laneLayout_.begin(), last - laneLayout_.begin()));
                 selectedLaneIds_.clear();
                 for (auto index = firstIndex; index <= lastIndex; ++index) {
-                    selectedLaneIds_.push_back(
-                        scenario_->lanes.at(laneLayout_[index].laneIndex).id);
+                    const auto& candidate =
+                        scenario_->lanes.at(laneLayout_[index].laneIndex);
+                    if (candidate.visible && candidate.kind != LaneKind::Group) {
+                        selectedLaneIds_.push_back(candidate.id);
+                    }
                 }
-                if (!selectedLaneIds_.empty()) selectedLaneId_ = selectedLaneIds_.front();
+                if (!selectedLaneIds_.empty()) {
+                    selectedLaneId_ = first <= last
+                        ? selectedLaneIds_.back()
+                        : selectedLaneIds_.front();
+                }
             }
         }
         selectedSegmentLaneId_.clear();
@@ -6272,17 +6423,17 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
         if (const auto rangeKind = explicitRangeKind()) {
             emit statusMessage(
                 *rangeKind == LaneKind::Enum
-                    ? tr("Selected %1 · %2 Enum signals · type a shared symbol in the range toolbar · Esc clears")
+                    ? tr("Selected %1 · %2 Enum signals · type a shared symbol in the range toolbar · Shift+Up/Down adjusts signals · Esc clears")
                           .arg(QString::fromStdString(
                               formatTick(duration, project_->timeBase)))
                           .arg(static_cast<qulonglong>(selectedLaneIds_.size()))
-                    : tr("Selected %1 · %2 signals · use 0/1/X/Z or the range toolbar · Esc clears")
+                    : tr("Selected %1 · %2 signals · use 0/1/X/Z or the range toolbar · Shift+Up/Down adjusts signals · Esc clears")
                           .arg(QString::fromStdString(
                               formatTick(duration, project_->timeBase)))
                           .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
         } else {
             emit statusMessage(
-                tr("Selected %1 · mixed/unsupported signal types · Copy, Cut, or Delete to clear")
+                tr("Selected %1 · mixed/unsupported signal types · Copy, Cut, or Delete to clear · Shift+Up/Down adjusts signals")
                     .arg(QString::fromStdString(formatTick(duration, project_->timeBase))));
         }
         emit selectionChanged(QString::fromStdString(selectedLaneId_), cursorTick_);

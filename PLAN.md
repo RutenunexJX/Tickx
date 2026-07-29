@@ -4374,10 +4374,65 @@ Visual result: 固定栏显示 1 Bus 与 0–10 ns，Copy/Cut/Paste/Clear、首�
 Desktop interaction: none
 Packaging: not run during iteration
 ```
+
+## 持续迭代 78：键盘多信号范围调整
+
+状态：完成，持续迭代中
+
+已交付：
+
+- 开发审计确认第 77 轮已消除“键盘定位后必须用鼠标建立时间范围”的断点，但范围的纵向目标仍只能通过 Shift 拖动重新框选。用户从一条 Enum/Bus/Bit 开始批量编辑相邻信号时，仍需离开键盘并重新命中时间与信号两个维度。
+- 显式范围存在时，`Shift+Up` / `Shift+Down` 以当前活动信号为端点，向相邻可见信号扩展或收缩连续目标块；回到锚点后继续反向按键可自然向另一侧扩展。Group 不进入波形目标，长列表只做保证活动行完整可见的最小纵向滚动。
+- 鼠标范围框选现在保留真实释放端作为活动信号，并排除 Group 行，因此可直接接续键盘扩缩。固定范围栏同步刷新目标数量、Bit/Bus/Enum 类型、Enum 共有符号及混合类型的安全操作，不增加新模式或工具栏按钮。
+- Bus/Enum 范围值存在未提交草稿时，键盘目标变化被原位阻止并将焦点返回输入框；修正或清除草稿后才允许改变信号集合。选择变化只影响选区与视口，不修改 Scenario、不进入 Undo、不改变 Saved。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：从 `state` 的 0–10 ns 单信号键盘范围开始，验证未提交 `D` 草稿阻断 `Shift+Down`；清除草稿后扩展到 `state_next`，固定栏切为 `2 Enum`，补全收敛为 `DONE/IDLE`，再用 `Shift+Up` 收回锚点。全过程断言活动信号、目标顺序、时间、Scenario、Undo、Saved、无模态窗口，并保存第八张离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 19 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 15.51 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 16.01 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 1.99 sec
+
+Automated QA: 在 state/0 ns 仅用键盘建立 0–10 ns 范围；输入未提交 D 后 Shift+Down 保留草稿、焦点和单信号目标。
+              清除草稿后 Shift+Down 将活动端移至 state_next，目标按画布顺序变为两条 Enum，固定栏立即显示 2 Enum，
+              共有符号仅为 DONE/IDLE；Shift+Up 收回 state，时间范围与光标不变。全程模型保持 Saved 且无 Undo。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-keyboard-signal-range.png
+Visual result: 固定范围栏显示 2 Enum 与 0–10 ns，两条 Enum 首拍均有透明蓝色选区；名称、采样值、波形和网格仍清晰可见，无覆盖、跳动或模态窗口。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。
 - 每项完成状态必须对应自动化测试或可复现手工验证。
 - 保持生成物为派生产物，不将其反向解析成场景事实源。
 - 在导入和 compare 阶段建立 1000 lane、百万 transition 的只读浏览基准。
-- 未经用户明确要求不执行远端 push。
+- 当前持续迭代 Goal 已明确要求每轮验收通过后执行远端 push；迭代过程中不打包。

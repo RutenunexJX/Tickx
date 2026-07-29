@@ -3400,6 +3400,188 @@ int main(int argc, char* argv[])
                 }
 
                 sendKey(canvas, Qt::Key_Home);
+                clickSignalHeader(enumLaneY);
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto keyboardSingleEnumRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{0, 10'000}};
+                const auto keyboardSingleEnumStatus =
+                    window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != keyboardSingleEnumRange
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-enum")
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-enum")}
+                    || canvas->cursorTick() != 10'000
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || !enumRangeContext->text().contains(QStringLiteral("1 Enum"))
+                    || !enumRangeContext->toolTip().contains(
+                        QStringLiteral("Shift+Up/Down adjusts signals"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !keyboardSingleEnumStatus.contains(
+                        QStringLiteral("Shift+Up/Down adjusts signals"))) {
+                    fail(QStringLiteral(
+                        "Keyboard time selection did not expose signal-range adjustment"));
+                    return;
+                }
+
+                enumRangeValueEdit->setText(QStringLiteral("D"));
+                enumRangeValueEdit->setModified(true);
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Down, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto rangeDraftSignalStatus =
+                    window.statusBar()->currentMessage();
+                if (canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-enum")}
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-enum")
+                    || enumRangeValueEdit->text() != QStringLiteral("D")
+                    || !enumRangeValueEdit->isModified()
+                    || !enumRangeValueEdit->hasFocus()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !rangeDraftSignalStatus.contains(
+                        QStringLiteral("Finish the selected range value"))) {
+                    fail(QStringLiteral(
+                        "Shift+Down changed range signals or discarded an unfinished value draft"));
+                    return;
+                }
+
+                enumRangeValueEdit->clear();
+                enumRangeValueEdit->setModified(false);
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Down, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                QStringList keyboardSignalEnumCompletions;
+                if (enumRangeCompleter && enumRangeCompleter->model()) {
+                    for (auto row = 0;
+                         row < enumRangeCompleter->model()->rowCount();
+                         ++row) {
+                        keyboardSignalEnumCompletions.append(
+                            enumRangeCompleter->model()
+                                ->index(row, 0)
+                                .data()
+                                .toString());
+                    }
+                }
+                const auto keyboardSignalExtendStatus =
+                    window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != keyboardSingleEnumRange
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-enum-next")
+                    || canvas->selectedLaneIds()
+                        != QStringList{
+                            QStringLiteral("lane-wave-edit-enum"),
+                            QStringLiteral("lane-wave-edit-enum-next"),
+                        }
+                    || canvas->cursorTick() != 10'000
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || !enumRangeContext->text().contains(QStringLiteral("2 Enum"))
+                    || !enumRangeContext->toolTip().contains(
+                        QStringLiteral("Shared symbols: DONE, IDLE"))
+                    || keyboardSignalEnumCompletions
+                        != QStringList{
+                            QStringLiteral("DONE"),
+                            QStringLiteral("IDLE"),
+                        }
+                    || enumRangeValueEdit->isModified()
+                    || QApplication::activeModalWidget()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !keyboardSignalExtendStatus.contains(
+                        QStringLiteral("Keyboard signal range"))
+                    || !keyboardSignalExtendStatus.contains(
+                        QStringLiteral("2 Enum signal(s)"))
+                    || !keyboardSignalExtendStatus.contains(
+                        QStringLiteral("active state_next"))) {
+                    qCritical().noquote()
+                        << "Keyboard signal range diagnostics"
+                        << "range"
+                        << (canvas->selectedTimeRange()
+                                ? QStringLiteral("%1-%2")
+                                      .arg(canvas->selectedTimeRange()->first)
+                                      .arg(canvas->selectedTimeRange()->second)
+                                : QStringLiteral("<none>"))
+                        << "active" << canvas->selectedLaneId()
+                        << "lanes" << canvas->selectedLaneIds().join(QLatin1Char(','))
+                        << "context" << enumRangeContext->text()
+                        << "help" << enumRangeContext->toolTip()
+                        << "completions"
+                        << keyboardSignalEnumCompletions.join(QLatin1Char(','))
+                        << "status" << keyboardSignalExtendStatus;
+                    fail(QStringLiteral(
+                        "Shift+Down did not extend the range to the adjacent Enum signal"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto keyboardSignalRangeScreenshotPath =
+                        waveEditAutoScrollScreenshotPath;
+                    const auto suffix = keyboardSignalRangeScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        keyboardSignalRangeScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-keyboard-signal-range"));
+                    } else {
+                        keyboardSignalRangeScreenshotPath.append(
+                            QStringLiteral("-keyboard-signal-range.png"));
+                    }
+                    if (!window.grab().save(keyboardSignalRangeScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save keyboard signal-range screenshot"));
+                        return;
+                    }
+                }
+
+                sendKey(canvas, Qt::Key_Up, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto keyboardSignalShrinkStatus =
+                    window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != keyboardSingleEnumRange
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-enum")
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-enum")}
+                    || canvas->cursorTick() != 10'000
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || !enumRangeContext->text().contains(QStringLiteral("1 Enum"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !keyboardSignalShrinkStatus.contains(
+                        QStringLiteral("1 Enum signal(s)"))
+                    || !keyboardSignalShrinkStatus.contains(
+                        QStringLiteral("active state"))) {
+                    fail(QStringLiteral(
+                        "Shift+Up did not shrink the range back to its anchor signal"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (canvas->hasExplicitRangeSelection()
+                    || enumRangePalette->isVisibleTo(&window)
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Escape did not clear the keyboard signal range"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_Home);
                 clickSignalHeader(laneY);
                 if (!window.statusBar()->currentMessage().contains(
                         QStringLiteral("Shift+Left/Right selects time"))) {

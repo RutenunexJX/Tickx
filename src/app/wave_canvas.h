@@ -275,6 +275,7 @@ private:
     [[nodiscard]] std::string nextLockedMarkerName(bool interval) const;
     [[nodiscard]] Tick cursorKeyboardStep() const;
     void adjustTimeRangeByKeyboard(bool forward);
+    void adjustRangeSignalsByKeyboard(bool downward);
     [[nodiscard]] std::optional<Tick> adjacentEdgeTick(
         const Lane& lane,
         Tick from,
