@@ -505,6 +505,11 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeValueEdit_->setAccessibleName(tr("Selected bus range value"));
     rangeValueEdit_->setMinimumWidth(105);
     rangeValueEdit_->setMaximumWidth(140);
+    rangeValueCompletionModel_ = new QStringListModel(this);
+    rangeValueCompleter_ = new QCompleter(rangeValueCompletionModel_, this);
+    rangeValueCompleter_->setCaseSensitivity(Qt::CaseInsensitive);
+    rangeValueCompleter_->setCompletionMode(QCompleter::PopupCompletion);
+    rangeValueEdit_->setCompleter(rangeValueCompleter_);
     rangeValueEdit_->installEventFilter(this);
     rangeLayout->addWidget(rangeValueEdit_);
     const auto makeRangeButton = [this, rangeLayout](
@@ -945,7 +950,7 @@ bool WaveCanvas::hasPendingRangeValueEdit() const noexcept
         && rangeEditPaletteVisible_
         && explicitRangeSelection_
         && kind
-        && *kind == LaneKind::Bus;
+        && (*kind == LaneKind::Bus || *kind == LaneKind::Enum);
 }
 
 bool WaveCanvas::hasPendingValueEdit() const noexcept
@@ -2184,8 +2189,12 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                 if (rangeValueEdit_ && rangeValueEdit_->isVisible()) {
                     rangeValueEdit_->setFocus(Qt::OtherFocusReason);
                     rangeValueEdit_->selectAll();
+                    const auto rangeKind = explicitRangeKind();
                     emit statusMessage(
-                        tr("Edit selected Bus range · type a value and press Enter · Esc clears the range"));
+                        tr("Edit selected %1 range · type a value and press Enter · Esc clears the range")
+                            .arg(rangeKind && *rangeKind == LaneKind::Enum
+                                     ? tr("Enum")
+                                     : tr("Bus")));
                 } else {
                     emit statusMessage(
                         tr("Esc clears the selected range before editing one signal beat"));
@@ -2338,9 +2347,17 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                 const auto kind = explicitRangeKind();
                 if (!kind) {
                     emit statusMessage(
-                        tr("No values changed · select only Bit signals or only Bus signals"));
+                        tr("No values changed · select only Bit, only Bus, or only Enum signals"));
                 } else if (*kind == LaneKind::Bit) {
                     static_cast<void>(applyExplicitRangeValue(value));
+                } else if (*kind == LaneKind::Enum) {
+                    if (event->key() == Qt::Key_0
+                        || event->key() == Qt::Key_1) {
+                        static_cast<void>(applyExplicitRangeValue(value));
+                    } else {
+                        emit statusMessage(
+                            tr("No values changed · type a declared symbol or numeric value in the Enum range field"));
+                    }
                 } else if (event->key() == Qt::Key_0) {
                     applyExplicitRangePreset("zero");
                 } else if (event->key() == Qt::Key_X) {
@@ -3999,7 +4016,10 @@ std::optional<LaneKind> WaveCanvas::explicitRangeKind() const
     std::optional<LaneKind> kind;
     for (const auto& laneId : selectedLaneIds_) {
         const auto* lane = findLane(*scenario_, laneId);
-        if (!lane || (lane->kind != LaneKind::Bit && lane->kind != LaneKind::Bus)) {
+        if (!lane
+            || (lane->kind != LaneKind::Bit
+                && lane->kind != LaneKind::Bus
+                && lane->kind != LaneKind::Enum)) {
             return std::nullopt;
         }
         if (!kind) {
@@ -4009,6 +4029,37 @@ std::optional<LaneKind> WaveCanvas::explicitRangeKind() const
         }
     }
     return kind;
+}
+
+QStringList WaveCanvas::explicitRangeEnumSymbols() const
+{
+    if (!scenario_ || !explicitRangeSelection_ || selectedLaneIds_.empty()) {
+        return {};
+    }
+    QStringList commonSymbols;
+    bool firstLane = true;
+    for (const auto& laneId : selectedLaneIds_) {
+        const auto* lane = findLane(*scenario_, laneId);
+        if (!lane || lane->kind != LaneKind::Enum) return {};
+        QStringList laneSymbols;
+        for (const auto& [symbol, value] : lane->enumMap) {
+            Q_UNUSED(value);
+            laneSymbols.append(QString::fromStdString(symbol));
+        }
+        if (firstLane) {
+            commonSymbols = std::move(laneSymbols);
+            firstLane = false;
+            continue;
+        }
+        for (auto symbol = commonSymbols.begin(); symbol != commonSymbols.end();) {
+            if (!laneSymbols.contains(*symbol)) {
+                symbol = commonSymbols.erase(symbol);
+            } else {
+                ++symbol;
+            }
+        }
+    }
+    return commonSymbols;
 }
 
 WaveCanvas::SegmentBoundary WaveCanvas::explicitRangeBoundaryAt(
@@ -4070,7 +4121,16 @@ void WaveCanvas::showRangeEditPalette()
     const auto kind = explicitRangeKind();
     const auto bitRange = kind && *kind == LaneKind::Bit;
     const auto busRange = kind && *kind == LaneKind::Bus;
-    const auto editable = bitRange || busRange;
+    const auto enumRange = kind && *kind == LaneKind::Enum;
+    const auto editable = bitRange || busRange || enumRange;
+    const auto presetRange = bitRange || busRange;
+    const auto valueRange = busRange || enumRange;
+    const auto enumSymbols = enumRange
+        ? explicitRangeEnumSymbols()
+        : QStringList{};
+    if (rangeValueCompletionModel_) {
+        rangeValueCompletionModel_->setStringList(enumSymbols);
+    }
     const auto count = static_cast<qulonglong>(selectedLaneIds_.size());
     const auto format = [this](const Tick tick) {
         return project_
@@ -4082,16 +4142,23 @@ void WaveCanvas::showRangeEditPalette()
             editable
                 ? tr("%1 %2 · %3–%4")
                       .arg(count)
-                      .arg(bitRange ? tr("Bit") : tr("Bus"))
+                      .arg(bitRange ? tr("Bit") : busRange ? tr("Bus") : tr("Enum"))
                       .arg(format(selectionRange_->first))
                       .arg(format(selectionRange_->second))
                 : tr("Mixed/unsupported selection · Copy, cut, or clear"));
-        rangeEditContextLabel_->setToolTip(
-            editable
-                ? tr("Applies to every selected signal from %1 to %2")
-                      .arg(format(selectionRange_->first))
-                      .arg(format(selectionRange_->second))
-                : tr("Batch assignment requires only Bit signals or only Bus signals"));
+        auto contextHelp = editable
+            ? tr("Applies to every selected signal from %1 to %2")
+                  .arg(format(selectionRange_->first))
+                  .arg(format(selectionRange_->second))
+            : tr("Batch assignment requires only Bit, only Bus, or only Enum signals");
+        if (enumRange) {
+            contextHelp.append(
+                enumSymbols.isEmpty()
+                    ? tr("\nNo declared symbols are shared by every selected Enum signal")
+                    : tr("\nShared symbols: %1")
+                          .arg(enumSymbols.join(QStringLiteral(", "))));
+        }
+        rangeEditContextLabel_->setToolTip(contextHelp);
     }
 
     if (rangeCopyButton_) {
@@ -4140,25 +4207,41 @@ void WaveCanvas::showRangeEditPalette()
              rangeXButton_,
              rangeZButton_,
              rangeDontCareButton_}) {
-        if (button) button->setEnabled(editable);
+        if (button) button->setEnabled(presetRange);
     }
-    if (rangeZeroButton_) rangeZeroButton_->setVisible(editable);
+    if (rangeZeroButton_) rangeZeroButton_->setVisible(presetRange);
     if (rangeOneButton_) rangeOneButton_->setVisible(bitRange);
-    if (rangeXButton_) rangeXButton_->setVisible(editable);
-    if (rangeZButton_) rangeZButton_->setVisible(editable);
+    if (rangeXButton_) rangeXButton_->setVisible(presetRange);
+    if (rangeZButton_) rangeZButton_->setVisible(presetRange);
     if (rangeDontCareButton_) rangeDontCareButton_->setVisible(busRange);
     if (rangeValueEdit_) {
-        const auto restoreCanvasFocus = rangeValueEdit_->hasFocus() && !busRange;
-        rangeValueEdit_->setVisible(busRange);
-        if (!busRange) {
+        const auto restoreCanvasFocus = rangeValueEdit_->hasFocus() && !valueRange;
+        rangeValueEdit_->setVisible(valueRange);
+        if (!valueRange) {
             rangeValueEdit_->clear();
             rangeValueEdit_->setModified(false);
             rangeValueEdit_->setStyleSheet({});
             rangeValueEdit_->setToolTip({});
-        } else if (!rangeValueEdit_->hasFocus() && !rangeValueEdit_->isModified()) {
-            rangeValueEdit_->clear();
-            rangeValueEdit_->setToolTip(tr("Type one value for the whole selected Bus range"));
-            rangeValueEdit_->setStyleSheet({});
+        } else {
+            rangeValueEdit_->setAccessibleName(
+                enumRange
+                    ? tr("Selected Enum range value")
+                    : tr("Selected Bus range value"));
+            rangeValueEdit_->setPlaceholderText(
+                enumRange ? tr("Symbol + Enter") : tr("Value + Enter"));
+            if (!rangeValueEdit_->hasFocus() && !rangeValueEdit_->isModified()) {
+                rangeValueEdit_->clear();
+            }
+            if (!rangeValueEdit_->isModified()) {
+                rangeValueEdit_->setToolTip(
+                    enumRange
+                        ? enumSymbols.isEmpty()
+                            ? tr("Type one numeric value for every selected Enum signal")
+                            : tr("Type one shared symbol for the selected Enum range · symbols: %1")
+                                  .arg(enumSymbols.join(QStringLiteral(", ")))
+                        : tr("Type one value for the whole selected Bus range"));
+                rangeValueEdit_->setStyleSheet({});
+            }
         }
         if (restoreCanvasFocus) viewport()->setFocus(Qt::OtherFocusReason);
     }
@@ -4209,7 +4292,7 @@ bool WaveCanvas::applyExplicitRangeValue(
     const auto kind = explicitRangeKind();
     if (!kind) {
         emit statusMessage(
-            tr("No values changed · select only Bit signals or only Bus signals"));
+            tr("No values changed · select only Bit, only Bus, or only Enum signals"));
         return false;
     }
 
@@ -4231,9 +4314,19 @@ bool WaveCanvas::applyExplicitRangeValue(
         }
         const auto validation = validateLaneValue(*lane, targetValue);
         if (targetValue.empty() || !validation.valid) {
-            const auto message = targetValue.empty()
-                ? tr("Enter a bus value.")
+            auto message = targetValue.empty()
+                ? *kind == LaneKind::Enum
+                    ? tr("Enter an enum symbol or numeric value.")
+                    : tr("Enter a bus value.")
                 : QString::fromStdString(validation.error);
+            if (*kind == LaneKind::Enum) {
+                const auto symbols = explicitRangeEnumSymbols();
+                if (!symbols.isEmpty()) {
+                    message.append(
+                        tr(" · shared symbols: %1")
+                            .arg(symbols.join(QStringLiteral(", "))));
+                }
+            }
             if (rangeValueEdit_ && rangeValueEdit_->isVisible()) {
                 rangeValueEdit_->setStyleSheet(QStringLiteral(
                     "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
@@ -4272,8 +4365,7 @@ bool WaveCanvas::applyExplicitRangeValue(
     if (rangeValueEdit_) {
         rangeValueEdit_->setModified(false);
         rangeValueEdit_->setStyleSheet({});
-        rangeValueEdit_->setToolTip(
-            tr("Type one value for the whole selected Bus range"));
+        rangeValueEdit_->setToolTip({});
     }
     if (changed) {
         emit modelEdited();
@@ -4395,7 +4487,7 @@ void WaveCanvas::applyExplicitRangePreset(const std::string& presetId)
     const auto kind = explicitRangeKind();
     if (!kind) {
         emit statusMessage(
-            tr("No values changed · select only Bit signals or only Bus signals"));
+            tr("No values changed · select only Bit, only Bus, or only Enum signals"));
         return;
     }
     if (*kind == LaneKind::Bit) {
@@ -4411,6 +4503,11 @@ void WaveCanvas::applyExplicitRangePreset(const std::string& presetId)
         static_cast<void>(applyExplicitRangeValue(value));
         return;
     }
+    if (*kind == LaneKind::Enum) {
+        emit statusMessage(
+            tr("No values changed · type a declared Enum symbol in the range field"));
+        return;
+    }
     if (presetId == "one") {
         emit statusMessage(tr("No values changed · use a custom Bus value for 1"));
         return;
@@ -4423,7 +4520,18 @@ void WaveCanvas::submitRangeValue()
     if (!rangeValueEdit_ || !explicitRangeSelection_) return;
     const auto value = rangeValueEdit_->text().trimmed();
     if (value.isEmpty()) {
-        const auto message = tr("Enter a bus value.");
+        const auto kind = explicitRangeKind();
+        auto message = kind && *kind == LaneKind::Enum
+            ? tr("Enter an enum symbol or numeric value.")
+            : tr("Enter a bus value.");
+        if (kind && *kind == LaneKind::Enum) {
+            const auto symbols = explicitRangeEnumSymbols();
+            if (!symbols.isEmpty()) {
+                message.append(
+                    tr(" · shared symbols: %1")
+                        .arg(symbols.join(QStringLiteral(", "))));
+            }
+        }
         rangeValueEdit_->setStyleSheet(QStringLiteral(
             "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
             "border-radius: 4px; padding: 3px 6px;"));
@@ -6028,11 +6136,17 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
         cursorTick_ = selectionRange_->first;
         showRangeEditPalette();
         const auto duration = selectionRange_->second - selectionRange_->first;
-        if (explicitRangeKind()) {
+        if (const auto rangeKind = explicitRangeKind()) {
             emit statusMessage(
-                tr("Selected %1 · %2 signals · use 0/1/X/Z or the range toolbar · Esc clears")
-                    .arg(QString::fromStdString(formatTick(duration, project_->timeBase)))
-                    .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
+                *rangeKind == LaneKind::Enum
+                    ? tr("Selected %1 · %2 Enum signals · type a shared symbol in the range toolbar · Esc clears")
+                          .arg(QString::fromStdString(
+                              formatTick(duration, project_->timeBase)))
+                          .arg(static_cast<qulonglong>(selectedLaneIds_.size()))
+                    : tr("Selected %1 · %2 signals · use 0/1/X/Z or the range toolbar · Esc clears")
+                          .arg(QString::fromStdString(
+                              formatTick(duration, project_->timeBase)))
+                          .arg(static_cast<qulonglong>(selectedLaneIds_.size())));
         } else {
             emit statusMessage(
                 tr("Selected %1 · mixed/unsupported signal types · Copy, Cut, or Delete to clear")

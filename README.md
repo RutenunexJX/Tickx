@@ -166,12 +166,14 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   清除旧拍选择，避免陈旧目标残留。
 - `Shift` + 拖动在一个或多个 lane 上建立持久时间范围；顶部固定工具栏提供可直接点击的
   `Copy`（复制完整 lane 集合和整数时间宽度）、`Cut`（复制后清除源区间）与 `Clear`（仅清除
-  所选区间）。同类型 Bit/Bus 另外显示批量赋值控件，不覆盖或截获波形点击，也不造成画布上下
-  跳动。范围左右边界显示可拖动手柄；修正端点时保留 lane 集合和工具栏，复用 7 像素轻吸附，
+  所选区间）。同类型 Bit/Bus/Enum 另外显示批量赋值控件，不覆盖或截获波形点击，也不造成画布
+  上下跳动。范围左右边界显示可拖动手柄；修正端点时保留 lane 集合和工具栏，复用 7 像素轻吸附，
   按住 `Alt` 临时绕过。端点修正只改变选择，不修改模型或占用 Undo。Bit 可用按钮或 `0`、`1`、
   `X`、`Z` 键一次写入完整范围；Bus 可直接输入值或选择 `0`、
-  `X`、`Z`、`Don't care`，每条 lane 按自身位宽生成值。混合类型隐藏所有无效赋值控件，但保留
-  `Copy`、`Cut` 与 `Clear`，不允许产生部分写入。一次批量赋值或范围清除对应一个 Undo/Redo；
+  `X`、`Z`、`Don't care`，每条 lane 按自身位宽生成值。Enum 只显示符号输入框并提供声明符号
+  补全；多条 Enum 同选时只列出全部目标共有的符号，非法输入保留选区、草稿和焦点。提交整个
+  Enum 范围只形成一个 Undo。混合类型隐藏所有无效赋值控件，但保留 `Copy`、`Cut` 与 `Clear`，
+  不允许产生部分写入。一次批量赋值或范围清除对应一个 Undo/Redo；
   对完整范围重复赋相同值只确认结果，不生成空历史或清除 Redo；
   `Delete` / `Backspace` 与 `Clear` 均清除所选信号区间并保持范围选中。`Cut` / `Ctrl+X` 同样
   保持选择，源清除为一个 Undo，随后 Paste 为另一个 Undo。同一时间边沿仍存在时复用稳定
@@ -305,8 +307,8 @@ exports/
 - bit 的 0/1/X/Z、bus width/signedness、enum。
 - segment 覆盖、合并、拆分和清除。
 - 单命令撤销/重做，以及快速创建命令的原子替换、取消和场景时长 Undo/Redo。
-- 多 lane 范围复制/粘贴、同类型 Bit/Bus 原子批量赋值、不同 Bus 位宽值生成、失败零部分写入及
-  完整撤销/重做。
+- 多 lane 范围复制/粘贴、同类型 Bit/Bus/Enum 原子批量赋值、不同 Bus 位宽值生成、Enum 共有符号
+  补全、失败零部分写入及完整撤销/重做。
 - Event 时间和值与关联 Segment 的双向同步；重分段时按 Segment ID/tick 复用稳定 Event ID，
   source/target 边沿消失时精确清理依赖 Relation，无关关系保持原样。linked 与普通 Event 删除均
   覆盖依赖清理及完整 Undo/Redo。
@@ -327,7 +329,7 @@ exports/
   多个交错命令逐次恢复、右键参数真实结果/原值确认/Undo/Redo、无效时间/颜色原位纠错与草稿/焦点保留、Marker 模式标题拖动 Esc 取消、
   跨位置/原位拖放结果以及 Undo/Redo 恢复提示均具有专项 offscreen 覆盖。
   长列表专项另覆盖上下边缘持续滚动、真实插入位置、Esc 复原视口与顺序、跨视口移动的一步 Undo，以及 Up/Down 从无选择进入首条、跳过 Group、首末边界、最小垂直滚动、End 文本框焦点隔离、键盘选择 Delete 安全和隐式 Bit `0` 值反馈。
-  Wave Edit 长时间轴专项覆盖右向 Segment 模型外预览、Esc 视图复原、释放单命令提交、Undo 回到 Saved、释放后计时器停止、左向 Shift 范围持续扩展、同一 Fit 动作的 selection/scenario 切换与全局恢复、放大状态下 End→末端、End 文本框 Home 焦点隔离、Ctrl+Home→起点和缩放保持，以及 Bus Segment/Clock 周期边沿的 Ctrl+Left/Right 相邻跳转、`0x35`/`X`/`0`/`1` 采样反馈、左侧所选值标签、边界反馈、信号选中提示和显式范围期间 Up/Down 的无损阻断。
+  Wave Edit 长时间轴专项覆盖右向 Segment 模型外预览、Esc 视图复原、释放单命令提交、Undo 回到 Saved、释放后计时器停止、左向 Shift 范围持续扩展、同一 Fit 动作的 selection/scenario 切换与全局恢复、放大状态下 End→末端、End 文本框 Home 焦点隔离、Ctrl+Home→起点和缩放保持，以及 Bus Segment/Clock 周期边沿的 Ctrl+Left/Right 相邻跳转、`0x35`/`X`/`0`/`1` 采样反馈、左侧所选值标签、边界反馈、信号选中提示和显式范围期间 Up/Down 的无损阻断，并验证两条 Enum 的 50–100 ns 范围、共有符号、非法草稿门禁、原子提交、Undo 与 Esc 清理。
 - Measure 离屏回归覆盖活动/临时光标、持久锁定点/区间、精确 `Δ`、创建/选择/拖动/方向键/删除
   结果、活动光标单击与方向键最终值、Shift 参考点、正负拖动的 Reference/Cursor/Δ、边界无效果
   反馈、一次 Undo 直达前一真实移动、Delete 的 Undo/Redo 恢复提示、删除较早点后的名称冲突规避、

@@ -4270,6 +4270,58 @@ Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-keyboard-e
 Desktop interaction: none
 ```
 
+## 持续迭代 76：Enum 多拍范围赋值
+
+状态：完成，本轮可用版本终点
+
+已交付：
+
+- 开发审计确认底层 `SetLaneRangesCommand` 与 Enum 值校验已支持范围赋值，但 `explicitRangeKind()` 只接受 Bit/Bus；用户可框选 Enum，却只看到“Mixed/unsupported”以及 Copy/Cut/Clear，必须逐拍修改或返回完整 Segment 窗口。
+- 用户视角的目标是把连续多拍状态一次改为 `WAIT_ACK` 或 `DONE`。现在同类型 Enum 范围直接进入既有固定范围栏，目标数量、时间和类型可见；不新增模式或工具栏按钮，现有 Bit/Bus、混合选择与 Segment 双击语义保持不变。
+- Enum 范围只显示一个符号输入框，隐藏 `0`、`1`、`X`、`Z`、`Don't care` 等 Bit/Bus 专用预设；输入框提供大小写不敏感的补全、可访问名称、占位文本和完整提示。多条 Enum 同选时补全模型取全部目标声明符号的交集，避免推荐无法原子提交的值。
+- 非法或空值保留选区、输入、焦点与 Saved 状态，并继续阻止 Save/Measure 等会结束草稿的动作；状态栏列出共有符号。合法值经单个 `SetLaneRangesCommand` 原子写入全部目标，保持 Event/Relation、Undo/Redo、autosave 和 Saved 语义；数字 `0/1` 可直接赋值，`X/Z` 不再被错误宣传为单字符合法 Enum 值。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：加入第二条 `state_next` Enum，声明集合与 `state` 的交集为 `DONE/IDLE`；验证跨两行 50–100 ns 框选、固定栏类型/时间、共同符号补全、五个专用预设隐藏、无模态窗口、`MISSING` 原位纠错及统一草稿门禁、`DONE` 两信号原子提交、边界外值不变、单步 Undo 精确恢复 Scenario 与 Saved、Esc 清除上下文，以及第六张离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 22 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.40 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.73 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 1.95 sec
+
+Automated QA: Shift 拖动 state 50 ns 到 state_next 100 ns 后，固定栏显示 2 Enum 与 50–100 ns；补全只包含共同的 DONE/IDLE，
+              五个 Bit/Bus 专用预设均隐藏，模型仍为 Saved 且无 Undo。输入 MISSING 后保留草稿、焦点和选区并阻断统一提交；
+              输入 DONE 后两条信号仅在目标范围内改变并形成一个 Undo，单步撤销恢复完整 Scenario、选区与 Saved，Esc 再清除上下文。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-enum-range-edit.png
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

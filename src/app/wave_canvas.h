@@ -229,6 +229,7 @@ private:
     void hideRangeEditPalette();
     void clearExplicitRangeSelection(bool clearLanes = true);
     [[nodiscard]] std::optional<LaneKind> explicitRangeKind() const;
+    [[nodiscard]] QStringList explicitRangeEnumSymbols() const;
     [[nodiscard]] SegmentBoundary explicitRangeBoundaryAt(const QPoint& position) const;
     [[nodiscard]] bool hasBitRangeSelection() const;
     bool applyExplicitRangeValue(
@@ -389,6 +390,8 @@ private:
     QToolButton* rangePasteButton_{nullptr};
     QToolButton* rangeClearButton_{nullptr};
     QLineEdit* rangeValueEdit_{nullptr};
+    QCompleter* rangeValueCompleter_{nullptr};
+    QStringListModel* rangeValueCompletionModel_{nullptr};
     QToolButton* rangeZeroButton_{nullptr};
     QToolButton* rangeOneButton_{nullptr};
     QToolButton* rangeXButton_{nullptr};

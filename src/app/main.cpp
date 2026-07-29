@@ -359,6 +359,26 @@ int main(int argc, char* argv[])
         doneState.value = "DONE";
         enumLane.segments.push_back(std::move(doneState));
         scenario.lanes.push_back(std::move(enumLane));
+        wave::Lane enumNextLane;
+        enumNextLane.id = "lane-wave-edit-enum-next";
+        enumNextLane.name = "state_next";
+        enumNextLane.kind = wave::LaneKind::Enum;
+        enumNextLane.width = 2;
+        enumNextLane.clockDomainId = "clock-wave-edit-scroll";
+        enumNextLane.color = "#ffcc80";
+        enumNextLane.height = 56;
+        enumNextLane.enumMap = {
+            {"IDLE", "0"},
+            {"DONE", "2"},
+            {"ERROR", "3"},
+        };
+        wave::Segment nextIdleState;
+        nextIdleState.id = "segment-wave-edit-enum-next-idle";
+        nextIdleState.start = 0;
+        nextIdleState.end = scenario.duration;
+        nextIdleState.value = "IDLE";
+        enumNextLane.segments.push_back(std::move(nextIdleState));
+        scenario.lanes.push_back(std::move(enumNextLane));
         wave::Lane clockLane;
         clockLane.id = "lane-wave-edit-clock";
         clockLane.name = "clk";
@@ -2209,11 +2229,13 @@ int main(int argc, char* argv[])
                 }
 
                 auto& scenario = window.project().scenarios.front();
-                if (scenario.lanes.size() != 3
+                if (scenario.lanes.size() != 4
                     || scenario.lanes.front().id != "lane-wave-edit-scroll"
                     || scenario.lanes.front().segments.size() != 1
                     || scenario.lanes.at(1).id != "lane-wave-edit-enum"
                     || scenario.lanes.at(1).segments.size() != 3
+                    || scenario.lanes.at(2).id != "lane-wave-edit-enum-next"
+                    || scenario.lanes.at(2).segments.size() != 1
                     || scenario.lanes.back().id != "lane-wave-edit-clock"
                     || window.project().clockDomains.size() != 1
                     || saveState->text() != QStringLiteral("Saved")
@@ -3076,10 +3098,252 @@ int main(int argc, char* argv[])
                         "Undo did not restore the exact pre-Enum-edit Scenario and Saved state"));
                     return;
                 }
+
+                const auto enumNextLaneY = 40
+                    + scenario.lanes.front().height
+                    + scenario.lanes.at(1).height
+                    + scenario.lanes.at(2).height / 2;
+                const QPoint enumRangeStart(xAtTick(50'000), enumLaneY);
+                const QPoint enumRangeEnd(xAtTick(100'000), enumNextLaneY);
+                sendMouse(
+                    QEvent::MouseButtonPress,
+                    enumRangeStart,
+                    Qt::LeftButton,
+                    Qt::LeftButton,
+                    Qt::ShiftModifier);
+                sendMouse(
+                    QEvent::MouseMove,
+                    enumRangeEnd,
+                    Qt::NoButton,
+                    Qt::LeftButton,
+                    Qt::ShiftModifier);
+                releaseLeftButton(enumRangeEnd, Qt::ShiftModifier);
+                auto* enumRangePalette = window.findChild<QFrame*>(
+                    QStringLiteral("RangeEditPalette"));
+                auto* enumRangeContext = window.findChild<QLabel*>(
+                    QStringLiteral("RangeEditContextLabel"));
+                auto* enumRangeValueEdit = window.findChild<QLineEdit*>(
+                    QStringLiteral("RangeEditValueEdit"));
+                const std::array<QToolButton*, 5> enumRangePresetButtons{
+                    window.findChild<QToolButton*>(
+                        QStringLiteral("RangeEditZeroButton")),
+                    window.findChild<QToolButton*>(
+                        QStringLiteral("RangeEditOneButton")),
+                    window.findChild<QToolButton*>(
+                        QStringLiteral("RangeEditXButton")),
+                    window.findChild<QToolButton*>(
+                        QStringLiteral("RangeEditZButton")),
+                    window.findChild<QToolButton*>(
+                        QStringLiteral("RangeEditDontCareButton")),
+                };
+                QStringList enumRangeCompletions;
+                auto* enumRangeCompleter = enumRangeValueEdit
+                    ? enumRangeValueEdit->completer()
+                    : nullptr;
+                if (enumRangeCompleter && enumRangeCompleter->model()) {
+                    for (auto row = 0;
+                         row < enumRangeCompleter->model()->rowCount();
+                         ++row) {
+                        enumRangeCompletions.append(
+                            enumRangeCompleter->model()
+                                ->index(row, 0)
+                                .data()
+                                .toString());
+                    }
+                }
+                const auto enumRangePresetsHidden = std::all_of(
+                    enumRangePresetButtons.begin(),
+                    enumRangePresetButtons.end(),
+                    [&window](const QToolButton* button) {
+                        return button && !button->isVisibleTo(&window);
+                    });
+                const auto selectedEnumRange = canvas->selectedTimeRange();
+                const auto selectedEnumLanes = canvas->selectedLaneIds();
+                const auto enumRangeStatus = window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || selectedEnumRange
+                        != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                            std::pair<wave::Tick, wave::Tick>{50'000, 100'000}}
+                    || selectedEnumLanes
+                        != QStringList{
+                            QStringLiteral("lane-wave-edit-enum"),
+                            QStringLiteral("lane-wave-edit-enum-next"),
+                        }
+                    || !enumRangePalette
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || !enumRangeContext
+                    || !enumRangeContext->text().contains(
+                        QStringLiteral("2 Enum"))
+                    || !enumRangeContext->toolTip().contains(
+                        QStringLiteral("Shared symbols: DONE, IDLE"))
+                    || !enumRangeValueEdit
+                    || !enumRangeValueEdit->isVisibleTo(&window)
+                    || enumRangeValueEdit->accessibleName()
+                        != QStringLiteral("Selected Enum range value")
+                    || !enumRangeValueEdit->placeholderText().contains(
+                        QStringLiteral("Symbol"))
+                    || enumRangeCompletions
+                        != QStringList{
+                            QStringLiteral("DONE"),
+                            QStringLiteral("IDLE"),
+                        }
+                    || !enumRangePresetsHidden
+                    || QApplication::activeModalWidget()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !enumRangeStatus.contains(
+                        QStringLiteral("2 Enum signals"))
+                    || !enumRangeStatus.contains(
+                        QStringLiteral("shared symbol"))) {
+                    qCritical().noquote()
+                        << "Enum range diagnostics"
+                        << "selection"
+                        << (selectedEnumRange
+                                ? QStringLiteral("%1-%2")
+                                      .arg(selectedEnumRange->first)
+                                      .arg(selectedEnumRange->second)
+                                : QStringLiteral("<missing>"))
+                        << "lanes" << selectedEnumLanes.join(QLatin1Char(','))
+                        << "palette"
+                        << (enumRangePalette
+                                && enumRangePalette->isVisibleTo(&window))
+                        << "context"
+                        << (enumRangeContext
+                                ? enumRangeContext->text()
+                                : QStringLiteral("<missing>"))
+                        << "help"
+                        << (enumRangeContext
+                                ? enumRangeContext->toolTip()
+                                : QStringLiteral("<missing>"))
+                        << "completions"
+                        << enumRangeCompletions.join(QLatin1Char(','))
+                        << "presetsHidden" << enumRangePresetsHidden
+                        << "status" << enumRangeStatus;
+                    fail(QStringLiteral(
+                        "Enum multi-lane range did not expose a shared-symbol editor"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto enumRangeScreenshotPath =
+                        waveEditAutoScrollScreenshotPath;
+                    const auto suffix = enumRangeScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        enumRangeScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-enum-range-edit"));
+                    } else {
+                        enumRangeScreenshotPath.append(
+                            QStringLiteral("-enum-range-edit.png"));
+                    }
+                    if (!window.grab().save(enumRangeScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save Enum range edit screenshot"));
+                        return;
+                    }
+                }
+
+                enumRangeValueEdit->setFocus(Qt::OtherFocusReason);
+                enumRangeValueEdit->setText(QStringLiteral("MISSING"));
+                enumRangeValueEdit->setModified(true);
+                sendKey(enumRangeValueEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                const auto invalidEnumRangeStatus =
+                    window.statusBar()->currentMessage();
+                if (!enumRangeValueEdit->hasFocus()
+                    || !enumRangeValueEdit->isModified()
+                    || enumRangeValueEdit->text() != QStringLiteral("MISSING")
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != selectedEnumRange
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !invalidEnumRangeStatus.contains(
+                        QStringLiteral("shared symbols: DONE, IDLE"))
+                    || canvas->commitPendingInlineEdits()) {
+                    fail(QStringLiteral(
+                        "Invalid Enum range value was not retained behind the draft gate"));
+                    return;
+                }
+
+                enumRangeValueEdit->setText(QStringLiteral("DONE"));
+                enumRangeValueEdit->setModified(true);
+                sendKey(enumRangeValueEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                const auto enumValueAt = [](
+                                             const wave::Lane* lane,
+                                             const wave::Tick tick) {
+                    if (!lane) return std::string{};
+                    const auto segment = std::find_if(
+                        lane->segments.begin(),
+                        lane->segments.end(),
+                        [tick](const wave::Segment& candidate) {
+                            return candidate.start <= tick
+                                && tick < candidate.end;
+                        });
+                    return segment == lane->segments.end()
+                        ? std::string{}
+                        : segment->value;
+                };
+                const auto* rangeEditedState = wave::findLane(
+                    scenario,
+                    "lane-wave-edit-enum");
+                const auto* rangeEditedNextState = wave::findLane(
+                    scenario,
+                    "lane-wave-edit-enum-next");
+                const auto enumRangeCommitStatus =
+                    window.statusBar()->currentMessage();
+                if (enumValueAt(rangeEditedState, 25'000) != "IDLE"
+                    || enumValueAt(rangeEditedState, 75'000) != "DONE"
+                    || enumValueAt(rangeEditedState, 125'000) != "DONE"
+                    || enumValueAt(rangeEditedNextState, 25'000) != "IDLE"
+                    || enumValueAt(rangeEditedNextState, 75'000) != "DONE"
+                    || enumValueAt(rangeEditedNextState, 125'000) != "IDLE"
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != selectedEnumRange
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || scenario == originalScenario
+                    || !undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || !enumRangeCommitStatus.contains(
+                        QStringLiteral("2 signals"))
+                    || !enumRangeCommitStatus.contains(QStringLiteral("DONE"))
+                    || !enumRangeCommitStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    fail(QStringLiteral(
+                        "Enum range submission did not atomically update both selected signals"));
+                    return;
+                }
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+                if (scenario != originalScenario
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != selectedEnumRange
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || window.windowTitle().contains(QStringLiteral(" *"))) {
+                    fail(QStringLiteral(
+                        "Enum range Undo did not restore the exact Scenario and selection"));
+                    return;
+                }
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (canvas->hasExplicitRangeSelection()
+                    || enumRangePalette->isVisibleTo(&window)
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Escape did not clear the completed Enum range context"));
+                    return;
+                }
+
                 sendKey(canvas, Qt::Key_Home);
                 const auto clockLaneY = 40
                     + scenario.lanes.front().height
                     + scenario.lanes.at(1).height
+                    + scenario.lanes.at(2).height
                     + scenario.lanes.back().height / 2;
                 clickSignalHeader(clockLaneY);
                 sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);
