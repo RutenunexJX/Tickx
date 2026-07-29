@@ -1408,6 +1408,22 @@ void WaveCanvas::revealLocation(const QString& laneId, const qint64 tick)
     viewport()->update();
 }
 
+void WaveCanvas::goToTick(const qint64 tick)
+{
+    if (!scenario_) return;
+    cursorTick_ = std::clamp<Tick>(tick, 0, scenario_->duration);
+    ensureCursorVisible(cursorTick_);
+    snapGuideTick_.reset();
+    positionBusPresetPalette();
+    viewport()->update();
+}
+
+void WaveCanvas::dismissInlineValueEditor()
+{
+    hideBusPresetPalette();
+    viewport()->update();
+}
+
 void WaveCanvas::copySelection()
 {
     if (!scenario_ || !selectionRange_

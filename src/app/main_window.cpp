@@ -1166,6 +1166,7 @@ void MainWindow::showSignalFind()
     if (markerAction_ && markerAction_->isChecked()) {
         markerAction_->setChecked(false);
     }
+    closeGoToTime(false);
 
     signalFindWidgetAction_->setVisible(true);
     signalFindMatchIndex_ = -1;
@@ -1315,6 +1316,144 @@ void MainWindow::stepSignalFind(const int direction)
     activateSignalFindMatch(matches, next, wrapped && matches.size() > 1);
     signalFindEdit_->setFocus(Qt::OtherFocusReason);
 }
+
+void MainWindow::showGoToTime()
+{
+    if (!canvas_ || !goToTimeWidgetAction_ || !goToTimeEdit_
+        || !goToTimeRangeLabel_) {
+        return;
+    }
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before Ctrl+G jumps to another time"),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+    if (markerAction_ && markerAction_->isChecked()) {
+        markerAction_->setChecked(false);
+    }
+    canvas_->dismissInlineValueEditor();
+    closeSignalFind(false);
+
+    const auto* scenario = activeScenario();
+    if (!scenario) return;
+    const auto format = [this](const Tick tick) {
+        return QString::fromStdString(formatTick(tick, project_.timeBase));
+    };
+    goToTimeWidgetAction_->setVisible(true);
+    goToTimeEdit_->setStyleSheet({});
+    goToTimeEdit_->setText(format(canvas_->cursorTick()));
+    goToTimeRangeLabel_->setText(
+        tr("%1–%2").arg(format(0)).arg(format(scenario->duration)));
+    goToTimeEdit_->setFocus(Qt::ShortcutFocusReason);
+    goToTimeEdit_->selectAll();
+    statusBar()->showMessage(
+        tr("Go to time · enter ps, ns, us, ms, tick, or cycle N · Enter jumps · Esc closes"));
+}
+
+void MainWindow::closeGoToTime(const bool announce)
+{
+    if (!goToTimeWidgetAction_ || !goToTimeWidgetAction_->isVisible()) return;
+    goToTimeWidgetAction_->setVisible(false);
+    if (canvas_ && canvas_->viewport()) {
+        canvas_->viewport()->setFocus(Qt::OtherFocusReason);
+    }
+    if (!announce) return;
+
+    const auto location = canvas_
+        ? QString::fromStdString(formatTick(canvas_->cursorTick(), project_.timeBase))
+        : QString{};
+    statusBar()->showMessage(
+        location.isEmpty()
+            ? tr("Go to time closed · Ctrl+G opens it again")
+            : tr("Go to time closed · edit cursor remains at %1 · Ctrl+G opens it again")
+                  .arg(location),
+        5'000);
+}
+
+void MainWindow::submitGoToTime()
+{
+    if (!canvas_ || !goToTimeWidgetAction_
+        || !goToTimeWidgetAction_->isVisible() || !goToTimeEdit_) {
+        return;
+    }
+    const auto* scenario = activeScenario();
+    if (!scenario) return;
+
+    if (!commitPendingEdits()) return;
+    canvas_->dismissInlineValueEditor();
+    const ClockDomain* clock = nullptr;
+    const Lane* selectedLane = nullptr;
+    const auto selectedLaneId = canvas_->selectedLaneId();
+    if (!selectedLaneId.isEmpty()) {
+        selectedLane = findLane(*scenario, selectedLaneId.toStdString());
+        if (selectedLane && !selectedLane->clockDomainId.empty()) {
+            clock = findClock(project_, selectedLane->clockDomainId);
+        }
+    }
+    if (!clock && project_.clockDomains.size() == 1) {
+        clock = &project_.clockDomains.front();
+    }
+
+    const auto input = goToTimeEdit_->text().trimmed();
+    std::optional<std::int64_t> cycle;
+    QString error;
+    const auto tick = parseTimeText(
+        input,
+        project_.timeBase,
+        clock,
+        cycle,
+        error);
+    const auto showError = [this](const QString& message) {
+        goToTimeEdit_->setStyleSheet(
+            QStringLiteral("QLineEdit { border: 1px solid #c96d6d; }"));
+        goToTimeEdit_->setFocus(Qt::OtherFocusReason);
+        statusBar()->showMessage(message, 6'000);
+    };
+    if (!tick) {
+        showError(
+            tr("Cannot go to “%1” · %2").arg(input, error));
+        return;
+    }
+
+    const auto format = [this](const Tick value) {
+        return QString::fromStdString(formatTick(value, project_.timeBase));
+    };
+    if (*tick < 0 || *tick > scenario->duration) {
+        showError(
+            tr("Cannot go to “%1” · enter a time from %2 to %3")
+                .arg(input)
+                .arg(format(0))
+                .arg(format(scenario->duration)));
+        return;
+    }
+
+    canvas_->goToTick(*tick);
+    goToTimeEdit_->setStyleSheet({});
+    {
+        const QSignalBlocker blocker(goToTimeEdit_);
+        goToTimeEdit_->setText(format(*tick));
+    }
+    goToTimeEdit_->setFocus(Qt::OtherFocusReason);
+    goToTimeEdit_->selectAll();
+
+    auto message = tr("Edit cursor moved to %1").arg(format(*tick));
+    if (cycle && clock) {
+        message.append(
+            tr(" · cycle %1 on %2")
+                .arg(*cycle)
+                .arg(QString::fromStdString(clock->name)));
+    }
+    if (selectedLane) {
+        message.append(
+            tr(" · %1 remains selected")
+                .arg(QString::fromStdString(selectedLane->name)));
+    }
+    message.append(tr(" · Enter jumps again · Esc closes"));
+    statusBar()->showMessage(message);
+}
+
 void MainWindow::closeEvent(QCloseEvent* event)
 {
     if (!commitPendingEdits()) {
@@ -1332,6 +1471,20 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if (watched == goToTimeEdit_ && event
+        && event->type() == QEvent::KeyPress) {
+        const auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (keyEvent->key() == Qt::Key_Escape) {
+            closeGoToTime();
+            return true;
+        }
+        if (keyEvent->key() == Qt::Key_Return
+            || keyEvent->key() == Qt::Key_Enter) {
+            submitGoToTime();
+            return true;
+        }
+    }
+
     if (watched == signalFindEdit_ && event
         && event->type() == QEvent::KeyPress) {
         const auto* keyEvent = static_cast<QKeyEvent*>(event);
@@ -1740,6 +1893,7 @@ void MainWindow::newProject()
     resetEditTracking(true);
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
     closeSignalFind(false);
+    closeGoToTime(false);
     canvas_->setTool(WaveCanvas::Tool::WaveEdit);
     if (markerAction_) markerAction_->setChecked(false);
     updateCommandActions();
@@ -4130,6 +4284,13 @@ void MainWindow::createActions()
         tr("Find a visible signal by name or ID without changing the edit cursor"));
     connect(signalFindAction_, &QAction::triggered, this, &MainWindow::showSignalFind);
 
+    goToTimeAction_ = editMenu_->addAction(tr("Go to &time…"));
+    goToTimeAction_->setObjectName(QStringLiteral("GoToTimeAction"));
+    goToTimeAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_G));
+    goToTimeAction_->setToolTip(
+        tr("Move the edit cursor to an exact time without changing the waveform"));
+    connect(goToTimeAction_, &QAction::triggered, this, &MainWindow::showGoToTime);
+
     editMenu_->addSeparator();
     auto* addLaneAction = editMenu_->addAction(
         tr("Add &lane…"),
@@ -4203,7 +4364,10 @@ void MainWindow::createToolBars()
             markerAction_->setChecked(false);
             return;
         }
-        if (checked) closeSignalFind(false);
+        if (checked) {
+            closeSignalFind(false);
+            closeGoToTime(false);
+        }
         canvas_->setTool(checked ? WaveCanvas::Tool::Marker : WaveCanvas::Tool::WaveEdit);
         statusBar()->showMessage(
             checked
@@ -4301,6 +4465,77 @@ void MainWindow::createToolBars()
     connect(signalFindCloseButton_, &QToolButton::clicked, this, [this] {
         closeSignalFind();
     });
+
+    goToTimeWidget_ = new QFrame(editBar);
+    goToTimeWidget_->setObjectName(QStringLiteral("GoToTimeBar"));
+    auto* goToTimeLayout = new QHBoxLayout(goToTimeWidget_);
+    goToTimeLayout->setContentsMargins(0, 0, 0, 0);
+    goToTimeLayout->setSpacing(4);
+    goToTimeLayout->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    auto* goToTimeLabel = new QLabel(tr("Go to"), goToTimeWidget_);
+    goToTimeLabel->setObjectName(QStringLiteral("GoToTimeLabel"));
+    goToTimeLayout->addWidget(goToTimeLabel);
+
+    goToTimeEdit_ = new QLineEdit(goToTimeWidget_);
+    goToTimeEdit_->setObjectName(QStringLiteral("GoToTimeEdit"));
+    goToTimeEdit_->setPlaceholderText(tr("125 ns or cycle 25"));
+    goToTimeEdit_->setAccessibleName(tr("Exact timeline position"));
+    goToTimeEdit_->setToolTip(
+        tr("Enter an exact ps, ns, us, ms, tick, or clock cycle within the scenario"));
+    goToTimeEdit_->setClearButtonEnabled(true);
+    goToTimeEdit_->setMinimumWidth(170);
+    goToTimeEdit_->setMaximumWidth(240);
+    goToTimeEdit_->installEventFilter(this);
+    goToTimeLayout->addWidget(goToTimeEdit_);
+
+    goToTimeRangeLabel_ = new QLabel(QStringLiteral("0 ps–0 ps"), goToTimeWidget_);
+    goToTimeRangeLabel_->setObjectName(QStringLiteral("GoToTimeRangeLabel"));
+    goToTimeRangeLabel_->setAlignment(Qt::AlignCenter);
+    goToTimeRangeLabel_->setMinimumWidth(90);
+    goToTimeRangeLabel_->setAccessibleName(tr("Available timeline range"));
+    goToTimeLayout->addWidget(goToTimeRangeLabel_);
+
+    const auto makeGoToTimeButton = [goToTimeLayout, this](
+                                        const QString& text,
+                                        const QString& objectName,
+                                        const QString& accessibleName,
+                                        const QString& toolTip) {
+        auto* button = new QToolButton(goToTimeWidget_);
+        button->setText(text);
+        button->setObjectName(objectName);
+        button->setAccessibleName(accessibleName);
+        button->setToolTip(toolTip);
+        button->setAutoRaise(true);
+        button->setFocusPolicy(Qt::NoFocus);
+        goToTimeLayout->addWidget(button);
+        return button;
+    };
+    goToTimeGoButton_ = makeGoToTimeButton(
+        tr("Go"),
+        QStringLiteral("GoToTimeGoButton"),
+        tr("Go to exact time"),
+        tr("Move the edit cursor to this time (Enter)"));
+    goToTimeCloseButton_ = makeGoToTimeButton(
+        QStringLiteral("×"),
+        QStringLiteral("GoToTimeCloseButton"),
+        tr("Close time navigation"),
+        tr("Close time navigation (Esc)"));
+
+    goToTimeWidgetAction_ = editBar->addWidget(goToTimeWidget_);
+    goToTimeWidgetAction_->setObjectName(QStringLiteral("GoToTimeToolbarAction"));
+    goToTimeWidgetAction_->setVisible(false);
+    connect(goToTimeEdit_, &QLineEdit::textChanged, this, [this] {
+        if (!goToTimeWidgetAction_ || !goToTimeWidgetAction_->isVisible()) return;
+        goToTimeEdit_->setStyleSheet({});
+        statusBar()->showMessage(
+            tr("Enter jumps to this exact time · Esc closes without moving"));
+    });
+    connect(goToTimeGoButton_, &QToolButton::clicked, this, [this] {
+        submitGoToTime();
+    });
+    connect(goToTimeCloseButton_, &QToolButton::clicked, this, [this] {
+        closeGoToTime();
+    });
     connect(
         canvas_,
         &WaveCanvas::rangeEditPaletteVisibilityChanged,
@@ -4308,6 +4543,9 @@ void MainWindow::createToolBars()
         [this](const bool visible) {
             if (visible && signalFindWidgetAction_ && signalFindWidgetAction_->isVisible()) {
                 closeSignalFind(false);
+            }
+            if (visible && goToTimeWidgetAction_ && goToTimeWidgetAction_->isVisible()) {
+                closeGoToTime(false);
             }
         });
     editBar->addSeparator();
@@ -5137,6 +5375,7 @@ bool MainWindow::loadFromPath(const QString& path)
     resetEditTracking(!result.migrated && !recoveredSnapshot);
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
     closeSignalFind(false);
+    closeGoToTime(false);
     updateCommandActions();
     updateWindowTitle();
     if (recoveredSnapshot) {

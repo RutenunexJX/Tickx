@@ -4697,6 +4697,58 @@ Desktop interaction: none
 Packaging: not run during iteration
 ```
 
+## 持续迭代 84：精确时间直接跳转
+
+状态：完成，持续迭代中
+
+已交付：
+
+- 开发审计确认现有 Home/End、方向键与相邻边沿导航适合探索式移动，但缺少“已知目标时间”的直接入口；在长时间轴定位 375 ns 或第 25 周期仍需反复缩放、滚动或换算后点击。
+- Edit 菜单新增平台标准 `Ctrl+G` 的 `Go to time…`。触发后只在 Waveform 工具栏临时显示紧凑跳转栏，接受整数 `ps` / `ns` / `us` / `ms` / `tick`，以及 `cycle N`；周期输入优先使用当前所选信号的时钟域，否则仅在项目时钟唯一时自动判定。
+- Enter 或 `Go` 将编辑光标准确定位并只做必要的水平滚动，保留当前信号、缩放与垂直位置。成功后输入框规范化为当前时间并全选，便于连续跳转；Esc 或关闭按钮收起工具栏并保留结果，再次打开预填当前光标。
+- 非法输入与越界时间在原位标红并公开允许范围，不打开模态窗口、不移动光标。显式时间范围存在时 Ctrl+G 不会静默清除目标，而是提示先按 Esc；未提交草稿仍优先阻止导航，已提交的 Bus/Enum 一拍浮层会在跳转前安全收起。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：验证动作、快捷键、工具栏默认隐藏、0 ps 预填、非法与越界输入、375 ns 精确跳转和最小揭示、Bus 选择与缩放保持、周期 25 映射至 250 ns、Esc/关闭/重开、显式范围门禁、Bus 浮层隔离、无模态窗口及 Scenario/Undo/Saved 零变化，并保存离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 21 ms / Release 5 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.84 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.81 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 2.07 sec
+
+Automated QA: 选中 data[7:0] 后以 Ctrl+G 输入 375 ns，编辑光标准确到达且只做必要水平滚动，信号选择、缩放、Scenario、Undo 与 Saved 均保持；非法值和 1 us 之外的输入原位说明错误，cycle 25 使用唯一 10 ns 时钟到达 250 ns。Esc/关闭保留结果，重开预填当前时间；显式范围先得到无损提示。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-go-to-time.png
+Visual result: Go to 标签、375 ns 输入、0 ps–1 us 范围、Go 与关闭按钮紧凑排列；375 ns 光标和所选 Bus 同时可见，无旧 Bus 浮层、裁切、遮挡、模态窗口或垂直视图跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

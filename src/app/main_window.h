@@ -109,6 +109,9 @@ private:
     void stepSignalFind(int direction);
     [[nodiscard]] QStringList matchingVisibleSignals(const QString& query) const;
     void activateSignalFindMatch(const QStringList& matches, int index, bool wrapped);
+    void showGoToTime();
+    void closeGoToTime(bool announce = true);
+    void submitGoToTime();
     void createDocks();
     void populateSignalTree();
     void populateClockTree();
@@ -215,6 +218,12 @@ private:
     QToolButton* signalFindNextButton_{nullptr};
     QToolButton* signalFindCloseButton_{nullptr};
     int signalFindMatchIndex_{-1};
+    QWidget* goToTimeWidget_{nullptr};
+    QLineEdit* goToTimeEdit_{nullptr};
+    QLabel* goToTimeRangeLabel_{nullptr};
+    QToolButton* goToTimeGoButton_{nullptr};
+    QToolButton* goToTimeCloseButton_{nullptr};
+    QAction* goToTimeWidgetAction_{nullptr};
     QAction* selectAction_{nullptr};
     QAction* drawAction_{nullptr};
     QAction* markerAction_{nullptr};
@@ -228,6 +237,7 @@ private:
     QMenu* recentProjectsMenu_{nullptr};
     QAction* signalFindAction_{nullptr};
     QAction* signalFindWidgetAction_{nullptr};
+    QAction* goToTimeAction_{nullptr};
     QAction* pinloomAction_{nullptr};
     bool populatingTables_{false};
     bool populatingTraceMapping_{false};

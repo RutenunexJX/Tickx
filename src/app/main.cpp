@@ -2218,13 +2218,34 @@ int main(int argc, char* argv[])
                     QStringLiteral("TimelineDurationEdit"));
                 auto* saveState = window.findChild<QLabel*>(
                     QStringLiteral("SaveStateLabel"));
+                auto* goToTimeAction = window.findChild<QAction*>(
+                    QStringLiteral("GoToTimeAction"));
+                auto* goToTimeToolbarAction = window.findChild<QAction*>(
+                    QStringLiteral("GoToTimeToolbarAction"));
+                auto* goToTimeBar = window.findChild<QFrame*>(
+                    QStringLiteral("GoToTimeBar"));
+                auto* goToTimeEdit = window.findChild<QLineEdit*>(
+                    QStringLiteral("GoToTimeEdit"));
+                auto* goToTimeRange = window.findChild<QLabel*>(
+                    QStringLiteral("GoToTimeRangeLabel"));
+                auto* goToTimeGo = window.findChild<QToolButton*>(
+                    QStringLiteral("GoToTimeGoButton"));
+                auto* goToTimeClose = window.findChild<QToolButton*>(
+                    QStringLiteral("GoToTimeCloseButton"));
+                auto* signalFindToolbarAction = window.findChild<QAction*>(
+                    QStringLiteral("SignalFindToolbarAction"));
+                auto* goToBusPalette = canvas->findChild<QWidget*>(
+                    QStringLiteral("BusPresetPalette"));
                 auto fail = [&application, &window](const QString& message) {
                     qCritical().noquote() << message;
                     window.hide();
                     application.exit(4);
                 };
                 if (!canvas || !undoAction || !fitAction || !selectFullRangeAction
-                    || !durationEdit || !saveState
+                    || !durationEdit || !saveState || !goToTimeAction
+                    || !goToTimeToolbarAction || !goToTimeBar
+                    || !goToTimeEdit || !goToTimeRange || !goToTimeGo
+                    || !goToTimeClose || !signalFindToolbarAction || !goToBusPalette
                     || window.project().scenarios.empty()) {
                     fail(QStringLiteral(
                         "Wave Edit autoscroll smoke prerequisites are missing"));
@@ -2247,7 +2268,19 @@ int main(int argc, char* argv[])
                         != QKeySequence::SelectAll
                     || fitAction->text() != QStringLiteral("Fit scenario")
                     || !fitAction->toolTip().contains(
-                        QStringLiteral("complete scenario"))) {
+                        QStringLiteral("complete scenario"))
+                    || goToTimeAction->shortcut().matches(
+                           QKeySequence(Qt::CTRL | Qt::Key_G))
+                        != QKeySequence::ExactMatch
+                    || goToTimeToolbarAction->isVisible()
+                    || goToTimeBar->isVisibleTo(&window)
+                    || goToTimeEdit->placeholderText()
+                        != QStringLiteral("125 ns or cycle 25")
+                    || goToTimeEdit->accessibleName()
+                        != QStringLiteral("Exact timeline position")
+                    || goToTimeRange->text() != QStringLiteral("0 ps–0 ps")
+                    || signalFindToolbarAction->isVisible()
+                    || QApplication::activeModalWidget()) {
                     fail(QStringLiteral(
                         "Wave Edit autoscroll smoke did not start from its Saved fixture"));
                     return;
@@ -2734,11 +2767,224 @@ int main(int argc, char* argv[])
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Enter edits value"))
                     || !window.statusBar()->currentMessage().contains(
-                        QStringLiteral("value X"))) {
+                        QStringLiteral("value X"))
+                    || !goToBusPalette->isVisibleTo(&window)) {
                     fail(QStringLiteral(
                         "Signal selection did not disclose adjacent edge navigation"));
                     return;
                 }
+                sendKey(canvas, Qt::Key_G, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (!goToTimeToolbarAction->isVisible()
+                    || !goToTimeBar->isVisibleTo(&window)
+                    || !goToTimeEdit->hasFocus()
+                    || goToTimeEdit->text() != QStringLiteral("0 ps")
+                    || goToTimeEdit->selectedText() != QStringLiteral("0 ps")
+                    || goToTimeRange->text() != QStringLiteral("0 ps–1 us")
+                    || signalFindToolbarAction->isVisible()
+                    || canvas->cursorTick() != 0
+                    || goToBusPalette->isVisibleTo(&window)
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || QApplication::activeModalWidget()) {
+                    fail(QStringLiteral(
+                        "Ctrl+G did not open a focused non-modal exact-time bar at the current cursor"));
+                    return;
+                }
+
+                goToTimeEdit->setText(QStringLiteral("not-a-time"));
+                sendKey(goToTimeEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                if (!goToTimeToolbarAction->isVisible()
+                    || !goToTimeEdit->hasFocus()
+                    || goToTimeEdit->text() != QStringLiteral("not-a-time")
+                    || goToTimeEdit->styleSheet().isEmpty()
+                    || canvas->cursorTick() != 0
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Cannot go to"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Use an integer"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Invalid time input moved the cursor or failed to preserve an inline correction"));
+                    return;
+                }
+
+                goToTimeEdit->setText(QStringLiteral("1200 ns"));
+                sendKey(goToTimeEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                if (goToTimeEdit->styleSheet().isEmpty()
+                    || canvas->cursorTick() != 0
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("from 0 ps to 1 us"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Out-of-range time did not stay in place with the valid timeline bounds"));
+                    return;
+                }
+
+                goToTimeEdit->setText(QStringLiteral("375 ns"));
+                goToTimeGo->click();
+                QCoreApplication::processEvents();
+                const auto absoluteTimeScroll =
+                    canvas->horizontalScrollBar()->value();
+                if (!goToTimeToolbarAction->isVisible()
+                    || !goToTimeEdit->hasFocus()
+                    || goToTimeEdit->text() != QStringLiteral("375 ns")
+                    || goToTimeEdit->selectedText() != QStringLiteral("375 ns")
+                    || !goToTimeEdit->styleSheet().isEmpty()
+                    || goToTimeRange->text() != QStringLiteral("0 ps–1 us")
+                    || canvas->cursorTick() != 375'000
+                    || absoluteTimeScroll <= 0
+                    || absoluteTimeScroll >= navigationMaximum
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Edit cursor moved to 375 ns"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("data[7:0] remains selected"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Enter jumps again"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || QApplication::activeModalWidget()) {
+                    fail(QStringLiteral(
+                        "Exact absolute time did not move and reveal the edit cursor without changing its signal"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto goToTimeScreenshotPath =
+                        waveEditAutoScrollScreenshotPath;
+                    const auto suffix = goToTimeScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        goToTimeScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-go-to-time"));
+                    } else {
+                        goToTimeScreenshotPath.append(
+                            QStringLiteral("-go-to-time.png"));
+                    }
+                    if (!window.grab().save(goToTimeScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save exact time navigation screenshot"));
+                        return;
+                    }
+                }
+
+                sendKey(goToTimeEdit, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (goToTimeToolbarAction->isVisible()
+                    || goToTimeBar->isVisibleTo(&window)
+                    || !canvas->viewport()->hasFocus()
+                    || canvas->cursorTick() != 375'000
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("edit cursor remains at 375 ns"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Escape did not close time navigation while retaining its result"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_G, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (!goToTimeToolbarAction->isVisible()
+                    || !goToTimeEdit->hasFocus()
+                    || goToTimeEdit->text() != QStringLiteral("375 ns")
+                    || goToTimeEdit->selectedText() != QStringLiteral("375 ns")) {
+                    fail(QStringLiteral(
+                        "Ctrl+G did not reopen at the current edit cursor"));
+                    return;
+                }
+                goToTimeEdit->setText(QStringLiteral("cycle 25"));
+                sendKey(goToTimeEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                if (canvas->cursorTick() != 250'000
+                    || goToTimeEdit->text() != QStringLiteral("250 ns")
+                    || goToTimeEdit->selectedText() != QStringLiteral("250 ns")
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("cycle 25 on navigation clock"))
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Cycle-based time did not use the unambiguous project clock"));
+                    return;
+                }
+                goToTimeClose->click();
+                QCoreApplication::processEvents();
+                if (goToTimeToolbarAction->isVisible()
+                    || !canvas->viewport()->hasFocus()
+                    || canvas->cursorTick() != 250'000
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("edit cursor remains at 250 ns"))) {
+                    fail(QStringLiteral(
+                        "Time navigation close button did not preserve the cycle result"));
+                    return;
+                }
+
+                sendKey(canvas, Qt::Key_Home);
+                sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
+                QCoreApplication::processEvents();
+                const auto goToGuardRange = canvas->selectedTimeRange();
+                if (!canvas->hasExplicitRangeSelection()
+                    || !goToGuardRange
+                    || goToGuardRange->first != 0
+                    || goToGuardRange->second != 10'000) {
+                    fail(QStringLiteral(
+                        "Time navigation range guard did not start from a 0–10 ns range"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_G, Qt::ControlModifier);
+                QCoreApplication::processEvents();
+                if (goToTimeToolbarAction->isVisible()
+                    || !canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != goToGuardRange
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Esc clears the selected range"))
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+G"))
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Ctrl+G discarded an explicit range instead of explaining how to continue"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Escape);
+                clickSignalHeader(laneY);
+                sendKey(canvas, Qt::Key_Home);
+                QCoreApplication::processEvents();
+                if (canvas->hasExplicitRangeSelection()
+                    || canvas->cursorTick() != 0
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || goToTimeToolbarAction->isVisible()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Time navigation range guard did not restore normal edge navigation"));
+                    return;
+                }
+
                 sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);
                 if (canvas->cursorTick() != 50'000
                     || canvas->selectedLaneId()

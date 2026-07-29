@@ -99,6 +99,8 @@ public slots:
     void fitSelection();
     void refreshModel();
     void revealLocation(const QString& laneId, qint64 tick);
+    void goToTick(qint64 tick);
+    void dismissInlineValueEditor();
     void selectEntireTimeline();
     void cutSelection();
     void copySelection();
