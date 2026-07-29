@@ -4218,6 +4218,58 @@ Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-keyboard-b
 Desktop interaction: none
 ```
 
+## 持续迭代 75：Enum 键盘一拍编辑
+
+状态：完成
+
+已交付：
+
+- 开发审计确认 Bus 已具备键盘一拍编辑，但 Enum/state 信号仍依赖鼠标命中或整段属性窗口；在 Up/Down 选择信号、Ctrl+Left/Right 到达状态边沿后，键盘路径中断，且用户无法就地发现工程已声明的状态符号。
+- 用户视角需要在读到某一拍状态后立即替换该拍，而不是重新定位鼠标或打开完整 Segment 编辑器。Enum 现在与 Bus 一样在选择、纵向导航和边沿导航反馈中公开 `Enter edits value`；现有 Segment 双击继续编辑完整区段，避免改变既有整段工作流。
+- 复用既有便携值编辑条支持 Enum：Enter 在当前整数 tick 打开并预填该拍符号，编辑条内 Enter 通过 `SetLaneRangeCommand` 提交一拍，Esc 零修改取消；提交继续保持 Event/Relation、Undo/Redo、autosave 与 Saved 语义。
+- Enum 编辑时隐藏仅适用于 Bus 的 `0`、`X`、`Z`、`Don't care` 按钮，输入框的可访问名称、占位文本和提示切换为 Enum 语义；补全列表以稳定字典序展示全部声明符号。非法符号保留原输入、面板和焦点，并在状态栏列出 `DONE, IDLE, WAIT_ACK` 等可用值。再次编辑 Bus 时四个快捷按钮恢复。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：加入 `state` Enum lane 和 `IDLE/WAIT_ACK/DONE` 三段状态，验证 50 ns 选中反馈、Enter 精确预填 `WAIT_ACK`、无模态窗口、补全模型、Bus 按钮隐藏、非法值原位纠错、Esc 取消、再次打开提交 `DONE`、Unsaved/Ctrl+Z 反馈，以及单步 Undo 精确恢复原 Scenario 与 Saved。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 21 ms / Release 4 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.06 sec
+
+cmake --build build/qtcreator-release
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.71 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 1.90 sec
+
+Automated QA: 选中 state 后同时显示 WAIT_ACK 与 Enter 编辑提示；在 50 ns 按 Enter 打开便携编辑条并精确预填 WAIT_ACK，
+              补全列表包含 DONE/IDLE/WAIT_ACK，Bus 专用按钮全部隐藏，模型仍为 Saved 且无 Undo；输入 MISSING 后原位列出可用符号，
+              Esc 关闭草稿且零修改。再次 Enter 后提交 DONE，只形成一个可撤销的一拍写值；单步 Undo 恢复原始三段 Enum 与 Saved。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-keyboard-enum-edit.png
+Desktop interaction: none
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

@@ -145,11 +145,13 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
 - 单击信号名选中当前信号后，状态栏直接提示边沿导航；Wave Edit 画布获得焦点时，`Ctrl+Left` / `Ctrl+Right` 严格跳到当前时间之前/之后的最近真实边沿，不会停在当前位置。Bit、Bus 与 Enum 使用 Segment 起止边界，Clock 同时使用周期上升/下降沿和覆盖区段边界；没有相邻边沿时光标保持原位，并提示使用 Home 或 End。该导航保留缩放和信号目标，不修改模型、Undo 或 Saved 状态。
 - Wave Edit 画布获得焦点时，`Up` / `Down` 选择当前行上方/下方的可见信号并跳过 Group；无选择时分别从末条/首条信号开始。时间光标、水平位置和模型保持不变，长列表只滚动到足以完整显示目标行，不额外滚到末尾添加区。到达首末信号时保持原目标并说明反向键；键盘选中不会武装整条信号 Delete。显式范围或拖动期间先提示完成/按 Esc，不隐式清除操作；End、重命名及其他画布内文本框获得焦点时 Up/Down 不会冒泡为信号导航。`Alt+Up` / `Alt+Down` 的可撤销重排语义不变。
 - Wave Edit 中，当前所选非 Group 信号的标题右端显示编辑光标处的采样值，使用与编辑光标一致的青色；Bit 的隐式值显示 `0`，Bus/Enum 的隐式值显示 `X`，Clock 按周期与覆盖状态采样。只为所选信号预留值宽度，名称继续中间省略，未选信号不增加杂讯；拖动预览期间暂时隐藏模型值，避免把未提交预览误认为结果。Up/Down 和 Ctrl+Left/Right 的状态反馈同步携带值；Measure 仍按活动光标显示全部信号值。
-- Wave Edit 选中 Bus 后，状态栏在鼠标选中、Up/Down 切换及 Ctrl+Left/Right 到达边沿时直接提示
-  `Enter edits value`。画布获得焦点后按 Enter，会在当前编辑 tick 附近打开既有一拍编辑条并预填
+- Wave Edit 选中 Bus 或 Enum 后，状态栏在鼠标选中、Up/Down 切换及 Ctrl+Left/Right 到达边沿时直接提示
+  `Enter edits value`。画布获得焦点后按 Enter，会在当前编辑 tick 附近打开一拍编辑条并预填
   精确采样值；Segment 边沿直接使用整数 tick，不经过像素往返，因此不会误取边沿前的隐式 `X`。
-  编辑条内按 Enter 提交一个可撤销的一拍写值，Esc 放弃草稿且不改变模型、Undo 或 Saved 状态；
-  位于 Scenario End 时明确提示先向左移动，不会静默改写末拍。
+  Bus 保留 `0`、`X`、`Z`、`Don't care` 快捷按钮；Enum 隐藏这些不适用按钮，输入框提供已声明
+  符号的补全与完整提示。非法 Enum 值保留草稿和焦点并列出可用符号。编辑条内按 Enter 提交一个
+  可撤销的一拍写值，Esc 放弃草稿且不改变模型、Undo 或 Saved 状态；位于 Scenario End 时明确
+  提示先向左移动，不会静默改写末拍。已有 Bus/Enum Segment 的双击仍用于编辑完整 Segment。
 - Clock 波形右键可对一拍执行 Gate、Drive X 或 Run。Run 清除该拍覆盖后保持拍级选择，并显示
   `restored normal clock waveform` 与撤销提示；已正常运行时显示 `no values changed`，不新增
   Undo 或清除 Redo。

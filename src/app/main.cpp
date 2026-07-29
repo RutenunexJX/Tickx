@@ -7,11 +7,13 @@
 
 #include <QAbstractButton>
 #include <QAction>
+#include <QAbstractItemModel>
 #include <QApplication>
 #include <QClipboard>
 #include <QColor>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QContextMenuEvent>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -329,6 +331,34 @@ int main(int argc, char* argv[])
         clock.phase = 0;
         clock.dutyCycle = {1, 2};
         project.clockDomains.push_back(std::move(clock));
+        wave::Lane enumLane;
+        enumLane.id = "lane-wave-edit-enum";
+        enumLane.name = "state";
+        enumLane.kind = wave::LaneKind::Enum;
+        enumLane.width = 2;
+        enumLane.clockDomainId = "clock-wave-edit-scroll";
+        enumLane.color = "#ef9a9a";
+        enumLane.height = 56;
+        enumLane.enumMap = {{"IDLE", "0"}, {"WAIT_ACK", "1"}, {"DONE", "2"}};
+        wave::Segment idleState;
+        idleState.id = "segment-wave-edit-enum-idle";
+        idleState.start = 0;
+        idleState.end = 50'000;
+        idleState.value = "IDLE";
+        enumLane.segments.push_back(std::move(idleState));
+        wave::Segment waitingState;
+        waitingState.id = "segment-wave-edit-enum-wait";
+        waitingState.start = 50'000;
+        waitingState.end = 100'000;
+        waitingState.value = "WAIT_ACK";
+        enumLane.segments.push_back(std::move(waitingState));
+        wave::Segment doneState;
+        doneState.id = "segment-wave-edit-enum-done";
+        doneState.start = 100'000;
+        doneState.end = scenario.duration;
+        doneState.value = "DONE";
+        enumLane.segments.push_back(std::move(doneState));
+        scenario.lanes.push_back(std::move(enumLane));
         wave::Lane clockLane;
         clockLane.id = "lane-wave-edit-clock";
         clockLane.name = "clk";
@@ -2179,9 +2209,11 @@ int main(int argc, char* argv[])
                 }
 
                 auto& scenario = window.project().scenarios.front();
-                if (scenario.lanes.size() != 2
+                if (scenario.lanes.size() != 3
                     || scenario.lanes.front().id != "lane-wave-edit-scroll"
                     || scenario.lanes.front().segments.size() != 1
+                    || scenario.lanes.at(1).id != "lane-wave-edit-enum"
+                    || scenario.lanes.at(1).segments.size() != 3
                     || scenario.lanes.back().id != "lane-wave-edit-clock"
                     || window.project().clockDomains.size() != 1
                     || saveState->text() != QStringLiteral("Saved")
@@ -2741,10 +2773,27 @@ int main(int argc, char* argv[])
                     QStringLiteral("BusPresetPalette"));
                 auto* busValueEdit = canvas->findChild<QLineEdit*>(
                     QStringLiteral("BusPresetValueEdit"));
+                const std::array<QToolButton*, 4> busPresetButtons{
+                    canvas->findChild<QToolButton*>(
+                        QStringLiteral("BusPresetZeroButton")),
+                    canvas->findChild<QToolButton*>(
+                        QStringLiteral("BusPresetXButton")),
+                    canvas->findChild<QToolButton*>(
+                        QStringLiteral("BusPresetZButton")),
+                    canvas->findChild<QToolButton*>(
+                        QStringLiteral("BusPresetDontCareButton")),
+                };
+                const auto busPresetsVisible = std::all_of(
+                    busPresetButtons.begin(),
+                    busPresetButtons.end(),
+                    [](const QToolButton* button) {
+                        return button && button->isVisible();
+                    });
                 const auto busEditEntryStatus = window.statusBar()->currentMessage();
                 if (!busPalette
                     || !busPalette->isVisible()
                     || !busValueEdit
+                    || !busPresetsVisible
                     || !busValueEdit->hasFocus()
                     || busValueEdit->text() != QStringLiteral("0x35")
                     || scenario != originalScenario
@@ -2855,9 +2904,182 @@ int main(int argc, char* argv[])
                         "Undo did not restore the exact pre-keyboard-edit Bus and Saved state"));
                     return;
                 }
+                const auto enumLaneY = 40
+                    + scenario.lanes.front().height
+                    + scenario.lanes.at(1).height / 2;
+                clickSignalHeader(enumLaneY);
+                const auto enumSelectionStatus = window.statusBar()->currentMessage();
+                if (canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-enum")
+                    || !enumSelectionStatus.contains(
+                        QStringLiteral("Selected signal state"))
+                    || !enumSelectionStatus.contains(
+                        QStringLiteral("value WAIT_ACK"))
+                    || !enumSelectionStatus.contains(
+                        QStringLiteral("Enter edits value"))) {
+                    fail(QStringLiteral(
+                        "Enum selection did not disclose its value and direct edit path"));
+                    return;
+                }
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                auto* enumContext = canvas->findChild<QLabel*>(
+                    QStringLiteral("BusPresetContextLabel"));
+                auto* enumCompleter = busValueEdit->completer();
+                QStringList enumCompletions;
+                if (enumCompleter && enumCompleter->model()) {
+                    for (auto row = 0; row < enumCompleter->model()->rowCount(); ++row) {
+                        enumCompletions.append(
+                            enumCompleter->model()->index(row, 0).data().toString());
+                    }
+                }
+                const auto enumPresetsHidden = std::all_of(
+                    busPresetButtons.begin(),
+                    busPresetButtons.end(),
+                    [](const QToolButton* button) {
+                        return button && !button->isVisible();
+                    });
+                const auto enumEditEntryStatus = window.statusBar()->currentMessage();
+                if (!busPalette->isVisible()
+                    || !busValueEdit->hasFocus()
+                    || busValueEdit->text() != QStringLiteral("WAIT_ACK")
+                    || busValueEdit->accessibleName() != QStringLiteral("Enum value")
+                    || !busValueEdit->placeholderText().contains(
+                        QStringLiteral("Symbol"))
+                    || !enumContext
+                    || !enumContext->text().contains(QStringLiteral("state"))
+                    || !enumContext->text().contains(QStringLiteral("50 ns"))
+                    || !enumContext->toolTip().contains(
+                        QStringLiteral("DONE, IDLE, WAIT_ACK"))
+                    || enumCompletions
+                        != QStringList{
+                            QStringLiteral("DONE"),
+                            QStringLiteral("IDLE"),
+                            QStringLiteral("WAIT_ACK"),
+                        }
+                    || !enumPresetsHidden
+                    || QApplication::activeModalWidget()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !enumEditEntryStatus.contains(
+                        QStringLiteral("Edit state at 50 ns"))
+                    || !enumEditEntryStatus.contains(
+                        QStringLiteral("current value WAIT_ACK"))) {
+                    qCritical().noquote()
+                        << "Enum keyboard edit diagnostics"
+                        << "palette" << busPalette->isVisible()
+                        << "focus" << busValueEdit->hasFocus()
+                        << "value" << busValueEdit->text()
+                        << "accessible" << busValueEdit->accessibleName()
+                        << "placeholder" << busValueEdit->placeholderText()
+                        << "context" << (enumContext
+                                ? enumContext->text()
+                                : QStringLiteral("<missing>"))
+                        << "contextHelp" << (enumContext
+                                ? enumContext->toolTip()
+                                : QStringLiteral("<missing>"))
+                        << "completions" << enumCompletions.join(QLatin1Char(','))
+                        << "presetsHidden" << enumPresetsHidden
+                        << "status" << enumEditEntryStatus;
+                    fail(QStringLiteral(
+                        "Enter did not open a discoverable non-modal Enum value editor"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto enumEditScreenshotPath = waveEditAutoScrollScreenshotPath;
+                    const auto suffix = enumEditScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        enumEditScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-keyboard-enum-edit"));
+                    } else {
+                        enumEditScreenshotPath.append(
+                            QStringLiteral("-keyboard-enum-edit.png"));
+                    }
+                    if (!window.grab().save(enumEditScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save keyboard Enum value edit screenshot"));
+                        return;
+                    }
+                }
+
+                busValueEdit->setText(QStringLiteral("MISSING"));
+                busValueEdit->setModified(true);
+                sendKey(busValueEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                const auto invalidEnumStatus = window.statusBar()->currentMessage();
+                if (!busPalette->isVisible()
+                    || !busValueEdit->hasFocus()
+                    || busValueEdit->text() != QStringLiteral("MISSING")
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !invalidEnumStatus.contains(
+                        QStringLiteral("symbols: DONE, IDLE, WAIT_ACK"))) {
+                    fail(QStringLiteral(
+                        "Invalid Enum value was not retained with declared-symbol guidance"));
+                    return;
+                }
+                sendKey(busValueEdit, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (busPalette->isVisible()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Escape did not discard the invalid Enum draft without changes"));
+                    return;
+                }
+
+                canvas->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                busValueEdit->setText(QStringLiteral("DONE"));
+                busValueEdit->setModified(true);
+                sendKey(busValueEdit, Qt::Key_Return);
+                QCoreApplication::processEvents();
+                const auto* keyboardEditedEnum = wave::findLane(
+                    scenario,
+                    "lane-wave-edit-enum");
+                const auto enumEditedValue = keyboardEditedEnum
+                    && std::any_of(
+                        keyboardEditedEnum->segments.begin(),
+                        keyboardEditedEnum->segments.end(),
+                        [](const wave::Segment& segment) {
+                            return segment.start <= 50'000
+                                && 50'000 < segment.end
+                                && segment.value == "DONE";
+                        });
+                const auto enumCommitStatus = window.statusBar()->currentMessage();
+                if (busPalette->isVisible()
+                    || !enumEditedValue
+                    || scenario == originalScenario
+                    || !undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || !enumCommitStatus.contains(QStringLiteral("state"))
+                    || !enumCommitStatus.contains(QStringLiteral("DONE"))
+                    || !enumCommitStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    fail(QStringLiteral(
+                        "Keyboard Enum value commit did not create one visible undoable edit"));
+                    return;
+                }
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+                if (scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || window.windowTitle().contains(QStringLiteral(" *"))) {
+                    fail(QStringLiteral(
+                        "Undo did not restore the exact pre-Enum-edit Scenario and Saved state"));
+                    return;
+                }
                 sendKey(canvas, Qt::Key_Home);
                 const auto clockLaneY = 40
                     + scenario.lanes.front().height
+                    + scenario.lanes.at(1).height
                     + scenario.lanes.back().height / 2;
                 clickSignalHeader(clockLaneY);
                 sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);

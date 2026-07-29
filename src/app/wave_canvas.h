@@ -16,6 +16,7 @@
 
 class QContextMenuEvent;
 class QComboBox;
+class QCompleter;
 class QDragEnterEvent;
 class QDragMoveEvent;
 class QDropEvent;
@@ -24,6 +25,7 @@ class QFrame;
 class QKeyEvent;
 class QLabel;
 class QLineEdit;
+class QStringListModel;
 class QMouseEvent;
 class QPaintEvent;
 class QResizeEvent;
@@ -376,6 +378,8 @@ private:
     QFrame* busPresetPalette_{nullptr};
     QLabel* busPresetContextLabel_{nullptr};
     QLineEdit* busValueEdit_{nullptr};
+    QCompleter* laneValueCompleter_{nullptr};
+    QStringListModel* laneValueCompletionModel_{nullptr};
     std::optional<Tick> busPresetAnchorTick_;
     std::string busPresetLaneId_;
     QFrame* rangeEditPalette_{nullptr};

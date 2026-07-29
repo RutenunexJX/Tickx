@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QComboBox>
+#include <QCompleter>
 #include <QContextMenuEvent>
 #include <QDrag>
 #include <QDragEnterEvent>
@@ -27,6 +28,7 @@
 #include <QPainterPath>
 #include <QPalette>
 #include <QScrollBar>
+#include <QStringListModel>
 #include <QToolButton>
 #include <QToolTip>
 #include <QTimer>
@@ -394,6 +396,11 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     busValueEdit_->setAccessibleName(tr("Bus value"));
     busValueEdit_->setMinimumWidth(105);
     busValueEdit_->setMaximumWidth(140);
+    laneValueCompletionModel_ = new QStringListModel(this);
+    laneValueCompleter_ = new QCompleter(laneValueCompletionModel_, this);
+    laneValueCompleter_->setCaseSensitivity(Qt::CaseInsensitive);
+    laneValueCompleter_->setCompletionMode(QCompleter::PopupCompletion);
+    busValueEdit_->setCompleter(laneValueCompleter_);
     busValueEdit_->installEventFilter(this);
     presetLayout->addWidget(busValueEdit_);
     const std::array<std::tuple<QString, QString, QString>, 4> presets{{
@@ -1843,7 +1850,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
             selectionMessage.append(
                 tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
                     .arg(laneValueAt(*lane, cursorTick_)));
-            if (lane->kind == LaneKind::Bus) {
+            if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                 selectionMessage.append(tr(" · Enter edits value"));
             }
         }
@@ -2172,7 +2179,7 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             const auto* lane = findLane(*scenario_, selectedLaneId_);
             if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
                 emit statusMessage(
-                    tr("Finish or cancel the current drag before editing a Bus value"));
+                    tr("Finish or cancel the current drag before editing a value"));
             } else if (explicitRangeSelection_) {
                 if (rangeValueEdit_ && rangeValueEdit_->isVisible()) {
                     rangeValueEdit_->setFocus(Qt::OtherFocusReason);
@@ -2181,11 +2188,13 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                         tr("Edit selected Bus range · type a value and press Enter · Esc clears the range"));
                 } else {
                     emit statusMessage(
-                        tr("Esc clears the selected range before editing one Bus beat"));
+                        tr("Esc clears the selected range before editing one signal beat"));
                 }
-            } else if (!lane || lane->kind != LaneKind::Bus) {
+            } else if (!lane
+                       || (lane->kind != LaneKind::Bus
+                           && lane->kind != LaneKind::Enum)) {
                 emit statusMessage(
-                    tr("Select a Bus signal before pressing Enter to edit its value"));
+                    tr("Select a Bus or Enum signal before pressing Enter to edit its value"));
             } else if (scenario_->duration <= 0 || cursorTick_ >= scenario_->duration) {
                 emit statusMessage(
                     tr("Timeline End has no editable beat · press Left or Ctrl+Left first"));
@@ -2279,7 +2288,7 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                                   cursorTick_,
                                   project_->timeBase)))
                               .arg(laneValueAt(*lane, cursorTick_));
-                if (lane->kind == LaneKind::Bus) {
+                if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                     message.append(tr(" · Enter edits value"));
                 }
                 emit statusMessage(message);
@@ -2670,7 +2679,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         && event->modifiers().testFlag(Qt::ShiftModifier);
     if (tool_ == Tool::WaveEdit
         && lane
-        && lane->kind == LaneKind::Bus
+        && (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum)
         && !startingExplicitRange) {
         showBusPresetPalette(*lane, position);
     } else {
@@ -2707,7 +2716,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             selectionMessage.append(
                 tr(" · value %1 · Up/Down selects signals · Ctrl+Left/Right jumps edges")
                     .arg(laneValueAt(*lane, cursorTick_)));
-            if (lane->kind == LaneKind::Bus) {
+            if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                 selectionMessage.append(tr(" · Enter edits value"));
             }
         }
@@ -3492,7 +3501,8 @@ void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
     if (tool_ == Tool::WaveEdit) {
         auto* editLane = laneAtY(position.y());
         if (editLane
-            && editLane->kind == LaneKind::Bus
+            && (editLane->kind == LaneKind::Bus
+                || editLane->kind == LaneKind::Enum)
             && !segmentAtTick(*editLane, tickAtX(position.x()))) {
             promptBusValueAt(editLane->id, snappedTick(tickAtX(position.x()), editLane));
         } else {
@@ -3867,7 +3877,8 @@ void WaveCanvas::positionBusPresetPalette()
         return;
     }
     const auto* lane = findLane(*scenario_, busPresetLaneId_);
-    if (!lane || lane->kind != LaneKind::Bus) {
+    if (!lane
+        || (lane->kind != LaneKind::Bus && lane->kind != LaneKind::Enum)) {
         hideBusPresetPalette();
         return;
     }
@@ -3907,7 +3918,10 @@ void WaveCanvas::showBusPresetPalette(
     const QPoint& anchor,
     const std::optional<Tick> exactTick)
 {
-    if (lane.kind != LaneKind::Bus || !scenario_ || scenario_->duration <= 0) {
+    const auto enumLane = lane.kind == LaneKind::Enum;
+    if ((lane.kind != LaneKind::Bus && !enumLane)
+        || !scenario_
+        || scenario_->duration <= 0) {
         hideBusPresetPalette();
         return;
     }
@@ -3916,21 +3930,54 @@ void WaveCanvas::showBusPresetPalette(
         anchor.x() >= headerWidth_ ? tickAtX(anchor.x()) : cursorTick_);
     busPresetAnchorTick_ = std::clamp<Tick>(requested, 0, scenario_->duration - 1);
     const auto [start, end] = beatRangeAt(*busPresetAnchorTick_, lane);
+    QStringList enumSymbols;
+    if (enumLane) {
+        for (const auto& [symbol, value] : lane.enumMap) {
+            Q_UNUSED(value);
+            enumSymbols.append(QString::fromStdString(symbol));
+        }
+    }
+    if (laneValueCompletionModel_) {
+        laneValueCompletionModel_->setStringList(enumSymbols);
+    }
+    if (busPresetPalette_) {
+        for (auto* button : busPresetPalette_->findChildren<QToolButton*>()) {
+            if (button->objectName().startsWith(QStringLiteral("BusPreset"))) {
+                button->setVisible(!enumLane);
+            }
+        }
+    }
     if (busPresetContextLabel_) {
         busPresetContextLabel_->setText(
             tr("%1 · %2 · 1 beat")
                 .arg(QString::fromStdString(lane.name))
                 .arg(QString::fromStdString(formatTick(start, project_->timeBase))));
-        busPresetContextLabel_->setToolTip(
-            tr("Applies from %1 to %2")
-                .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
-                .arg(QString::fromStdString(formatTick(end, project_->timeBase))));
+        auto contextHelp = tr("Applies from %1 to %2")
+                               .arg(QString::fromStdString(formatTick(
+                                   start,
+                                   project_->timeBase)))
+                               .arg(QString::fromStdString(formatTick(
+                                   end,
+                                   project_->timeBase)));
+        if (!enumSymbols.isEmpty()) {
+            contextHelp.append(
+                tr("\nSymbols: %1").arg(enumSymbols.join(QStringLiteral(", "))));
+        }
+        busPresetContextLabel_->setToolTip(contextHelp);
     }
     if (busValueEdit_) {
         const auto* existing = segmentAtTick(lane, *busPresetAnchorTick_);
         busValueEdit_->setText(existing ? QString::fromStdString(existing->value) : QString{});
         busValueEdit_->setModified(false);
-        busValueEdit_->setToolTip(tr("Type a value and press Enter"));
+        busValueEdit_->setPlaceholderText(
+            enumLane ? tr("Symbol or value + Enter") : tr("Value + Enter"));
+        busValueEdit_->setAccessibleName(
+            enumLane ? tr("Enum value") : tr("Bus value"));
+        busValueEdit_->setToolTip(
+            enumLane && !enumSymbols.isEmpty()
+                ? tr("Type a symbol or numeric value and press Enter · symbols: %1")
+                      .arg(enumSymbols.join(QStringLiteral(", ")))
+                : tr("Type a value and press Enter"));
         busValueEdit_->setStyleSheet({});
     }
     positionBusPresetPalette();
@@ -4407,7 +4454,8 @@ void WaveCanvas::submitBusValue()
         return;
     }
     const auto* lane = findLane(*scenario_, busPresetLaneId_);
-    if (!lane || lane->kind != LaneKind::Bus) {
+    if (!lane
+        || (lane->kind != LaneKind::Bus && lane->kind != LaneKind::Enum)) {
         hideBusPresetPalette();
         return;
     }
@@ -4415,7 +4463,10 @@ void WaveCanvas::submitBusValue()
         || *busPresetAnchorTick_ < 0
         || *busPresetAnchorTick_ >= scenario_->duration) {
         const auto message = tr(
-            "This Bus draft is beyond End. Extend the timeline or press Esc to discard it.");
+            "This %1 draft is beyond End. Extend the timeline or press Esc to discard it.")
+                                 .arg(lane->kind == LaneKind::Enum
+                                         ? tr("Enum")
+                                         : tr("Bus"));
         busValueEdit_->setStyleSheet(QStringLiteral(
             "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
             "border-radius: 4px; padding: 3px 6px;"));
@@ -4435,9 +4486,22 @@ void WaveCanvas::submitBusValue()
     const auto value = busValueEdit_->text().trimmed();
     const auto validation = validateLaneValue(*lane, value.toStdString());
     if (value.isEmpty() || !validation.valid) {
-        const auto message = value.isEmpty()
-            ? tr("Enter a bus value.")
+        auto message = value.isEmpty()
+            ? lane->kind == LaneKind::Enum
+                ? tr("Enter an enum symbol or numeric value.")
+                : tr("Enter a bus value.")
             : QString::fromStdString(validation.error);
+        if (lane->kind == LaneKind::Enum
+            && !validation.valid
+            && !lane->enumMap.empty()) {
+            QStringList symbols;
+            for (const auto& [symbol, mappedValue] : lane->enumMap) {
+                Q_UNUSED(mappedValue);
+                symbols.append(QString::fromStdString(symbol));
+            }
+            message.append(
+                tr(" · symbols: %1").arg(symbols.join(QStringLiteral(", "))));
+        }
         busValueEdit_->setStyleSheet(QStringLiteral(
             "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
             "border-radius: 4px; padding: 3px 6px;"));
@@ -4549,7 +4613,10 @@ void WaveCanvas::promptBusValueAt(const std::string& laneId, const Tick tick)
 {
     if (!scenario_) return;
     const auto* lane = findLane(*scenario_, laneId);
-    if (!lane || lane->kind != LaneKind::Bus) return;
+    if (!lane
+        || (lane->kind != LaneKind::Bus && lane->kind != LaneKind::Enum)) {
+        return;
+    }
     showBusPresetPalette(*lane, QPoint(xAtTick(tick), 0), tick);
     if (busValueEdit_) {
         busValueEdit_->setFocus(Qt::OtherFocusReason);
@@ -5474,7 +5541,7 @@ void WaveCanvas::selectAdjacentLane(const bool downward)
                        .arg(ordinal)
                        .arg(total)
                        .arg(laneValueAt(*target, cursorTick_));
-    if (target->kind == LaneKind::Bus) {
+    if (target->kind == LaneKind::Bus || target->kind == LaneKind::Enum) {
         message.append(tr(" · Enter edits value"));
     }
     emit statusMessage(message);
