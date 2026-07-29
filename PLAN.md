@@ -4537,6 +4537,60 @@ Desktop interaction: none
 Packaging: not run during iteration
 ```
 
+## 持续迭代 81：键盘范围直达真实信号边沿
+
+状态：完成，持续迭代中
+
+已交付：
+
+- 开发审计确认 `Ctrl+Left/Right` 已能精确导航真实边沿，`Shift+Left/Right` 已能按 10 ns 固定步进建立范围，但两组修饰键无法组合。对 50 ns Bus Segment、5 ns Clock 半周期或其他非固定步长边界，用户仍需多次按键或切回鼠标命中边沿。
+- Wave Edit 新增 `Ctrl+Shift+Left` / `Ctrl+Shift+Right`：以当前范围活动端或当前编辑光标为起点，严格移动到当前活动信号的前一/后一真实边沿，并按既有锚点规则创建、扩展或收缩显式时间范围。Bit/Bus/Enum 复用 Segment 起止边界，Clock 复用周期上升/下降沿及 Gate/Drive X 覆盖边界。
+- 已有单/多信号目标集合、活动信号、缩放和最小必要滚动语义均保留；固定范围栏同步更新时间、类型与可用操作。无相邻边沿时范围、光标和视口原位不变，状态栏显示信号名、当前位置及 `Shift+Home/End` 时间轴边界路径。
+- 信号标题选中、Up/Down 选择、键盘范围状态及固定范围栏提示公开组合键。画布内 `QLineEdit` 保留 Ctrl+Shift 按词选择，不触发波形范围；拖动或标题重排期间仍需先完成或取消当前手势。选择不写 Scenario、不进入 Undo、不改变 Saved。
+- 扩展 `wave-wave-edit-autoscroll-smoke`：Bus 从 0 ns 以组合键建立 0–50 ns，继续扩至 100 ns，再收回 50 ns；无更早边沿时验证原位反馈。范围值输入框验证组合键只选文本；Clock 验证 0–5 ns 首个半周期边沿。全过程断言信号目标、固定栏、视口、Scenario、Undo、Saved、无模态窗口，并保存第十一张离屏截图。
+
+开发视角验收：
+
+```text
+cmake --build build/qtcreator-debug --target wave-workbench
+Result: success
+
+Core test executable: 26/26 passed
+Million-transition metric: Debug 18 ms / Release 5 ms
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug --output-on-failure
+26/26 tests passed
+Total Test time: 16.24 sec
+
+cmake --build build/qtcreator-release --target wave-workbench
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-release --output-on-failure
+26/26 tests passed
+Total Test time: 15.46 sec
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/qtcreator-debug \
+  -R "^wave-wave-edit-autoscroll-smoke$" --output-on-failure
+1/1 passed
+Total Test time: 2.08 sec
+
+Automated QA: data[7:0] 在 0 ns 按 Ctrl+Shift+Right 后直接得到 0–50 ns，第二次到 100 ns，Ctrl+Shift+Left 收回 50 ns；
+              再向左时范围和光标不变并提示 Shift+Home。范围值输入框中的组合键只选择文本；clk 从 0 ns 一次得到 0–5 ns 半周期范围。
+              所有选择只改变编辑上下文，模型保持 Saved 且无 Undo。
+Offscreen visual QA: build/qtcreator-debug/wave-edit-autoscroll-smoke-keyboard-edge-range.png
+Visual result: 固定范围栏显示 1 Bus 与 0 ps–50 ns；右端手柄精确对齐 data[7:0] 的 50 ns Segment 边沿，采样值、波形、Clock 与纵横网格均清晰可见，无视口跳动或模态窗口。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

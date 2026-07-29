@@ -168,6 +168,11 @@ private:
         Start,
         End,
     };
+    enum class KeyboardRangeTarget {
+        Step,
+        TimelineBoundary,
+        SignalEdge,
+    };
 
     struct SegmentHit {
         const Segment* segment{nullptr};
@@ -275,7 +280,9 @@ private:
     [[nodiscard]] QString markerLocationText(const Marker& marker) const;
     [[nodiscard]] std::string nextLockedMarkerName(bool interval) const;
     [[nodiscard]] Tick cursorKeyboardStep() const;
-    void adjustTimeRangeByKeyboard(bool forward, bool toBoundary = false);
+    void adjustTimeRangeByKeyboard(
+        bool forward,
+        KeyboardRangeTarget target = KeyboardRangeTarget::Step);
     void adjustRangeSignalsByKeyboard(bool downward);
     [[nodiscard]] std::optional<Tick> adjacentEdgeTick(
         const Lane& lane,

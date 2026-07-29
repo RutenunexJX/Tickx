@@ -3963,12 +3963,188 @@ int main(int argc, char* argv[])
                         "Escape did not clear the Ctrl+A multi-signal selection"));
                     return;
                 }
+
+                sendKey(canvas, Qt::Key_Home);
+                clickSignalHeader(laneY);
+                if (!window.statusBar()->currentMessage().contains(
+                        QStringLiteral("Ctrl+Shift+Left/Right selects to edges"))) {
+                    fail(QStringLiteral(
+                        "Signal selection did not disclose keyboard edge-range selection"));
+                    return;
+                }
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                const auto edgeRangeModifiers =
+                    Qt::ControlModifier | Qt::ShiftModifier;
+                sendKey(canvas, Qt::Key_Right, edgeRangeModifiers);
+                QCoreApplication::processEvents();
+                const auto firstBusEdgeRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{0, 50'000}};
+                const auto firstBusEdgeStatus =
+                    window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != firstBusEdgeRange
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-scroll")
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-scroll")}
+                    || canvas->cursorTick() != 50'000
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || !enumRangeContext->text().contains(QStringLiteral("1 Bus"))
+                    || !enumRangeContext->toolTip().contains(
+                        QStringLiteral("Ctrl+Shift+Left/Right selects to signal edges"))
+                    || QApplication::activeModalWidget()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !firstBusEdgeStatus.contains(
+                        QStringLiteral("Keyboard edge range on data[7:0]"))
+                    || !firstBusEdgeStatus.contains(QStringLiteral("50 ns"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+Shift+Right did not select from the cursor to the next Bus edge"));
+                    return;
+                }
+
+                enumRangeValueEdit->setText(QStringLiteral("0xa5"));
+                enumRangeValueEdit->setModified(false);
+                enumRangeValueEdit->setCursorPosition(
+                    enumRangeValueEdit->text().size());
+                enumRangeValueEdit->setFocus(Qt::OtherFocusReason);
+                sendKey(
+                    enumRangeValueEdit,
+                    Qt::Key_Left,
+                    edgeRangeModifiers);
+                QCoreApplication::processEvents();
+                if (enumRangeValueEdit->selectedText().isEmpty()
+                    || canvas->selectedTimeRange() != firstBusEdgeRange
+                    || canvas->cursorTick() != 50'000
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Ctrl+Shift+Left escaped the range value field instead of selecting text"));
+                    return;
+                }
+                enumRangeValueEdit->clear();
+                enumRangeValueEdit->setModified(false);
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+
+                sendKey(canvas, Qt::Key_Right, edgeRangeModifiers);
+                QCoreApplication::processEvents();
+                const auto secondBusEdgeRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{0, 100'000}};
+                if (canvas->selectedTimeRange() != secondBusEdgeRange
+                    || canvas->cursorTick() != 100'000
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-scroll")}
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Repeated Ctrl+Shift+Right did not extend the Bus range to its next edge"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Left, edgeRangeModifiers);
+                QCoreApplication::processEvents();
+                if (canvas->selectedTimeRange() != firstBusEdgeRange
+                    || canvas->cursorTick() != 50'000
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Ctrl+Shift+Left did not shrink the Bus range to its previous edge"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Left, edgeRangeModifiers);
+                QCoreApplication::processEvents();
+                const auto noEarlierBusEdgeStatus =
+                    window.statusBar()->currentMessage();
+                if (canvas->selectedTimeRange() != firstBusEdgeRange
+                    || canvas->cursorTick() != 50'000
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !noEarlierBusEdgeStatus.contains(
+                        QStringLiteral("No earlier edge on data[7:0]"))
+                    || !noEarlierBusEdgeStatus.contains(
+                        QStringLiteral("Shift+Home selects to timeline start"))) {
+                    fail(QStringLiteral(
+                        "Missing earlier Bus edge changed the range or omitted boundary guidance"));
+                    return;
+                }
+                if (!waveEditAutoScrollScreenshotPath.isEmpty()) {
+                    auto edgeRangeScreenshotPath =
+                        waveEditAutoScrollScreenshotPath;
+                    const auto suffix = edgeRangeScreenshotPath.lastIndexOf(
+                        QLatin1Char('.'));
+                    if (suffix >= 0) {
+                        edgeRangeScreenshotPath.insert(
+                            suffix,
+                            QStringLiteral("-keyboard-edge-range"));
+                    } else {
+                        edgeRangeScreenshotPath.append(
+                            QStringLiteral("-keyboard-edge-range.png"));
+                    }
+                    if (!window.grab().save(edgeRangeScreenshotPath)) {
+                        fail(QStringLiteral(
+                            "Cannot save keyboard edge-range screenshot"));
+                        return;
+                    }
+                }
+                sendKey(canvas, Qt::Key_Escape);
+                QCoreApplication::processEvents();
+                if (canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange()
+                    || enumRangePalette->isVisibleTo(&window)
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")) {
+                    fail(QStringLiteral(
+                        "Escape did not clear the keyboard edge range"));
+                    return;
+                }
                 sendKey(canvas, Qt::Key_Home);
                 const auto clockLaneY = 40
                     + scenario.lanes.front().height
                     + scenario.lanes.at(1).height
                     + scenario.lanes.at(2).height
                     + scenario.lanes.back().height / 2;
+                clickSignalHeader(clockLaneY);
+                canvas->setFocus(Qt::OtherFocusReason);
+                canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                sendKey(canvas, Qt::Key_Right, edgeRangeModifiers);
+                QCoreApplication::processEvents();
+                const auto firstClockEdgeRange =
+                    std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{0, 5'000}};
+                const auto clockEdgeRangeStatus =
+                    window.statusBar()->currentMessage();
+                if (!canvas->hasExplicitRangeSelection()
+                    || canvas->selectedTimeRange() != firstClockEdgeRange
+                    || canvas->selectedLaneId()
+                        != QStringLiteral("lane-wave-edit-clock")
+                    || canvas->selectedLaneIds()
+                        != QStringList{QStringLiteral("lane-wave-edit-clock")}
+                    || canvas->cursorTick() != 5'000
+                    || canvas->horizontalScrollBar()->value() != 0
+                    || !enumRangePalette->isVisibleTo(&window)
+                    || QApplication::activeModalWidget()
+                    || scenario != originalScenario
+                    || undoAction->isEnabled()
+                    || saveState->text() != QStringLiteral("Saved")
+                    || !clockEdgeRangeStatus.contains(
+                        QStringLiteral("Keyboard edge range on clk"))
+                    || !clockEdgeRangeStatus.contains(QStringLiteral("5 ns"))) {
+                    fail(QStringLiteral(
+                        "Ctrl+Shift+Right did not select the first Clock half-cycle edge"));
+                    return;
+                }
+                sendKey(canvas, Qt::Key_Escape);
+                sendKey(canvas, Qt::Key_Home);
                 clickSignalHeader(clockLaneY);
                 sendKey(canvas, Qt::Key_Right, Qt::ControlModifier);
                 if (canvas->cursorTick() != 5'000
