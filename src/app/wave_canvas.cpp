@@ -2059,6 +2059,8 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
             selectionMessage.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary · Ctrl+Shift+Left/Right selects to edges · Ctrl+A selects full timeline"));
             if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                 selectionMessage.append(tr(" · Enter edits value"));
+            } else if (lane->kind == LaneKind::Clock) {
+                selectionMessage.append(tr(" · G gates · X drives unknown · R runs"));
             }
         }
         if (lockedMarkerDeselected) {
@@ -2212,58 +2214,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     } else if (chosen == clockDisabled) {
         setLaneRangeValue(lane->id, beatStart, beatEnd, "disabled");
     } else if (chosen == clockRun) {
-        const auto laneId = lane->id;
-        const auto laneName = lane->name;
-        const auto relationCountBefore = scenario_->relations.size();
-        bool changed = false;
-        try {
-            changed = commandStack_->execute(
-                std::make_unique<ClearLaneRangeCommand>(
-                    *scenario_, laneId, beatStart, beatEnd));
-        } catch (const std::exception& exception) {
-            emit statusMessage(
-                tr("Clock not changed · %1")
-                    .arg(QString::fromUtf8(exception.what())));
-            event->accept();
-            return;
-        }
-        selectedLaneId_ = laneId;
-        selectedLaneIds_ = {laneId};
-        laneHeaderSelectionActive_ = false;
-        selectedSegmentLaneId_.clear();
-        selectedSegmentId_.clear();
-        selectionRange_ = std::pair{beatStart, beatEnd};
-        cursorTick_ = beatStart;
-        if (changed) {
-            emit modelEdited();
-            emit commandAvailabilityChanged();
-        }
-        emit selectionChanged(QString::fromStdString(laneId), beatStart);
-        refreshModel();
-        const auto message = changed
-            ? tr("%1 · %2–%3 restored normal clock waveform")
-                  .arg(QString::fromStdString(laneName))
-                  .arg(QString::fromStdString(formatTick(
-                      beatStart,
-                      project_->timeBase)))
-                  .arg(QString::fromStdString(formatTick(
-                      beatEnd,
-                      project_->timeBase)))
-            : tr("%1 · %2–%3 already uses normal clock waveform · no values changed")
-                  .arg(QString::fromStdString(laneName))
-                  .arg(QString::fromStdString(formatTick(
-                      beatStart,
-                      project_->timeBase)))
-                  .arg(QString::fromStdString(formatTick(
-                      beatEnd,
-                      project_->timeBase)));
-        emit statusMessage(
-            changed
-                ? appendRelationAwareUndo(
-                      message,
-                      relationCountBefore,
-                      scenario_->relations.size())
-                : message);
+        clearClockBeat(lane->id, beatStart, beatEnd);
     }
     event->accept();
 }
@@ -2585,6 +2536,8 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                               .arg(laneValueAt(*lane, cursorTick_));
                 if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                     message.append(tr(" · Enter edits value"));
+                } else if (lane->kind == LaneKind::Clock) {
+                    message.append(tr(" · G gates · X drives unknown · R runs"));
                 }
                 emit statusMessage(message);
                 viewport()->update();
@@ -2628,6 +2581,26 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             viewport()->update();
             event->accept();
             return;
+        }
+        if (event->modifiers() == Qt::NoModifier
+            && (event->key() == Qt::Key_G
+                || event->key() == Qt::Key_X
+                || event->key() == Qt::Key_R)) {
+            const auto* lane = findLane(*scenario_, selectedLaneId_);
+            if (lane && lane->kind == LaneKind::Clock) {
+                const auto [start, end] = editableBeatRangeAt(cursorTick_, *lane);
+                if (event->key() == Qt::Key_G) {
+                    static_cast<void>(
+                        setLaneRangeValue(lane->id, start, end, "gated"));
+                } else if (event->key() == Qt::Key_X) {
+                    static_cast<void>(
+                        setLaneRangeValue(lane->id, start, end, "disabled"));
+                } else {
+                    clearClockBeat(lane->id, start, end);
+                }
+                event->accept();
+                return;
+            }
         }
         if (event->modifiers() == Qt::NoModifier
             && (event->key() == Qt::Key_0
@@ -3081,6 +3054,8 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             selectionMessage.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary · Ctrl+Shift+Left/Right selects to edges · Ctrl+A selects full timeline"));
             if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
                 selectionMessage.append(tr(" · Enter edits value"));
+            } else if (lane->kind == LaneKind::Clock) {
+                selectionMessage.append(tr(" · G gates · X drives unknown · R runs"));
             }
         }
         if (lockedMarkerDeselected) {
@@ -5678,6 +5653,74 @@ void WaveCanvas::promptBusValueAt(const std::string& laneId, const Tick tick)
     }
 }
 
+void WaveCanvas::clearClockBeat(
+    const std::string& laneId,
+    const Tick start,
+    const Tick end)
+{
+    if (!scenario_ || !commandStack_ || start < 0 || end <= start
+        || end > scenario_->duration) {
+        return;
+    }
+    const auto* lane = findLane(*scenario_, laneId);
+    if (!lane || lane->kind != LaneKind::Clock) return;
+    const auto laneName = lane->name;
+    const auto relationCountBefore = scenario_->relations.size();
+    bool changed = false;
+    try {
+        changed = commandStack_->execute(
+            std::make_unique<ClearLaneRangeCommand>(
+                *scenario_,
+                laneId,
+                start,
+                end));
+    } catch (const std::exception& exception) {
+        emit statusMessage(
+            tr("Clock not changed · %1")
+                .arg(QString::fromUtf8(exception.what())));
+        return;
+    }
+    selectedLaneId_ = laneId;
+    selectedLaneIds_ = {laneId};
+    laneHeaderSelectionActive_ = false;
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    selectionRange_ = std::pair{start, end};
+    waveEditHoverLaneId_ = laneId;
+    waveEditHoverRange_ = selectionRange_;
+    cursorTick_ = start;
+    if (changed) {
+        emit modelEdited();
+        emit commandAvailabilityChanged();
+    }
+    emit selectionChanged(QString::fromStdString(laneId), start);
+    refreshModel();
+    const auto message = changed
+        ? tr("%1 · %2–%3 restored normal clock waveform")
+              .arg(QString::fromStdString(laneName))
+              .arg(QString::fromStdString(formatTick(
+                  start,
+                  project_->timeBase)))
+              .arg(QString::fromStdString(formatTick(
+                  end,
+                  project_->timeBase)))
+        : tr("%1 · %2–%3 already uses normal clock waveform · no values changed")
+              .arg(QString::fromStdString(laneName))
+              .arg(QString::fromStdString(formatTick(
+                  start,
+                  project_->timeBase)))
+              .arg(QString::fromStdString(formatTick(
+                  end,
+                  project_->timeBase)));
+    emit statusMessage(
+        changed
+            ? appendRelationAwareUndo(
+                  message,
+                  relationCountBefore,
+                  scenario_->relations.size())
+            : message);
+}
+
 bool WaveCanvas::setLaneRangeValue(
     const std::string& laneId,
     const Tick start,
@@ -7158,6 +7201,8 @@ void WaveCanvas::selectAdjacentLane(const bool downward)
     message.append(tr(" · Shift+Left/Right selects time · Shift+Home/End selects to boundary · Ctrl+Shift+Left/Right selects to edges · Ctrl+A selects full timeline"));
     if (target->kind == LaneKind::Bus || target->kind == LaneKind::Enum) {
         message.append(tr(" · Enter edits value"));
+    } else if (target->kind == LaneKind::Clock) {
+        message.append(tr(" · G gates · X drives unknown · R runs"));
     }
     emit statusMessage(message);
     viewport()->setCursor(Qt::PointingHandCursor);

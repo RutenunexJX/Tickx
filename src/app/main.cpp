@@ -7269,6 +7269,75 @@ int main(int argc, char* argv[])
             canvas->fitScenario();
             QCoreApplication::processEvents();
 
+            const auto clockOverrideAtZero = [&window, &quickClock]() {
+                const auto* lane = wave::findLane(
+                    window.project().scenarios.front(),
+                    quickClock.id);
+                if (!lane) return std::string{};
+                const auto segment = std::find_if(
+                    lane->segments.begin(),
+                    lane->segments.end(),
+                    [](const wave::Segment& candidate) {
+                        return candidate.start <= 0 && 0 < candidate.end;
+                    });
+                return segment == lane->segments.end()
+                    ? std::string{}
+                    : segment->value;
+            };
+            canvas->revealLocation(
+                QString::fromStdString(quickClock.id),
+                0);
+            canvas->setFocus(Qt::OtherFocusReason);
+            sendKey(canvas, Qt::Key_G);
+            QCoreApplication::processEvents();
+            if (clockOverrideAtZero() != "gated") {
+                fail(QStringLiteral("Clock G did not gate the current period"));
+                return;
+            }
+            sendKey(canvas, Qt::Key_X);
+            QCoreApplication::processEvents();
+            if (clockOverrideAtZero() != "disabled") {
+                fail(QStringLiteral("Clock X did not drive the current period unknown"));
+                return;
+            }
+            sendKey(canvas, Qt::Key_R);
+            QCoreApplication::processEvents();
+            if (!clockOverrideAtZero().empty()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("restored normal clock waveform"))) {
+                fail(QStringLiteral("Clock R did not restore the current period"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (clockOverrideAtZero() != "disabled") {
+                fail(QStringLiteral("Undo did not restore the Clock X keyboard edit"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (clockOverrideAtZero() != "gated") {
+                fail(QStringLiteral("Undo did not restore the Clock G keyboard edit"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (!clockOverrideAtZero().empty() || !redoAction->isEnabled()) {
+                fail(QStringLiteral("Clock keyboard edits did not undo to the original waveform"));
+                return;
+            }
+            const auto undoTextBeforeNormalClockRun = undoAction->text();
+            sendKey(canvas, Qt::Key_R);
+            QCoreApplication::processEvents();
+            if (!clockOverrideAtZero().empty()
+                || undoAction->text() != undoTextBeforeNormalClockRun
+                || !redoAction->isEnabled()
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("no values changed"))) {
+                fail(QStringLiteral("Clock R on a normal period changed history"));
+                return;
+            }
+
             sendMouse(
                 QEvent::MouseButtonPress,
                 paletteClick,

@@ -237,6 +237,10 @@ private:
     void submitBusValue(BusEditCommitAction action = BusEditCommitAction::Close);
     void submitRangeValue();
     void submitDurationEdit(bool preserveMouseFocusTarget = false);
+    void clearClockBeat(
+        const std::string& laneId,
+        Tick start,
+        Tick end);
     [[nodiscard]] bool hasPendingBusValueEdit() const noexcept;
     [[nodiscard]] bool hasPendingRangeValueEdit() const noexcept;
     [[nodiscard]] bool hasPendingValueEdit() const noexcept;
