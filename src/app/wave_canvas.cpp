@@ -2723,6 +2723,17 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         }
+        if ((event->key() == Qt::Key_BracketLeft
+             || event->key() == Qt::Key_BraceLeft)
+            && (event->modifiers() == Qt::NoModifier
+                || event->modifiers() == Qt::ShiftModifier)
+            && !selectedSegmentId_.empty()) {
+            static_cast<void>(resizeSelectedSegmentBoundary(
+                SegmentBoundary::Start,
+                event->modifiers() == Qt::NoModifier));
+            event->accept();
+            return;
+        }
         if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
             const auto step = cursorKeyboardStep();
             const auto direction = event->key() == Qt::Key_Left ? Tick{-1} : Tick{1};
@@ -6596,6 +6607,147 @@ bool WaveCanvas::nudgeSelectedSegment(const bool forward)
             .arg(forward ? tr("later") : tr("earlier"))
             .arg(formatTime(targetStart))
             .arg(formatTime(targetEnd))
+            .arg(formatTime(unit)),
+        relationCountBefore,
+        scenario_->relations.size()));
+    viewport()->update();
+    return true;
+}
+
+bool WaveCanvas::resizeSelectedSegmentBoundary(
+    const SegmentBoundary boundary,
+    const bool expand)
+{
+    if (!scenario_ || !commandStack_
+        || boundary == SegmentBoundary::None
+        || selectedSegmentLaneId_.empty()
+        || selectedSegmentId_.empty()) {
+        return false;
+    }
+    auto* lane = findLane(*scenario_, selectedSegmentLaneId_);
+    const auto* segment = segmentById(
+        selectedSegmentLaneId_,
+        selectedSegmentId_);
+    if (!lane || !segment || lane->kind == LaneKind::Group) return false;
+
+    const auto current = std::find_if(
+        lane->segments.begin(),
+        lane->segments.end(),
+        [this](const Segment& candidate) {
+            return candidate.id == selectedSegmentId_;
+        });
+    if (current == lane->segments.end()) return false;
+    const auto index = static_cast<std::size_t>(
+        std::distance(lane->segments.begin(), current));
+    const auto unit = minimumWaveEditUnit(*lane);
+    auto targetStart = segment->start;
+    auto targetEnd = segment->end;
+    auto lower = Tick{0};
+    auto upper = scenario_->duration;
+    if (boundary == SegmentBoundary::Start) {
+        if (index > 0) {
+            const auto& previous = lane->segments.at(index - 1);
+            lower = previous.end == segment->start
+                ? previous.start + unit
+                : previous.end;
+        }
+        upper = segment->end - unit;
+        targetStart = expand
+            ? segment->start - unit
+            : segment->start + unit;
+    } else {
+        lower = segment->start + unit;
+        if (index + 1 < lane->segments.size()) {
+            const auto& next = lane->segments.at(index + 1);
+            upper = next.start == segment->end
+                ? next.end - unit
+                : next.start;
+        }
+        targetEnd = expand
+            ? segment->end + unit
+            : segment->end - unit;
+    }
+
+    const auto requested = boundary == SegmentBoundary::Start
+        ? targetStart
+        : targetEnd;
+    const auto formatTime = [this](const Tick tick) {
+        return project_
+            ? QString::fromStdString(formatTick(tick, project_->timeBase))
+            : QString::number(tick);
+    };
+    if (upper < lower || requested < lower || requested > upper) {
+        emit statusMessage(
+            tr("%1 Segment %2 boundary cannot move %3 by %4 · adjacent content or minimum width blocks it")
+                .arg(QString::fromStdString(lane->name))
+                .arg(boundary == SegmentBoundary::Start
+                         ? tr("left")
+                         : tr("right"))
+                .arg(
+                    boundary == SegmentBoundary::Start
+                        ? expand ? tr("earlier") : tr("later")
+                        : expand ? tr("later") : tr("earlier"))
+                .arg(formatTime(unit)));
+        return false;
+    }
+
+    const auto laneId = lane->id;
+    const auto laneName = lane->name;
+    const auto segmentId = segment->id;
+    const auto segmentValue = segment->value;
+    const auto relationCountBefore = scenario_->relations.size();
+    bool changed = false;
+    try {
+        changed = commandStack_->execute(std::make_unique<EditSegmentCommand>(
+            *scenario_,
+            laneId,
+            segmentId,
+            targetStart,
+            targetEnd,
+            segmentValue));
+    } catch (const std::exception& exception) {
+        emit statusMessage(QString::fromUtf8(exception.what()));
+        return false;
+    }
+    if (!changed) {
+        emit statusMessage(
+            tr("%1 Segment boundary is unchanged")
+                .arg(QString::fromStdString(laneName)));
+        return false;
+    }
+
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    refreshModel();
+    selectedLaneId_ = laneId;
+    selectedLaneIds_ = {laneId};
+    laneHeaderSelectionActive_ = false;
+    cursorTick_ = boundary == SegmentBoundary::Start
+        ? targetStart
+        : targetEnd;
+    if (const auto* refreshedLane = findLane(*scenario_, laneId)) {
+        const auto midpoint =
+            targetStart + (targetEnd - targetStart) / 2;
+        if (const auto* target = segmentAtTick(*refreshedLane, midpoint)) {
+            selectedSegmentLaneId_ = laneId;
+            selectedSegmentId_ = target->id;
+            selectionRange_ = std::pair{targetStart, targetEnd};
+        }
+    }
+    ensureCursorVisible(cursorTick_);
+    emit selectionChanged(QString::fromStdString(laneId), cursorTick_);
+    emit statusMessage(appendRelationAwareUndo(
+        tr("%1 Segment %2 boundary moved %3 to %4 · width %5 · step %6")
+            .arg(QString::fromStdString(laneName))
+            .arg(boundary == SegmentBoundary::Start
+                     ? tr("left")
+                     : tr("right"))
+            .arg(
+                boundary == SegmentBoundary::Start
+                    ? expand ? tr("earlier") : tr("later")
+                    : expand ? tr("later") : tr("earlier"))
+            .arg(formatTime(requested))
+            .arg(formatTime(targetEnd - targetStart))
             .arg(formatTime(unit)),
         relationCountBefore,
         scenario_->relations.size()));

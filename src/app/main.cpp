@@ -8266,6 +8266,8 @@ int main(int argc, char* argv[])
                 navigationSource->end,
             };
             const auto navigationSourceValue = navigationSource->value;
+            const auto navigationSourceExtensions =
+                navigationSource->extensions;
             sendMouse(
                 QEvent::MouseButtonPress,
                 copySourcePoint,
@@ -8559,8 +8561,104 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            const auto beforeLeftBoundaryKeyboardEdit =
+                window.project().scenarios.front();
+            sendKey(canvas, Qt::Key_BracketLeft);
+            QCoreApplication::processEvents();
+            auto* busAfterLeftBoundary = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto expandedLeftSegment = busAfterLeftBoundary
+                ? std::find_if(
+                      busAfterLeftBoundary->segments.begin(),
+                      busAfterLeftBoundary->segments.end(),
+                      [presetStart, expectedBeat](
+                          const wave::Segment& candidate) {
+                          return candidate.start
+                                  == presetStart - expectedBeat
+                              && candidate.end
+                                  == presetStart + expectedBeat;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (!busAfterLeftBoundary
+                || expandedLeftSegment
+                    == busAfterLeftBoundary->segments.end()
+                || expandedLeftSegment->value != navigationSourceValue
+                || expandedLeftSegment->extensions
+                    != navigationSourceExtensions
+                || canvas->selectedTimeRange()
+                    != std::optional<std::pair<wave::Tick, wave::Tick>>{
+                        std::pair<wave::Tick, wave::Tick>{
+                            presetStart - expectedBeat,
+                            presetStart + expectedBeat}}
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("left boundary moved earlier"))) {
+                fail(QStringLiteral(
+                    "[ did not expand the selected Segment left boundary by one Sync beat"));
+                return;
+            }
+            const auto afterLeftBoundaryExpansion =
+                window.project().scenarios.front();
+            sendKey(
+                canvas,
+                Qt::Key_BracketLeft,
+                Qt::ShiftModifier);
+            QCoreApplication::processEvents();
+            busAfterLeftBoundary = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto trimmedLeftSegment = busAfterLeftBoundary
+                ? std::find_if(
+                      busAfterLeftBoundary->segments.begin(),
+                      busAfterLeftBoundary->segments.end(),
+                      [presetStart, expectedBeat](
+                          const wave::Segment& candidate) {
+                          return candidate.start == presetStart
+                              && candidate.end
+                                  == presetStart + expectedBeat;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (!busAfterLeftBoundary
+                || trimmedLeftSegment
+                    == busAfterLeftBoundary->segments.end()
+                || trimmedLeftSegment->value != navigationSourceValue
+                || trimmedLeftSegment->extensions
+                    != navigationSourceExtensions
+                || !window.statusBar()->currentMessage().contains(
+                    QStringLiteral("left boundary moved later"))) {
+                fail(QStringLiteral(
+                    "Shift+[ did not trim the selected Segment left boundary by one Sync beat"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front()
+                != afterLeftBoundaryExpansion) {
+                fail(QStringLiteral(
+                    "Left-boundary trim was not one atomic Undo"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            if (window.project().scenarios.front()
+                != beforeLeftBoundaryKeyboardEdit) {
+                fail(QStringLiteral(
+                    "Left-boundary expansion was not one atomic Undo"));
+                return;
+            }
+            sendMouse(
+                QEvent::MouseButtonPress,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+
             const auto nudgeSourceValue = navigationSourceValue;
-            const auto nudgeSourceExtensions = navigationSource->extensions;
+            const auto nudgeSourceExtensions =
+                navigationSourceExtensions;
             const auto beforeSegmentNudge =
                 window.project().scenarios.front();
             sendKey(

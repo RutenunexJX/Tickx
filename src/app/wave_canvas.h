@@ -299,6 +299,9 @@ private:
     bool duplicateSelectedSegment(bool after);
     bool duplicateSelectedSegmentBefore();
     bool nudgeSelectedSegment(bool forward);
+    bool resizeSelectedSegmentBoundary(
+        SegmentBoundary boundary,
+        bool expand);
     void updateLaneDropTarget(int y);
     void updateLaneDragAutoScroll(int pointerY);
     void advanceLaneDragAutoScroll();
