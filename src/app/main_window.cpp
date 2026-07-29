@@ -4689,6 +4689,36 @@ void MainWindow::createToolBars()
             5'000);
     });
 
+    asyncTimingAction_ = editBar->addAction(tr("Sync"));
+    asyncTimingAction_->setObjectName(QStringLiteral("AsyncTimingAction"));
+    asyncTimingAction_->setCheckable(true);
+    asyncTimingAction_->setChecked(false);
+    asyncTimingAction_->setToolTip(
+        tr("Sync: edits use one associated-clock beat. Click to allow asynchronous tick offsets."));
+    connect(asyncTimingAction_, &QAction::toggled, this, [this](const bool enabled) {
+        if (!canvas_->commitPendingInlineEdits()) {
+            const QSignalBlocker blocker(asyncTimingAction_);
+            asyncTimingAction_->setChecked(!enabled);
+            return;
+        }
+        canvas_->setAsynchronousEditing(enabled);
+        asyncTimingAction_->setText(enabled ? tr("Async") : tr("Sync"));
+        asyncTimingAction_->setToolTip(
+            enabled
+                ? tr("Async: edges may use arbitrary ticks with light snapping. Click for one-beat Sync editing.")
+                : tr("Sync: edits use one associated-clock beat. Click to allow asynchronous tick offsets."));
+    });
+
+    auto* busEditPalette = canvas_->busEditPaletteWidget();
+    busEditPaletteAction_ = editBar->addWidget(busEditPalette);
+    busEditPaletteAction_->setObjectName(QStringLiteral("BusEditToolbarAction"));
+    busEditPaletteAction_->setVisible(false);
+    connect(
+        canvas_,
+        &WaveCanvas::busEditPaletteVisibilityChanged,
+        busEditPaletteAction_,
+        &QAction::setVisible);
+
     auto* rangeEditPalette = canvas_->rangeEditPaletteWidget();
     rangeEditPaletteAction_ = editBar->addWidget(rangeEditPalette);
     rangeEditPaletteAction_->setObjectName(QStringLiteral("RangeEditToolbarAction"));

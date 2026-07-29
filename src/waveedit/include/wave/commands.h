@@ -171,7 +171,8 @@ public:
         std::string segmentId,
         Tick start,
         Tick end,
-        std::string value);
+        std::string value,
+        std::optional<JsonExtensions> extensions = std::nullopt);
 
     void redo() override;
     void undo() override;
@@ -184,6 +185,32 @@ private:
     Tick start_;
     Tick end_;
     std::string value_;
+    std::optional<JsonExtensions> extensions_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class CopySegmentCommand final : public EditCommand {
+public:
+    CopySegmentCommand(
+        Scenario& scenario,
+        std::string laneId,
+        std::string sourceSegmentId,
+        Tick start,
+        Tick end);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::string laneId_;
+    std::string value_;
+    JsonExtensions extensions_;
+    Tick start_;
+    Tick end_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
 };

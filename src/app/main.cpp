@@ -1122,9 +1122,8 @@ int main(int argc, char* argv[])
 
                 const auto busY = laneCenter(busLaneId);
                 click(QPoint(xAtTick(70'000), busY));
-                auto* palette = canvas->findChild<QWidget*>(QStringLiteral("BusPresetPalette"));
-                auto* busValue = canvas->findChild<QLineEdit*>(
-                    QStringLiteral("BusPresetValueEdit"));
+                auto* palette = window.findChild<QWidget*>(QStringLiteral("BusPresetPalette"));
+                auto* busValue = window.findChild<QLineEdit*>(QStringLiteral("BusPresetValueEdit"));
                 if (!palette || !palette->isVisible() || !busValue) {
                     fail(QStringLiteral("Bus click did not expose nearby direct controls"));
                     return;
@@ -2239,8 +2238,7 @@ int main(int argc, char* argv[])
                     QStringLiteral("GoToTimeCloseButton"));
                 auto* signalFindToolbarAction = window.findChild<QAction*>(
                     QStringLiteral("SignalFindToolbarAction"));
-                auto* goToBusPalette = canvas->findChild<QWidget*>(
-                    QStringLiteral("BusPresetPalette"));
+                auto* goToBusPalette = window.findChild<QWidget*>(QStringLiteral("BusPresetPalette"));
                 auto fail = [&application, &window](const QString& message) {
                     qCritical().noquote() << message;
                     window.hide();
@@ -3049,19 +3047,13 @@ int main(int argc, char* argv[])
 
                 sendKey(canvas, Qt::Key_Return);
                 QCoreApplication::processEvents();
-                auto* busPalette = canvas->findChild<QWidget*>(
-                    QStringLiteral("BusPresetPalette"));
-                auto* busValueEdit = canvas->findChild<QLineEdit*>(
-                    QStringLiteral("BusPresetValueEdit"));
+                auto* busPalette = window.findChild<QWidget*>(QStringLiteral("BusPresetPalette"));
+                auto* busValueEdit = window.findChild<QLineEdit*>(QStringLiteral("BusPresetValueEdit"));
                 const std::array<QToolButton*, 4> busPresetButtons{
-                    canvas->findChild<QToolButton*>(
-                        QStringLiteral("BusPresetZeroButton")),
-                    canvas->findChild<QToolButton*>(
-                        QStringLiteral("BusPresetXButton")),
-                    canvas->findChild<QToolButton*>(
-                        QStringLiteral("BusPresetZButton")),
-                    canvas->findChild<QToolButton*>(
-                        QStringLiteral("BusPresetDontCareButton")),
+                    window.findChild<QToolButton*>(QStringLiteral("BusPresetZeroButton")),
+                    window.findChild<QToolButton*>(QStringLiteral("BusPresetXButton")),
+                    window.findChild<QToolButton*>(QStringLiteral("BusPresetZButton")),
+                    window.findChild<QToolButton*>(QStringLiteral("BusPresetDontCareButton")),
                 };
                 const auto busPresetsVisible = std::all_of(
                     busPresetButtons.begin(),
@@ -3204,8 +3196,7 @@ int main(int argc, char* argv[])
                 canvas->setFocus(Qt::OtherFocusReason);
                 sendKey(canvas, Qt::Key_Return);
                 QCoreApplication::processEvents();
-                auto* enumContext = canvas->findChild<QLabel*>(
-                    QStringLiteral("BusPresetContextLabel"));
+                auto* enumContext = window.findChild<QLabel*>(QStringLiteral("BusPresetContextLabel"));
                 auto* enumCompleter = busValueEdit->completer();
                 QStringList enumCompletions;
                 if (enumCompleter && enumCompleter->model()) {
@@ -6552,6 +6543,8 @@ int main(int argc, char* argv[])
                 QStringLiteral("DuplicateLaneAction"));
             auto* measureAction = window.findChild<QAction*>(
                 QStringLiteral("MeasureToolAction"));
+            auto* asyncTimingAction = window.findChild<QAction*>(
+                QStringLiteral("AsyncTimingAction"));
             const auto toolbarActions = waveformToolbar
                 ? waveformToolbar->actions()
                 : QList<QAction*>{};
@@ -6581,9 +6574,13 @@ int main(int argc, char* argv[])
                 || !cutRangeAction
                 || !duplicateLaneAction
                 || !measureAction
+                || !asyncTimingAction
                 || window.findChild<QAction*>(QStringLiteral("WaveEditToolAction"))
-                || checkableModeCount != 1
+                || checkableModeCount != 2
                 || measureAction->isChecked()
+                || asyncTimingAction->isChecked()
+                || asyncTimingAction->text() != QStringLiteral("Sync")
+                || canvas->asynchronousEditing()
                 || measureAction->shortcut().matches(QKeySequence(Qt::CTRL | Qt::Key_M))
                     != QKeySequence::ExactMatch
                 || canvas->tool() != wave::WaveCanvas::Tool::WaveEdit
@@ -6689,14 +6686,15 @@ int main(int argc, char* argv[])
                                        const QEvent::Type type,
                                        const QPoint position,
                                        const Qt::MouseButton button,
-                                       const Qt::MouseButtons buttons) {
+                                       const Qt::MouseButtons buttons,
+                                       const Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
                 QMouseEvent event(
                     type,
                     QPointF(position),
                     QPointF(canvas->viewport()->mapToGlobal(position)),
                     button,
                     buttons,
-                    Qt::NoModifier);
+                    modifiers);
                 QCoreApplication::sendEvent(canvas->viewport(), &event);
             };
             const auto clickHeader = [&sendMouse](const QPoint position) {
@@ -6768,25 +6766,29 @@ int main(int argc, char* argv[])
                 Qt::LeftButton,
                 Qt::NoButton);
             QCoreApplication::processEvents();
-            auto* presetPalette = canvas->findChild<QWidget*>(
-                QStringLiteral("BusPresetPalette"));
+            auto* presetPalette = window.findChild<QWidget*>(QStringLiteral("BusPresetPalette"));
             const std::array<QToolButton*, 4> presetButtons{
-                canvas->findChild<QToolButton*>(QStringLiteral("BusPresetZeroButton")),
-                canvas->findChild<QToolButton*>(QStringLiteral("BusPresetXButton")),
-                canvas->findChild<QToolButton*>(QStringLiteral("BusPresetZButton")),
-                canvas->findChild<QToolButton*>(QStringLiteral("BusPresetDontCareButton")),
+                window.findChild<QToolButton*>(QStringLiteral("BusPresetZeroButton")),
+                window.findChild<QToolButton*>(QStringLiteral("BusPresetXButton")),
+                window.findChild<QToolButton*>(QStringLiteral("BusPresetZButton")),
+                window.findChild<QToolButton*>(QStringLiteral("BusPresetDontCareButton")),
             };
-            auto* directValue = canvas->findChild<QLineEdit*>(
-                QStringLiteral("BusPresetValueEdit"));
-            auto* contextLabel = canvas->findChild<QLabel*>(
-                QStringLiteral("BusPresetContextLabel"));
+            auto* directValue = window.findChild<QLineEdit*>(QStringLiteral("BusPresetValueEdit"));
+            auto* radixCombo = window.findChild<QComboBox*>(QStringLiteral("BusEditRadixCombo"));
+            auto* recentValues = window.findChild<QComboBox*>(QStringLiteral("BusEditRecentValuesCombo"));
+            auto* contextLabel = window.findChild<QLabel*>(QStringLiteral("BusPresetContextLabel"));
             if (!presetPalette
                 || !presetPalette->isVisible()
                 || !directValue
                 || !directValue->isVisible()
+                || !radixCombo
+                || !radixCombo->isVisible()
+                || radixCombo->currentText() != QStringLiteral("HEX")
+                || !recentValues
+                || !recentValues->isVisible()
                 || !contextLabel
                 || !contextLabel->text().contains(QString::fromStdString(quickBus.name))
-                || canvas->findChild<QToolButton*>(QStringLiteral("BusPresetCustomButton"))
+                || window.findChild<QToolButton*>(QStringLiteral("BusPresetCustomButton"))
                 || std::any_of(
                     presetButtons.begin(),
                     presetButtons.end(),
@@ -6836,7 +6838,7 @@ int main(int argc, char* argv[])
                 Qt::LeftButton,
                 Qt::NoButton);
             QCoreApplication::processEvents();
-            directValue->setText(QStringLiteral("0x2a"));
+            directValue->setText(QStringLiteral("2a"));
             QKeyEvent valueEnter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
             QCoreApplication::sendEvent(directValue, &valueEnter);
             QCoreApplication::processEvents();
@@ -6862,6 +6864,12 @@ int main(int argc, char* argv[])
                 Qt::LeftButton,
                 Qt::NoButton);
             QCoreApplication::processEvents();
+            if (!recentValues->isVisible()
+                || !recentValues->isEnabled()
+                || recentValues->findText(QStringLiteral("0x2a")) <= 0) {
+                fail(QStringLiteral("Bus recent values did not retain the normalized per-signal value"));
+                return;
+            }
             directValue->setText(QStringLiteral("0x3c"));
             directValue->setModified(true);
             clickHeader(QPoint(80, laneCenter(quickBit.id)));
@@ -7068,6 +7076,40 @@ int main(int argc, char* argv[])
                 Qt::NoModifier);
             QCoreApplication::sendEvent(canvas->viewport(), &drop);
             QCoreApplication::processEvents();
+            if (dragEnter.isAccepted() || drop.isAccepted()) {
+                fail(QStringLiteral("Removed Bus preset drag/drop interaction is still active"));
+                return;
+            }
+
+            sendMouse(
+                QEvent::MouseButtonPress,
+                presetDropPoint,
+                Qt::LeftButton,
+                Qt::LeftButton);
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                presetDropPoint,
+                Qt::LeftButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            auto* busToolbarAction = window.findChild<QAction*>(
+                QStringLiteral("BusEditToolbarAction"));
+            const auto paletteGlobal = QRect(
+                presetPalette->mapToGlobal(QPoint(0, 0)),
+                presetPalette->size());
+            const auto viewportGlobal = QRect(
+                canvas->viewport()->mapToGlobal(QPoint(0, 0)),
+                canvas->viewport()->size());
+            if (!presetPalette->isVisible()
+                || !busToolbarAction
+                || !busToolbarAction->isVisible()
+                || paletteGlobal.intersects(viewportGlobal)
+                || !contextLabel->text().contains(QStringLiteral("Beat"))) {
+                fail(QStringLiteral("Bus editor is not fixed in the toolbar with an explicit Beat target"));
+                return;
+            }
+            presetButtons.back()->click();
+            QCoreApplication::processEvents();
             auto* busAfterPreset = wave::findLane(
                 window.project().scenarios.front(), quickBus.id);
             const auto presetSegment = busAfterPreset
@@ -7086,9 +7128,7 @@ int main(int argc, char* argv[])
                 wave::TimeUnit::Nanosecond,
                 window.project().timeBase).value_or(0);
             const auto presetSelection = canvas->selectedTimeRange();
-            if (!dragEnter.isAccepted()
-                || !drop.isAccepted()
-                || !busAfterPreset
+            if (!busAfterPreset
                 || presetSegment == busAfterPreset->segments.end()
                 || presetSegment->end - presetSegment->start != expectedBeat
                 || presetSegment->value != "0bxxxxxxxx"
@@ -7100,7 +7140,7 @@ int main(int argc, char* argv[])
                         presetSegment->start,
                         presetSegment->end,
                     }) {
-                fail(QStringLiteral("Bus quick-value drop did not create one persisted beat"));
+                fail(QStringLiteral("Bus Don't care button did not create one semantic beat"));
                 return;
             }
             const auto presetStart = presetSegment->start;
@@ -7109,7 +7149,7 @@ int main(int argc, char* argv[])
             busAfterPreset = wave::findLane(
                 window.project().scenarios.front(), quickBus.id);
             if (!busAfterPreset || !busAfterPreset->segments.empty()) {
-                fail(QStringLiteral("Bus quick-value drop undo failed"));
+                fail(QStringLiteral("Bus Don't care undo failed"));
                 return;
             }
             redoAction->trigger();
@@ -7117,15 +7157,142 @@ int main(int argc, char* argv[])
             busAfterPreset = wave::findLane(
                 window.project().scenarios.front(), quickBus.id);
             if (!busAfterPreset || busAfterPreset->segments.empty()) {
-                fail(QStringLiteral("Bus quick-value drop redo failed"));
+                fail(QStringLiteral("Bus Don't care redo failed"));
                 return;
             }
+
+            const auto timelineDuration = window.project().scenarios.front().duration;
+            const auto tickX = [canvas, timelineDuration](const wave::Tick tick) {
+                return 190 + static_cast<int>(std::llround(
+                    static_cast<double>(tick)
+                    / static_cast<double>(timelineDuration)
+                    * static_cast<double>(canvas->viewport()->width() - 190)))
+                    - canvas->horizontalScrollBar()->value();
+            };
+            const auto forwardCopyStart = presetStart + 3 * expectedBeat;
+            const auto copyStart = forwardCopyStart + expectedBeat <= timelineDuration
+                ? forwardCopyStart
+                : presetStart - 3 * expectedBeat;
+            const QPoint copySourcePoint(
+                tickX(presetStart + expectedBeat / 2),
+                presetBusY);
+            const QPoint copyTargetPoint(
+                tickX(copyStart + expectedBeat / 2),
+                presetBusY);
+            sendMouse(
+                QEvent::MouseButtonPress,
+                copySourcePoint,
+                Qt::LeftButton,
+                Qt::LeftButton,
+                Qt::ControlModifier);
+            sendMouse(
+                QEvent::MouseMove,
+                copyTargetPoint,
+                Qt::NoButton,
+                Qt::LeftButton,
+                Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            const auto copyPreview = canvas->selectedTimeRange();
+            if (!copyPreview
+                || copyPreview->first != copyStart
+                || copyPreview->second != copyStart + expectedBeat) {
+                fail(QStringLiteral("Ctrl+drag did not show a one-beat Sync copy preview"));
+                return;
+            }
+            if (!canvasAddLaneScreenshotPath.isEmpty()) {
+                auto copyPreviewScreenshotPath = canvasAddLaneScreenshotPath;
+                const auto suffix = copyPreviewScreenshotPath.lastIndexOf(QLatin1Char('.'));
+                if (suffix >= 0) {
+                    copyPreviewScreenshotPath.insert(
+                        suffix,
+                        QStringLiteral("-ctrl-drag-copy-preview"));
+                } else {
+                    copyPreviewScreenshotPath.append(
+                        QStringLiteral("-ctrl-drag-copy-preview.png"));
+                }
+                if (!window.grab().save(copyPreviewScreenshotPath)) {
+                    fail(QStringLiteral("Cannot save Ctrl+drag copy preview screenshot"));
+                    return;
+                }
+            }
+            sendMouse(
+                QEvent::MouseButtonRelease,
+                copyTargetPoint,
+                Qt::LeftButton,
+                Qt::NoButton,
+                Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            busAfterPreset = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            const auto sourceAfterCopy = busAfterPreset
+                ? std::find_if(
+                      busAfterPreset->segments.begin(),
+                      busAfterPreset->segments.end(),
+                      [presetStart](const wave::Segment& segment) {
+                          return segment.start <= presetStart
+                              && presetStart < segment.end;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            const auto targetAfterCopy = busAfterPreset
+                ? std::find_if(
+                      busAfterPreset->segments.begin(),
+                      busAfterPreset->segments.end(),
+                      [copyStart](const wave::Segment& segment) {
+                          return segment.start <= copyStart
+                              && copyStart < segment.end;
+                      })
+                : std::vector<wave::Segment>::iterator{};
+            if (!busAfterPreset
+                || sourceAfterCopy == busAfterPreset->segments.end()
+                || targetAfterCopy == busAfterPreset->segments.end()
+                || sourceAfterCopy->extensions.find("waveWorkbench.busPreset")
+                    == sourceAfterCopy->extensions.end()
+                || targetAfterCopy->extensions.find("waveWorkbench.busPreset")
+                    == targetAfterCopy->extensions.end()) {
+                fail(QStringLiteral("Ctrl+drag copy did not retain source and semantic metadata"));
+                return;
+            }
+            undoAction->trigger();
+            QCoreApplication::processEvents();
+            busAfterPreset = wave::findLane(
+                window.project().scenarios.front(), quickBus.id);
+            if (!busAfterPreset
+                || std::any_of(
+                    busAfterPreset->segments.begin(),
+                    busAfterPreset->segments.end(),
+                    [copyStart](const wave::Segment& segment) {
+                        return segment.start <= copyStart && copyStart < segment.end;
+                    })) {
+                fail(QStringLiteral("Ctrl+drag copy undo did not remove only the target"));
+                return;
+            }
+            redoAction->trigger();
+            QCoreApplication::processEvents();
 
             const auto edgeX = 190 + static_cast<int>(std::llround(
                 static_cast<double>(presetStart)
                 / static_cast<double>(window.project().scenarios.front().duration)
                 * static_cast<double>(canvas->viewport()->width() - 190)))
                 - canvas->horizontalScrollBar()->value();
+            sendMouse(
+                QEvent::MouseMove,
+                QPoint(edgeX + 24, presetBusY),
+                Qt::NoButton,
+                Qt::NoButton);
+            QCoreApplication::processEvents();
+            if (canvas->cursorTick() % expectedBeat != 0) {
+                fail(QStringLiteral("Default Sync mode did not hard-quantize the edit cursor to a beat"));
+                return;
+            }
+
+            asyncTimingAction->trigger();
+            QCoreApplication::processEvents();
+            if (!asyncTimingAction->isChecked()
+                || asyncTimingAction->text() != QStringLiteral("Async")
+                || !canvas->asynchronousEditing()) {
+                fail(QStringLiteral("Async mode did not activate from the toolbar"));
+                return;
+            }
             auto capturedNearbyEdge = false;
             for (auto offset = -16; offset <= 16 && !capturedNearbyEdge; ++offset) {
                 sendMouse(
@@ -7137,7 +7304,7 @@ int main(int argc, char* argv[])
                 capturedNearbyEdge = canvas->cursorTick() == presetStart;
             }
             if (!capturedNearbyEdge) {
-                fail(QStringLiteral("Soft snapping did not capture a nearby signal edge"));
+                fail(QStringLiteral("Async light snapping did not capture a nearby signal edge"));
                 return;
             }
             sendMouse(
@@ -7147,7 +7314,7 @@ int main(int argc, char* argv[])
                 Qt::NoButton);
             QCoreApplication::processEvents();
             if (canvas->cursorTick() == presetStart) {
-                fail(QStringLiteral("Soft snapping remained active outside its pixel radius"));
+                fail(QStringLiteral("Async light snapping remained active outside its pixel radius"));
                 return;
             }
 
@@ -7168,10 +7335,16 @@ int main(int argc, char* argv[])
                 capturedNearbyTick = canvas->cursorTick() == rulerTick;
             }
             if (!capturedNearbyTick) {
-                fail(QStringLiteral("Soft snapping did not capture a nearby ruler tick"));
+                fail(QStringLiteral("Async light snapping did not capture a nearby ruler tick"));
                 return;
             }
-
+            asyncTimingAction->trigger();
+            QCoreApplication::processEvents();
+            if (canvas->asynchronousEditing()
+                || asyncTimingAction->text() != QStringLiteral("Sync")) {
+                fail(QStringLiteral("Sync mode did not restore from the toolbar"));
+                return;
+            }
             bool waveformMenuHandled = false;
             QTimer::singleShot(0, &application, [&application, &waveformMenuHandled] {
                 auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
@@ -7921,10 +8094,8 @@ int main(int argc, char* argv[])
                 QStringLiteral("QuickLaneNameEdit"));
             auto* transactionError = canvas->findChild<QLabel*>(
                 QStringLiteral("QuickLaneSetupError"));
-            auto* transactionBusPalette = canvas->findChild<QWidget*>(
-                QStringLiteral("BusPresetPalette"));
-            auto* transactionBusPreset = canvas->findChild<QToolButton*>(
-                QStringLiteral("BusPresetXButton"));
+            auto* transactionBusPalette = window.findChild<QWidget*>(QStringLiteral("BusPresetPalette"));
+            auto* transactionBusPreset = window.findChild<QToolButton*>(QStringLiteral("BusPresetXButton"));
             if (!transactionPanel
                 || !transactionName
                 || !transactionError
@@ -8596,8 +8767,7 @@ int main(int argc, char* argv[])
                 canvas->verticalScrollBar()->setValue(0);
                 QCoreApplication::processEvents();
                 const auto dataY = laneCenter("lane-data");
-                auto* busPresetPalette = canvas->findChild<QWidget*>(
-                    QStringLiteral("BusPresetPalette"));
+                auto* busPresetPalette = window.findChild<QWidget*>(QStringLiteral("BusPresetPalette"));
                 if (dataY < 0 || !busPresetPalette) {
                     qCritical().noquote() << "Measure isolation controls are missing";
                     window.hide();
@@ -9733,36 +9903,73 @@ int main(int argc, char* argv[])
                 }
                 const auto payloadEditTick = payload->start + moveWidth / 2;
 
-                bool valueDialogHandled = false;
-                QTimer::singleShot(0, &window, [&valueDialogHandled] {
-                    auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-                    auto* edit = dialog ? dialog->findChild<QLineEdit*>() : nullptr;
-                    if (!dialog || !edit) return;
-                    edit->setText(QStringLiteral("0x2a"));
-                    valueDialogHandled = true;
-                    dialog->accept();
-                });
+                window.activateWindow();
+                canvas->setFocus(Qt::OtherFocusReason);
+                QCoreApplication::processEvents();
                 sendMouse(
                     QEvent::MouseButtonDblClick,
                     QPoint(xAtTick(payloadEditTick), dataY),
                     Qt::LeftButton,
                     Qt::LeftButton);
+                sendMouse(
+                    QEvent::MouseButtonRelease,
+                    QPoint(xAtTick(payloadEditTick), dataY),
+                    Qt::LeftButton,
+                    Qt::NoButton);
+                QCoreApplication::processEvents();
+                auto* segmentEditor = window.findChild<QLineEdit*>(
+                    QStringLiteral("BusPresetValueEdit"));
+                auto* segmentContext = window.findChild<QLabel*>(
+                    QStringLiteral("BusPresetContextLabel"));
+                auto* segmentPalette = window.findChild<QWidget*>(
+                    QStringLiteral("BusPresetPalette"));
+                if (!segmentEditor
+                    || !segmentContext
+                    || !segmentPalette
+                    || !segmentPalette->isVisible()
+                    || !segmentEditor->hasFocus()
+                    || segmentEditor->text() != QStringLiteral("0x35")
+                    || !segmentContext->text().contains(QStringLiteral("Segment"))) {
+                    qCritical().noquote()
+                        << "Double click editor diagnostics"
+                        << "editor" << static_cast<bool>(segmentEditor)
+                        << "context" << static_cast<bool>(segmentContext)
+                        << "palette" << static_cast<bool>(segmentPalette)
+                        << "visible" << (segmentPalette && segmentPalette->isVisible())
+                        << "focus" << (segmentEditor && segmentEditor->hasFocus())
+                        << "text" << (segmentEditor ? segmentEditor->text() : QStringLiteral("<missing>"))
+                        << "contextText" << (segmentContext ? segmentContext->text() : QStringLiteral("<missing>"))
+                        << "focusWidget" << (QApplication::focusWidget() ? QApplication::focusWidget()->objectName() : QStringLiteral("<none>"))
+                        << "editorEnabled" << (segmentEditor && segmentEditor->isEnabled())
+                        << "selected" << canvas->selectedSegmentId()
+                        << "tick" << payloadEditTick;
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                segmentEditor->setText(QStringLiteral("0x2a"));
+                segmentEditor->setModified(true);
+                QKeyEvent segmentEnter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+                QCoreApplication::sendEvent(segmentEditor, &segmentEnter);
                 QCoreApplication::processEvents();
                 dataLane = wave::findLane(scenario, "lane-data");
-                if (!valueDialogHandled || !dataLane
+                if (segmentPalette->isVisible()
+                    || !dataLane
                     || valueAt(*dataLane, payloadEditTick) != "0x2a"
+                    || canvas->selectedSegmentId()
+                        != QStringLiteral("segment-data-payload")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("data[7:0]"))
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("= 0x2a"))
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Ctrl+Z"))) {
-                    qCritical().noquote() << "Double click did not edit the existing segment value";
+                    qCritical().noquote()
+                        << "Double click did not edit the existing Segment inline";
                     window.hide();
                     application.exit(4);
                     return;
                 }
-
                 const auto payloadEvent = std::find_if(
                     scenario.events.begin(),
                     scenario.events.end(),
@@ -12011,13 +12218,20 @@ int main(int argc, char* argv[])
                 const auto durableLane = durableLanes.size() == 1
                     ? durableLanes.first().toObject()
                     : QJsonObject{};
+                bool validDurableDuration = false;
+                const auto durableDuration =
+                    durableRoot.value(QStringLiteral("durationTick"))
+                        .toString()
+                        .toLongLong(&validDurableDuration);
                 if (durableRoot.value(QStringLiteral("schemaVersion")).toInt(-1) != 2
                     || durableLane.value(QStringLiteral("name")).toString()
                         != QStringLiteral("req")
                     || durableLane.value(QStringLiteral("kind")).toString()
                         != QStringLiteral("bit")
                     || durableLane.value(QStringLiteral("width")).toString()
-                        != QStringLiteral("1")) {
+                        != QStringLiteral("1")
+                    || !validDurableDuration
+                    || durableDuration != 10'000) {
                     qCritical().noquote()
                         << "Clipboard range is not a self-describing snapshot";
                     window.hide();
@@ -12026,13 +12240,16 @@ int main(int argc, char* argv[])
                 }
 
                 const auto endBeforeExtendedPaste = scenario.duration;
-                const auto nearEndPasteStart = endBeforeExtendedPaste - 5'000;
-                const auto expectedExtendedEnd = endBeforeExtendedPaste + 5'000;
+                const auto nearEndPasteStart = endBeforeExtendedPaste;
+                const auto expectedExtendedEnd =
+                    endBeforeExtendedPaste + durableDuration;
                 const auto extendedProbeTick = endBeforeExtendedPaste + 2'000;
                 const auto expectedExtendedEndLabel = QString::fromStdString(
                     wave::formatTick(expectedExtendedEnd, window.project().timeBase));
                 if (!chooseWaveformAction(
-                        QPoint(xAtTick(nearEndPasteStart), acknowledgeY),
+                        QPoint(
+                            std::max(191, xAtTick(nearEndPasteStart) - 1),
+                            acknowledgeY),
                         QStringLiteral("Paste copied range here"))) {
                     qCritical().noquote()
                         << "Near-End Paste action could not be invoked";
@@ -12057,6 +12274,8 @@ int main(int argc, char* argv[])
                         QStringLiteral("Ctrl+Z"))) {
                     const auto failedExtendedRange = extendedPasteRange.value_or(
                         std::pair<wave::Tick, wave::Tick>{-1, -1});
+
+
                     qCritical().noquote()
                         << "Near-End Paste was truncated or not visibly extended"
                         << "range" << failedExtendedRange.first << failedExtendedRange.second
@@ -12749,9 +12968,12 @@ int main(int argc, char* argv[])
                     QStringLiteral("ModeToolbar"));
                 auto* waveformToolbar = window.findChild<QToolBar*>(
                     QStringLiteral("WaveformToolbar"));
-                auto* snapControl = waveformToolbar
-                    ? waveformToolbar->findChild<QComboBox*>()
-                    : nullptr;
+                auto* busRadix = window.findChild<QComboBox*>(
+                    QStringLiteral("BusEditRadixCombo"));
+                auto* busRecent = window.findChild<QComboBox*>(
+                    QStringLiteral("BusEditRecentValuesCombo"));
+                auto* asyncTimingAction = window.findChild<QAction*>(
+                    QStringLiteral("AsyncTimingAction"));
                 if (!canvas
                     || window.centralWidget() != canvas
                     || !canvas->isVisible()
@@ -12759,7 +12981,13 @@ int main(int argc, char* argv[])
                     || modeToolbar
                     || !waveformToolbar
                     || !waveformToolbar->isVisible()
-                    || snapControl) {
+                    || !busRadix
+                    || !busRecent
+                    || busRadix->isVisible()
+                    || busRecent->isVisible()
+                    || !asyncTimingAction
+                    || asyncTimingAction->isChecked()
+                    || asyncTimingAction->text() != QStringLiteral("Sync")) {
                     qCritical().noquote()
                         << "Waveform-only layout contains legacy panels or snapping UI";
                     window.hide();

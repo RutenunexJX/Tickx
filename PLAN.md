@@ -4909,6 +4909,78 @@ Visual result: 紧凑菜单完整列出两个隐藏对象和全部恢复；单�
 Desktop interaction: none
 Packaging: not run during iteration
 ```
+## 持续迭代 88：Bus 直接编辑、同步/异步时序与 Ctrl 拖动复制
+
+状态：完成，达到本轮可用版本；按用户要求完成验收并推送后结束本轮，不执行打包
+
+已交付：
+
+- Bus 编辑从画布附近浮层收敛为固定顶部编辑栏。单击以一个 Beat 为目标，双击以完整 Segment
+  为目标；栏内直接显示目标范围、HEX/BIN/DEC/OCT、值输入、当前信号最近自定义值和
+  `0` / `X` / `Z` / `Don't care`。拖动 Segment 或边界超过系统拖动阈值后自动收起编辑栏，
+  避免陈旧目标与波形预览同时存在。
+- 裸值按所选进制规范化；最近值按 lane 独立维护，快捷预设不挤占最近自定义值。整段自定义值
+  只清除 `waveWorkbench.busPreset`，应用预设只替换该扩展，其他 Segment 扩展元数据保持不变。
+- `Don't care` 使用灰色纹理和点线边界，Expected/Actual 比较跳过带该语义的 Bus 目标区间；
+  普通 `X` 继续按既有比较规则处理。旧 `Reserved` 零值兼容保留。
+- 新增默认 `Sync` 编辑。Bit 拍、边沿、Segment 移动/缩放、显式范围边界及 Bus/Enum 目标按
+  关联时钟有效边沿和周期量化；无法判定关联时钟时回退 10 ns。工具栏同一动作可切换 `Async`，
+  此时允许任意整数 tick，并保留 7 像素轻吸附及 Alt 临时绕过。模式切换取消未完成拖动，
+  不提交半成品。
+- 非 Bit、非 Clock Segment 支持 `Ctrl` + 拖动复制。预览保留源段、使用虚线并标注 `Copy`；
+  释放后由独立 `CopySegmentCommand` 原子提交，支持 Undo/Redo、Event/Relation 重同步和必要的
+  依赖清理。复制到完全相同范围为无效果操作，不进入历史且不清除 Redo。
+- 更新核心及 offscreen GUI 回归，覆盖固定 Bus 编辑栏、进制与最近值、Don’t-care 比较、
+  Sync/Async、Alt、Ctrl 拖动复制预览/提交/撤销/重做、相同范围空历史抑制、元数据保留和
+  Qt Creator Debug preset。
+
+开发视角验收：
+
+```text
+cmake --build build --parallel 4
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+26/26 tests passed
+Total Test time: 16.62 sec
+
+cmake --preset qtcreator-debug
+cmake --build --preset qtcreator-debug
+Result: success
+
+QT_QPA_PLATFORM=offscreen ctest --preset qtcreator-debug
+26/26 tests passed
+Total Test time: 16.46 sec
+
+Targeted high-risk tests:
+wave-core-tests, wave-canvas-add-lane-smoke, wave-wave-edit-smoke
+3/3 passed
+
+Git diff --check: passed
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
+用户视角验收：
+
+```text
+Automated QA: 单击 Bus 后固定栏明确显示 Bus · Beat、0 ps–10 ns、HEX、Value、Recent 和
+0/X/Z/Don't care；裸值 2a 提交为 0x2a 并进入该 lane 最近值。双击只编辑完整 Segment。
+默认 Sync 下修改以关联时钟一拍为最小单位；切到 Async 后可偏离时钟边沿，Alt 可绕过轻吸附。
+Ctrl+拖动 Bus Segment 时原段保持可见，目标使用虚线 Copy 预览；释放后单步 Undo/Redo，
+复制到原位不产生虚假历史。
+
+Offscreen visual QA:
+build/canvas-signal-management-smoke.png
+build/canvas-signal-management-smoke-ctrl-drag-copy-preview.png
+
+Visual result: 固定 Bus 编辑栏不覆盖波形、刻度或信号名，目标范围和快捷值无需猜测；
+开始移动、缩放或复制后编辑栏自动收起。复制预览与普通移动具有不同光标、虚线和 Copy 文案，
+源段仍可见；Sync/Async 状态在唯一工具栏中可直接确认。无弹窗、裁切、桌面抢焦点或视图跳动。
+Desktop interaction: none
+Packaging: not run during iteration
+```
+
 ## 横向工作
 
 - 每个阶段结束后同步更新 `README.md`、`PLAN.md`、`GOAL.md`。

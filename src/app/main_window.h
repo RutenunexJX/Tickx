@@ -234,6 +234,8 @@ private:
     QAction* selectAction_{nullptr};
     QAction* drawAction_{nullptr};
     QAction* markerAction_{nullptr};
+    QAction* asyncTimingAction_{nullptr};
+    QAction* busEditPaletteAction_{nullptr};
     QAction* rangeEditPaletteAction_{nullptr};
     QAction* relationAction_{nullptr};
     QAction* exportAction_{nullptr};

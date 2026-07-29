@@ -111,7 +111,7 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
 - 快速新增输入条是一个未结束事务。删除、重排、参数编辑、范围粘贴、End、Segment 双击和 Pulse 等
   已接入动作会先尝试完成新增；名称或参数无效时保留输入条与错误说明并阻止该动作。Esc 取消新增；
   防御性检测到旧的交错命令时，Ctrl+Z 逐条撤销后续命令，再取消新增，不会越过事务基线。
-  开始快速新增时会关闭 Bus 便携面板，隐藏控件也不能写入波形。
+  开始快速新增时会关闭 Bus 编辑栏，隐藏控件也不能写入波形。
 - 左侧信号名区域支持单击选择、拖动重排、`Delete` / `Backspace` 删除。单击后状态栏立即显示
   当前信号名、Delete 的实际目标和 `F2` 入口；若同次取消 Marker 或范围选择，也会明确报告。
   双击信号名或按 `F2` 就地重命名，入口显示目标信号名；Enter 或点击别处提交，Esc 取消并恢复
@@ -138,7 +138,7 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   隐藏信号与 Group，可只恢复其中一项。单项恢复保持原顺序和稳定 ID，立即选中并仅做必要的纵向揭示，
   不改变水平滚动、缩放或编辑光标；状态栏显示剩余隐藏数量和 `Ctrl+Z`。只剩一个隐藏项时按钮保持单击
   直达，不增加菜单步骤。单项或全部恢复均各自产生一个 Undo；显式范围存在时保持原选择并提示先按 Esc。
-  被隐藏信号的标题选择、波形选择和 Bus 便携面板会立即清除。
+  被隐藏信号的标题选择、波形选择和 Bus 编辑栏会立即清除。
 - 可见 Group 标题与信号标题使用同一套直接操作：单击选择、拖动重排、双击或 `F2` 就地重命名、
   `Delete` / `Backspace` 删除；右键进入完整 Group 属性。选择、取消、完成及 Add/Change/Move/Remove
   的 Undo/Redo 均明确使用 group 名称；删除前说明成员将被解组，Undo 原子恢复 Group 和成员关系。
@@ -173,9 +173,11 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   按 Esc 或关闭按钮收起查找栏并保留找到的信号，再次按 `Ctrl+F` 会保留并全选上次查询。查找保持编辑光标、水平视图、Scenario、Undo 与 Saved 状态；显式时间范围存在时不会静默改变目标，而是提示先按 Esc 清除范围。
 - Wave Edit 中，当前所选非 Group 信号的标题右端显示编辑光标处的采样值，使用与编辑光标一致的青色；Bit 的隐式值显示 `0`，Bus/Enum 的隐式值显示 `X`，Clock 按周期与覆盖状态采样。只为所选信号预留值宽度，名称继续中间省略，未选信号不增加杂讯；拖动预览期间暂时隐藏模型值，避免把未提交预览误认为结果。Up/Down 和 Ctrl+Left/Right 的状态反馈同步携带值；Measure 仍按活动光标显示全部信号值。
 - Wave Edit 选中 Bus 或 Enum 后，状态栏在鼠标选中、Up/Down 切换及 Ctrl+Left/Right 到达边沿时直接提示
-  `Enter edits value`。画布获得焦点后按 Enter，会在当前编辑 tick 附近打开一拍编辑条并预填
-  精确采样值；Segment 边沿直接使用整数 tick，不经过像素往返，因此不会误取边沿前的隐式 `X`。
-  Bus 保留 `0`、`X`、`Z`、`Don't care` 快捷按钮；Enum 隐藏这些不适用按钮，输入框提供已声明
+  `Enter edits value`。单击 Bus 以当前拍为目标，双击以完整 Segment 为目标；编辑栏固定显示在画布上方，
+  明确给出目标范围、HEX/BIN/DEC/OCT 输入进制、直接值、该信号最近使用值以及 `0`、`X`、`Z`、
+  `Don't care`。画布获得焦点后按 Enter 使用当前编辑 tick 打开同一编辑栏并预填精确采样值；
+  Segment 边沿直接使用整数 tick，不经过像素往返，因此不会误取边沿前的隐式 `X`。Enum 隐藏
+  Bus 专用预设，输入框提供已声明
   符号的补全与完整提示。非法 Enum 值保留草稿和焦点并列出可用符号。编辑条内按 Enter 提交一个
   可撤销的一拍写值，Esc 放弃草稿且不改变模型、Undo 或 Saved 状态；位于 Scenario End 时明确
   提示先向左移动，不会静默改写末拍。已有 Bus/Enum Segment 的双击仍用于编辑完整 Segment。
@@ -227,9 +229,17 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   左右方向键移动直接编辑时间光标。
 - Bit Event 菱形无需切换模式即可直接拖动。预览期间模型不变，虚线只覆盖原/新边沿中较早位置
   到后继 Segment 结束的局部范围；释放后以一个命令同步更新 Segment 与 Event。
-- 单击 Bus 波形会在附近显示上下文、直接值输入框以及 `0`、`X`、`Z`、`Don't care`。预设可
-  单击或拖放，直接值按 Enter 提交；非法值保持浮层与焦点并解释原因。默认宽度是一拍，插入后
-  可拖动边界修改宽度；旧工程的 `Reserved` 语义继续按零值兼容读取。
+- Bus 快捷预设直接作用于当前目标，不再要求从浮层拖放。`Don't care` 使用灰色纹理显示，并在
+  Expected/Actual 比较中忽略对应目标区间；普通 `X` 仍是有意义的未知值，不会被自动当作通配。
+  自定义值按 Enter 提交并进入每条信号独立的最近值列表；预设值不挤占最近自定义值。整段改值或
+  应用预设只替换 Bus 预设语义，保留 Segment 的其他扩展元数据。
+- 波形修改默认为 `Sync`：Bit 拍、Segment 移动/缩放、范围边界和 Bus/Enum 写值以关联时钟的有效
+  边沿为一拍单位；没有可判定关联时钟时使用 10 ns。点击工具栏 `Sync` 切换为 `Async` 后，可把
+  信号边沿放在任意整数 tick，仍保留 7 像素轻吸附；按住 `Alt` 临时绕过吸附。再次点击恢复 Sync。
+  切换模式会取消尚未释放的波形拖动，不提交半成品。
+- 在非 Bit、非 Clock Segment 主体上普通拖动为移动；按住 `Ctrl` 拖动为复制。复制预览使用虚线并
+  标注 `Copy`，原 Segment 保持可见；释放后作为一个可撤销命令提交。复制到完全相同范围不产生
+  空历史，也不会清除已有 Redo。
 - 时间交互采用无设置项的轻吸附：距离可见刻度、Clock 边沿或信号边沿 7 像素以内自动对齐，
   并显示吸附时间提示；超出范围使用原始整数 tick，按住 `Alt` 可临时绕过吸附。
 - `Ctrl` + 鼠标滚轮以指针所在时间为锚缩放，`Shift` + 滚轮水平滚动；中键拖动或按住空格再左键
@@ -255,7 +265,7 @@ WaveDrom JSON。桌面应用的 Export 工具提供全场景、当前选择或�
   自动补全 `.wave.json`，显式扩展名保持不变。首次 Save As 从 Documents（不可用时 Home）开始；成功保存或打开后记住目录。
   `File > Open Recent` 保留最近 5 个有效工程，以文件名和父目录区分、完整路径置于提示；点击当前脏工程只显示 Already open，不重载或触发丢弃确认。
   单个本地 `.wave.json`、`.json` 或 `.autosave` 文件可直接从资源管理器拖到波形画布打开；它复用同一草稿门禁、未保存确认、恢复选择和 Recent 更新，
-  不接管或破坏 Bus 快捷值的内部拖放。普通工程成功打开后状态栏显示 `Opened <path>`；恢复快照
+  与固定 Bus 编辑栏互不干扰。普通工程成功打开后状态栏显示 `Opened <path>`；恢复快照
   和迁移警告仍显示各自说明。Open 先选择目标文件；取消选择不会触发未保存确认或改变当前工程，只有选定
   目标后才询问 Save/Discard/Cancel。修改后 1.5 秒启动 Qt Concurrent 后台恢复快照；首次 Save As 前的 Untitled 波形同样写入应用恢复目录，
   无参数启动时自动恢复有效快照，并明确显示 `Recovery loaded · Save required`；此时 Save 仍打开 Save As，要求选择正式工程文件。
@@ -394,11 +404,14 @@ exports/
 - Event 菱形局部虚线预览期间模型不变，释放、Undo 与 Redo 后 Event/Segment 保持同步。
 - Clock 真实右键 Gate→Run→重复 Run、拍级选择、无效果反馈、一次 Undo/Redo 及基线恢复具有专项
   offscreen 覆盖。
-- Bus 浮层覆盖直接值、非法值纠错、0/X/Z/Don't care 单击与拖放以及波形右键；未提交值的
+- Bus 固定编辑栏覆盖 Beat/Segment 目标、HEX/BIN/DEC/OCT、直接值、每信号最近值、
+  0/X/Z/Don't care 单击以及波形右键；未提交值的
   点击别处提交、隐藏草稿恢复、Save/New/Open/Close/Export 门禁、Bus/End 冲突顺序、鼠标失焦
   坐标保护及 Undo 后越界草稿的 End 延长恢复均有专项离屏回归。长时间轴专项另覆盖选中 Bus 后
   Enter 在 50 ns Segment 精确预填 `0x35`、焦点与上下文提示、Esc 零修改取消、再次 Enter 提交
-  `0x5a`、单步 Undo 精确恢复 Scenario 与 Saved，以及编辑条离屏截图。
+  `0x5a`、单步 Undo 精确恢复 Scenario 与 Saved，以及编辑条离屏截图。第 88 轮继续覆盖裸 HEX
+  输入规范化、最近自定义值、Don’t-care 比较语义、Sync/Async 边沿约束、Alt 绕过轻吸附、
+  Ctrl+拖动复制预览/提交/Undo/Redo、相同范围空历史抑制和 Segment 扩展元数据保留。
 - Waveform 工具栏离屏检查确认常驻动作仅有临时 Measure、缩放和 Fit；持久选择期间的批量赋值栏
   固定在工具栏中，960 像素宽度下无裁切且显隐不移动画布。不存在 Edit、Transition、Export 与
   Undo/Redo 按钮，菜单快捷键仍存在。
@@ -422,7 +435,7 @@ exports/
 - first mismatch、缺失 signal、width mismatch、condition evaluation error、诊断可见性
   以及 JSON/CSV/HTML 报告。
 - ZeroSlack signal-list、Private Frame sample、Pinloom entry 和 Wave Workbench URI。
-- 文件对话框、最近工程和工程拖放通过完整用户旅程验收：首次 Save As 位于 Documents/Home；保存后最近工程立即出现；New 后 Open 保持最近目录；当前脏工程的最近项为安全无操作；New 后最近项一键恢复 650 ns/3 lane 工程；再将独立 700 ns 工程拖入画布，断言加载、Saved/Opened 和 Recent 置顶。所有 GUI 测试的设置目录相互隔离且不触碰真实用户设置；既有 Bus `Don't care` MIME 拖放继续通过专项回归。
+- 文件对话框、最近工程和工程拖放通过完整用户旅程验收：首次 Save As 位于 Documents/Home；保存后最近工程立即出现；New 后 Open 保持最近目录；当前脏工程的最近项为安全无操作；New 后最近项一键恢复 650 ns/3 lane 工程；再将独立 700 ns 工程拖入画布，断言加载、Saved/Opened 和 Recent 置顶。所有 GUI 测试的设置目录相互隔离且不触碰真实用户设置；Bus 快捷值不再使用 MIME 拖放，工程文件拖入仍保持独立。
 - 主窗口后台 autosave 生成可由正式加载器读取的恢复快照；首次保存前的 Untitled 编辑也写入隔离恢复目录，无参数重启自动恢复且 Save 仍要求正式位置；启动/Open 已保存工程自动采用有效且更新的快照并显示 Save required，较旧或损坏快照回退正式工程；正式保存清除已完成/在途快照并保留 Saved 反馈；New/Open/Close 的 Discard 也等待在途 worker、永久清除快照且不重新调度。
 
 - 命令历史为每个真实状态保留稳定保存点标识；正式保存后继续编辑，再用 Undo 回到保存版本时，

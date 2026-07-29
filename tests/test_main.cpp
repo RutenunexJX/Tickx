@@ -1798,7 +1798,7 @@ void testDirectSegmentEditingCommands()
     bus.name = "bus";
     bus.kind = wave::LaneKind::Bus;
     bus.width = 8;
-    bus.segments = {{"b0", 0, 60, "0x01", {}}};
+    bus.segments = {{"b0", 0, 60, "0x01", {{"copyMeta", "\"kept\""}}}};
     scenario.lanes = {bit, bus};
     const auto original = scenario;
 
@@ -1840,7 +1840,66 @@ void testDirectSegmentEditingCommands()
                 "bus value edit did not preserve the segment ID");
     expectEqual(editedBus->segments.front().value, std::string{"0x2a"},
                 "bus value edit did not normalize the replacement value");
+    expectEqual(editedBus->segments.front().extensions,
+                wave::JsonExtensions{{"copyMeta", "\"kept\""}},
+                "bus value edit discarded unrelated segment metadata");
     expect(stack.undo(), "segment value undo failed");
+
+    stack.clear();
+    scenario = original;
+    stack.execute(std::make_unique<wave::CopySegmentCommand>(
+        scenario,
+        "bus",
+        "b0",
+        80,
+        100));
+    editedBus = wave::findLane(scenario, "bus");
+    expect(editedBus != nullptr, "copied bus lane is missing");
+    const auto copiedSegment = std::find_if(
+        editedBus->segments.begin(),
+        editedBus->segments.end(),
+        [](const wave::Segment& segment) {
+            return segment.start == 80 && segment.end == 100;
+        });
+    expect(copiedSegment != editedBus->segments.end(),
+           "segment copy did not create the target interval");
+    expectEqual(copiedSegment->value, std::string{"0x01"},
+                "segment copy changed the source value");
+    expectEqual(copiedSegment->extensions,
+                wave::JsonExtensions{{"copyMeta", "\"kept\""}},
+                "segment copy lost semantic metadata");
+    expect(copiedSegment->id != "b0", "segment copy reused the source identity");
+    const auto sourceAfterCopy = std::find_if(
+        editedBus->segments.begin(),
+        editedBus->segments.end(),
+        [](const wave::Segment& segment) { return segment.id == "b0"; });
+    expect(sourceAfterCopy != editedBus->segments.end()
+               && sourceAfterCopy->start == 0
+               && sourceAfterCopy->end == 60,
+           "segment copy moved or removed the source interval");
+    const auto copiedScenario = scenario;
+    expectEqual(stack.undoDescription(), std::string{"Copy segment"},
+                "segment copy did not expose a clear Undo label");
+    expect(stack.undo(), "segment copy undo failed");
+    expectEqual(scenario, original, "segment copy undo did not restore the scenario");
+    expect(stack.redo(), "segment copy redo failed");
+    expectEqual(scenario, copiedScenario, "segment copy redo was not exact");
+
+    stack.clear();
+    scenario = original;
+    const auto copiedOntoSelf = stack.execute(
+        std::make_unique<wave::CopySegmentCommand>(
+            scenario,
+            "bus",
+            "b0",
+            0,
+            60));
+    expect(!copiedOntoSelf,
+           "copying a segment onto the identical range created a false edit");
+    expectEqual(scenario, original,
+                "no-effect segment copy changed the scenario");
+    expectEqual(stack.size(), std::size_t{0},
+                "no-effect segment copy entered Undo history");
 
     stack.clear();
     scenario = original;
@@ -2940,6 +2999,23 @@ void testExpectedActualCompareRules()
         reference,
         dataWindow);
     expect(masked.matches(), "bus mask did not suppress the masked bit");
+
+    auto dontCareProject = maskedProject;
+    auto* dontCareData = wave::findLane(
+        dontCareProject.scenarios.front(),
+        "lane-data");
+    expect(dontCareData != nullptr, "don't-care data lane is missing");
+    dontCareData->segments.at(1).extensions["waveWorkbench.busPreset"] =
+        "\"dont-care\"";
+    dataWindow.defaultRule.busMask.clear();
+    const auto dontCareResult = wave::compareScenario(
+        dontCareProject,
+        dontCareProject.scenarios.front(),
+        trace,
+        reference,
+        dataWindow);
+    expect(dontCareResult.matches(),
+           "semantic don't-care segment did not ignore its compare interval");
 
     auto wildcardProject = project;
     auto* request = wave::findLane(wildcardProject.scenarios.front(), "lane-request");

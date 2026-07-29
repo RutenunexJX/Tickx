@@ -11,15 +11,13 @@
 
 #include <array>
 #include <cstddef>
+#include <map>
 #include <optional>
 #include <vector>
 
 class QContextMenuEvent;
 class QComboBox;
 class QCompleter;
-class QDragEnterEvent;
-class QDragMoveEvent;
-class QDropEvent;
 class QEvent;
 class QFrame;
 class QKeyEvent;
@@ -75,7 +73,9 @@ public:
     [[nodiscard]] int signalHeaderWidth() const noexcept;
     [[nodiscard]] bool commitLaneRename();
     [[nodiscard]] bool commitPendingInlineEdits();
+    [[nodiscard]] QWidget* busEditPaletteWidget() const noexcept;
     [[nodiscard]] QWidget* rangeEditPaletteWidget() const noexcept;
+    [[nodiscard]] bool asynchronousEditing() const noexcept;
 
     void beginQuickLaneSetup(
         const QString& laneId,
@@ -108,6 +108,7 @@ public slots:
     void copySelection();
     void pasteAtCursor();
     void insertPulse();
+    void setAsynchronousEditing(bool enabled);
 
 signals:
     void addLaneRequested(LaneKind kind);
@@ -131,6 +132,7 @@ signals:
     void laneRenameAccepted(const QString& laneId, const QString& name);
     void durationEditRequested(const QString& value);
     void measureModeExitRequested();
+    void busEditPaletteVisibilityChanged(bool visible);
     void rangeEditPaletteVisibilityChanged(bool visible);
     void signalHeaderWidthCommitted(int width);
 
@@ -147,9 +149,6 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
-    void dragEnterEvent(QDragEnterEvent* event) override;
-    void dragMoveEvent(QDragMoveEvent* event) override;
-    void dropEvent(QDropEvent* event) override;
 
 private:
     struct LaneLayout {
@@ -173,6 +172,10 @@ private:
         None,
         Start,
         End,
+    };
+    enum class BusEditScope {
+        Beat,
+        Segment,
     };
     enum class KeyboardRangeTarget {
         Step,
@@ -235,8 +238,11 @@ private:
     void showBusPresetPalette(
         const Lane& lane,
         const QPoint& anchor,
-        std::optional<Tick> exactTick = std::nullopt);
+        std::optional<Tick> exactTick = std::nullopt,
+        std::optional<std::pair<Tick, Tick>> exactRange = std::nullopt);
     void hideBusPresetPalette();
+    void rememberBusValue(const std::string& laneId, const QString& value);
+    [[nodiscard]] QString busEditorValue(const Lane& lane) const;
     void showRangeEditPalette();
     void hideRangeEditPalette();
     void clearExplicitRangeSelection(bool clearLanes = true);
@@ -249,7 +255,11 @@ private:
         const std::string& presetId = {});
     bool clearExplicitRange(bool cutting = false);
     void applyExplicitRangePreset(const std::string& presetId);
-    void applyBusPreset(const std::string& laneId, const std::string& presetId, Tick tick);
+    void applyBusPreset(
+        const std::string& laneId,
+        const std::string& presetId,
+        Tick tick,
+        bool useEditorRange = true);
     void promptBusValueAt(const std::string& laneId, Tick tick);
     bool setLaneRangeValue(
         const std::string& laneId,
@@ -310,8 +320,17 @@ private:
     [[nodiscard]] SegmentHit segmentHitAtPosition(
         const Lane& lane,
         const QPoint& position) const;
+    [[nodiscard]] std::pair<Tick, Tick> beatGrid(const Lane& lane) const;
+    [[nodiscard]] Tick synchronousBoundaryTick(Tick tick, const Lane& lane) const;
+    [[nodiscard]] Tick editTick(Tick tick, const Lane& lane) const;
+    [[nodiscard]] Tick minimumWaveEditUnit(const Lane& lane) const;
     [[nodiscard]] std::pair<Tick, Tick> beatRangeAt(Tick tick, const Lane& lane) const;
+    [[nodiscard]] std::pair<Tick, Tick> editableBeatRangeAt(Tick tick, const Lane& lane) const;
     [[nodiscard]] std::vector<std::pair<Tick, Tick>> beatRangesBetween(
+        Tick first,
+        Tick second,
+        const Lane& lane) const;
+    [[nodiscard]] std::vector<std::pair<Tick, Tick>> editableBeatRangesBetween(
         Tick first,
         Tick second,
         const Lane& lane) const;
@@ -396,10 +415,16 @@ private:
     QFrame* busPresetPalette_{nullptr};
     QLabel* busPresetContextLabel_{nullptr};
     QLineEdit* busValueEdit_{nullptr};
+    QComboBox* busRadixCombo_{nullptr};
+    QComboBox* busRecentValuesCombo_{nullptr};
     QCompleter* laneValueCompleter_{nullptr};
     QStringListModel* laneValueCompletionModel_{nullptr};
     std::optional<Tick> busPresetAnchorTick_;
+    std::optional<std::pair<Tick, Tick>> busEditRange_;
     std::string busPresetLaneId_;
+    std::map<std::string, QStringList> busRecentValues_;
+    BusEditScope busEditScope_{BusEditScope::Beat};
+    bool busEditPaletteVisible_{false};
     QFrame* rangeEditPalette_{nullptr};
     QLabel* rangeEditContextLabel_{nullptr};
     QToolButton* rangeCopyButton_{nullptr};
@@ -452,6 +477,8 @@ private:
     Qt::KeyboardModifiers waveEditDragAutoScrollModifiers_{Qt::NoModifier};
     int waveEditDragOriginalHorizontalScroll_{0};
     bool waveEditDragAutoScrolled_{false};
+    bool waveEditCopyDrag_{false};
+    bool asynchronousEditing_{false};
     int headerWidth_{DefaultHeaderWidth};
     bool headerResizing_{false};
     int headerResizePressX_{0};

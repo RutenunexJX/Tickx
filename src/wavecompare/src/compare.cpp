@@ -172,6 +172,30 @@ std::optional<bool> actualValueEquals(
     return *actualBits == *literalBits;
 }
 
+bool isDontCareSegment(const Segment& segment)
+{
+    const auto preset = segment.extensions.find("waveWorkbench.busPreset");
+    if (preset == segment.extensions.end()) return false;
+    auto value = trim(preset->second);
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+        value = value.substr(1, value.size() - 2);
+    }
+    return value == "dont-care";
+}
+
+const Segment* expectedSegmentAt(const Lane& lane, const Tick tick)
+{
+    const auto iterator = std::upper_bound(
+        lane.segments.begin(),
+        lane.segments.end(),
+        tick,
+        [](const Tick value, const Segment& segment) {
+            return value < segment.start;
+        });
+    if (iterator == lane.segments.begin()) return nullptr;
+    const auto& segment = *std::prev(iterator);
+    return segment.start <= tick && tick < segment.end ? &segment : nullptr;
+}
 std::optional<std::string> expectedValueAt(
     const Project& project,
     const Lane& lane,
@@ -182,17 +206,9 @@ std::optional<std::string> expectedValueAt(
         if (!clock || !clock->isValid()) return std::nullopt;
         return std::string(1, clockValueAt(*clock, lane, tick));
     }
-    const auto iterator = std::upper_bound(
-        lane.segments.begin(),
-        lane.segments.end(),
-        tick,
-        [](const Tick value, const Segment& segment) {
-            return value < segment.start;
-        });
-    if (iterator == lane.segments.begin()) return std::nullopt;
-    const auto& segment = *std::prev(iterator);
-    return segment.start <= tick && tick < segment.end
-        ? std::optional<std::string>{segment.value}
+    const auto* segment = expectedSegmentAt(lane, tick);
+    return segment
+        ? std::optional<std::string>{segment->value}
         : std::nullopt;
 }
 
@@ -698,6 +714,10 @@ CompareResult compareScenario(
         for (std::size_t index = 0; index + 1 < boundaries.size(); ++index) {
             const auto intervalStart = boundaries[index];
             const auto intervalEnd = boundaries[index + 1];
+            const auto* expectedSegment = lane.kind == LaneKind::Bus
+                ? expectedSegmentAt(lane, intervalStart)
+                : nullptr;
+            if (expectedSegment && isDontCareSegment(*expectedSegment)) continue;
             const auto expected = expectedValueAt(project, lane, intervalStart);
             const auto* actualTransition = signal->valueAt(intervalStart);
             if (!expected && !options.compareUndefinedExpected) continue;

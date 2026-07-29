@@ -687,13 +687,15 @@ EditSegmentCommand::EditSegmentCommand(
     std::string segmentId,
     const Tick start,
     const Tick end,
-    std::string value)
+    std::string value,
+    std::optional<JsonExtensions> extensions)
     : scenario_(&scenario)
     , laneId_(std::move(laneId))
     , segmentId_(std::move(segmentId))
     , start_(start)
     , end_(end)
     , value_(std::move(value))
+    , extensions_(std::move(extensions))
 {
 }
 
@@ -740,6 +742,7 @@ void EditSegmentCommand::redo()
         segment->start = start_;
         segment->end = end_;
         segment->value = validation.normalizedValue;
+        if (extensions_) segment->extensions = *extensions_;
         normalizeSegments(*lane);
         if (lane->kind == LaneKind::Bit
             || lane->kind == LaneKind::Bus
@@ -758,6 +761,62 @@ void EditSegmentCommand::undo()
 std::string EditSegmentCommand::description() const
 {
     return "Edit segment";
+}
+
+CopySegmentCommand::CopySegmentCommand(
+    Scenario& scenario,
+    std::string laneId,
+    std::string sourceSegmentId,
+    const Tick start,
+    const Tick end)
+    : scenario_(&scenario)
+    , laneId_(std::move(laneId))
+    , start_(start)
+    , end_(end)
+{
+    auto* lane = findLane(scenario, laneId_);
+    if (!lane) throw std::invalid_argument("lane does not exist");
+    const auto* source = findLinkedSegment(*lane, sourceSegmentId);
+    if (!source) throw std::invalid_argument("source segment does not exist");
+    if (lane->kind == LaneKind::Clock || lane->kind == LaneKind::Group) {
+        throw std::invalid_argument("this lane does not support segment copy");
+    }
+    if (start_ < 0 || end_ <= start_ || end_ > scenario.duration) {
+        throw std::invalid_argument("copied segment interval is invalid");
+    }
+    value_ = source->value;
+    extensions_ = source->extensions;
+}
+
+void CopySegmentCommand::redo()
+{
+    snapshotRedo(*scenario_, before_, after_, [this] {
+        auto* lane = findLane(*scenario_, laneId_);
+        if (!lane) throw std::runtime_error("lane was removed before segment copy");
+        if (rangeAlreadyEquals(*lane, start_, end_, value_, extensions_)) return;
+        setSegmentRange(*lane, start_, end_, value_, {}, extensions_);
+        if (lane->kind == LaneKind::Bit
+            || lane->kind == LaneKind::Bus
+            || lane->kind == LaneKind::Enum) {
+            synchronizeLaneEventsFromSegments(*scenario_, laneId_);
+        }
+    });
+}
+
+void CopySegmentCommand::undo()
+{
+    if (!before_) throw std::runtime_error("segment copy command has not been executed");
+    *scenario_ = *before_;
+}
+
+std::string CopySegmentCommand::description() const
+{
+    return "Copy segment";
+}
+
+bool CopySegmentCommand::hasEffect() const noexcept
+{
+    return before_ && after_ && *before_ != *after_;
 }
 
 ToggleBitRangeCommand::ToggleBitRangeCommand(
