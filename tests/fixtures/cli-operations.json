@@ -1,0 +1,32 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "expectedProjectId": "project-wave-workbench-demo",
+    "scenarioId": "scenario-handshake",
+    "operations": [
+        {
+            "op": "add-signal",
+            "id": "lane-cli-data",
+            "name": "cli_data",
+            "kind": "bus",
+            "width": 8,
+            "clockDomainId": "clock-main",
+            "color": "#4fc3f7"
+        },
+        {
+            "op": "set-range",
+            "laneId": "lane-cli-data",
+            "startTick": "0",
+            "endTick": "10000",
+            "value": "0xa5"
+        },
+        {
+            "op": "rename-lane",
+            "laneId": "lane-request",
+            "name": "req_cli"
+        },
+        {
+            "op": "set-duration",
+            "durationTick": "230000"
+        }
+    ]
+}

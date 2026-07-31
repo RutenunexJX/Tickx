@@ -1,0 +1,42 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "expectedProjectId": "project-wave-workbench-demo",
+    "scenarioId": "Request / acknowledge",
+    "operations": [
+        {
+            "op": "assert-value",
+            "laneId": "REQ",
+            "at": "cycle 8",
+            "clockId": "CLK",
+            "value": "1"
+        },
+        {
+            "op": "set-range",
+            "clockId": "clk",
+            "start": "cycle 8",
+            "end": "cycle 9",
+            "assignments": [
+                {
+                    "laneId": "ack",
+                    "value": "1"
+                },
+                {
+                    "laneId": "DATA[7:0]",
+                    "value": "0xa5"
+                }
+            ]
+        },
+        {
+            "op": "assert-value",
+            "laneId": "ACK",
+            "at": "cycle 8",
+            "value": "1"
+        },
+        {
+            "op": "assert-value",
+            "laneId": "data[7:0]",
+            "at": "cycle 8",
+            "value": "0xa5"
+        }
+    ]
+}

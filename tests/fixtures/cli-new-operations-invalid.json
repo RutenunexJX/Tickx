@@ -1,0 +1,18 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "operations": [
+        {
+            "op": "add-signal",
+            "id": "lane-bit",
+            "name": "bit",
+            "kind": "bit"
+        },
+        {
+            "op": "set-sequence",
+            "laneId": "lane-bit",
+            "start": "0 ns",
+            "step": "10 ns",
+            "values": ["0", "2", "1"]
+        }
+    ]
+}

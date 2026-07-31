@@ -46,6 +46,161 @@ void appendUndefinedRegions(
     }
 }
 
+void appendLaneClockIssue(
+    const Project& project,
+    const Lane& lane,
+    std::vector<ValidationIssue>& issues)
+{
+    const auto clockMatches =
+        lane.clockDomainId.empty()
+        ? std::size_t{0}
+        : static_cast<std::size_t>(
+              std::count_if(
+                  project.clockDomains.begin(),
+                  project.clockDomains.end(),
+                  [&lane](const ClockDomain& clock) {
+                      return clock.id
+                          == lane.clockDomainId;
+                  }));
+    const auto invalidGroupReference =
+        lane.kind == LaneKind::Group
+        && !lane.clockDomainId.empty();
+    const auto invalidClockReference =
+        lane.kind == LaneKind::Clock
+        && (lane.clockDomainId.empty()
+            || clockMatches != 1);
+    const auto invalidOptionalReference =
+        lane.kind != LaneKind::Clock
+        && lane.kind != LaneKind::Group
+        && !lane.clockDomainId.empty()
+        && clockMatches != 1;
+    if (!invalidGroupReference
+        && !invalidClockReference
+        && !invalidOptionalReference) {
+        return;
+    }
+
+    std::string message;
+    if (invalidGroupReference) {
+        message =
+            "Group Lane cannot reference a ClockDomain";
+    } else if (lane.clockDomainId.empty()) {
+        message =
+            "Clock Lane requires a ClockDomain";
+    } else if (clockMatches == 0) {
+        message =
+            "Lane ClockDomain does not exist";
+    } else {
+        message =
+            "Lane ClockDomain ID is ambiguous";
+    }
+    issues.push_back({
+        ValidationCode::LaneClockDomainInvalid,
+        Severity::Error,
+        std::move(message),
+        lane.id,
+        0,
+        {},
+        {},
+    });
+}
+
+void appendLaneGroupIssue(
+    const Scenario& scenario,
+    const Lane& lane,
+    std::vector<ValidationIssue>& issues)
+{
+    if (lane.groupId.empty()) return;
+
+    const Lane* target = nullptr;
+    std::size_t targetMatches = 0;
+    for (const auto& candidate : scenario.lanes) {
+        if (candidate.id != lane.groupId) continue;
+        target = &candidate;
+        ++targetMatches;
+    }
+    const auto valid =
+        lane.kind != LaneKind::Group
+        && targetMatches == 1
+        && target
+        && target->kind == LaneKind::Group
+        && target->id != lane.id;
+    if (valid) return;
+
+    std::string message;
+    if (lane.kind == LaneKind::Group) {
+        message = "Group Lane cannot belong to another Group";
+    } else if (targetMatches == 0) {
+        message = "Lane Group does not exist";
+    } else if (targetMatches > 1) {
+        message = "Lane Group ID is ambiguous";
+    } else if (target && target->id == lane.id) {
+        message = "Lane cannot use itself as its Group";
+    } else {
+        message = "Lane groupId does not reference a Group Lane";
+    }
+    issues.push_back({
+        ValidationCode::LaneGroupReferenceInvalid,
+        Severity::Error,
+        std::move(message),
+        lane.id,
+        0,
+        {},
+        {},
+    });
+}
+
+const Event* uniqueEvent(
+    const Scenario& scenario,
+    std::string_view id,
+    bool& multiple);
+
+void appendRelationClockIssue(
+    const Project& project,
+    const Scenario& scenario,
+    const Relation& relation,
+    std::vector<ValidationIssue>& issues)
+{
+    if (relation.clockDomainId.empty()) return;
+
+    const auto clockMatches =
+        static_cast<std::size_t>(
+            std::count_if(
+                project.clockDomains.begin(),
+                project.clockDomains.end(),
+                [&relation](const ClockDomain& clock) {
+                    return clock.id
+                        == relation.clockDomainId;
+                }));
+    if (clockMatches == 1) return;
+
+    const Event* anchor = nullptr;
+    bool multiple = false;
+    anchor = uniqueEvent(
+        scenario,
+        relation.sourceEventId,
+        multiple);
+    if (multiple) anchor = nullptr;
+    if (!anchor) {
+        anchor = uniqueEvent(
+            scenario,
+            relation.targetEventId,
+            multiple);
+        if (multiple) anchor = nullptr;
+    }
+    issues.push_back({
+        ValidationCode::RelationClockDomainInvalid,
+        Severity::Error,
+        clockMatches == 0
+            ? "Relation ClockDomain does not exist"
+            : "Relation ClockDomain ID is ambiguous",
+        anchor ? anchor->laneId : std::string{},
+        anchor ? anchor->tick : Tick{0},
+        anchor ? anchor->id : std::string{},
+        relation.id,
+    });
+}
+
 std::string eventName(const Scenario& scenario, const Event& event)
 {
     const auto* lane = findLane(scenario, event.laneId);
@@ -76,6 +231,213 @@ std::string effectiveClockDomain(const Scenario& scenario, const Event& event)
     if (!event.clockDomainId.empty()) return event.clockDomainId;
     const auto* lane = findLane(scenario, event.laneId);
     return lane ? lane->clockDomainId : std::string{};
+}
+
+bool actionControlsWaveform(const EventAction action)
+{
+    return action == EventAction::Drive
+        || action == EventAction::Expect
+        || action == EventAction::Pulse
+        || action == EventAction::Toggle;
+}
+
+void appendEventCycleIssues(
+    const Project& project,
+    const Scenario& scenario,
+    std::vector<ValidationIssue>& issues)
+{
+    for (const auto& event : scenario.events) {
+        if (!event.cycle) continue;
+
+        const auto clockDomainId =
+            effectiveClockDomain(scenario, event);
+        const ClockDomain* clock = nullptr;
+        std::size_t clockMatches = 0;
+        if (!clockDomainId.empty()) {
+            for (const auto& candidate :
+                 project.clockDomains) {
+                if (candidate.id != clockDomainId) {
+                    continue;
+                }
+                clock = &candidate;
+                ++clockMatches;
+            }
+        }
+
+        std::string message;
+        if (*event.cycle < 0) {
+            message =
+                "Event cycle index must be non-negative";
+        } else if (clockDomainId.empty()
+                   || clockMatches != 1
+                   || !clock) {
+            message =
+                "Cycle-based Event does not resolve one clock domain";
+        } else {
+            const auto expectedTick =
+                tickAtCycle(
+                    *clock,
+                    *event.cycle,
+                    clock->activeEdge);
+            if (!expectedTick) {
+                message =
+                    "Event cycle cannot be represented by its clock domain";
+            } else if (*expectedTick != event.tick) {
+                message =
+                    "Cycle-based Event time does not match its clock active edge";
+            } else {
+                continue;
+            }
+        }
+
+        issues.push_back({
+            ValidationCode::EventCycleMismatch,
+            Severity::Error,
+            std::move(message),
+            event.laneId,
+            event.tick,
+            event.id,
+            {},
+        });
+    }
+}
+
+void appendEventClockIssues(
+    const Project& project,
+    const Scenario& scenario,
+    std::vector<ValidationIssue>& issues)
+{
+    for (const auto& event : scenario.events) {
+        if (event.clockDomainId.empty()) continue;
+        const auto clockMatches =
+            std::count_if(
+                project.clockDomains.begin(),
+                project.clockDomains.end(),
+                [&event](const ClockDomain& clock) {
+                    return clock.id
+                        == event.clockDomainId;
+                });
+        if (clockMatches == 1) continue;
+        issues.push_back({
+            ValidationCode::EventClockDomainInvalid,
+            Severity::Error,
+            clockMatches == 0
+                ? "Event ClockDomain does not exist"
+                : "Event ClockDomain ID is ambiguous",
+            event.laneId,
+            event.tick,
+            event.id,
+            {},
+        });
+    }
+}
+
+bool waveformLinkIdentitiesAreStable(
+    const Scenario& scenario)
+{
+    std::unordered_map<std::string, std::size_t>
+        laneIdCounts;
+    std::unordered_map<std::string, std::size_t>
+        segmentIdCounts;
+    std::unordered_map<std::string, std::size_t>
+        eventIdCounts;
+    for (const auto& lane : scenario.lanes) {
+        if (lane.id.empty()
+            || ++laneIdCounts[lane.id] != 1) {
+            return false;
+        }
+        for (const auto& segment : lane.segments) {
+            if (segment.id.empty()
+                || ++segmentIdCounts[segment.id] != 1) {
+                return false;
+            }
+        }
+    }
+    for (const auto& event : scenario.events) {
+        if (event.id.empty()
+            || ++eventIdCounts[event.id] != 1) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void appendWaveformEventIssues(
+    const Scenario& scenario,
+    std::vector<ValidationIssue>& issues)
+{
+    if (!waveformLinkIdentitiesAreStable(scenario)) {
+        return;
+    }
+    for (const auto& event : scenario.events) {
+        if (!event.waveformLinked) continue;
+        const auto* currentLane =
+            findLane(scenario, event.laneId);
+        if (!currentLane) {
+            continue;
+        }
+
+        const Lane* linkedLane = nullptr;
+        const Segment* linkedSegment = nullptr;
+        std::size_t segmentMatches = 0;
+        for (const auto& lane : scenario.lanes) {
+            for (const auto& segment : lane.segments) {
+                if (segment.id
+                    != event.linkedSegmentId) {
+                    continue;
+                }
+                linkedLane = &lane;
+                linkedSegment = &segment;
+                ++segmentMatches;
+            }
+        }
+        const auto linkedEventCount =
+            event.linkedSegmentId.empty()
+            ? std::size_t{0}
+            : static_cast<std::size_t>(
+                  std::count_if(
+                      scenario.events.begin(),
+                      scenario.events.end(),
+                      [&event](const Event& candidate) {
+                          return candidate.waveformLinked
+                              && candidate.linkedSegmentId
+                                  == event.linkedSegmentId;
+                      }));
+        auto mismatch =
+            event.linkedSegmentId.empty()
+            || segmentMatches != 1
+            || !linkedLane
+            || !linkedSegment
+            || linkedEventCount != 1
+            || linkedLane->kind == LaneKind::Clock
+            || linkedLane->kind == LaneKind::Group
+            || !actionControlsWaveform(event.action);
+        if (!mismatch) {
+            const auto valueValidation =
+                validateLaneValue(
+                    *linkedLane,
+                    linkedSegment->value);
+            if (!valueValidation.valid) {
+                continue;
+            }
+            mismatch =
+                event.laneId != linkedLane->id
+                || event.tick != linkedSegment->start
+                || event.value
+                    != valueValidation.normalizedValue;
+        }
+        if (!mismatch) continue;
+
+        issues.push_back({
+            ValidationCode::EventWaveformMismatch,
+            Severity::Error,
+            "Waveform-linked Event does not match its Segment",
+            event.laneId,
+            event.tick,
+            event.id,
+            {},
+        });
+    }
 }
 
 std::optional<std::string> expectedValueAt(
@@ -350,6 +712,10 @@ std::vector<ValidationIssue> validateScenario(
     std::vector<ValidationIssue> issues;
 
     for (const auto& lane : scenario.lanes) {
+        appendLaneClockIssue(
+            project, lane, issues);
+        appendLaneGroupIssue(
+            scenario, lane, issues);
         appendUndefinedRegions(scenario, lane, issues);
         for (const auto& segment : lane.segments) {
             const auto validation = validateLaneValue(lane, segment.value);
@@ -368,7 +734,7 @@ std::vector<ValidationIssue> validateScenario(
     }
 
     for (const auto& event : scenario.events) {
-        if (event.tick < 0 || event.tick > scenario.duration) {
+        if (event.tick < 0 || event.tick >= scenario.duration) {
             issues.push_back({
                 ValidationCode::EventOutsideScenario,
                 Severity::Error,
@@ -391,8 +757,13 @@ std::vector<ValidationIssue> validateScenario(
             });
         }
     }
+    appendEventClockIssues(project, scenario, issues);
+    appendEventCycleIssues(project, scenario, issues);
+    appendWaveformEventIssues(scenario, issues);
 
     for (const auto& relation : scenario.relations) {
+        appendRelationClockIssue(
+            project, scenario, relation, issues);
         if (relation.minimumDelay < 0 || relation.maximumDelay < relation.minimumDelay) {
             issues.push_back({
                 ValidationCode::RelationViolated,
@@ -434,6 +805,12 @@ std::string_view toString(const ValidationCode code) noexcept
     case ValidationCode::UndefinedRegion: return "undefined-region";
     case ValidationCode::MissingLane: return "missing-lane";
     case ValidationCode::EventOutsideScenario: return "event-outside-scenario";
+    case ValidationCode::EventWaveformMismatch: return "event-waveform-mismatch";
+    case ValidationCode::EventCycleMismatch: return "event-cycle-mismatch";
+    case ValidationCode::EventClockDomainInvalid: return "event-clock-domain-invalid";
+    case ValidationCode::LaneClockDomainInvalid: return "lane-clock-domain-invalid";
+    case ValidationCode::LaneGroupReferenceInvalid: return "lane-group-reference-invalid";
+    case ValidationCode::RelationClockDomainInvalid: return "relation-clock-domain-invalid";
     case ValidationCode::InvalidRelationCondition: return "invalid-relation-condition";
     case ValidationCode::RelationNotApplicable: return "relation-not-applicable";
     }

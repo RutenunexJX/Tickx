@@ -1,0 +1,22 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "scenarioId": "Waveform",
+    "operations": [
+        {
+            "op": "add-marker",
+            "name": "Should roll back",
+            "at": "cycle 1",
+            "clockId": "clk"
+        },
+        {
+            "op": "add-relation",
+            "sourceLaneId": "enable",
+            "sourceAt": "cycle 2",
+            "targetLaneId": "state",
+            "targetAt": "cycle 3",
+            "minimumDelayCycles": 1,
+            "maximumDelayCycles": 2,
+            "clockId": "clk"
+        }
+    ]
+}

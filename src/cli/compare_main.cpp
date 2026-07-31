@@ -2,6 +2,8 @@
 #include "wave/project_io.h"
 #include "wave/trace.h"
 
+#include "scenario_selection.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -67,7 +69,8 @@ int main(int argc, char* argv[])
     if (arguments.size() < 3) {
         QTextStream(stderr)
             << "Usage: wave-compare <project.wave.json> <output-directory> "
-               "[--trace-id=ID] [--edge-tolerance-tick=N] "
+               "[--scenario=SELECTOR] [--trace-id=ID] "
+               "[--edge-tolerance-tick=N] "
                "[--x=exact|ignore-x|wildcard] [--mask=VALUE] "
                "[--start-tick=N --end-tick=N] [--relation-only] "
                "[--fail-on-difference]\n";
@@ -76,12 +79,22 @@ int main(int argc, char* argv[])
 
     const auto projectPath = QFileInfo(arguments[1]).absoluteFilePath();
     const auto outputDirectory = QFileInfo(arguments[2]).absoluteFilePath();
+    std::optional<QString> scenarioSelector;
     QString traceId;
     wave::CompareOptions compareOptions;
     bool failOnDifference = false;
     for (int index = 3; index < arguments.size(); ++index) {
         const auto& argument = arguments[index];
-        if (argument.startsWith(QStringLiteral("--trace-id="))) {
+        if (argument.startsWith(
+                QStringLiteral("--scenario="))) {
+            if (scenarioSelector) {
+                QTextStream(stderr)
+                    << "--scenario may be specified only once.\n";
+                return 2;
+            }
+            scenarioSelector = argument.mid(
+                QStringLiteral("--scenario=").size());
+        } else if (argument.startsWith(QStringLiteral("--trace-id="))) {
             traceId = argument.mid(QStringLiteral("--trace-id=").size());
         } else if (argument.startsWith(QStringLiteral("--edge-tolerance-tick="))) {
             const auto parsed = integerOption(
@@ -136,46 +149,104 @@ int main(int argc, char* argv[])
         return 2;
     }
     const auto& project = *loaded.project;
-    if (project.scenarios.empty() || project.importedTraces.empty()) {
-        QTextStream(stderr) << "Project has no scenario or imported trace reference.\n";
+    QString scenarioError;
+    const auto scenarioIndex =
+        wave::cli::resolveScenarioIndex(
+            project,
+            scenarioSelector,
+            scenarioError);
+    if (!scenarioIndex) {
+        QTextStream(stderr)
+            << scenarioError << '\n';
         return 2;
     }
-    const auto traceIterator = traceId.isEmpty()
-        ? project.importedTraces.begin()
-        : std::find_if(
-            project.importedTraces.begin(),
-            project.importedTraces.end(),
-            [&traceId](const wave::ImportedTrace& trace) {
-                return QString::fromStdString(trace.id) == traceId;
-            });
-    if (traceIterator == project.importedTraces.end()) {
-        QTextStream(stderr) << "Requested trace reference does not exist.\n";
+    const auto& scenario =
+        project.scenarios.at(*scenarioIndex);
+    if (project.importedTraces.empty()) {
+        QTextStream(stderr)
+            << "Project has no imported trace reference.\n";
         return 2;
     }
-    const auto& reference = *traceIterator;
-    auto tracePath = QString::fromUtf8(reference.path);
+    const wave::ImportedTrace* selectedTrace = nullptr;
+    if (traceId.isEmpty()) {
+        if (project.importedTraces.size() != 1) {
+            QTextStream(stderr)
+                << "Project has " << project.importedTraces.size()
+                << " imported trace references; specify --trace-id=<stable-id>.\n";
+            return 2;
+        }
+        selectedTrace = &project.importedTraces.front();
+    } else {
+        std::size_t matchCount = 0;
+        for (const auto& trace : project.importedTraces) {
+            if (QString::fromStdString(trace.id) != traceId) continue;
+            selectedTrace = &trace;
+            ++matchCount;
+        }
+        if (matchCount == 0) {
+            QTextStream(stderr) << "Requested trace reference does not exist.\n";
+            return 2;
+        }
+        if (matchCount > 1) {
+            QTextStream(stderr)
+                << "Requested trace stable ID is ambiguous; repair duplicate Imported Trace IDs before comparing.\n";
+            return 2;
+        }
+    }
+    if (!selectedTrace || selectedTrace->id.empty()) {
+        QTextStream(stderr)
+            << "Selected imported trace has an empty stable ID; repair it before comparing.\n";
+        return 2;
+    }
+    const auto& reference = *selectedTrace;
+    const auto storedTracePath =
+        QString::fromUtf8(reference.path);
+    if (storedTracePath.trimmed().isEmpty()) {
+        QTextStream(stderr)
+            << "Selected imported trace has an empty source path; repair it before comparing.\n";
+        return 2;
+    }
+    const auto format =
+        QString::fromStdString(reference.format)
+            .trimmed()
+            .toLower();
+    if (format != QStringLiteral("vcd")
+        && format != QStringLiteral("csv")) {
+        QTextStream(stderr)
+            << "Selected imported trace format '"
+            << QString::fromStdString(reference.format)
+            << "' is unsupported; expected VCD or CSV.\n";
+        return 2;
+    }
+    auto tracePath = storedTracePath;
     if (!QFileInfo(tracePath).isAbsolute()) {
         tracePath = QFileInfo(projectPath).absoluteDir().absoluteFilePath(tracePath);
+    }
+    if (!QFileInfo(tracePath).isFile()) {
+        QTextStream(stderr)
+            << "Selected imported trace file is missing or not a file: "
+            << tracePath << '\n';
+        return 2;
     }
     wave::TraceParseOptions parseOptions;
     parseOptions.projectTimeBase = project.timeBase;
     parseOptions.identity = {project.id, reference.id, 1};
     parseOptions.offset = reference.offset;
-    const auto format = QString::fromStdString(reference.format).toLower();
     auto parsed = format == QStringLiteral("vcd")
         ? wave::parseVcdFile(nativePath(tracePath), parseOptions)
-        : format == QStringLiteral("csv")
-            ? wave::parseCsvFile(nativePath(tracePath), parseOptions)
-            : wave::TraceParseResult{};
+        : wave::parseCsvFile(
+              nativePath(tracePath), parseOptions);
     if (!parsed.ok()) {
         const auto message = parsed.errorSummary();
         QTextStream(stderr)
-            << (message.empty() ? QStringLiteral("Unsupported trace format.") : QString::fromStdString(message))
+            << (message.empty()
+                    ? QStringLiteral(
+                          "Imported trace parsing failed.")
+                    : QString::fromStdString(message))
             << '\n';
         return 2;
     }
 
-    const auto& scenario = project.scenarios.front();
     const auto result = wave::compareScenario(
         project,
         scenario,
@@ -205,6 +276,7 @@ int main(int argc, char* argv[])
     }
     QTextStream(stdout)
         << "Compared " << scenario.name.c_str()
+        << " (" << scenario.id.c_str() << ")"
         << ": " << result.differences.size() << " difference(s)"
         << ", tolerated edges " << result.toleratedEdgeCount << '\n';
     return failOnDifference && !result.matches() ? 3 : 0;

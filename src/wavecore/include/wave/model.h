@@ -222,7 +222,9 @@ struct ValueValidation {
     const Lane& clockLane,
     Tick tick) noexcept;
 
-void normalizeSegments(Lane& lane);
+void normalizeSegments(
+    Lane& lane,
+    bool allowInvalidValues = false);
 void setSegmentRange(
     Lane& lane,
     Tick start,

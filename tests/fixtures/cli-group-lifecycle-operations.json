@@ -1,0 +1,45 @@
+{
+  "schema": "wave-workbench.operations/v1",
+  "operations": [
+    {
+      "op": "add-group",
+      "name": "Core"
+    },
+    {
+      "op": "add-signal",
+      "name": "req",
+      "kind": "bit",
+      "groupId": "CORE"
+    },
+    {
+      "op": "add-group",
+      "name": "Debug"
+    },
+    {
+      "op": "update-group",
+      "groupId": "core",
+      "name": "Control",
+      "color": "#336699",
+      "height": 52,
+      "visible": false
+    },
+    {
+      "op": "move-group",
+      "groupId": "CONTROL",
+      "afterLaneId": "DEBUG"
+    },
+    {
+      "op": "update-group",
+      "groupId": "Control",
+      "name": "Control",
+      "color": "#336699",
+      "height": 52,
+      "visible": false
+    },
+    {
+      "op": "move-group",
+      "groupId": "control",
+      "destinationIndex": 2
+    }
+  ]
+}

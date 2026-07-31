@@ -1,0 +1,61 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "scenarioId": "Waveform",
+    "operations": [
+        {
+            "op": "add-relation",
+            "id": "relation-enable-state",
+            "sourceLaneId": "ENABLE",
+            "sourceAt": "cycle 0",
+            "targetLaneId": "state",
+            "targetAt": "cycle 2",
+            "minimumDelayCycles": 2,
+            "maximumDelayCycles": 2,
+            "clockId": "CLK",
+            "severity": "error",
+            "description": "state changes one cycle after enable"
+        },
+        {
+            "op": "add-marker",
+            "name": "Active",
+            "start": "cycle 1",
+            "end": "cycle 3",
+            "clockId": "clk",
+            "kind": "phase",
+            "note": "Active control interval"
+        },
+        {
+            "op": "update-relation",
+            "relationId": "relation-enable-state",
+            "sourceAt": "cycle 1",
+            "minimumDelayCycles": 1,
+            "maximumDelayCycles": 2,
+            "severity": "warning",
+            "description": "state changes within two cycles after enable"
+        },
+        {
+            "op": "update-marker",
+            "markerId": "ACTIVE",
+            "name": "Control window",
+            "end": "cycle 4",
+            "clockId": "clk",
+            "note": "Complete control interval"
+        },
+        {
+            "op": "update-relation",
+            "relationId": "relation-enable-state",
+            "maximumDelayCycles": 2,
+            "severity": "warning",
+            "description": "state changes within two cycles after enable"
+        },
+        {
+            "op": "update-marker",
+            "markerId": "Control window",
+            "name": "Control window",
+            "end": "cycle 4",
+            "clockId": "clk",
+            "kind": "phase",
+            "note": "Complete control interval"
+        }
+    ]
+}

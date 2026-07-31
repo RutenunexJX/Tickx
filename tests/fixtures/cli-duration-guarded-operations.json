@@ -1,0 +1,16 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "expectedProjectId": "project-wave-workbench-demo",
+    "scenarioId": "scenario-handshake",
+    "operations": [
+        {
+            "op": "rename-lane",
+            "laneId": "lane-request",
+            "name": "req_before_guarded_shrink"
+        },
+        {
+            "op": "set-duration",
+            "duration": "120 ns"
+        }
+    ]
+}

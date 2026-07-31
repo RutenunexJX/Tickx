@@ -515,7 +515,9 @@ char clockValueAt(
     return position < highTicks ? '1' : '0';
 }
 
-void normalizeSegments(Lane& lane)
+void normalizeSegments(
+    Lane& lane,
+    const bool allowInvalidValues)
 {
     for (auto& segment : lane.segments) {
         if (segment.id.empty()) {
@@ -526,9 +528,12 @@ void normalizeSegments(Lane& lane)
         }
         const auto validation = validateLaneValue(lane, segment.value);
         if (!validation.valid) {
-            throw std::invalid_argument(validation.error);
+            if (!allowInvalidValues) {
+                throw std::invalid_argument(validation.error);
+            }
+        } else {
+            segment.value = validation.normalizedValue;
         }
-        segment.value = validation.normalizedValue;
     }
 
     std::sort(lane.segments.begin(), lane.segments.end(), [](const Segment& left, const Segment& right) {

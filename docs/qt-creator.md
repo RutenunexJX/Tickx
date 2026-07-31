@@ -48,6 +48,16 @@ Qt 的 CMake 前缀、编译器、调试器、CMake 和 Ninja 均由所选 Kit �
 - 点击 Build 或按 `Ctrl+B` 构建当前项目。
 - 选择 `wave-workbench` 后点击 Run，可启动内置演示场景。
 - 点击 Start Debugging 或按 `F5`，可在 `src/app/main.cpp` 等源码中设置断点并调试。
+- 调试多 Scenario 工程时，运行后的工具栏会显示 `Waveform` 选择器；切换不修改工程文件，
+  `Ctrl+PageUp` / `Ctrl+PageDown` 可在画布内前后切换。正式工程重新打开时恢复最后一个唯一
+  稳定 ID 波形，并恢复该波形最后的安全信号、整数 tick 和可见时间跨度；跨度在窗口最终布局后
+  以光标为中心恢复，不依赖 Qt Creator 启动窗口的像素尺寸。Beat、Segment 和范围不会恢复。
+  正式工程在导航或缩放停止 400 ms 后自动更新安全位置；调试进程异常终止后重新运行并采用较新
+  `.autosave` 时，恢复数据和最后安全视图可同时返回，不要求先 Save 或正常关闭。恢复状态不会
+  武装 Delete，Undo 仍为空；Untitled 和未提交快速新增信号不建立该位置身份。URI 可用
+  `&scenario=<stable-id>&lane=<stable-id>&tick=<integer>` 显式覆盖位置并保留该尺度。
+  调试 Group 时可点击标题箭头或按 Left/Right 收起/展开成员；该动作仅改变当前 Scenario
+  会话视图，不会触发断点所观察的模型写入、Undo 或 Saved 变化。
 - 若要直接打开磁盘示例，在 Projects > Run Settings 中设置：
 
 ```text
@@ -62,9 +72,10 @@ Working directory:      <source>
 | 目标 | 类型 | 用途 |
 |---|---|---|
 | `wave-workbench` | GUI 可执行程序 | 主桌面应用，默认调试目标 |
-| `wave-generate` | CLI 可执行程序 | 生成 HDL、Python 和图形派生产物 |
-| `wave-compare` | CLI 可执行程序 | 无界面 Expected/Actual 对比 |
-| `wave-bridge` | CLI 可执行程序 | 跨应用文件与 URI 契约 |
+| `wave-generate` | CLI 可执行程序 | 生成 HDL、Python 和图形派生产物；多 Scenario 时使用 `--scenario` |
+| `wave-compare` | CLI 可执行程序 | 无界面 Expected/Actual 对比；多 Scenario 时使用 `--scenario` |
+| `wave-bridge` | CLI 可执行程序 | 跨应用文件与 URI 契约；Scenario 级子命令支持 `--scenario` |
+| `wave-cli` | CLI 可执行程序 | 机器可读 capabilities、new、signals、inspect、sample、window、edges、markers、relations、结构化 validate，以及整信号复制、安全 End 截断、完整 Group 生命周期、Enum、边沿 Relation/Marker 编辑、损坏波形/Event/身份、Event–Segment 关联、陈旧 cycle、悬空 Event/Lane/Relation ClockDomain、无效 Lane Group 与 Imported Trace 身份/源引用/映射恢复 |
 | `wave-tests` | 测试可执行程序 | 领域、生成、导入、Compare 和集成测试 |
 | `test` | CMake/CTest 目标 | 运行已登记的完整测试集 |
 

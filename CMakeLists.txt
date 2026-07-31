@@ -104,6 +104,17 @@ target_link_libraries(wavegenerate
 )
 wave_enable_warnings(wavegenerate)
 
+add_library(waveautomation STATIC
+    src/waveautomation/src/automation.cpp
+)
+target_include_directories(waveautomation
+    PUBLIC src/waveautomation/include
+)
+target_link_libraries(waveautomation
+    PUBLIC wavecore wavetime waveedit wavevalidate Qt6::Core
+)
+wave_enable_warnings(waveautomation)
+
 add_executable(wave-workbench
     src/app/main.cpp
     src/app/main_window.cpp
@@ -121,6 +132,7 @@ wave_enable_warnings(wave-workbench)
 
 add_executable(wave-generate
     src/cli/generate_main.cpp
+    src/cli/scenario_selection.h
 )
 target_link_libraries(wave-generate
     PRIVATE waveproject wavegenerate Qt6::Core Qt6::Gui
@@ -129,6 +141,7 @@ wave_enable_warnings(wave-generate)
 
 add_executable(wave-compare
     src/cli/compare_main.cpp
+    src/cli/scenario_selection.h
 )
 target_link_libraries(wave-compare
     PRIVATE waveproject waveimport wavecompare Qt6::Core
@@ -137,11 +150,21 @@ wave_enable_warnings(wave-compare)
 
 add_executable(wave-bridge
     src/cli/bridge_main.cpp
+    src/cli/scenario_selection.h
 )
 target_link_libraries(wave-bridge
     PRIVATE waveproject waveintegration Qt6::Core
 )
 wave_enable_warnings(wave-bridge)
+
+add_executable(wave-cli
+    src/cli/wave_cli_main.cpp
+    src/cli/scenario_selection.h
+)
+target_link_libraries(wave-cli
+    PRIVATE waveautomation waveproject Qt6::Core
+)
+wave_enable_warnings(wave-cli)
 
 if(WIN32)
     set_property(TARGET wave-workbench PROPERTY WIN32_EXECUTABLE FALSE)

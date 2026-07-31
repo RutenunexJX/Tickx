@@ -1,0 +1,17 @@
+{
+  "schema": "wave-workbench.operations/v1",
+  "scenarioId": "Request / acknowledge",
+  "operations": [
+    {
+      "op": "duplicate-signal",
+      "laneId": "data[7:0]",
+      "name": "temporary_copy"
+    },
+    {
+      "op": "duplicate-signal",
+      "laneId": "data[7:0]",
+      "name": "invalid_clock_copy",
+      "newClockId": "not-valid-for-bus"
+    }
+  ]
+}

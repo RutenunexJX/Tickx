@@ -60,6 +60,33 @@ private:
     Tick after_;
 };
 
+struct ScenarioTruncationSummary {
+    std::size_t clippedSegmentCount{0};
+    std::size_t removedSegmentCount{0};
+    std::size_t removedEventCount{0};
+    std::size_t removedRelationCount{0};
+    std::size_t clippedMarkerCount{0};
+    std::size_t removedMarkerCount{0};
+
+    [[nodiscard]] bool changesContent() const noexcept;
+};
+
+class TruncateScenarioDurationCommand final : public EditCommand {
+public:
+    TruncateScenarioDurationCommand(Scenario& scenario, Tick duration);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] const ScenarioTruncationSummary& summary() const noexcept;
+
+private:
+    Scenario* scenario_;
+    Scenario before_;
+    Scenario after_;
+    ScenarioTruncationSummary summary_;
+};
+
 class SetLaneRangeCommand final : public EditCommand {
 public:
     SetLaneRangeCommand(
@@ -89,6 +116,56 @@ private:
     std::vector<Relation> relationsBefore_;
     std::vector<Relation> relationsAfter_;
     bool initialized_{false};
+};
+
+struct LaneSequenceStep {
+    Tick start{0};
+    Tick end{0};
+    std::string value;
+    JsonExtensions extensions;
+};
+
+struct LaneSequenceAssignment {
+    std::string laneId;
+    std::vector<LaneSequenceStep> steps;
+};
+
+class SetLaneSequenceCommand final : public EditCommand {
+public:
+    SetLaneSequenceCommand(
+        Scenario& scenario,
+        std::string laneId,
+        std::vector<LaneSequenceStep> steps);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::string laneId_;
+    std::vector<LaneSequenceStep> steps_;
+    Scenario before_;
+    Scenario after_;
+};
+
+class SetLaneSequencesCommand final : public EditCommand {
+public:
+    SetLaneSequencesCommand(
+        Scenario& scenario,
+        std::vector<LaneSequenceAssignment> assignments);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::vector<LaneSequenceAssignment> assignments_;
+    Scenario before_;
+    Scenario after_;
 };
 
 struct LaneRangeAssignment {
@@ -177,6 +254,7 @@ public:
     void redo() override;
     void undo() override;
     [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
     Scenario* scenario_;
@@ -259,6 +337,42 @@ private:
     std::size_t insertionIndex_{0};
 };
 
+class CreateGroupWithLaneCommand final : public EditCommand {
+public:
+    CreateGroupWithLaneCommand(
+        Scenario& scenario,
+        Lane group,
+        std::string laneId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::string laneId_;
+    std::vector<Lane> before_;
+    std::vector<Lane> after_;
+};
+
+class CreateGroupWithLanesCommand final : public EditCommand {
+public:
+    CreateGroupWithLanesCommand(
+        Scenario& scenario,
+        Lane group,
+        std::vector<std::string> laneIds);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::vector<std::string> laneIds_;
+    std::vector<Lane> before_;
+    std::vector<Lane> after_;
+};
+
 class DuplicateLaneCommand final : public EditCommand {
 public:
     DuplicateLaneCommand(
@@ -278,6 +392,29 @@ public:
 
 private:
     AddLaneCommand addLaneCommand_;
+};
+
+class DuplicateLanesCommand final : public EditCommand {
+public:
+    DuplicateLanesCommand(
+        Project& project,
+        Scenario& scenario,
+        std::vector<Lane> lanes,
+        std::vector<ClockDomain> clockDomains,
+        std::size_t insertionIndex);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Project* project_;
+    Scenario* scenario_;
+    std::vector<Lane> beforeLanes_;
+    std::vector<Lane> afterLanes_;
+    std::vector<ClockDomain> beforeClockDomains_;
+    std::vector<ClockDomain> afterClockDomains_;
+    std::size_t duplicateCount_{0};
 };
 
 class RemoveLaneCommand final : public EditCommand {
@@ -306,6 +443,100 @@ private:
     bool removesGroup_{false};
 };
 
+class RemoveLanesCommand final : public EditCommand {
+public:
+    RemoveLanesCommand(
+        Project& project,
+        Scenario& scenario,
+        std::vector<std::string> laneIds);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    struct TraceMapping {
+        std::string traceId;
+        std::string laneId;
+        std::string signalId;
+    };
+
+    Project* project_;
+    Scenario* scenario_;
+    std::vector<std::string> laneIds_;
+    Scenario beforeScenario_;
+    Scenario afterScenario_;
+    std::vector<TraceMapping> removedTraceMappings_;
+};
+
+class RemoveTraceMappingAtIndexCommand final : public EditCommand {
+public:
+    RemoveTraceMappingAtIndexCommand(
+        Project& project,
+        std::size_t traceIndex,
+        ImportedTrace expected,
+        std::string expectedLaneId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Project* project_;
+    std::size_t traceIndex_;
+    ImportedTrace expected_;
+    std::string expectedLaneId_;
+    std::optional<std::vector<ImportedTrace>> before_;
+    std::optional<std::vector<ImportedTrace>> after_;
+};
+
+class ChangeTraceIdentityAtIndexCommand final : public EditCommand {
+public:
+    ChangeTraceIdentityAtIndexCommand(
+        Project& project,
+        std::size_t traceIndex,
+        ImportedTrace expected,
+        std::string replacementId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Project* project_;
+    std::size_t traceIndex_;
+    ImportedTrace expected_;
+    std::string replacementId_;
+    std::optional<std::vector<ImportedTrace>> before_;
+    std::optional<std::vector<ImportedTrace>> after_;
+};
+
+class ChangeTraceSourceAtIndexCommand final : public EditCommand {
+public:
+    ChangeTraceSourceAtIndexCommand(
+        Project& project,
+        std::size_t traceIndex,
+        ImportedTrace expected,
+        std::string replacementPath,
+        std::string replacementFormat);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Project* project_;
+    std::size_t traceIndex_;
+    ImportedTrace expected_;
+    std::string replacementPath_;
+    std::string replacementFormat_;
+    std::optional<std::vector<ImportedTrace>> before_;
+    std::optional<std::vector<ImportedTrace>> after_;
+};
+
 class MoveLaneCommand final : public EditCommand {
 public:
     MoveLaneCommand(
@@ -323,6 +554,65 @@ private:
     std::size_t beforeIndex_;
     std::size_t afterIndex_;
     bool movesGroup_{false};
+};
+
+class MoveLanesCommand final : public EditCommand {
+public:
+    MoveLanesCommand(
+        Scenario& scenario,
+        std::vector<std::string> laneIds,
+        std::size_t insertionSlot);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::vector<std::string> laneIds_;
+    std::vector<Lane> before_;
+    std::vector<Lane> after_;
+};
+
+class SetLaneGroupCommand final : public EditCommand {
+public:
+    SetLaneGroupCommand(
+        Scenario& scenario,
+        std::string laneId,
+        std::string groupId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::string laneId_;
+    std::string groupId_;
+    std::vector<Lane> before_;
+    std::vector<Lane> after_;
+};
+
+class SetLanesGroupCommand final : public EditCommand {
+public:
+    SetLanesGroupCommand(
+        Scenario& scenario,
+        std::vector<std::string> laneIds,
+        std::string groupId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::vector<std::string> laneIds_;
+    std::string groupId_;
+    std::vector<Lane> before_;
+    std::vector<Lane> after_;
 };
 
 class ChangeLaneCommand final : public EditCommand {
@@ -345,6 +635,44 @@ private:
     Lane after_;
 };
 
+class RepairLaneClockReferenceCommand final : public EditCommand {
+public:
+    RepairLaneClockReferenceCommand(
+        const Project& project,
+        Scenario& scenario,
+        std::string laneId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    const Project* project_;
+    Scenario* scenario_;
+    std::string laneId_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class RepairLaneGroupReferenceCommand final : public EditCommand {
+public:
+    RepairLaneGroupReferenceCommand(
+        Scenario& scenario,
+        std::string laneId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::string laneId_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
 class HideLaneCommand final : public EditCommand {
 public:
     HideLaneCommand(Scenario& scenario, std::string laneId);
@@ -359,6 +687,27 @@ private:
     std::string laneId_;
     bool wasVisible_{false};
     bool hidesGroup_{false};
+};
+
+class HideLanesCommand final : public EditCommand {
+public:
+    HideLanesCommand(
+        Scenario& scenario,
+        std::vector<std::string> laneIds);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    struct Visibility {
+        std::string laneId;
+        bool visible{false};
+    };
+
+    Scenario* scenario_;
+    std::vector<Visibility> before_;
 };
 
 class ShowLaneCommand final : public EditCommand {
@@ -414,8 +763,52 @@ private:
 };
 
 struct CopiedLaneRange {
+    CopiedLaneRange() = default;
+    CopiedLaneRange(
+        std::string destinationLaneId,
+        std::vector<Segment> segments,
+        std::string source = {})
+        : laneId(std::move(destinationLaneId))
+        , relativeSegments(std::move(segments))
+        , sourceLaneId(std::move(source))
+    {
+    }
+
+    // laneId is the destination. An empty sourceLaneId means the same lane.
     std::string laneId;
     std::vector<Segment> relativeSegments;
+    std::string sourceLaneId;
+};
+
+enum class RangeTransferMode {
+    Move,
+    Copy,
+};
+
+class TransferRangeCommand final : public EditCommand {
+public:
+    TransferRangeCommand(
+        Scenario& scenario,
+        std::vector<CopiedLaneRange> lanes,
+        Tick source,
+        Tick destination,
+        Tick duration,
+        RangeTransferMode mode);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::vector<CopiedLaneRange> lanes_;
+    Tick source_;
+    Tick destination_;
+    Tick duration_;
+    RangeTransferMode mode_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
 };
 
 class PasteRangeCommand final : public EditCommand {
@@ -424,7 +817,8 @@ public:
         Scenario& scenario,
         std::vector<CopiedLaneRange> lanes,
         Tick destination,
-        Tick duration);
+        Tick duration,
+        std::string description = "Paste range");
 
     void redo() override;
     void undo() override;
@@ -436,6 +830,7 @@ private:
     std::vector<CopiedLaneRange> lanes_;
     Tick destination_;
     Tick duration_;
+    std::string description_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
 };
@@ -467,6 +862,64 @@ private:
     Scenario* scenario_;
     std::string eventId_;
     Event replacement_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class RepairWaveformEventLinkCommand final : public EditCommand {
+public:
+    RepairWaveformEventLinkCommand(
+        const Project& project,
+        Scenario& scenario,
+        std::string eventId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    const Project* project_;
+    Scenario* scenario_;
+    std::string eventId_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class ClearEventCycleCommand final : public EditCommand {
+public:
+    ClearEventCycleCommand(
+        Scenario& scenario,
+        std::string eventId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Scenario* scenario_;
+    std::string eventId_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class RepairEventClockReferenceCommand final : public EditCommand {
+public:
+    RepairEventClockReferenceCommand(
+        const Project& project,
+        Scenario& scenario,
+        std::string eventId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    const Project* project_;
+    Scenario* scenario_;
+    std::string eventId_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
 };
@@ -520,6 +973,27 @@ private:
     std::optional<Scenario> after_;
 };
 
+class ChangeMarkerAtIndexCommand final : public EditCommand {
+public:
+    ChangeMarkerAtIndexCommand(
+        Scenario& scenario,
+        std::size_t markerIndex,
+        Marker expected,
+        Marker replacement);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::size_t markerIndex_;
+    Marker expected_;
+    Marker replacement_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
 class RemoveMarkerCommand final : public EditCommand {
 public:
     RemoveMarkerCommand(Scenario& scenario, std::string markerId);
@@ -531,6 +1005,25 @@ public:
 private:
     Scenario* scenario_;
     std::string markerId_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class RemoveMarkerAtIndexCommand final : public EditCommand {
+public:
+    RemoveMarkerAtIndexCommand(
+        Scenario& scenario,
+        std::size_t markerIndex,
+        Marker expected);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::size_t markerIndex_;
+    Marker expected_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
 };
@@ -569,6 +1062,48 @@ private:
     std::optional<Scenario> after_;
 };
 
+class RepairRelationClockReferenceCommand final
+    : public EditCommand {
+public:
+    RepairRelationClockReferenceCommand(
+        const Project& project,
+        Scenario& scenario,
+        std::string relationId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    const Project* project_;
+    Scenario* scenario_;
+    std::string relationId_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class ChangeRelationAtIndexCommand final : public EditCommand {
+public:
+    ChangeRelationAtIndexCommand(
+        Scenario& scenario,
+        std::size_t relationIndex,
+        Relation expected,
+        Relation replacement);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::size_t relationIndex_;
+    Relation expected_;
+    Relation replacement_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
 class RemoveRelationCommand final : public EditCommand {
 public:
     RemoveRelationCommand(Scenario& scenario, std::string relationId);
@@ -580,6 +1115,25 @@ public:
 private:
     Scenario* scenario_;
     std::string relationId_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class RemoveRelationAtIndexCommand final : public EditCommand {
+public:
+    RemoveRelationAtIndexCommand(
+        Scenario& scenario,
+        std::size_t relationIndex,
+        Relation expected);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::size_t relationIndex_;
+    Relation expected_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
 };

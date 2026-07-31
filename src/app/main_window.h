@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -48,7 +49,11 @@ class MainWindow final : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(Project project, QString projectFile = {}, QWidget* parent = nullptr);
+    explicit MainWindow(
+        Project project,
+        QString projectFile = {},
+        QWidget* parent = nullptr,
+        std::optional<std::size_t> initialScenarioIndex = std::nullopt);
 
     [[nodiscard]] const Project& project() const noexcept;
     void requestCompareMode();
@@ -104,6 +109,20 @@ private slots:
 private:
     void createActions();
     void createToolBars();
+    void populateScenarioSelector();
+    bool switchActiveScenario(std::size_t index, bool announce = true);
+    void switchAdjacentScenario(bool forward);
+    bool selectScenarioForHistoryState(std::uint64_t stateId);
+    void updateScenarioNavigationActions();
+    void rememberActiveScenario();
+    void scheduleActiveScenarioLocationMemory();
+    void rememberActiveScenarioLocation();
+    [[nodiscard]] std::optional<QString> restoreActiveScenarioLocation();
+    [[nodiscard]] std::optional<std::size_t>
+    rememberedActiveScenarioIndex();
+    [[nodiscard]] QString scenarioPreferenceKey() const;
+    [[nodiscard]] QString scenarioLocationPreferenceKey() const;
+    [[nodiscard]] QString activeScenarioLabel() const;
     void showSignalFind();
     void closeSignalFind(bool announce = true);
     void updateSignalFind();
@@ -113,6 +132,7 @@ private:
     void showGoToTime();
     void closeGoToTime(bool announce = true);
     void submitGoToTime();
+    void syncGoToTimeEditor(bool replaceInput);
     void createDocks();
     void populateSignalTree();
     void populateClockTree();
@@ -137,14 +157,28 @@ private:
     [[nodiscard]] Tick latestContentTick(const Scenario& scenario) const noexcept;
     void duplicateSelectedLane();
     void duplicateLaneById(const QString& laneId);
+    void duplicateLanesById(const QStringList& laneIds);
     void hideSelectedLane();
     void hideLaneById(const QString& laneId);
+    void hideLanesById(const QStringList& laneIds);
     void renameLaneById(const QString& laneId);
     void removeLaneById(const QString& laneId);
+    void removeLanesById(const QStringList& laneIds);
+    void setLaneGroupById(const QString& laneId, const QString& groupId);
+    void setLanesGroupById(const QStringList& laneIds, const QString& groupId);
+    void createGroupWithLane(const QString& laneId);
+    void createGroupWithLanes(const QStringList& laneIds);
     void showLaneContextMenu(const QString& laneId, const QPoint& globalPosition);
     void editLaneKeyParameters(const QString& laneId);
     void moveSelectedLaneBy(int offset);
+    [[nodiscard]] std::optional<std::size_t>
+    batchLaneStepInsertionSlot(
+        const Scenario& scenario,
+        const QStringList& laneIds,
+        int offset) const;
     void updateLaneOrderActions();
+    void updateWaveContext();
+    void updateSegmentActions();
     void editLaneById(const QString& laneId);
     void invalidateCompareResult();
     void scheduleAutosave();
@@ -176,6 +210,7 @@ private:
 
     Project project_;
     QString projectFile_;
+    std::size_t activeScenarioIndex_{0};
     bool dirty_{false};
     bool recoveryLoaded_{false};
     bool quickLaneDirtyBefore_{false};
@@ -184,6 +219,7 @@ private:
     CommandStack commandStack_;
     std::optional<std::uint64_t> cleanCommandStateId_;
     std::uint64_t observedCommandStateId_{0};
+    std::map<std::uint64_t, std::size_t> commandScenarioIndices_;
     std::uint64_t externalRevision_{0};
     std::uint64_t cleanExternalRevision_{0};
     WaveCanvas* canvas_{nullptr};
@@ -211,10 +247,20 @@ private:
     QProgressBar* traceProgress_{nullptr};
     QLabel* traceSummary_{nullptr};
     QLabel* saveStateLabel_{nullptr};
+    QLabel* scenarioSelectorLabel_{nullptr};
+    QComboBox* scenarioSelector_{nullptr};
+    QAction* scenarioSelectorLabelAction_{nullptr};
+    QAction* scenarioSelectorAction_{nullptr};
+    QAction* scenarioSelectorSeparatorAction_{nullptr};
+    QLabel* waveTargetLabel_{nullptr};
     QAction* undoAction_{nullptr};
     QAction* redoAction_{nullptr};
+    QAction* previousScenarioAction_{nullptr};
+    QAction* nextScenarioAction_{nullptr};
+    QAction* cutRangeAction_{nullptr};
     QAction* duplicateLaneAction_{nullptr};
     QAction* hideLaneAction_{nullptr};
+    QAction* removeLaneAction_{nullptr};
     QAction* moveLaneUpAction_{nullptr};
     QAction* moveLaneDownAction_{nullptr};
     QAction* showHiddenLanesAction_{nullptr};
@@ -226,16 +272,31 @@ private:
     QToolButton* signalFindCloseButton_{nullptr};
     int signalFindMatchIndex_{-1};
     QWidget* goToTimeWidget_{nullptr};
+    QLabel* goToTimeLabel_{nullptr};
     QLineEdit* goToTimeEdit_{nullptr};
     QLabel* goToTimeRangeLabel_{nullptr};
+    QToolButton* goToTimeOtherEdgeButton_{nullptr};
     QToolButton* goToTimeGoButton_{nullptr};
     QToolButton* goToTimeCloseButton_{nullptr};
     QAction* goToTimeWidgetAction_{nullptr};
+    bool goToTimeEditsRange_{false};
+    bool goToTimeEditsRangeWidth_{false};
     QAction* selectAction_{nullptr};
     QAction* drawAction_{nullptr};
     QAction* markerAction_{nullptr};
     QAction* asyncTimingAction_{nullptr};
-    QAction* busEditPaletteAction_{nullptr};
+    QAction* waveTargetAction_{nullptr};
+    QAction* selectSegmentAtCursorAction_{nullptr};
+    QAction* previousSegmentAction_{nullptr};
+    QAction* nextSegmentAction_{nullptr};
+    QAction* duplicateSegmentBeforeAction_{nullptr};
+    QAction* duplicateSegmentAfterAction_{nullptr};
+    QAction* moveSegmentEarlierAction_{nullptr};
+    QAction* moveSegmentLaterAction_{nullptr};
+    QAction* expandSegmentStartAction_{nullptr};
+    QAction* trimSegmentStartAction_{nullptr};
+    QAction* expandSegmentEndAction_{nullptr};
+    QAction* trimSegmentEndAction_{nullptr};
     QAction* rangeEditPaletteAction_{nullptr};
     QAction* relationAction_{nullptr};
     QAction* exportAction_{nullptr};
@@ -243,6 +304,7 @@ private:
     QAction* cancelTraceAction_{nullptr};
     QAction* compareModeAction_{nullptr};
     QMenu* editMenu_{nullptr};
+    QMenu* segmentMenu_{nullptr};
     QMenu* recentProjectsMenu_{nullptr};
     QAction* signalFindAction_{nullptr};
     QAction* signalFindWidgetAction_{nullptr};
@@ -262,6 +324,7 @@ private:
     std::uint64_t traceGeneration_{0};
     std::shared_ptr<std::atomic_bool> traceCancelFlag_;
     QFutureWatcher<std::shared_ptr<TraceParseResult>>* traceWatcher_{nullptr};
+    QTimer* scenarioLocationMemoryTimer_{nullptr};
     QTimer* autosaveTimer_{nullptr};
     QFutureWatcher<QPair<quint64, QString>>* autosaveWatcher_{nullptr};
     quint64 autosaveGeneration_{0};

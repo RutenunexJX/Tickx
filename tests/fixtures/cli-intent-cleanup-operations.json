@@ -1,0 +1,14 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "scenarioId": "Waveform",
+    "operations": [
+        {
+            "op": "delete-relation",
+            "relationId": "relation-enable-state"
+        },
+        {
+            "op": "delete-marker",
+            "markerId": "CONTROL WINDOW"
+        }
+    ]
+}

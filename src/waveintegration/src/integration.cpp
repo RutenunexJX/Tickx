@@ -372,10 +372,14 @@ QByteArray makeWorkspaceManifest(
     QJsonObject commands;
     commands.insert(
         QStringLiteral("generate"),
-        QStringLiteral("wave-generate <project.wave.json> <workspace>"));
+        QStringLiteral(
+            "wave-generate <project.wave.json> <workspace> "
+            "[--scenario=SELECTOR]"));
     commands.insert(
         QStringLiteral("compare"),
-        QStringLiteral("wave-compare <project.wave.json> <output-directory>"));
+        QStringLiteral(
+            "wave-compare <project.wave.json> <output-directory> "
+            "[--scenario=SELECTOR]"));
     root.insert(QStringLiteral("cli"), commands);
     return QJsonDocument(root).toJson(QJsonDocument::Indented);
 }

@@ -1,0 +1,18 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "expectedProjectId": "project-wave-workbench-demo",
+    "scenarioId": "scenario-handshake",
+    "operations": [
+        {
+            "op": "rename-lane",
+            "laneId": "lane-request",
+            "name": "must_not_escape"
+        },
+        {
+            "op": "assert-value",
+            "laneId": "lane-request",
+            "at": "80 ns",
+            "value": "0"
+        }
+    ]
+}

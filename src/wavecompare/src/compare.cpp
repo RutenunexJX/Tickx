@@ -125,9 +125,20 @@ std::optional<bool> actualValueEquals(
     const std::string_view literal,
     std::string& error)
 {
-    const auto* signal = mappedSignal(reference, trace, lane.id);
+    const auto mapping =
+        reference.signalMapping.find(lane.id);
+    if (mapping == reference.signalMapping.end()) {
+        error = "lane '" + lane.name
+            + "' has no configured actual signal mapping";
+        return std::nullopt;
+    }
+    const auto* signal =
+        trace.findSignal(mapping->second);
     if (!signal) {
-        error = "lane '" + lane.name + "' has no mapped actual signal";
+        error = "mapped actual signal '"
+            + mapping->second + "' for lane '"
+            + lane.name
+            + "' does not exist in the loaded trace";
         return std::nullopt;
     }
     if (lane.kind != LaneKind::Transaction
@@ -626,8 +637,33 @@ CompareResult compareScenario(
             || lane.kind == LaneKind::Event) {
             continue;
         }
-        const auto* signal = mappedSignal(reference, trace, lane.id);
-        auto& summary = laneSummary(result, lane, signal ? signal->id : std::string{});
+        const auto mapping =
+            reference.signalMapping.find(lane.id);
+        if (mapping
+            == reference.signalMapping.end()) {
+            auto& summary =
+                laneSummary(result, lane, {});
+            appendDifference(
+                result,
+                summary,
+                {
+                    {},
+                    CompareDifferenceKind::UnmappedSignal,
+                    lane.id,
+                    {},
+                    result.start,
+                    result.end,
+                    lane.name,
+                    {},
+                    "No actual signal mapping is configured for this Lane.",
+                },
+                options.maximumDifferences);
+            continue;
+        }
+        const auto* signal =
+            trace.findSignal(mapping->second);
+        auto& summary = laneSummary(
+            result, lane, mapping->second);
         if (!signal) {
             appendDifference(
                 result,
@@ -636,12 +672,14 @@ CompareResult compareScenario(
                     {},
                     CompareDifferenceKind::MissingSignal,
                     lane.id,
-                    {},
+                    mapping->second,
                     result.start,
                     result.end,
                     lane.name,
-                    {},
-                    "No mapped actual signal exists.",
+                    mapping->second,
+                    "Mapped actual signal '"
+                        + mapping->second
+                        + "' does not exist in the loaded trace.",
                 },
                 options.maximumDifferences);
             continue;
@@ -888,6 +926,8 @@ std::string_view toString(const CompareDifferenceKind kind) noexcept
     switch (kind) {
     case CompareDifferenceKind::ValueMismatch:
         return "value-mismatch";
+    case CompareDifferenceKind::UnmappedSignal:
+        return "unmapped-signal";
     case CompareDifferenceKind::MissingSignal:
         return "missing-signal";
     case CompareDifferenceKind::WidthMismatch:

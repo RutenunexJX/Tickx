@@ -342,7 +342,7 @@ std::optional<Lane> laneFromJson(const QJsonValue& value, QString& error)
         {"id", "name", "kind", "width", "signed", "radix", "enumMap",
          "clockDomainId", "color", "height", "visible", "groupId", "segments"});
     try {
-        normalizeSegments(lane);
+        normalizeSegments(lane, true);
     } catch (const std::exception& exception) {
         error = QStringLiteral("Invalid segments in lane %1: %2")
                     .arg(qString(lane.name), QString::fromUtf8(exception.what()));

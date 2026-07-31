@@ -11,11 +11,14 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <vector>
 
 class QContextMenuEvent;
+class QAction;
 class QComboBox;
 class QCompleter;
 class QEvent;
@@ -28,6 +31,7 @@ class QStringListModel;
 class QMouseEvent;
 class QPaintEvent;
 class QResizeEvent;
+class QShowEvent;
 class QToolButton;
 class QTimer;
 class QWheelEvent;
@@ -46,15 +50,90 @@ public:
         Relation,
     };
 
+    enum class SegmentAction {
+        DuplicateBefore,
+        DuplicateAfter,
+        MoveEarlier,
+        MoveLater,
+        ExpandStart,
+        TrimStart,
+        ExpandEnd,
+        TrimEnd,
+    };
+
+    enum class BusEditAction {
+        ApplyDraft,
+        PresetZero,
+        PresetX,
+        PresetZ,
+        PresetDontCare,
+        Clear,
+    };
+
+    struct SegmentActionState {
+        bool applicable{false};
+        bool valid{false};
+        bool modelChanges{false};
+        Tick start{0};
+        Tick end{0};
+        std::size_t relationRemovalCount{0};
+        QString summary;
+    };
+
+    struct BusEditActionState {
+        bool applicable{false};
+        bool valid{false};
+        bool modelChanges{false};
+        Tick start{0};
+        Tick end{0};
+        std::size_t relationRemovalCount{0};
+        std::size_t valueCount{0};
+        bool sequence{false};
+        bool extendsEnd{false};
+        QString displayValue;
+        QString summary;
+    };
+
     explicit WaveCanvas(QWidget* parent = nullptr);
 
     void setDocument(Project* project, Scenario* scenario, CommandStack* commandStack);
+    void clearDocumentContexts();
+    [[nodiscard]] bool hasDocumentContext(const Scenario* scenario) const noexcept;
     void setTool(Tool tool);
 
     [[nodiscard]] Tool tool() const noexcept;
     [[nodiscard]] QString selectedLaneId() const;
     [[nodiscard]] QStringList selectedLaneIds() const;
+    [[nodiscard]] bool hasLaneHeaderSelection() const noexcept;
+    [[nodiscard]] std::pair<bool, QString> selectedLanePasteAvailability() const;
+    [[nodiscard]] std::pair<bool, QString>
+    selectedRangeClearAvailability() const;
+    [[nodiscard]] std::pair<bool, QString>
+    selectedRangeRepeatAvailability() const;
+    [[nodiscard]] std::size_t
+    selectedRangeRepeatRelationRemovalCount() const;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    laneHeaderPastePreviewRange() const;
+    [[nodiscard]] QStringList laneHeaderPastePreviewTargetLaneIds() const;
+    [[nodiscard]] std::size_t
+    laneHeaderPastePreviewRelationRemovalCount() const;
+    [[nodiscard]] QStringList
+    laneHeaderPastePreviewRelationRemovalSummaries() const;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    pastePreviewRange() const;
+    [[nodiscard]] QStringList pastePreviewTargetLaneIds() const;
+    [[nodiscard]] std::size_t pastePreviewRelationRemovalCount() const;
+    [[nodiscard]] QStringList
+    pastePreviewRelationRemovalSummaries() const;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    repeatPreviewRange() const;
+    [[nodiscard]] QStringList repeatPreviewTargetLaneIds() const;
+    [[nodiscard]] std::size_t repeatPreviewRelationRemovalCount() const;
+    [[nodiscard]] QStringList
+    repeatPreviewRelationRemovalSummaries() const;
     [[nodiscard]] Tick cursorTick() const noexcept;
+    [[nodiscard]] Tick visibleTimeSpan() const noexcept;
+    bool restoreVisibleTimeSpan(Tick span, Tick anchorTick);
     [[nodiscard]] std::optional<Tick> movableCursorTick() const noexcept;
     [[nodiscard]] std::optional<Tick> temporaryCursorTick() const noexcept;
     [[nodiscard]] QString selectedMarkerId() const;
@@ -65,18 +144,84 @@ public:
     [[nodiscard]] QString hoveredBitBeatLaneId() const;
     [[nodiscard]] std::optional<std::pair<Tick, Tick>> hoveredBitBeatRange() const noexcept;
     [[nodiscard]] std::optional<std::size_t> laneDropDestinationIndex() const noexcept;
+    [[nodiscard]] QString laneDropGroupId() const;
     [[nodiscard]] std::optional<Tick> waveEditTransitionPreviewTick() const noexcept;
     [[nodiscard]] std::optional<std::pair<Tick, Tick>>
     waveEditTransitionPreviewRange() const noexcept;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    waveEditRangeTransferPreviewRange() const noexcept;
+    [[nodiscard]] bool waveEditRangeTransferCopies() const noexcept;
+    [[nodiscard]] QStringList waveEditRangeTransferTargetLaneIds() const;
+    [[nodiscard]] bool waveEditRangeTransferTargetValid() const noexcept;
+    [[nodiscard]] QString waveEditRangeTransferTargetError() const;
+    [[nodiscard]] bool waveEditRangeTransferChangesModel() const;
+    [[nodiscard]] bool waveEditRangeTransferExtendsEnd() const;
+    [[nodiscard]] std::size_t
+    waveEditRangeTransferRelationRemovalCount() const;
+    [[nodiscard]] QStringList
+    waveEditRangeTransferRelationRemovalSummaries() const;
+    [[nodiscard]] bool waveEditSegmentChangesModel() const;
+    [[nodiscard]] std::size_t
+    waveEditSegmentRelationRemovalCount() const;
+    [[nodiscard]] QStringList
+    waveEditSegmentRelationRemovalSummaries() const;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    waveEditSegmentPreviewRange() const;
+    [[nodiscard]] SegmentActionState
+    selectedSegmentActionState(SegmentAction action) const;
+    bool previewSelectedSegmentAction(SegmentAction action);
+    void clearSelectedSegmentActionPreview();
+    [[nodiscard]] BusEditActionState
+    busEditActionState(BusEditAction action) const;
+    bool previewBusEditAction(BusEditAction action);
+    void clearBusEditActionPreview();
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    busEditPreviewRange() const;
+    [[nodiscard]] bool busEditPreviewChangesModel() const;
+    [[nodiscard]] std::size_t busEditPreviewRelationRemovalCount() const;
+    [[nodiscard]] QStringList busEditPreviewRelationRemovalSummaries() const;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    rangeSequencePreviewRange() const;
+    [[nodiscard]] bool rangeSequencePreviewChangesModel() const;
+    [[nodiscard]] std::size_t
+    rangeSequencePreviewRelationRemovalCount() const;
+    [[nodiscard]] QString rangeSequenceCaretTargetLaneId() const;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    rangeSequenceCaretTargetRange() const;
+    [[nodiscard]] std::size_t rangeSequenceCaretTargetCount() const noexcept;
     [[nodiscard]] bool hasQuickLaneSetup() const noexcept;
     [[nodiscard]] bool hasLaneRename() const noexcept;
+    [[nodiscard]] bool isGroupCollapsed(const QString& groupId) const noexcept;
+    [[nodiscard]] bool isLaneDisplayed(const QString& laneId) const noexcept;
+    bool setGroupCollapsed(const QString& groupId, bool collapsed);
     [[nodiscard]] int signalHeaderWidth() const noexcept;
     [[nodiscard]] bool commitLaneRename();
     [[nodiscard]] bool commitPendingInlineEdits();
     [[nodiscard]] QWidget* busEditPaletteWidget() const noexcept;
     [[nodiscard]] QWidget* rangeEditPaletteWidget() const noexcept;
     [[nodiscard]] bool asynchronousEditing() const noexcept;
+    [[nodiscard]] std::optional<Tick> explicitRangeAnchorTick() const noexcept;
+    [[nodiscard]] std::optional<Tick> explicitRangeActiveTick() const noexcept;
+    [[nodiscard]] QString editTargetSummary() const;
+    [[nodiscard]] QString editTargetToolTip() const;
+    [[nodiscard]] QString editTimingSummary() const;
+    [[nodiscard]] QString restoreSelectionForHistoryTransition(
+        std::uint64_t fromStateId,
+        std::uint64_t toStateId);
+    void beginCommandSelectionTransition(std::uint64_t beforeStateId);
+    void finishCommandSelectionTransition(std::uint64_t afterStateId);
+    void cancelCommandSelectionTransition() noexcept;
+    void selectSegmentAtCursor();
+    void selectPreviousSegment();
+    void selectNextSegment();
+    bool duplicateSelectedSegmentBefore();
     bool duplicateSelectedSegmentAfter();
+    bool moveSelectedSegmentEarlier();
+    bool moveSelectedSegmentLater();
+    bool expandSelectedSegmentStart();
+    bool trimSelectedSegmentStart();
+    bool expandSelectedSegmentEnd();
+    bool trimSelectedSegmentEnd();
 
     void beginQuickLaneSetup(
         const QString& laneId,
@@ -102,22 +247,29 @@ public slots:
     void refreshModel();
     void revealLocation(const QString& laneId, qint64 tick);
     void revealLane(const QString& laneId);
+    void selectLaneHeaders(
+        const QStringList& laneIds,
+        const QString& activeLaneId);
     void goToTick(qint64 tick);
     void dismissInlineValueEditor();
     void selectEntireTimeline();
     void cutSelection();
     void copySelection();
     void pasteAtCursor();
+    void duplicateSelectionAfter();
     void insertPulse();
     void setAsynchronousEditing(bool enabled);
+    bool setExplicitRangeActiveTick(qint64 tick);
 
 signals:
     void addLaneRequested(LaneKind kind);
     void showHiddenLanesRequested();
     void showHiddenLaneRequested(const QString& laneId);
     void duplicateLaneRequested(const QString& laneId);
+    void duplicateLanesRequested(const QStringList& laneIds);
     void renameLaneRequested(const QString& laneId);
     void removeLaneRequested(const QString& laneId);
+    void removeLanesRequested(const QStringList& laneIds);
     void editLaneParametersRequested(const QString& laneId, const QPoint& globalPosition);
     void selectionChanged(const QString& laneId, qint64 tick);
     void modelEdited();
@@ -135,6 +287,7 @@ signals:
     void measureModeExitRequested();
     void busEditPaletteVisibilityChanged(bool visible);
     void rangeEditPaletteVisibilityChanged(bool visible);
+    void exactRangeTimeEditRequested();
     void signalHeaderWidthCommitted(int width);
 
 protected:
@@ -146,6 +299,7 @@ protected:
     void keyReleaseEvent(QKeyEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
@@ -198,10 +352,264 @@ private:
         SegmentBoundary boundary{SegmentBoundary::None};
     };
 
+    struct HistorySelectionSnapshot {
+        std::string selectedLaneId;
+        std::vector<std::string> selectedLaneIds;
+        std::string selectedSegmentLaneId;
+        std::string selectedSegmentId;
+        std::optional<std::pair<Tick, Tick>> selectionRange;
+        Tick cursorTick{0};
+        bool explicitRangeSelection{false};
+        bool laneHeaderSelectionActive{false};
+    };
+
+    struct RangePasteAvailability {
+        bool enabled{false};
+        QString toolTip;
+    };
+
+    struct RelationRemovalImpact {
+        std::vector<std::string> ids;
+        QStringList endpointSummaries;
+        QStringList summaries;
+    };
+
+    struct RangeClearAvailability {
+        bool enabled{false};
+        bool clockRange{false};
+        std::size_t affectedLaneCount{0};
+        RelationRemovalImpact relationImpact;
+        QString toolTip;
+    };
+
+    struct RangeValueAvailability {
+        bool valid{false};
+        bool enabled{false};
+        std::size_t affectedLaneCount{0};
+        QString displayValue;
+        RelationRemovalImpact relationImpact;
+        QString toolTip;
+    };
+
+    struct BitPatternDraft {
+        bool valid{false};
+        std::vector<std::string> values;
+        QString error;
+    };
+
+    struct BitPatternProjection {
+        std::vector<std::string> laneIds;
+        Tick start{0};
+        Tick end{0};
+        Tick beatWidth{0};
+        std::size_t patternLength{0};
+        std::size_t beatCount{0};
+        std::size_t changedLaneCount{0};
+        bool sharedPattern{true};
+        QStringList patternSummaries;
+        std::vector<Lane> lanes;
+        std::vector<LaneSequenceAssignment> assignments;
+        RelationRemovalImpact relationImpact;
+        bool waveformChanges{false};
+        bool modelChanges{false};
+    };
+
+    struct BitPatternAssessment {
+        bool applicable{false};
+        bool valid{false};
+        bool enabled{false};
+        QString summary;
+        std::optional<BitPatternProjection> projection;
+    };
+
+    struct BusRangeSequenceProjection {
+        std::vector<std::string> laneIds;
+        Tick start{0};
+        Tick end{0};
+        Tick beatWidth{0};
+        std::size_t patternLength{0};
+        std::size_t beatCount{0};
+        std::size_t changedLaneCount{0};
+        bool sharedSequence{true};
+        QStringList sequenceSummaries;
+        std::vector<Lane> lanes;
+        std::vector<LaneSequenceAssignment> assignments;
+        RelationRemovalImpact relationImpact;
+        bool waveformChanges{false};
+        bool modelChanges{false};
+    };
+
+    struct RangeSequenceTarget {
+        std::string laneId;
+        Tick start{0};
+        Tick end{0};
+        std::size_t firstBeat{0};
+        std::size_t beatCount{0};
+        std::size_t totalBeatCount{0};
+    };
+
+    struct RangeSequenceTextSpan {
+        int textStart{0};
+        int textLength{0};
+        QString token;
+        std::vector<RangeSequenceTarget> targets;
+    };
+
+    struct RangeSequenceBaseline {
+        const Scenario* scenario{nullptr};
+        std::vector<std::string> laneIds;
+        std::pair<Tick, Tick> range{0, 0};
+        std::uint64_t historyStateId{0};
+        QString text;
+        std::vector<RangeSequenceTextSpan> spans;
+    };
+
+    struct RangeSequenceAnchor {
+        std::string laneId;
+        Tick tick{0};
+    };
+
+    struct BusRangeSequenceAssessment {
+        bool applicable{false};
+        bool sequence{false};
+        bool valid{false};
+        bool enabled{false};
+        QString summary;
+        std::optional<BusRangeSequenceProjection> projection;
+        std::vector<RangeSequenceTextSpan> textSpans;
+    };
+
+    struct RangeSequenceSeed {
+        bool applicable{false};
+        bool available{false};
+        std::size_t laneCount{0};
+        std::size_t beatCount{0};
+        QString text;
+        QString summary;
+        std::vector<RangeSequenceTextSpan> spans;
+    };
+
+    struct RangeRepeatAvailability {
+        bool enabled{false};
+        Tick destination{0};
+        Tick duration{0};
+        bool extendsEnd{false};
+        RelationRemovalImpact relationImpact;
+        QString toolTip;
+    };
+
+    enum class RangePreviewOperation {
+        Paste,
+        Repeat,
+    };
+
+    struct LaneHeaderPastePreview {
+        RangePreviewOperation operation{RangePreviewOperation::Paste};
+        Tick start{0};
+        Tick duration{0};
+        std::vector<Lane> lanes;
+        std::size_t relationRemovalCount{0};
+        std::vector<std::string> relationRemovalIds;
+        QStringList relationRemovalEndpointSummaries;
+        QStringList relationRemovalSummaries;
+        bool waveformChanges{false};
+        bool modelChanges{false};
+    };
+
+    struct RangeTransferProjection {
+        bool copy{false};
+        Tick sourceStart{0};
+        Tick targetStart{0};
+        Tick duration{0};
+        std::vector<std::string> targetLaneIds;
+        std::vector<CopiedLaneRange> copiedLanes;
+        std::vector<Lane> lanes;
+        RelationRemovalImpact relationImpact;
+        bool waveformChanges{false};
+        bool extendsEnd{false};
+        bool modelChanges{false};
+    };
+
+    enum class SegmentEditOperation {
+        Move,
+        Copy,
+        ResizeStart,
+        ResizeEnd,
+    };
+
+    struct SegmentEditProjection {
+        SegmentEditOperation operation{SegmentEditOperation::Move};
+        std::string laneId;
+        std::string sourceSegmentId;
+        Tick originalStart{0};
+        Tick originalEnd{0};
+        Tick start{0};
+        Tick end{0};
+        Lane lane;
+        RelationRemovalImpact relationImpact;
+        bool waveformChanges{false};
+        bool modelChanges{false};
+    };
+
+    struct SegmentActionAssessment {
+        SegmentActionState state;
+        std::optional<SegmentEditProjection> projection;
+    };
+
+    struct BusEditProjection {
+        BusEditAction action{BusEditAction::ApplyDraft};
+        std::string laneId;
+        Tick start{0};
+        Tick end{0};
+        Lane lane;
+        std::vector<LaneSequenceStep> sequenceSteps;
+        RelationRemovalImpact relationImpact;
+        bool waveformChanges{false};
+        bool modelChanges{false};
+        bool extendsEnd{false};
+        QString displayValue;
+        QString summary;
+    };
+
+    struct BusEditActionAssessment {
+        BusEditActionState state;
+        std::optional<BusEditProjection> projection;
+    };
+
+    struct BusDraftToken {
+        int textStart{0};
+        int textLength{0};
+        std::size_t expandedOffset{0};
+        std::size_t expandedCount{0};
+        QString token;
+    };
+
+    struct BusDraftValues {
+        bool sequence{false};
+        bool valid{false};
+        std::size_t valueCount{0};
+        std::vector<std::string> normalizedValues;
+        std::vector<BusDraftToken> tokens;
+        QString error;
+    };
+
+    struct DocumentContext {
+        HistorySelectionSnapshot selection;
+        std::map<
+            std::pair<std::uint64_t, std::uint64_t>,
+            HistorySelectionSnapshot>
+            historySelectionTransitions;
+        double pixelsPerTick{0.003};
+        int horizontalScroll{0};
+        int verticalScroll{0};
+        std::set<std::string> collapsedGroupIds;
+    };
+
     enum class WaveEditInteraction {
         None,
         MoveTransition,
         MoveSegment,
+        MoveRange,
         ToggleBitRange,
         ResizeStart,
         ResizeEnd,
@@ -226,9 +634,15 @@ private:
     [[nodiscard]] Qt::CursorShape defaultCursorShape() const noexcept;
     void rebuildLaneLayout();
     void rebuildSnapIndex();
+    void sanitizeCollapsedGroups();
     void updateScrollBars();
     void updateAddLaneButtonGeometry();
     [[nodiscard]] bool signalHeaderDividerAt(const QPoint& position) const noexcept;
+    [[nodiscard]] bool isLaneDisplayed(const Lane& lane) const noexcept;
+    [[nodiscard]] const Lane* visibleParentGroup(const Lane& lane) const noexcept;
+    [[nodiscard]] std::size_t visibleGroupMemberCount(
+        const std::string& groupId) const noexcept;
+    [[nodiscard]] QRect groupDisclosureRect(const Lane& group) const;
     [[nodiscard]] int fittedSignalHeaderWidth() const;
     void positionQuickLaneSetup();
     void positionLaneRename();
@@ -238,6 +652,10 @@ private:
     void submitLaneRename();
     void cancelLaneRename();
     void submitBusValue(BusEditCommitAction action = BusEditCommitAction::Close);
+    void submitBusSequence(
+        BusEditCommitAction action,
+        const BusDraftValues& draft,
+        const BusEditActionAssessment& assessment);
     void submitRangeValue();
     void submitDurationEdit(bool preserveMouseFocusTarget = false);
     void clearClockBeat(
@@ -249,6 +667,15 @@ private:
     [[nodiscard]] bool hasPendingValueEdit() const noexcept;
     void syncDurationEditor();
     void positionBusPresetPalette();
+    void cancelBusValueEdit();
+    void clearBusEditTarget();
+    bool toggleBusEditScope();
+    [[nodiscard]] BusEditActionAssessment
+    assessBusEditAction(BusEditAction action) const;
+    void updateBusEditActionStates(bool announceDraft = false);
+    void restoreBusEditDraftPreview(bool announce = false);
+    void updateBusEditContextLabel(
+        const BusEditActionState* previewState = nullptr);
     void showBusPresetPalette(
         const Lane& lane,
         const QPoint& anchor,
@@ -269,12 +696,90 @@ private:
     bool stepBusEditorValue(bool upward);
     bool cycleBusRecentValue(bool forward);
     void rememberBusValue(const std::string& laneId, const QString& value);
+    [[nodiscard]] BusDraftValues parseBusDraftValues(
+        const Lane& lane) const;
+    [[nodiscard]] BusDraftValues parseBusDraftValues(
+        const Lane& lane,
+        const QString& entered,
+        bool useEditorRadix) const;
     [[nodiscard]] QString busEditorValue(const Lane& lane) const;
+    [[nodiscard]] QString busEditorValue(
+        const Lane& lane,
+        const QString& entered) const;
     void showRangeEditPalette();
     void hideRangeEditPalette();
     void clearExplicitRangeSelection(bool clearLanes = true);
+    [[nodiscard]] BitPatternDraft parseBitPatternDraft(
+        const QString& entered) const;
+    [[nodiscard]] BitPatternAssessment assessBitPatternDraft(
+        const QString& entered) const;
+    bool submitBitPattern();
+    [[nodiscard]] BusRangeSequenceAssessment
+    assessBusRangeSequenceDraft(const QString& entered) const;
+    [[nodiscard]] RangeSequenceSeed
+    currentRangeSequenceSeed() const;
+    void loadCurrentRangeSequence();
+    void clearRangeSequenceBaseline();
+    [[nodiscard]] bool rangeSequenceBaselineMatchesContext() const noexcept;
+    bool restoreRangeSequenceBaseline();
+    void clearRangeSequenceCaretTarget();
+    void clearRangeSequenceAnchor();
+    void updateRangeSequenceCaretTarget(bool announce = true);
+    bool navigateRangeSequenceTarget(bool forward);
+    [[nodiscard]] bool hasActiveRangeSequenceTokenMapping() const noexcept;
+    [[nodiscard]] bool rangeSequenceTokenAt(const QPoint& position) const;
+    [[nodiscard]] const RangeSequenceTextSpan*
+    rangeSequenceTextSpanAt(
+        const std::string& laneId,
+        Tick tick) const;
+    bool selectRangeSequenceTokenAt(const QPoint& position);
+    bool beginExplicitRangeMove(
+        const QPoint& position,
+        Qt::KeyboardModifiers modifiers);
+    bool submitBusRangeSequence();
+    [[nodiscard]] HistorySelectionSnapshot historySelectionSnapshot() const;
+    void rememberHistorySelectionTransition(
+        std::uint64_t beforeStateId,
+        const HistorySelectionSnapshot& beforeSelection,
+        std::uint64_t afterStateId);
+    [[nodiscard]] bool explicitRangeContains(const QPoint& position) const;
     [[nodiscard]] std::optional<LaneKind> explicitRangeKind() const;
     [[nodiscard]] QStringList explicitRangeEnumSymbols() const;
+    [[nodiscard]] RangePasteAvailability rangePasteAvailability() const;
+    [[nodiscard]] RangeClearAvailability rangeClearAvailability() const;
+    [[nodiscard]] RangeRepeatAvailability rangeRepeatAvailability() const;
+    [[nodiscard]] RangeValueAvailability rangeValueAvailability(
+        const std::string& value,
+        const std::string& presetId = {}) const;
+    [[nodiscard]] RangePasteAvailability pasteAvailabilityForTargets(
+        const std::vector<std::string>& targetLaneIds,
+        Tick pasteStart,
+        std::optional<Tick> selectedWidth = std::nullopt) const;
+    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    laneHeaderPastePreview() const;
+    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    explicitRangePastePreview() const;
+    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    pastePreview() const;
+    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    buildRepeatPreview() const;
+    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    buildPastePreview(
+        const std::vector<std::string>& targetLaneIds,
+        Tick pasteStart) const;
+    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    buildCopiedRangePreview(
+        const std::vector<CopiedLaneRange>& copiedLanes,
+        Tick destination,
+        Tick duration,
+        RangePreviewOperation operation) const;
+    [[nodiscard]] RangePasteAvailability pasteAvailabilityWithImpact(
+        const std::vector<std::string>& targetLaneIds,
+        Tick pasteStart,
+        std::optional<Tick> selectedWidth = std::nullopt) const;
+    [[nodiscard]] RelationRemovalImpact relationRemovalImpactForProjectedLanes(
+        const std::vector<Lane>& projectedLanes) const;
+    [[nodiscard]] QString laneHeaderPasteHint() const;
     [[nodiscard]] SegmentBoundary explicitRangeBoundaryAt(const QPoint& position) const;
     [[nodiscard]] bool hasBitRangeSelection() const;
     bool applyExplicitRangeValue(
@@ -293,11 +798,11 @@ private:
         Tick start,
         Tick end,
         std::string value,
-        JsonExtensions extensions = {});
-    bool clearSelectedBitRange();
+        JsonExtensions extensions = {},
+        const RelationRemovalImpact* predictedRelationImpact = nullptr);
+    bool clearSelectedBeatRange();
     void clearSelectedSegment();
     bool duplicateSelectedSegment(bool after);
-    bool duplicateSelectedSegmentBefore();
     bool nudgeSelectedSegment(bool forward);
     bool resizeSelectedSegmentBoundary(
         SegmentBoundary boundary,
@@ -311,7 +816,34 @@ private:
         Qt::KeyboardModifiers modifiers);
     void advanceWaveEditDragAutoScroll();
     void stopWaveEditDragAutoScroll();
+    void cancelExplicitRangeDrag(const QString& message);
+    void updateRangeTransferTargetLanes(const Lane* pointerLane);
+    [[nodiscard]] bool rangeTransferTargetOverlapsSource() const;
+    [[nodiscard]] QString rangeTransferTargetSummary() const;
+    [[nodiscard]] std::optional<RangeTransferProjection>
+    buildRangeTransferProjection() const;
+    [[nodiscard]] QString rangeTransferPreviewStatus(
+        const RangeTransferProjection& projection) const;
+    [[nodiscard]] std::optional<SegmentEditProjection>
+    buildSegmentEditProjection() const;
+    [[nodiscard]] std::optional<SegmentEditProjection>
+    buildSegmentEditProjection(
+        SegmentEditOperation operation,
+        const std::string& laneId,
+        const std::string& segmentId,
+        Tick originalStart,
+        Tick originalEnd,
+        Tick start,
+        Tick end) const;
+    [[nodiscard]] std::optional<SegmentEditProjection>
+    activeSegmentEditProjection() const;
+    [[nodiscard]] SegmentActionAssessment
+    assessSelectedSegmentAction(SegmentAction action) const;
+    [[nodiscard]] QString segmentEditPreviewStatus(
+        const SegmentEditProjection& projection) const;
     void commitLaneReorder();
+    bool applyVisibleTimeSpan(Tick span, Tick anchorTick);
+    void schedulePendingVisibleTimeSpanRestore();
     void setScale(double scale, int anchorX);
     [[nodiscard]] int zoomAnchorX() const;
     [[nodiscard]] double contentWidth() const;
@@ -330,6 +862,12 @@ private:
     [[nodiscard]] QString markerLocationText(const Marker& marker) const;
     [[nodiscard]] std::string nextLockedMarkerName(bool interval) const;
     [[nodiscard]] Tick cursorKeyboardStep() const;
+    [[nodiscard]] std::optional<std::pair<Tick, Tick>>
+    explicitRangeAnchorAndActive() const noexcept;
+    [[nodiscard]] std::optional<Tick> adjacentKeyboardTick(
+        Tick from,
+        bool forward,
+        const Lane* lane) const;
     void adjustTimeRangeByKeyboard(
         bool forward,
         KeyboardRangeTarget target = KeyboardRangeTarget::Step);
@@ -374,11 +912,12 @@ private:
         const std::pair<Tick, Tick>& currentRange,
         bool forward) const;
     void navigateSelectedBeat(bool forward);
-    void selectSegmentAtCursor();
     void navigateSelectedSegment(bool forward);
     void navigateTimelinePage(bool forward);
     void clearWaveEditState();
     void commitWaveEdit(const QPoint& releasePosition);
+    void updateRulerScrub(int x, bool final, bool rangeCleared = false);
+    void cancelRulerScrub();
     [[nodiscard]] Tick constrainedTransitionTick(const Event& event, Tick requested) const;
     void commitBitToggle(const std::vector<std::pair<Tick, Tick>>& beats, const QPoint& position);
     void editSegmentAt(const QPoint& position);
@@ -408,28 +947,52 @@ private:
         const Lane& lane,
         const QRect& rect,
         Tick visibleStart,
-        Tick visibleEnd);
+        Tick visibleEnd,
+        bool preview = false);
     void drawBitSegments(
         class QPainter& painter,
         const Lane& lane,
         const QRect& rect,
         Tick visibleStart,
-        Tick visibleEnd);
+        Tick visibleEnd,
+        bool preview = false);
     void drawBusSegments(
         class QPainter& painter,
         const Lane& lane,
         const QRect& rect,
         Tick visibleStart,
-        Tick visibleEnd);
+        Tick visibleEnd,
+        bool preview = false);
     void drawScenarioOverlays(
         class QPainter& painter,
         Tick visibleStart,
-        Tick visibleEnd);
+        Tick visibleEnd,
+        const std::vector<std::string>* relationRemovalIds);
     void drawCursorOverlays(
         class QPainter& painter,
         Tick visibleStart,
         Tick visibleEnd);
-    void drawWaveEditOverlay(class QPainter& painter);
+    void drawWaveEditOverlay(
+        class QPainter& painter,
+        const RangeTransferProjection* transferProjection,
+        const SegmentEditProjection* segmentProjection,
+        const BusEditProjection* busEditProjection);
+    void drawLaneHeaderPastePreview(
+        class QPainter& painter,
+        const LaneHeaderPastePreview* pastePreview);
+    void drawRangeTransferWaveformPreview(
+        class QPainter& painter,
+        const RangeTransferProjection* transferProjection);
+    void drawSegmentEditWaveformPreview(
+        class QPainter& painter,
+        const SegmentEditProjection* segmentProjection);
+    void drawProjectedLaneWaveformPreview(
+        class QPainter& painter,
+        const Lane& lane,
+        Tick start,
+        Tick end,
+        const RelationRemovalImpact& relationImpact,
+        bool modelChanges);
     void drawEditGuide(class QPainter& painter);
     void drawWaveEditTransitionPreview(class QPainter& painter);
     void drawLaneReorderOverlay(class QPainter& painter);
@@ -460,6 +1023,13 @@ private:
     QLineEdit* busValueEdit_{nullptr};
     QComboBox* busRadixCombo_{nullptr};
     QComboBox* busRecentValuesCombo_{nullptr};
+    QToolButton* busScopeButton_{nullptr};
+    QToolButton* busPreviousButton_{nullptr};
+    QToolButton* busNextButton_{nullptr};
+    QToolButton* busClearButton_{nullptr};
+    QToolButton* busApplyButton_{nullptr};
+    QToolButton* busCloseButton_{nullptr};
+    std::array<QToolButton*, 4> busPresetButtons_{};
     QCompleter* laneValueCompleter_{nullptr};
     QStringListModel* laneValueCompletionModel_{nullptr};
     std::optional<Tick> busPresetAnchorTick_;
@@ -468,13 +1038,16 @@ private:
     std::map<std::string, QStringList> busRecentValues_;
     BusEditScope busEditScope_{BusEditScope::Beat};
     bool busEditPaletteVisible_{false};
+    std::optional<BusEditProjection> busEditActionPreview_;
+    std::optional<BusEditAction> busEditPreviewAction_;
     QFrame* rangeEditPalette_{nullptr};
     QLabel* rangeEditContextLabel_{nullptr};
     QToolButton* rangeCopyButton_{nullptr};
-    QToolButton* rangeCutButton_{nullptr};
+    QToolButton* rangeRepeatButton_{nullptr};
     QToolButton* rangePasteButton_{nullptr};
     QToolButton* rangeClearButton_{nullptr};
     QLineEdit* rangeValueEdit_{nullptr};
+    QAction* rangeLoadValuesAction_{nullptr};
     QCompleter* rangeValueCompleter_{nullptr};
     QStringListModel* rangeValueCompletionModel_{nullptr};
     QToolButton* rangeZeroButton_{nullptr};
@@ -482,9 +1055,28 @@ private:
     QToolButton* rangeXButton_{nullptr};
     QToolButton* rangeZButton_{nullptr};
     QToolButton* rangeDontCareButton_{nullptr};
+    QToolButton* rangeClockGateButton_{nullptr};
+    QToolButton* rangeClockDisableButton_{nullptr};
+    QToolButton* rangeCloseButton_{nullptr};
     bool rangeEditPaletteVisible_{false};
+    bool rangeRepeatPreviewActive_{false};
+    std::optional<BitPatternProjection> bitPatternPreview_;
+    std::optional<BusRangeSequenceProjection>
+        busRangeSequencePreview_;
+    std::vector<RangeSequenceTextSpan>
+        rangeSequenceTextSpans_;
+    std::optional<RangeSequenceTextSpan>
+        rangeSequenceCaretTarget_;
+    std::optional<RangeSequenceBaseline>
+        rangeSequenceBaseline_;
+    std::optional<RangeSequenceAnchor>
+        rangeSequenceAnchor_;
+    bool rangeSequenceTokenPress_{false};
+    bool rangeSequenceTokenDragRejected_{false};
+    QPoint rangeSequenceTokenPressPosition_;
     bool explicitRangeSelection_{false};
     std::vector<LaneLayout> laneLayout_;
+    std::set<std::string> collapsedGroupIds_;
     std::vector<Tick> signalEdgeIndex_;
     std::optional<Tick> movableCursorTick_;
     std::optional<Tick> temporaryCursorTick_;
@@ -496,9 +1088,14 @@ private:
     std::string selectedLaneId_;
     std::string selectedSegmentLaneId_;
     std::string selectedSegmentId_;
+    std::optional<SegmentEditProjection> segmentActionPreview_;
     WaveEditInteraction waveEditInteraction_{WaveEditInteraction::None};
     std::optional<std::pair<Tick, Tick>> waveEditOriginalRange_;
     std::optional<std::pair<Tick, Tick>> waveEditPreviewRange_;
+    std::vector<std::string> waveEditRangeTargetLaneIds_;
+    std::size_t waveEditRangeGrabLaneOffset_{0};
+    bool waveEditRangeTargetValid_{true};
+    QString waveEditRangeTargetError_;
     std::string waveEditHoverLaneId_;
     std::optional<std::pair<Tick, Tick>> waveEditHoverRange_;
     QPoint waveEditPressPosition_;
@@ -506,19 +1103,26 @@ private:
     bool laneHeaderPressed_{false};
     bool laneHeaderDragging_{false};
     bool laneHeaderSelectionActive_{false};
+    std::string laneHeaderSelectionAnchorId_;
     QPoint laneHeaderPressPosition_;
     int laneDragOriginalVerticalScroll_{0};
     std::string laneDragId_;
+    std::vector<std::string> laneDragIds_;
+    bool laneHeaderPressPreservesMultiSelection_{false};
+    std::optional<std::size_t> laneDropInsertionSlot_;
     std::optional<std::size_t> laneDropDestinationIndex_;
     std::optional<int> laneDropIndicatorY_;
+    std::string laneDropGroupId_;
     QTimer* laneDragAutoScrollTimer_{nullptr};
     int laneDragAutoScrollDirection_{0};
     int laneDragAutoScrollPointerY_{0};
     QTimer* waveEditDragAutoScrollTimer_{nullptr};
     int waveEditDragAutoScrollDirection_{0};
+    int waveEditDragVerticalAutoScrollDirection_{0};
     QPoint waveEditDragAutoScrollPointer_;
     Qt::KeyboardModifiers waveEditDragAutoScrollModifiers_{Qt::NoModifier};
     int waveEditDragOriginalHorizontalScroll_{0};
+    int waveEditDragOriginalVerticalScroll_{0};
     bool waveEditDragAutoScrolled_{false};
     bool waveEditCopyDrag_{false};
     bool asynchronousEditing_{false};
@@ -539,6 +1143,8 @@ private:
     QPoint interactionCurrent_;
     std::vector<EventHitRegion> eventHitRegions_;
     bool fitPending_{false};
+    std::optional<std::pair<Tick, Tick>> pendingVisibleTimeSpanRestore_;
+    bool pendingVisibleTimeSpanRestoreScheduled_{false};
     std::optional<std::pair<Tick, Tick>> selectionRange_;
     int selectionStartY_{0};
     bool bypassSnap_{false};
@@ -548,6 +1154,18 @@ private:
     QPoint panPressPosition_;
     int panStartHorizontal_{0};
     int panStartVertical_{0};
+    bool rulerScrubbing_{false};
+    bool rulerScrubClearedRange_{false};
+    Tick rulerScrubOriginalTick_{0};
+    int rulerScrubOriginalHorizontalScroll_{0};
+    std::optional<HistorySelectionSnapshot> rulerScrubOriginalSelection_;
+    std::map<
+        std::pair<std::uint64_t, std::uint64_t>,
+        HistorySelectionSnapshot>
+        historySelectionTransitions_;
+    std::optional<std::pair<std::uint64_t, HistorySelectionSnapshot>>
+        pendingCommandSelectionTransition_;
+    std::map<const Scenario*, DocumentContext> documentContexts_;
 };
 
 } // namespace wave

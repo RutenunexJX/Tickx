@@ -1,0 +1,16 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "scenarioId": "Waveform",
+    "operations": [
+        {
+            "op": "update-signal",
+            "laneId": "state",
+            "enumMap": {
+                "IDLE": "0",
+                "BUSY": "1",
+                "DONE": "2",
+                "OVERFLOW": "4"
+            }
+        }
+    ]
+}

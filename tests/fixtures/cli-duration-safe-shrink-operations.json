@@ -1,0 +1,9 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "operations": [
+        {
+            "op": "set-duration",
+            "duration": "40 ns"
+        }
+    ]
+}

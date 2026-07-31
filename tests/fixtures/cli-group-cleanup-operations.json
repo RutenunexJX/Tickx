@@ -1,0 +1,9 @@
+{
+  "schema": "wave-workbench.operations/v1",
+  "operations": [
+    {
+      "op": "delete-group",
+      "groupId": "CONTROL"
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "operations": [
+        {
+            "op": "add-signal",
+            "name": "clk",
+            "kind": "clock",
+            "period": "10 ns"
+        },
+        {
+            "op": "add-signal",
+            "name": "request",
+            "kind": "bit"
+        },
+        {
+            "op": "add-signal",
+            "name": "data",
+            "kind": "bus",
+            "width": 8,
+            "clockDomainId": "CLK"
+        },
+        {
+            "op": "set-sequence",
+            "start": "cycle 0",
+            "stepCycles": 1,
+            "clockId": "clk",
+            "sequences": [
+                {
+                    "laneId": "REQUEST",
+                    "values": ["0", "1", "0", "1"]
+                },
+                {
+                    "laneId": "Data",
+                    "values": ["0x00", "0x12", "0x34", "0x56"]
+                }
+            ]
+        },
+        {
+            "op": "assert-value",
+            "laneId": "request",
+            "at": "cycle 3",
+            "clockId": "CLK",
+            "value": "1"
+        },
+        {
+            "op": "assert-value",
+            "laneId": "DATA",
+            "at": "cycle 2",
+            "value": "0x34"
+        }
+    ]
+}

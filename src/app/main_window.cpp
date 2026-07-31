@@ -9,10 +9,13 @@
 #include "wave_canvas.h"
 
 #include <QAction>
+#include <QApplication>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCheckBox>
 #include <QColor>
+#include <QCryptographicHash>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDesktopServices>
@@ -35,6 +38,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QInputDialog>
 #include <QProgressBar>
 #include <QPushButton>
@@ -44,6 +48,7 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -75,6 +80,8 @@
 
 namespace wave {
 namespace {
+
+constexpr int ScenarioLocationMemoryDelayMs = 400;
 
 QIcon themedIcon(const QString& name, QStyle* style, const QStyle::StandardPixmap fallback)
 {
@@ -162,6 +169,98 @@ std::string randomReadableLaneColor(
     return std::string(palette.at(paletteIndex));
 }
 
+std::optional<std::string> promptNewGroupName(
+    QWidget* parent,
+    const Scenario& scenario,
+    const QString& title,
+    const QString& description,
+    const std::string_view defaultName)
+{
+    QDialog dialog(parent);
+    dialog.setObjectName(QStringLiteral("GroupNameDialog"));
+    dialog.setWindowTitle(title);
+    dialog.setMinimumWidth(380);
+    dialog.setAccessibleName(title);
+
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(16, 14, 16, 14);
+    layout->setSpacing(8);
+    auto* prompt = new QLabel(description, &dialog);
+    prompt->setObjectName(QStringLiteral("GroupNamePromptLabel"));
+    prompt->setWordWrap(true);
+    layout->addWidget(prompt);
+
+    auto* name = new QLineEdit(
+        QString::fromStdString(std::string(defaultName)),
+        &dialog);
+    name->setObjectName(QStringLiteral("GroupNameEdit"));
+    name->setAccessibleName(QObject::tr("Group name"));
+    name->setPlaceholderText(QObject::tr("Group name"));
+    name->setMaxLength(128);
+    layout->addWidget(name);
+
+    auto* error = new QLabel(&dialog);
+    error->setObjectName(QStringLiteral("GroupNameErrorLabel"));
+    error->setAccessibleName(QObject::tr("Group name validation"));
+    error->setMinimumHeight(error->fontMetrics().height());
+    error->setStyleSheet(QStringLiteral("color: #ef9a9a;"));
+    layout->addWidget(error);
+
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+        &dialog);
+    buttons->setObjectName(QStringLiteral("GroupNameButtonBox"));
+    layout->addWidget(buttons);
+    auto* accept = buttons->button(QDialogButtonBox::Ok);
+    accept->setText(QObject::tr("Create"));
+    accept->setDefault(true);
+
+    const auto validate = [&scenario, name, error, accept] {
+        const auto candidate = name->text().trimmed();
+        if (candidate.isEmpty()) {
+            error->setText(QObject::tr("Enter a group name."));
+            accept->setEnabled(false);
+            return;
+        }
+        const auto duplicate = std::any_of(
+            scenario.lanes.begin(),
+            scenario.lanes.end(),
+            [&candidate](const Lane& lane) {
+                return QString::compare(
+                           candidate,
+                           QString::fromStdString(lane.name),
+                           Qt::CaseInsensitive)
+                    == 0;
+            });
+        error->setText(
+            duplicate
+                ? QObject::tr("A signal or group already uses this name.")
+                : QString{});
+        accept->setEnabled(!duplicate);
+    };
+    QObject::connect(
+        name,
+        &QLineEdit::textChanged,
+        &dialog,
+        [validate] { validate(); });
+    QObject::connect(
+        buttons,
+        &QDialogButtonBox::accepted,
+        &dialog,
+        &QDialog::accept);
+    QObject::connect(
+        buttons,
+        &QDialogButtonBox::rejected,
+        &dialog,
+        &QDialog::reject);
+    validate();
+    name->selectAll();
+    name->setFocus(Qt::OtherFocusReason);
+
+    if (dialog.exec() != QDialog::Accepted) return std::nullopt;
+    return name->text().trimmed().toStdString();
+}
+
 QString actionText(const EventAction action)
 {
     const auto text = toString(action);
@@ -206,21 +305,24 @@ std::optional<Tick> parseTimeText(
     }
 
     const QRegularExpression absoluteExpression(
-        QStringLiteral(R"(^(-?\d+)\s*(ps|ns|us|ms|ticks?)?$)"));
+        QStringLiteral(
+            R"(^(-?(?:\d+(?:\.\d*)?|\.\d+))\s*(ps|ns|us|ms|ticks?)?$)"));
     const auto match = absoluteExpression.match(text);
     if (!match.hasMatch()) {
-        error = QObject::tr("Use an integer followed by ps, ns, us, ms, tick, or 'cycle N'.");
+        error = QObject::tr(
+            "Use a number followed by ps, ns, us, ms, tick, or 'cycle N'.");
         return std::nullopt;
     }
-    bool valid = false;
-    const auto value = match.captured(1).toLongLong(&valid);
-    if (!valid) {
-        error = QObject::tr("Invalid integer time.");
-        return std::nullopt;
-    }
+    const auto valueText = match.captured(1);
     const auto suffix = match.captured(2);
     cycle.reset();
     if (suffix.isEmpty() || suffix.startsWith(QStringLiteral("tick"))) {
+        bool valid = false;
+        const auto value = valueText.toLongLong(&valid);
+        if (!valid) {
+            error = QObject::tr("Tick values must be integers.");
+            return std::nullopt;
+        }
         return value;
     }
     const auto unit = suffix == QStringLiteral("ps")
@@ -230,7 +332,13 @@ std::optional<Tick> parseTimeText(
             : suffix == QStringLiteral("us")
                 ? TimeUnit::Microsecond
                 : TimeUnit::Millisecond;
-    const auto tick = toTicks(value, unit, timeBase);
+    const auto valueBytes = valueText.toLatin1();
+    const auto tick = toTicks(
+        std::string_view{
+            valueBytes.constData(),
+            static_cast<std::size_t>(valueBytes.size())},
+        unit,
+        timeBase);
     if (!tick) {
         error = QObject::tr("The time cannot be represented exactly in the project timebase.");
     }
@@ -261,6 +369,42 @@ std::optional<Tick> parseDelayText(
         }
         return cycles * clock->period;
     }
+    std::optional<std::int64_t> unusedCycle;
+    return parseTimeText(text, timeBase, nullptr, unusedCycle, error);
+}
+
+std::optional<Tick> parseRangeWidthText(
+    QString text,
+    const TimeBase& timeBase,
+    const ClockDomain* clock,
+    std::optional<std::int64_t>& cycles,
+    QString& error)
+{
+    text = text.trimmed().toLower();
+    const QRegularExpression cycleExpression(
+        QStringLiteral(R"(^(?:cycle\s+(\d+)|(\d+)\s*cycles?)$)"));
+    const auto cycleMatch = cycleExpression.match(text);
+    if (cycleMatch.hasMatch()) {
+        if (!clock) {
+            error = QObject::tr("A cycle-based width requires a clock domain.");
+            return std::nullopt;
+        }
+        bool valid = false;
+        const auto countText = cycleMatch.captured(1).isEmpty()
+            ? cycleMatch.captured(2)
+            : cycleMatch.captured(1);
+        const auto count = countText.toLongLong(&valid);
+        if (!valid || count < 0 || clock->period <= 0
+            || (count > 0
+                && clock->period > std::numeric_limits<Tick>::max() / count)) {
+            error = QObject::tr("Cycle width is outside the integer tick range.");
+            return std::nullopt;
+        }
+        cycles = count;
+        return count * clock->period;
+    }
+
+    cycles.reset();
     std::optional<std::int64_t> unusedCycle;
     return parseTimeText(text, timeBase, nullptr, unusedCycle, error);
 }
@@ -967,7 +1111,11 @@ QString preferredProjectLoadPath(const QString& requestedPath)
     return loadProjectFile(recoveryPath).ok() ? recoveryPath : requestedPath;
 }
 
-MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
+MainWindow::MainWindow(
+    Project project,
+    QString projectFile,
+    QWidget* parent,
+    const std::optional<std::size_t> initialScenarioIndex)
     : QMainWindow(parent)
     , project_(std::move(project))
     , projectFile_(std::move(projectFile))
@@ -979,6 +1127,11 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     if (recoveredSnapshot) {
         projectFile_ = projectPathForLoadedFile(projectFile_);
         dirty_ = true;
+    }
+    if (!project_.scenarios.empty()) {
+        activeScenarioIndex_ = initialScenarioIndex
+            ? std::min(*initialScenarioIndex, project_.scenarios.size() - 1)
+            : rememberedActiveScenarioIndex().value_or(std::size_t{0});
     }
     resetEditTracking(!recoveredSnapshot);
     setObjectName(QStringLiteral("WaveWorkbenchMainWindow"));
@@ -1039,6 +1192,8 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     connect(canvas_, &WaveCanvas::measureModeExitRequested, this, [this] {
         if (markerAction_) markerAction_->setChecked(false);
         canvas_->setTool(WaveCanvas::Tool::WaveEdit);
+        updateWaveContext();
+        updateSegmentActions();
         statusBar()->showMessage(tr("Direct waveform editing active"), 3'000);
     });
     connect(
@@ -1046,8 +1201,14 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
         &WaveCanvas::duplicateLaneRequested,
         this,
         &MainWindow::duplicateLaneById);
+    connect(
+        canvas_,
+        &WaveCanvas::duplicateLanesRequested,
+        this,
+        &MainWindow::duplicateLanesById);
     connect(canvas_, &WaveCanvas::renameLaneRequested, this, &MainWindow::renameLaneById);
     connect(canvas_, &WaveCanvas::removeLaneRequested, this, &MainWindow::removeLaneById);
+    connect(canvas_, &WaveCanvas::removeLanesRequested, this, &MainWindow::removeLanesById);
     connect(
         canvas_,
         &WaveCanvas::editLaneParametersRequested,
@@ -1058,6 +1219,8 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     connect(canvas_, &WaveCanvas::commandAvailabilityChanged, this, &MainWindow::updateCommandActions);
     connect(canvas_, &WaveCanvas::eventSelected, this, &MainWindow::selectEventRow);
     connect(canvas_, &WaveCanvas::statusMessage, this, [this](const QString& message) {
+        updateWaveContext();
+        scheduleActiveScenarioLocationMemory();
         statusBar()->showMessage(message);
     });
     connect(
@@ -1076,6 +1239,34 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
         rememberProjectPath(projectFile_);
     }
     createToolBars();
+    rememberActiveScenario();
+    const auto restoredLocation = restoreActiveScenarioLocation();
+    updateWaveContext();
+    scenarioLocationMemoryTimer_ = new QTimer(this);
+    scenarioLocationMemoryTimer_->setObjectName(
+        QStringLiteral("ScenarioLocationMemoryTimer"));
+    scenarioLocationMemoryTimer_->setSingleShot(true);
+    scenarioLocationMemoryTimer_->setInterval(
+        ScenarioLocationMemoryDelayMs);
+    connect(
+        scenarioLocationMemoryTimer_,
+        &QTimer::timeout,
+        this,
+        &MainWindow::rememberActiveScenarioLocation);
+    connect(
+        canvas_->horizontalScrollBar(),
+        &QScrollBar::valueChanged,
+        this,
+        [this] {
+            scheduleActiveScenarioLocationMemory();
+        });
+    connect(
+        canvas_->horizontalScrollBar(),
+        &QScrollBar::rangeChanged,
+        this,
+        [this](const int, const int) {
+            scheduleActiveScenarioLocationMemory();
+        });
     traceWatcher_ = new QFutureWatcher<std::shared_ptr<TraceParseResult>>(this);
     connect(
         traceWatcher_,
@@ -1100,12 +1291,20 @@ MainWindow::MainWindow(Project project, QString projectFile, QWidget* parent)
     statusBar()->addPermanentWidget(saveStateLabel_);
     updateCommandActions();
     updateWindowTitle();
-    statusBar()->showMessage(
-        recoveredSnapshot
-            ? (projectFile_.isEmpty()
-                   ? tr("Untitled recovery snapshot loaded; use Save to choose a project file")
-                   : tr("Recovery snapshot loaded; save to commit it to %1").arg(projectFile_))
-            : tr("Ready"));
+    auto initialStatus = recoveredSnapshot
+        ? (projectFile_.isEmpty()
+               ? tr("Untitled recovery snapshot loaded; use Save to choose a project file")
+               : tr("Recovery snapshot loaded; save to commit it to %1").arg(projectFile_))
+        : (restoredLocation
+               ? tr("Resumed %1 · no edit range restored")
+                     .arg(*restoredLocation)
+               : tr("Ready"));
+    if (recoveredSnapshot && restoredLocation) {
+        initialStatus.append(
+            tr(" · resumed %1 · no edit range restored")
+                .arg(*restoredLocation));
+    }
+    statusBar()->showMessage(initialStatus);
 }
 
 const Project& MainWindow::project() const noexcept
@@ -1134,6 +1333,7 @@ void MainWindow::revealLocation(const QString& laneId, const Tick tick)
     if (!resolvedLaneId.isEmpty()) {
         canvas_->revealLocation(resolvedLaneId, tick);
         canvas_->setFocus(Qt::OtherFocusReason);
+        rememberActiveScenarioLocation();
     }
     if (traceIndex_) {
         if (traceCanvas_) traceCanvas_->revealTick(tick);
@@ -1342,17 +1542,16 @@ void MainWindow::stepSignalFind(const int direction)
 void MainWindow::showGoToTime()
 {
     if (!canvas_ || !goToTimeWidgetAction_ || !goToTimeEdit_
-        || !goToTimeRangeLabel_) {
-        return;
-    }
-    if (canvas_->hasExplicitRangeSelection()) {
-        statusBar()->showMessage(
-            tr("Esc clears the selected range before Ctrl+G jumps to another time"),
-            5'000);
+        || !goToTimeLabel_ || !goToTimeRangeLabel_
+        || !goToTimeGoButton_ || !goToTimeOtherEdgeButton_) {
         return;
     }
     if (!commitPendingEdits()) return;
-    if (markerAction_ && markerAction_->isChecked()) {
+    goToTimeEditsRange_ = canvas_->hasExplicitRangeSelection();
+    goToTimeEditsRangeWidth_ = false;
+    if (!goToTimeEditsRange_
+        && markerAction_
+        && markerAction_->isChecked()) {
         markerAction_->setChecked(false);
     }
     canvas_->dismissInlineValueEditor();
@@ -1360,29 +1559,155 @@ void MainWindow::showGoToTime()
 
     const auto* scenario = activeScenario();
     if (!scenario) return;
+    if (goToTimeEditsRange_ && rangeEditPaletteAction_) {
+        rangeEditPaletteAction_->setVisible(false);
+    }
+    goToTimeWidgetAction_->setVisible(true);
+    goToTimeEdit_->setStyleSheet({});
+    syncGoToTimeEditor(true);
+    goToTimeEdit_->setFocus(Qt::ShortcutFocusReason);
+    goToTimeEdit_->selectAll();
+    if (goToTimeEditsRange_) {
+        const auto anchor = canvas_->explicitRangeAnchorTick();
+        statusBar()->showMessage(
+            tr("Set exact active range edge · anchor %1 · click Range edge to enter a width · Enter applies · Esc returns")
+                .arg(anchor
+                         ? QString::fromStdString(
+                               formatTick(*anchor, project_.timeBase))
+                         : QString{}));
+    } else {
+        statusBar()->showMessage(
+            tr("Go to time · enter decimal ps/ns/us/ms, integer tick, or cycle N · Enter jumps · Esc closes"));
+    }
+}
+
+void MainWindow::syncGoToTimeEditor(const bool replaceInput)
+{
+    if (!canvas_ || !goToTimeLabel_ || !goToTimeEdit_
+        || !goToTimeRangeLabel_ || !goToTimeOtherEdgeButton_
+        || !goToTimeGoButton_) {
+        return;
+    }
+    const auto* scenario = activeScenario();
+    if (!scenario) return;
     const auto format = [this](const Tick tick) {
         return QString::fromStdString(formatTick(tick, project_.timeBase));
     };
-    goToTimeWidgetAction_->setVisible(true);
-    goToTimeEdit_->setStyleSheet({});
-    goToTimeEdit_->setText(format(canvas_->cursorTick()));
-    goToTimeRangeLabel_->setText(
-        tr("%1–%2").arg(format(0)).arg(format(scenario->duration)));
-    goToTimeEdit_->setFocus(Qt::ShortcutFocusReason);
-    goToTimeEdit_->selectAll();
-    statusBar()->showMessage(
-        tr("Go to time · enter ps, ns, us, ms, tick, or cycle N · Enter jumps · Esc closes"));
+
+    const auto anchor = canvas_->explicitRangeAnchorTick();
+    const auto active = canvas_->explicitRangeActiveTick();
+    if (goToTimeEditsRange_ && (!anchor || !active)) {
+        goToTimeEditsRange_ = false;
+        goToTimeEditsRangeWidth_ = false;
+    }
+
+    const QSignalBlocker blocker(goToTimeEdit_);
+    if (goToTimeEditsRange_) {
+        goToTimeLabel_->setCursor(Qt::PointingHandCursor);
+        if (goToTimeEditsRangeWidth_) {
+            const auto width = *active > *anchor
+                ? *active - *anchor
+                : *anchor - *active;
+            const auto towardEnd = *active > *anchor;
+            goToTimeLabel_->setText(tr("Range width ▾"));
+            goToTimeLabel_->setAccessibleName(
+                tr("Range width mode; click to edit the active edge"));
+            goToTimeLabel_->setToolTip(
+                tr("Click to switch from exact range width to exact active edge"));
+            goToTimeEdit_->setPlaceholderText(tr("25 ns or cycle 3"));
+            goToTimeEdit_->setAccessibleName(tr("Exact selected range width"));
+            goToTimeEdit_->setToolTip(
+                tr("Set a positive width from the fixed anchor using decimal ps, ns, us, or ms, an integer tick, or cycle N"));
+            if (replaceInput) goToTimeEdit_->setText(format(width));
+            goToTimeRangeLabel_->setText(
+                towardEnd
+                    ? tr("Anchor %1 · to End").arg(format(*anchor))
+                    : tr("Anchor %1 · to 0").arg(format(*anchor)));
+            goToTimeRangeLabel_->setAccessibleName(
+                towardEnd
+                    ? tr("Fixed range anchor %1; active edge extends toward timeline end")
+                          .arg(format(*anchor))
+                    : tr("Fixed range anchor %1; active edge extends toward timeline start")
+                          .arg(format(*anchor)));
+            goToTimeGoButton_->setText(tr("Set width"));
+            goToTimeGoButton_->setAccessibleName(tr("Set exact range width"));
+            goToTimeGoButton_->setToolTip(
+                tr("Apply this exact width from the fixed anchor (Enter)"));
+            goToTimeOtherEdgeButton_->setToolTip(
+                tr("Keep the range width and switch which edge is fixed"));
+        } else {
+            goToTimeLabel_->setText(tr("Range edge ▾"));
+            goToTimeLabel_->setAccessibleName(
+                tr("Range edge mode; click to edit the range width"));
+            goToTimeLabel_->setToolTip(
+                tr("Click to switch from exact active edge to exact range width"));
+            goToTimeEdit_->setPlaceholderText(tr("Exact active edge"));
+            goToTimeEdit_->setAccessibleName(tr("Exact selected range edge"));
+            goToTimeEdit_->setToolTip(
+                tr("Set the active range edge using decimal ps, ns, us, or ms, an integer tick, or cycle N"));
+            if (replaceInput) goToTimeEdit_->setText(format(*active));
+            goToTimeRangeLabel_->setText(
+                tr("Anchor %1 · End %2")
+                    .arg(format(*anchor))
+                    .arg(format(scenario->duration)));
+            goToTimeRangeLabel_->setAccessibleName(
+                tr("Fixed range anchor and timeline end"));
+            goToTimeGoButton_->setText(tr("Set edge"));
+            goToTimeGoButton_->setAccessibleName(tr("Set exact range edge"));
+            goToTimeGoButton_->setToolTip(
+                tr("Apply this exact time to the active range edge (Enter)"));
+            goToTimeOtherEdgeButton_->setToolTip(
+                tr("Keep the range and switch the exact editor to its other edge"));
+        }
+        goToTimeOtherEdgeButton_->setVisible(true);
+    } else {
+        goToTimeLabel_->setText(tr("Go to"));
+        goToTimeLabel_->setAccessibleName(tr("Go to time"));
+        goToTimeLabel_->setToolTip({});
+        goToTimeLabel_->setCursor(Qt::ArrowCursor);
+        goToTimeEdit_->setPlaceholderText(tr("2.5 ns or cycle 25"));
+        goToTimeEdit_->setAccessibleName(tr("Exact timeline position"));
+        goToTimeEdit_->setToolTip(
+            tr("Enter a decimal ps, ns, us, or ms value, an integer tick, or a clock cycle within the scenario"));
+        if (replaceInput) goToTimeEdit_->setText(format(canvas_->cursorTick()));
+        goToTimeRangeLabel_->setText(
+            tr("%1–%2").arg(format(0)).arg(format(scenario->duration)));
+        goToTimeRangeLabel_->setAccessibleName(tr("Available timeline range"));
+        goToTimeOtherEdgeButton_->setVisible(false);
+        goToTimeGoButton_->setText(tr("Go"));
+        goToTimeGoButton_->setAccessibleName(tr("Go to exact time"));
+        goToTimeGoButton_->setToolTip(
+            tr("Move the edit cursor to this time (Enter)"));
+    }
 }
 
 void MainWindow::closeGoToTime(const bool announce)
 {
     if (!goToTimeWidgetAction_ || !goToTimeWidgetAction_->isVisible()) return;
+    const auto wasRangeEdit = goToTimeEditsRange_;
     goToTimeWidgetAction_->setVisible(false);
+    goToTimeEditsRange_ = false;
+    goToTimeEditsRangeWidth_ = false;
+    if (wasRangeEdit && rangeEditPaletteAction_
+        && canvas_ && canvas_->hasExplicitRangeSelection()) {
+        rangeEditPaletteAction_->setVisible(true);
+    }
     if (canvas_ && canvas_->viewport()) {
         canvas_->viewport()->setFocus(Qt::OtherFocusReason);
     }
     if (!announce) return;
 
+    if (wasRangeEdit && canvas_ && canvas_->selectedTimeRange()) {
+        const auto [start, end] = *canvas_->selectedTimeRange();
+        statusBar()->showMessage(
+            tr("Exact range edit closed · selection remains %1–%2 · Ctrl+G reopens it")
+                .arg(QString::fromStdString(
+                    formatTick(start, project_.timeBase)))
+                .arg(QString::fromStdString(
+                    formatTick(end, project_.timeBase))),
+            5'000);
+        return;
+    }
     const auto location = canvas_
         ? QString::fromStdString(formatTick(canvas_->cursorTick(), project_.timeBase))
         : QString{};
@@ -1405,6 +1730,8 @@ void MainWindow::submitGoToTime()
 
     if (!commitPendingEdits()) return;
     canvas_->dismissInlineValueEditor();
+    const auto editingRange =
+        goToTimeEditsRange_ && canvas_->hasExplicitRangeSelection();
     const ClockDomain* clock = nullptr;
     const Lane* selectedLane = nullptr;
     const auto selectedLaneId = canvas_->selectedLaneId();
@@ -1421,12 +1748,20 @@ void MainWindow::submitGoToTime()
     const auto input = goToTimeEdit_->text().trimmed();
     std::optional<std::int64_t> cycle;
     QString error;
-    const auto tick = parseTimeText(
-        input,
-        project_.timeBase,
-        clock,
-        cycle,
-        error);
+    const auto editingWidth = editingRange && goToTimeEditsRangeWidth_;
+    const auto tick = editingWidth
+        ? parseRangeWidthText(
+              input,
+              project_.timeBase,
+              clock,
+              cycle,
+              error)
+        : parseTimeText(
+              input,
+              project_.timeBase,
+              clock,
+              cycle,
+              error);
     const auto showError = [this](const QString& message) {
         goToTimeEdit_->setStyleSheet(
             QStringLiteral("QLineEdit { border: 1px solid #c96d6d; }"));
@@ -1435,23 +1770,121 @@ void MainWindow::submitGoToTime()
     };
     if (!tick) {
         showError(
-            tr("Cannot go to “%1” · %2").arg(input, error));
+            editingRange
+                ? editingWidth
+                    ? tr("Cannot set range width to “%1” · %2").arg(input, error)
+                    : tr("Cannot set range edge to “%1” · %2").arg(input, error)
+                : tr("Cannot go to “%1” · %2").arg(input, error));
         return;
     }
 
     const auto format = [this](const Tick value) {
         return QString::fromStdString(formatTick(value, project_.timeBase));
     };
-    if (*tick < 0 || *tick > scenario->duration) {
+    if (!editingWidth && (*tick < 0 || *tick > scenario->duration)) {
         showError(
-            tr("Cannot go to “%1” · enter a time from %2 to %3")
-                .arg(input)
-                .arg(format(0))
-                .arg(format(scenario->duration)));
+            editingRange
+                ? tr("Cannot set range edge to “%1” · enter a time from %2 to %3")
+                      .arg(input)
+                      .arg(format(0))
+                      .arg(format(scenario->duration))
+                : tr("Cannot go to “%1” · enter a time from %2 to %3")
+                      .arg(input)
+                      .arg(format(0))
+                      .arg(format(scenario->duration)));
+        return;
+    }
+
+    if (editingRange) {
+        const auto anchor = canvas_->explicitRangeAnchorTick();
+        const auto active = canvas_->explicitRangeActiveTick();
+        if (!anchor || !active) {
+            showError(
+                editingWidth
+                    ? tr("Cannot set range width · the selected range is no longer available")
+                    : tr("Cannot set range edge · the selected range is no longer available"));
+            return;
+        }
+
+        Tick targetTick = *tick;
+        if (editingWidth) {
+            if (*tick <= 0) {
+                showError(
+                    tr("Cannot set range width to %1 · the width must be greater than zero")
+                        .arg(format(*tick)));
+                return;
+            }
+            const auto towardEnd = *active > *anchor;
+            const auto maximumWidth = towardEnd
+                ? scenario->duration - *anchor
+                : *anchor;
+            if (*tick > maximumWidth) {
+                showError(
+                    tr("Cannot set range width to %1 · maximum toward %2 from anchor %3 is %4")
+                        .arg(format(*tick))
+                        .arg(towardEnd ? tr("End") : tr("start"))
+                        .arg(format(*anchor))
+                        .arg(format(maximumWidth)));
+                return;
+            }
+            targetTick = towardEnd
+                ? *anchor + *tick
+                : *anchor - *tick;
+        } else {
+            if (*tick == *anchor) {
+                showError(
+                    tr("Cannot set range edge to %1 · the range must remain non-empty")
+                        .arg(format(*tick)));
+                return;
+            }
+        }
+        if (!canvas_->setExplicitRangeActiveTick(targetTick)) {
+            showError(
+                editingWidth
+                    ? tr("Cannot set range width to %1 · keep it inside the timeline")
+                          .arg(format(*tick))
+                    : tr("Cannot set range edge to %1 · keep it inside the timeline and away from the anchor")
+                          .arg(format(*tick)));
+            return;
+        }
+        goToTimeEdit_->setStyleSheet({});
+        syncGoToTimeEditor(true);
+        goToTimeEdit_->setFocus(Qt::OtherFocusReason);
+        goToTimeEdit_->selectAll();
+
+        const auto [start, end] = *canvas_->selectedTimeRange();
+        auto message = editingWidth
+            ? tr("Range width set to %1 · active edge %2 · selection %3–%4 · %5 signal(s) kept")
+                  .arg(format(*tick))
+                  .arg(format(targetTick))
+                  .arg(format(start))
+                  .arg(format(end))
+                  .arg(canvas_->selectedLaneIds().size())
+            : tr("Range edge set to %1 · selection %2–%3 · %4 signal(s) kept")
+                  .arg(format(*tick))
+                  .arg(format(start))
+                  .arg(format(end))
+                  .arg(canvas_->selectedLaneIds().size());
+        if (cycle && clock) {
+            message.append(
+                editingWidth
+                    ? tr(" · %1 cycle(s) on %2")
+                          .arg(*cycle)
+                          .arg(QString::fromStdString(clock->name))
+                    : tr(" · cycle %1 on %2")
+                          .arg(*cycle)
+                          .arg(QString::fromStdString(clock->name)));
+        }
+        message.append(
+            editingWidth
+                ? tr(" · Enter sets again · Other edge reverses direction · Esc returns")
+                : tr(" · Enter sets again · Other edge switches endpoints · Esc returns"));
+        statusBar()->showMessage(message);
         return;
     }
 
     canvas_->goToTick(*tick);
+    rememberActiveScenarioLocation();
     goToTimeEdit_->setStyleSheet({});
     {
         const QSignalBlocker blocker(goToTimeEdit_);
@@ -1485,6 +1918,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (confirmDiscardChanges()) {
         if (traceCancelFlag_) traceCancelFlag_->store(true);
+        rememberActiveScenarioLocation();
         event->accept();
     } else {
         event->ignore();
@@ -1493,6 +1927,27 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if (watched == goToTimeLabel_ && event
+        && event->type() == QEvent::MouseButtonRelease) {
+        const auto* mouseEvent = static_cast<QMouseEvent*>(event);
+        if (mouseEvent->button() == Qt::LeftButton
+            && goToTimeEditsRange_
+            && goToTimeWidgetAction_
+            && goToTimeWidgetAction_->isVisible()
+            && canvas_
+            && canvas_->hasExplicitRangeSelection()) {
+            goToTimeEditsRangeWidth_ = !goToTimeEditsRangeWidth_;
+            syncGoToTimeEditor(true);
+            goToTimeEdit_->setFocus(Qt::OtherFocusReason);
+            goToTimeEdit_->selectAll();
+            statusBar()->showMessage(
+                goToTimeEditsRangeWidth_
+                    ? tr("Editing exact range width from the fixed anchor · Enter applies · click Range width to return to edge entry")
+                    : tr("Editing the exact active range edge · Enter applies · click Range edge to enter a width"));
+            return true;
+        }
+    }
+
     if (watched == goToTimeEdit_ && event
         && event->type() == QEvent::KeyPress) {
         const auto* keyEvent = static_cast<QKeyEvent*>(event);
@@ -1715,6 +2170,16 @@ void MainWindow::saveProjectAs()
 
 void MainWindow::undo()
 {
+    if (auto* editor = qobject_cast<QLineEdit*>(focusWidget());
+        editor
+        && editor->isVisibleTo(this)
+        && editor->isEnabled()
+        && !editor->isReadOnly()
+        && editor->isUndoAvailable()) {
+        editor->undo();
+        updateCommandActions();
+        return;
+    }
     if (!pendingQuickLaneId_.isEmpty()
         && commandStack_.size() > pendingQuickCommandSize_) {
         if (commandStack_.undoLastAfter(pendingQuickCommandSize_)) {
@@ -1743,11 +2208,18 @@ void MainWindow::undo()
     }
     const auto description =
         QString::fromStdString(commandStack_.undoDescription());
+    const auto historyStateBefore = commandStack_.stateId();
+    const auto changedWaveform =
+        selectScenarioForHistoryState(historyStateBefore);
     if (commandStack_.undo()) {
         invalidateCompareResult();
         observedCommandStateId_ = commandStack_.stateId();
         const auto cleanupFailure = synchronizeDirtyState();
         canvas_->refreshModel();
+        const auto restoredSelection =
+            canvas_->restoreSelectionForHistoryTransition(
+                historyStateBefore,
+                commandStack_.stateId());
         updateCommandActions();
         updateWindowTitle();
         auto message = dirty_
@@ -1755,6 +2227,12 @@ void MainWindow::undo()
             : projectFile_.isEmpty()
                 ? tr("Undid %1 · all changes undone · Ctrl+Y to redo").arg(description)
                 : tr("Undid %1 · back to saved version · Ctrl+Y to redo").arg(description);
+        if (!restoredSelection.isEmpty()) {
+            message += tr(" · %1").arg(restoredSelection);
+        }
+        if (changedWaveform) {
+            message += tr(" - showing %1").arg(activeScenarioLabel());
+        }
         if (!cleanupFailure.isEmpty()) {
             message += tr(" · recovery snapshot remains: %1").arg(cleanupFailure);
         }
@@ -1764,17 +2242,34 @@ void MainWindow::undo()
 
 void MainWindow::redo()
 {
+    if (auto* editor = qobject_cast<QLineEdit*>(focusWidget());
+        editor
+        && editor->isVisibleTo(this)
+        && editor->isEnabled()
+        && !editor->isReadOnly()
+        && editor->isRedoAvailable()) {
+        editor->redo();
+        updateCommandActions();
+        return;
+    }
     if (!pendingQuickLaneId_.isEmpty()) {
         canvas_->showQuickLaneSetupError(tr("Finish or cancel the current signal first."));
         return;
     }
     const auto description =
         QString::fromStdString(commandStack_.redoDescription());
+    const auto historyStateBefore = commandStack_.stateId();
     if (commandStack_.redo()) {
         invalidateCompareResult();
         observedCommandStateId_ = commandStack_.stateId();
+        const auto changedWaveform =
+            selectScenarioForHistoryState(observedCommandStateId_);
         const auto cleanupFailure = synchronizeDirtyState();
         canvas_->refreshModel();
+        const auto restoredSelection =
+            canvas_->restoreSelectionForHistoryTransition(
+                historyStateBefore,
+                commandStack_.stateId());
         updateCommandActions();
         updateWindowTitle();
         auto message = dirty_
@@ -1782,6 +2277,12 @@ void MainWindow::redo()
             : projectFile_.isEmpty()
                 ? tr("Redid %1 · all changes undone · Ctrl+Z to undo").arg(description)
                 : tr("Redid %1 · back to saved version · Ctrl+Z to undo").arg(description);
+        if (!restoredSelection.isEmpty()) {
+            message += tr(" · %1").arg(restoredSelection);
+        }
+        if (changedWaveform) {
+            message += tr(" - showing %1").arg(activeScenarioLabel());
+        }
         if (!cleanupFailure.isEmpty()) {
             message += tr(" · recovery snapshot remains: %1").arg(cleanupFailure);
         }
@@ -1793,7 +2294,11 @@ void MainWindow::markEdited()
 {
     invalidateCompareResult();
     const auto currentStateId = commandStack_.stateId();
-    if (currentStateId == observedCommandStateId_) ++externalRevision_;
+    if (currentStateId == observedCommandStateId_) {
+        ++externalRevision_;
+    } else {
+        commandScenarioIndices_[currentStateId] = activeScenarioIndex_;
+    }
     observedCommandStateId_ = currentStateId;
     (void)synchronizeDirtyState();
     updateCommandActions();
@@ -1827,6 +2332,7 @@ QString MainWindow::synchronizeDirtyState()
 void MainWindow::resetEditTracking(const bool clean)
 {
     observedCommandStateId_ = commandStack_.stateId();
+    commandScenarioIndices_.clear();
     externalRevision_ = 0;
     cleanExternalRevision_ = 0;
     if (clean) {
@@ -1843,20 +2349,54 @@ void MainWindow::updateSelection(const QString& laneId, const qint64 tick)
     Q_UNUSED(laneId)
     Q_UNUSED(tick)
     updateLaneOrderActions();
+    updateWaveContext();
+    updateSegmentActions();
+    scheduleActiveScenarioLocationMemory();
 }
 
 void MainWindow::updateCommandActions()
 {
-    undoAction_->setEnabled(commandStack_.canUndo());
-    redoAction_->setEnabled(commandStack_.canRedo());
+    const auto* editor = qobject_cast<QLineEdit*>(focusWidget());
+    const auto textUndoAvailable = editor
+        && editor->isVisibleTo(this)
+        && editor->isEnabled()
+        && !editor->isReadOnly()
+        && editor->isUndoAvailable();
+    const auto textRedoAvailable = editor
+        && editor->isVisibleTo(this)
+        && editor->isEnabled()
+        && !editor->isReadOnly()
+        && editor->isRedoAvailable();
+    undoAction_->setEnabled(textUndoAvailable || commandStack_.canUndo());
+    redoAction_->setEnabled(textRedoAvailable || commandStack_.canRedo());
     undoAction_->setText(
-        commandStack_.canUndo()
+        textUndoAvailable
+            ? tr("Undo text edit")
+            : commandStack_.canUndo()
             ? tr("Undo %1").arg(QString::fromStdString(commandStack_.undoDescription()))
             : tr("Undo"));
     redoAction_->setText(
-        commandStack_.canRedo()
+        textRedoAvailable
+            ? tr("Redo text edit")
+            : commandStack_.canRedo()
             ? tr("Redo %1").arg(QString::fromStdString(commandStack_.redoDescription()))
             : tr("Redo"));
+    undoAction_->setToolTip(
+        textUndoAvailable
+            ? tr("Undo the last change in the active text field")
+            : commandStack_.canUndo()
+                ? tr("Undo %1").arg(
+                      QString::fromStdString(
+                          commandStack_.undoDescription()))
+                : tr("Nothing to undo"));
+    redoAction_->setToolTip(
+        textRedoAvailable
+            ? tr("Redo the last reverted change in the active text field")
+            : commandStack_.canRedo()
+                ? tr("Redo %1").arg(
+                      QString::fromStdString(
+                          commandStack_.redoDescription()))
+                : tr("Nothing to redo"));
     if (showHiddenLanesAction_) {
         const auto* scenario = activeScenario();
         const auto hiddenCount = scenario
@@ -1874,6 +2414,116 @@ void MainWindow::updateCommandActions()
                     static_cast<qulonglong>(hiddenCount)));
     }
     updateLaneOrderActions();
+    updateWaveContext();
+    updateSegmentActions();
+}
+
+void MainWindow::updateWaveContext()
+{
+    if (!canvas_) return;
+
+    if (waveTargetLabel_) {
+        waveTargetLabel_->setText(canvas_->editTargetSummary());
+        waveTargetLabel_->setToolTip(canvas_->editTargetToolTip());
+    }
+    if (asyncTimingAction_) {
+        asyncTimingAction_->setText(
+            tr("Timing: %1").arg(canvas_->editTimingSummary()));
+        asyncTimingAction_->setToolTip(
+            canvas_->asynchronousEditing()
+                ? tr("Current mode: %1. Left/Right and Shift+Left/Right move one tick. Click to return to clock-aligned one-beat editing.")
+                      .arg(canvas_->editTimingSummary())
+                : tr("Current mode: %1. Left/Right and Shift+Left/Right follow this associated-clock beat. Click to allow arbitrary tick offsets with light snapping.")
+                      .arg(canvas_->editTimingSummary()));
+        asyncTimingAction_->setStatusTip(
+            canvas_->asynchronousEditing()
+                ? tr("Async timing is active; click for clock-aligned Sync editing")
+                : tr("Sync timing is active; click for arbitrary-tick Async editing"));
+    }
+}
+
+void MainWindow::updateSegmentActions()
+{
+    if (!canvas_) return;
+    const auto waveEdit = canvas_->tool() == WaveCanvas::Tool::WaveEdit;
+    const auto* scenario = activeScenario();
+    const auto selectedLaneId = canvas_->selectedLaneId().toStdString();
+    const auto* selectedLane = scenario
+        ? findLane(*scenario, selectedLaneId)
+        : nullptr;
+    const auto segmentSelected = waveEdit
+        && !canvas_->selectedSegmentId().isEmpty()
+        && !canvas_->selectedSegmentLaneId().isEmpty();
+    const auto navigableLane = waveEdit
+        && selectedLane
+        && selectedLane->kind != LaneKind::Group
+        && selectedLane->kind != LaneKind::Bit;
+
+    if (segmentMenu_) {
+        segmentMenu_->setEnabled(navigableLane || segmentSelected);
+    }
+    if (selectSegmentAtCursorAction_) {
+        selectSegmentAtCursorAction_->setEnabled(navigableLane);
+    }
+    if (previousSegmentAction_) previousSegmentAction_->setEnabled(navigableLane);
+    if (nextSegmentAction_) nextSegmentAction_->setEnabled(navigableLane);
+    const auto configureSegmentAction =
+        [this, segmentSelected](
+            QAction* action,
+            const WaveCanvas::SegmentAction segmentAction,
+            const QString& baseText) {
+            if (!action) return;
+            const auto state =
+                canvas_->selectedSegmentActionState(segmentAction);
+            auto text = baseText;
+            if (state.valid && state.relationRemovalCount > 0) {
+                text += tr(" ⚠%1").arg(static_cast<qulonglong>(
+                    state.relationRemovalCount));
+            } else if (state.valid && !state.modelChanges) {
+                text += tr(" · no change");
+            } else if (state.applicable && !state.valid) {
+                text += tr(" · unavailable");
+            }
+            action->setText(text);
+            action->setEnabled(
+                segmentSelected
+                && state.valid
+                && state.modelChanges);
+            action->setToolTip(state.summary);
+            action->setStatusTip(state.summary);
+        };
+    configureSegmentAction(
+        duplicateSegmentBeforeAction_,
+        WaveCanvas::SegmentAction::DuplicateBefore,
+        tr("Duplicate Segment before"));
+    configureSegmentAction(
+        duplicateSegmentAfterAction_,
+        WaveCanvas::SegmentAction::DuplicateAfter,
+        tr("Duplicate Segment after"));
+    configureSegmentAction(
+        moveSegmentEarlierAction_,
+        WaveCanvas::SegmentAction::MoveEarlier,
+        tr("Move Segment earlier"));
+    configureSegmentAction(
+        moveSegmentLaterAction_,
+        WaveCanvas::SegmentAction::MoveLater,
+        tr("Move Segment later"));
+    configureSegmentAction(
+        expandSegmentStartAction_,
+        WaveCanvas::SegmentAction::ExpandStart,
+        tr("Expand Segment start"));
+    configureSegmentAction(
+        trimSegmentStartAction_,
+        WaveCanvas::SegmentAction::TrimStart,
+        tr("Trim Segment start"));
+    configureSegmentAction(
+        expandSegmentEndAction_,
+        WaveCanvas::SegmentAction::ExpandEnd,
+        tr("Expand Segment end"));
+    configureSegmentAction(
+        trimSegmentEndAction_,
+        WaveCanvas::SegmentAction::TrimEnd,
+        tr("Trim Segment end"));
 }
 
 bool MainWindow::commitPendingEdits()
@@ -1890,6 +2540,7 @@ void MainWindow::newProject()
     if (!commitPendingEdits()) return;
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (!confirmDiscardChanges()) return;
+    rememberActiveScenarioLocation();
 
     Project replacement;
     replacement.id = makeStableId("project");
@@ -1908,12 +2559,15 @@ void MainWindow::newProject()
     traceIndex_.reset();
     activeTraceId_.clear();
     traceVisibleSignalIds_.clear();
+    canvas_->clearDocumentContexts();
     project_ = std::move(replacement);
+    activeScenarioIndex_ = 0;
     projectFile_.clear();
     recoveryLoaded_ = false;
     commandStack_.clear();
     resetEditTracking(true);
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
+    populateScenarioSelector();
     closeSignalFind(false);
     closeGoToTime(false);
     canvas_->setTool(WaveCanvas::Tool::WaveEdit);
@@ -2393,23 +3047,28 @@ void MainWindow::addGroup()
     if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
     if (!scenario) return;
+    const auto defaultName = uniqueLaneName(*scenario, "Group");
+    const auto name = promptNewGroupName(
+        this,
+        *scenario,
+        tr("Create group"),
+        tr("Name the empty Group. Signals can be dragged onto its header after creation."),
+        defaultName);
+    if (!name) {
+        statusBar()->showMessage(tr("Group creation cancelled"), 3'000);
+        return;
+    }
+
     Lane group;
     group.id = makeStableId("group");
-    group.name = "Group";
+    group.name = *name;
     group.kind = LaneKind::Group;
-    group.color = "#90a4ae";
+    group.color = randomReadableLaneColor(*scenario);
     group.height = 40;
-    const auto replacement = promptLaneProperties(
-        this,
-        project_,
-        *scenario,
-        group,
-        true);
-    if (!replacement) return;
     try {
         commandStack_.execute(std::make_unique<AddLaneCommand>(
             *scenario,
-            *replacement));
+            group));
     } catch (const std::exception& exception) {
         QMessageBox::warning(
             this,
@@ -2420,10 +3079,14 @@ void MainWindow::addGroup()
     canvas_->refreshModel();
     markEdited();
     canvas_->revealLocation(
-        QString::fromStdString(replacement->id),
+        QString::fromStdString(group.id),
         canvas_->cursorTick());
-    selectLaneItem(signalTree_, QString::fromStdString(replacement->id));
-    selectLaneItem(groupTree_, QString::fromStdString(replacement->id));
+    selectLaneItem(signalTree_, QString::fromStdString(group.id));
+    selectLaneItem(groupTree_, QString::fromStdString(group.id));
+    statusBar()->showMessage(
+        tr("Created empty group %1 · drag signals onto its header or use Move to group · Ctrl+Z to undo")
+            .arg(QString::fromStdString(group.name)),
+        8'000);
 }
 
 void MainWindow::editSelectedLane()
@@ -2433,6 +3096,17 @@ void MainWindow::editSelectedLane()
 
 void MainWindow::duplicateSelectedLane()
 {
+    if (canvas_ && canvas_->hasExplicitRangeSelection()) {
+        canvas_->duplicateSelectionAfter();
+        return;
+    }
+    if (canvas_ && canvas_->hasLaneHeaderSelection()) {
+        const auto laneIds = canvas_->selectedLaneIds();
+        if (laneIds.size() > 1) {
+            duplicateLanesById(laneIds);
+            return;
+        }
+    }
     duplicateLaneById(selectedLaneIdForEditing());
 }
 
@@ -2527,8 +3201,155 @@ void MainWindow::duplicateLaneById(const QString& laneId)
     statusBar()->showMessage(result, 6'000);
 }
 
+void MainWindow::duplicateLanesById(const QStringList& laneIds)
+{
+    if (!canvas_ || laneIds.size() < 2) {
+        if (laneIds.size() == 1) duplicateLaneById(laneIds.front());
+        return;
+    }
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before duplicating whole signals"),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+
+    auto* scenario = activeScenario();
+    if (!scenario) return;
+    std::vector<const Lane*> sources;
+    sources.reserve(static_cast<std::size_t>(laneIds.size()));
+    std::size_t insertionIndex = 0;
+    for (auto index = std::size_t{0};
+         index < scenario->lanes.size();
+         ++index) {
+        const auto& candidate = scenario->lanes[index];
+        const auto candidateId = QString::fromStdString(candidate.id);
+        if (!laneIds.contains(candidateId)) continue;
+        if (candidate.kind == LaneKind::Group
+            || !candidate.visible
+            || !canvas_->isLaneDisplayed(candidateId)) {
+            statusBar()->showMessage(
+                tr("The selected signals changed before they could be duplicated"),
+                5'000);
+            updateLaneOrderActions();
+            return;
+        }
+        sources.push_back(&candidate);
+        insertionIndex = index + 1;
+    }
+    if (sources.size()
+        != static_cast<std::size_t>(laneIds.size())) {
+        statusBar()->showMessage(
+            tr("The selected signals changed before they could be duplicated"),
+            5'000);
+        updateLaneOrderActions();
+        return;
+    }
+
+    const auto activeSourceId = canvas_->selectedLaneId().toStdString();
+    auto planningScenario = *scenario;
+    std::vector<Lane> duplicates;
+    std::vector<ClockDomain> duplicateClocks;
+    QStringList duplicateIds;
+    duplicates.reserve(sources.size());
+    duplicateIds.reserve(laneIds.size());
+    auto activeDuplicateId = QString{};
+    for (const auto* source : sources) {
+        Lane duplicate = *source;
+        duplicate.id = makeStableId("lane");
+        duplicate.name = uniqueLaneName(
+            planningScenario,
+            source->name + "_copy");
+        duplicate.color = randomReadableLaneColor(
+            planningScenario,
+            source->color);
+        duplicate.visible = true;
+        for (auto& segment : duplicate.segments) {
+            segment.id = makeStableId("segment");
+        }
+
+        if (duplicate.kind == LaneKind::Clock) {
+            const auto* sourceClock =
+                findClock(project_, source->clockDomainId);
+            if (!sourceClock) {
+                statusBar()->showMessage(
+                    tr("A selected Clock no longer references valid clock settings; no signals were duplicated"),
+                    6'000);
+                return;
+            }
+            auto duplicateClock = *sourceClock;
+            duplicateClock.id = makeStableId("clock");
+            duplicateClock.name = duplicate.name;
+            duplicate.clockDomainId = duplicateClock.id;
+            duplicateClocks.push_back(std::move(duplicateClock));
+        }
+
+        const auto duplicateId =
+            QString::fromStdString(duplicate.id);
+        if (source->id == activeSourceId) {
+            activeDuplicateId = duplicateId;
+        }
+        duplicateIds.push_back(duplicateId);
+        planningScenario.lanes.push_back(duplicate);
+        duplicates.push_back(std::move(duplicate));
+    }
+    if (activeDuplicateId.isEmpty()) {
+        activeDuplicateId = duplicateIds.front();
+    }
+
+    const auto beforeStateId = commandStack_.stateId();
+    canvas_->beginCommandSelectionTransition(beforeStateId);
+    try {
+        commandStack_.execute(
+            std::make_unique<DuplicateLanesCommand>(
+                project_,
+                *scenario,
+                duplicates,
+                duplicateClocks,
+                insertionIndex));
+    } catch (const std::exception& exception) {
+        canvas_->cancelCommandSelectionTransition();
+        QMessageBox::warning(
+            this,
+            tr("Cannot duplicate selected signals"),
+            QString::fromUtf8(exception.what()));
+        return;
+    }
+
+    canvas_->refreshModel();
+    canvas_->selectLaneHeaders(
+        duplicateIds,
+        activeDuplicateId);
+    canvas_->finishCommandSelectionTransition(
+        commandStack_.stateId());
+    markEdited();
+    selectLaneItem(signalTree_, activeDuplicateId);
+    selectLaneItem(groupTree_, activeDuplicateId);
+    updateLaneOrderActions();
+
+    auto result = tr("Duplicated %1 selected signals as one block below the last source · waveforms, properties, and Group memberships copied")
+                      .arg(duplicateIds.size());
+    if (!duplicateClocks.empty()) {
+        result.append(
+            tr(" · %1 Clock signal(s) use independent settings")
+                .arg(static_cast<qulonglong>(
+                    duplicateClocks.size())));
+    }
+    result.append(
+        tr(" · Event, Relation, and Trace links not copied · one Undo step · Ctrl+Z to undo"));
+    statusBar()->showMessage(result, 9'000);
+}
+
 void MainWindow::hideSelectedLane()
 {
+    if (canvas_ && canvas_->hasLaneHeaderSelection()) {
+        const auto laneIds = canvas_->selectedLaneIds();
+        if (laneIds.size() > 1) {
+            hideLanesById(laneIds);
+            return;
+        }
+    }
     hideLaneById(selectedLaneIdForEditing());
 }
 
@@ -2591,6 +3412,84 @@ void MainWindow::hideLaneById(const QString& laneId)
     statusBar()->showMessage(
         tr("Hidden %1 %2 · %3 at the bottom or in Edit restores hidden items · Ctrl+Z to undo")
             .arg(hidingGroup ? tr("group") : tr("signal"), laneName, restoreLabel),
+        8'000);
+}
+
+void MainWindow::hideLanesById(const QStringList& laneIds)
+{
+    if (!canvas_ || laneIds.size() < 2) {
+        if (laneIds.size() == 1) hideLaneById(laneIds.front());
+        return;
+    }
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before hiding whole signals"),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+
+    auto* scenario = activeScenario();
+    if (!scenario) return;
+    std::vector<std::string> orderedIds;
+    orderedIds.reserve(static_cast<std::size_t>(laneIds.size()));
+    for (const auto& lane : scenario->lanes) {
+        const auto candidateId = QString::fromStdString(lane.id);
+        if (lane.kind != LaneKind::Group
+            && lane.visible
+            && laneIds.contains(candidateId)
+            && std::find(orderedIds.begin(), orderedIds.end(), lane.id)
+                == orderedIds.end()) {
+            orderedIds.push_back(lane.id);
+        }
+    }
+    if (orderedIds.size() != static_cast<std::size_t>(laneIds.size())) {
+        statusBar()->showMessage(
+            tr("The selected signals changed before they could be hidden"),
+            5'000);
+        return;
+    }
+
+    const auto beforeStateId = commandStack_.stateId();
+    canvas_->beginCommandSelectionTransition(beforeStateId);
+    try {
+        if (!commandStack_.execute(std::make_unique<HideLanesCommand>(
+                *scenario,
+                orderedIds))) {
+            canvas_->cancelCommandSelectionTransition();
+            statusBar()->showMessage(
+                tr("The selected signals are already hidden"),
+                3'000);
+            updateCommandActions();
+            return;
+        }
+    } catch (const std::exception& exception) {
+        canvas_->cancelCommandSelectionTransition();
+        QMessageBox::warning(
+            this,
+            tr("Cannot hide selected signals"),
+            QString::fromUtf8(exception.what()));
+        return;
+    }
+
+    canvas_->refreshModel();
+    updateSelection({}, canvas_->cursorTick());
+    canvas_->finishCommandSelectionTransition(commandStack_.stateId());
+    markEdited();
+    const auto hiddenCount = static_cast<std::size_t>(std::count_if(
+        scenario->lanes.begin(),
+        scenario->lanes.end(),
+        [](const Lane& lane) {
+            return !lane.visible;
+        }));
+    const auto restoreLabel = hiddenCount == 1
+        ? tr("Show 1 hidden item")
+        : tr("Show %1 hidden items").arg(
+            static_cast<qulonglong>(hiddenCount));
+    statusBar()->showMessage(
+        tr("Hidden %1 selected signals · %2 at the bottom or in Edit restores hidden items · Ctrl+Z to undo")
+            .arg(static_cast<qulonglong>(orderedIds.size()))
+            .arg(restoreLabel),
         8'000);
 }
 
@@ -2700,6 +3599,13 @@ QString MainWindow::selectedLaneIdForEditing() const
 
 void MainWindow::removeSelectedLane()
 {
+    if (canvas_ && canvas_->hasLaneHeaderSelection()) {
+        const auto laneIds = canvas_->selectedLaneIds();
+        if (laneIds.size() > 1) {
+            removeLanesById(laneIds);
+            return;
+        }
+    }
     removeLaneById(selectedLaneIdForEditing());
 }
 
@@ -2808,6 +3714,149 @@ void MainWindow::removeLaneById(const QString& laneId)
     statusBar()->showMessage(result, 5'000);
 }
 
+void MainWindow::removeLanesById(const QStringList& laneIds)
+{
+    if (!canvas_ || laneIds.size() < 2) {
+        if (laneIds.size() == 1) removeLaneById(laneIds.front());
+        return;
+    }
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before removing whole signals"),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+
+    auto* scenario = activeScenario();
+    if (!scenario) return;
+    std::vector<std::string> orderedIds;
+    QStringList names;
+    orderedIds.reserve(static_cast<std::size_t>(laneIds.size()));
+    for (const auto& lane : scenario->lanes) {
+        const auto candidateId = QString::fromStdString(lane.id);
+        if (lane.kind != LaneKind::Group
+            && laneIds.contains(candidateId)
+            && std::find(orderedIds.begin(), orderedIds.end(), lane.id)
+                == orderedIds.end()) {
+            orderedIds.push_back(lane.id);
+            names.push_back(QString::fromStdString(lane.name));
+        }
+    }
+    if (orderedIds.size() != static_cast<std::size_t>(laneIds.size())) {
+        statusBar()->showMessage(
+            tr("The selected signals changed before they could be removed"),
+            5'000);
+        return;
+    }
+
+    const auto selected = [&orderedIds](const std::string& laneId) {
+        return std::find(orderedIds.begin(), orderedIds.end(), laneId)
+            != orderedIds.end();
+    };
+    std::vector<std::string> removedEventIds;
+    for (const auto& event : scenario->events) {
+        if (selected(event.laneId)) removedEventIds.push_back(event.id);
+    }
+    const auto removedRelationCount = static_cast<std::size_t>(std::count_if(
+        scenario->relations.begin(),
+        scenario->relations.end(),
+        [&removedEventIds](const Relation& relation) {
+            const auto removed = [&removedEventIds](const std::string& eventId) {
+                return std::find(
+                           removedEventIds.begin(),
+                           removedEventIds.end(),
+                           eventId)
+                    != removedEventIds.end();
+            };
+            return removed(relation.sourceEventId)
+                || removed(relation.targetEventId);
+        }));
+    auto removedTraceMappingCount = std::size_t{0};
+    for (const auto& laneId : orderedIds) {
+        const auto usedByAnotherScenario = std::any_of(
+            project_.scenarios.begin(),
+            project_.scenarios.end(),
+            [scenario, &laneId](const Scenario& candidate) {
+                return &candidate != scenario
+                    && findLane(candidate, laneId);
+            });
+        if (usedByAnotherScenario) continue;
+        for (const auto& trace : project_.importedTraces) {
+            if (trace.signalMapping.contains(laneId)) {
+                ++removedTraceMappingCount;
+            }
+        }
+    }
+    const auto quantity = [this](const std::size_t count, const QString& noun) {
+        return tr("%1 %2%3")
+            .arg(static_cast<qulonglong>(count))
+            .arg(noun)
+            .arg(count == 1 ? QString{} : QStringLiteral("s"));
+    };
+    QStringList removedEffects;
+    if (!removedEventIds.empty()) {
+        removedEffects.append(quantity(removedEventIds.size(), tr("event")));
+    }
+    if (removedRelationCount > 0) {
+        removedEffects.append(quantity(removedRelationCount, tr("relation")));
+    }
+    if (removedTraceMappingCount > 0) {
+        removedEffects.append(
+            quantity(removedTraceMappingCount, tr("trace mapping")));
+    }
+
+    auto message = tr("Remove %1 selected signals: %2?")
+        .arg(static_cast<qulonglong>(orderedIds.size()))
+        .arg(names.join(QStringLiteral(", ")));
+    if (!removedEffects.isEmpty()) {
+        message += tr(" This also removes %1.")
+                       .arg(removedEffects.join(QStringLiteral(", ")));
+    }
+    message += tr(" You can undo this with Ctrl+Z.");
+    if (QMessageBox::question(
+            this,
+            tr("Remove selected signals"),
+            message,
+            QMessageBox::Yes | QMessageBox::Cancel,
+            QMessageBox::Cancel)
+        != QMessageBox::Yes) {
+        return;
+    }
+
+    const auto beforeStateId = commandStack_.stateId();
+    canvas_->beginCommandSelectionTransition(beforeStateId);
+    try {
+        commandStack_.execute(std::make_unique<RemoveLanesCommand>(
+            project_,
+            *scenario,
+            orderedIds));
+    } catch (const std::exception& exception) {
+        canvas_->cancelCommandSelectionTransition();
+        QMessageBox::warning(
+            this,
+            tr("Cannot remove selected signals"),
+            QString::fromUtf8(exception.what()));
+        return;
+    }
+    canvas_->refreshModel();
+    updateSelection({}, canvas_->cursorTick());
+    canvas_->finishCommandSelectionTransition(commandStack_.stateId());
+    markEdited();
+
+    QStringList results;
+    for (const auto& effect : removedEffects) {
+        results.append(tr("%1 removed").arg(effect));
+    }
+    auto result = tr("Removed %1 selected signals")
+        .arg(static_cast<qulonglong>(orderedIds.size()));
+    if (!results.isEmpty()) {
+        result += tr(" · %1").arg(results.join(QStringLiteral(", ")));
+    }
+    result += tr(" · Ctrl+Z to undo");
+    statusBar()->showMessage(result, 8'000);
+}
+
 void MainWindow::showLaneContextMenu(
     const QString& laneId,
     const QPoint& globalPosition)
@@ -2818,7 +3867,31 @@ void MainWindow::showLaneContextMenu(
 
     QMenu menu(this);
     menu.setObjectName(QStringLiteral("LaneHeaderContextMenu"));
+    menu.setToolTipsVisible(true);
     if (lane->kind == LaneKind::Group) {
+        const auto collapsed = canvas_->isGroupCollapsed(laneId);
+        const auto collapsible = std::any_of(
+            scenario->lanes.begin(),
+            scenario->lanes.end(),
+            [lane](const Lane& candidate) {
+                return candidate.visible
+                    && candidate.kind != LaneKind::Group
+                    && candidate.groupId == lane->id;
+            });
+        auto* toggle = menu.addAction(
+            collapsed ? tr("Expand group") : tr("Collapse group"));
+        toggle->setObjectName(QStringLiteral("GroupCollapseExpandAction"));
+        toggle->setEnabled(collapsible);
+        toggle->setToolTip(
+            !collapsible
+                ? tr("This group has no visible member signals")
+                : collapsed
+                    ? tr("Show this group's visible member signals")
+                    : tr("Temporarily hide this group's member signals from the canvas"));
+        connect(toggle, &QAction::triggered, this, [this, laneId, collapsed] {
+            canvas_->setGroupCollapsed(laneId, !collapsed);
+        });
+        menu.addSeparator();
         auto* properties = menu.addAction(tr("Group properties…"));
         properties->setObjectName(QStringLiteral("GroupPropertiesAction"));
         connect(properties, &QAction::triggered, this, [this, laneId] {
@@ -2835,6 +3908,56 @@ void MainWindow::showLaneContextMenu(
         menu.exec(globalPosition);
         return;
     }
+    QStringList selectedLaneIds{laneId};
+    if (canvas_) {
+        const auto canvasSelection = canvas_->selectedLaneIds();
+        if (canvasSelection.size() > 1 && canvasSelection.contains(laneId)) {
+            selectedLaneIds.clear();
+            for (const auto& candidate : scenario->lanes) {
+                const auto candidateId = QString::fromStdString(candidate.id);
+                if (candidate.kind != LaneKind::Group
+                    && candidate.visible
+                    && canvasSelection.contains(candidateId)
+                    && canvas_->isLaneDisplayed(candidateId)) {
+                    selectedLaneIds.push_back(candidateId);
+                }
+            }
+        }
+    }
+    if (selectedLaneIds.isEmpty()) selectedLaneIds = {laneId};
+    const auto batchSelection = selectedLaneIds.size() > 1;
+
+    const auto* clipboardMime = QApplication::clipboard()->mimeData();
+    if (canvas_
+        && clipboardMime
+        && clipboardMime->hasFormat(
+            QByteArrayLiteral("application/x-wave-workbench-range+json"))) {
+        const auto [pasteEnabled, pasteToolTip] =
+            canvas_->selectedLanePasteAvailability();
+        const auto targetLabel = batchSelection
+            ? tr("%1 selected signals").arg(selectedLaneIds.size())
+            : QString::fromStdString(lane->name);
+        const auto pasteTime = QString::fromStdString(
+            formatTick(canvas_->cursorTick(), project_.timeBase));
+        auto* paste = menu.addAction(
+            tr("Paste copied range into %1 at %2")
+                .arg(targetLabel, pasteTime));
+        paste->setObjectName(
+            QStringLiteral("PasteRangeIntoLaneSelectionAction"));
+        paste->setShortcut(QKeySequence::Paste);
+        paste->setEnabled(pasteEnabled);
+        paste->setToolTip(pasteToolTip);
+        auto pasteStatusTip = pasteToolTip;
+        pasteStatusTip.replace(QLatin1Char('\n'), QStringLiteral(" · "));
+        paste->setStatusTip(pasteStatusTip);
+        connect(
+            paste,
+            &QAction::triggered,
+            this,
+            [this] { canvas_->pasteAtCursor(); });
+        menu.addSeparator();
+    }
+
     const auto label = lane->kind == LaneKind::Clock
         ? tr("Clock frequency / period...")
         : lane->kind == LaneKind::Bus
@@ -2844,25 +3967,473 @@ void MainWindow::showLaneContextMenu(
                 : tr("Signal display parameters...");
     auto* parameters = menu.addAction(label);
     parameters->setObjectName(QStringLiteral("QuickLaneParametersAction"));
+    parameters->setEnabled(!batchSelection);
+    if (batchSelection) {
+        parameters->setToolTip(
+            tr("Display parameters require one signal; click a name without Ctrl/Shift"));
+    }
     connect(parameters, &QAction::triggered, this, [this, laneId] {
         editLaneKeyParameters(laneId);
     });
     menu.addSeparator();
-    auto* duplicate = menu.addAction(tr("Duplicate signal"));
+    auto* groupMenu = menu.addMenu(
+        batchSelection
+            ? tr("Move selected signals to group")
+            : tr("Move to group"));
+    groupMenu->setObjectName(QStringLiteral("LaneGroupMenu"));
+    groupMenu->setToolTipsVisible(true);
+    auto* ungroup = groupMenu->addAction(tr("No group"));
+    ungroup->setObjectName(QStringLiteral("RemoveLaneFromGroupAction"));
+    ungroup->setCheckable(true);
+    const auto allUngrouped = std::all_of(
+        selectedLaneIds.begin(),
+        selectedLaneIds.end(),
+        [scenario](const QString& selectedId) {
+            const auto* selected = findLane(*scenario, selectedId.toStdString());
+            return selected && selected->groupId.empty();
+        });
+    const auto anyGrouped = std::any_of(
+        selectedLaneIds.begin(),
+        selectedLaneIds.end(),
+        [scenario](const QString& selectedId) {
+            const auto* selected = findLane(*scenario, selectedId.toStdString());
+            return selected && !selected->groupId.empty();
+        });
+    ungroup->setChecked(allUngrouped);
+    ungroup->setEnabled(anyGrouped);
+    ungroup->setToolTip(
+        allUngrouped
+            ? batchSelection
+                ? tr("All selected signals are already outside every group")
+                : tr("This signal is already outside every group")
+            : batchSelection
+                ? tr("Keep signal order and remove group membership from all selected signals")
+                : tr("Keep the signal at its current position and remove its group membership"));
+    connect(ungroup, &QAction::triggered, this, [this, selectedLaneIds] {
+        setLanesGroupById(selectedLaneIds, {});
+    });
+
+    auto visibleGroupCount = std::size_t{0};
+    for (const auto& candidate : scenario->lanes) {
+        if (candidate.kind != LaneKind::Group || !candidate.visible) continue;
+        if (visibleGroupCount == 0) groupMenu->addSeparator();
+        ++visibleGroupCount;
+        auto* assign = groupMenu->addAction(
+            QString::fromStdString(candidate.name));
+        assign->setObjectName(QStringLiteral("AssignLaneGroupAction"));
+        assign->setData(QString::fromStdString(candidate.id));
+        assign->setCheckable(true);
+        const auto allInCandidate = std::all_of(
+            selectedLaneIds.begin(),
+            selectedLaneIds.end(),
+            [scenario, &candidate](const QString& selectedId) {
+                const auto* selected =
+                    findLane(*scenario, selectedId.toStdString());
+                return selected && selected->groupId == candidate.id;
+            });
+        assign->setChecked(allInCandidate);
+        assign->setToolTip(
+            allInCandidate
+                ? batchSelection
+                    ? tr("All selected signals already belong to this group")
+                    : tr("This signal already belongs to this group")
+                : batchSelection
+                    ? tr("Move all selected signals below this group's current members in one undoable step")
+                    : tr("Move the signal below this group's current members in one undoable step"));
+        connect(
+            assign,
+            &QAction::triggered,
+            this,
+            [this,
+             selectedLaneIds,
+             groupId = QString::fromStdString(candidate.id)] {
+                setLanesGroupById(selectedLaneIds, groupId);
+            });
+    }
+    if (visibleGroupCount == 0) {
+        groupMenu->addSeparator();
+        auto* unavailable = groupMenu->addAction(
+            tr("No visible groups"));
+        unavailable->setObjectName(QStringLiteral("NoLaneGroupsAction"));
+        unavailable->setEnabled(false);
+        unavailable->setToolTip(
+            tr("Use Edit > Add group to create or restore a group"));
+    }
+    groupMenu->addSeparator();
+    auto* createGroup = groupMenu->addAction(
+        batchSelection
+            ? tr("New group with selected signals…")
+            : tr("New group with this signal…"));
+    createGroup->setObjectName(
+        QStringLiteral("CreateGroupWithLaneAction"));
+    createGroup->setToolTip(
+        batchSelection
+            ? tr("Name a new Group and move all selected signals into it in one undoable step")
+            : tr("Name a new Group and make this signal its first member in one undoable step"));
+    connect(createGroup, &QAction::triggered, this, [this, selectedLaneIds] {
+        createGroupWithLanes(selectedLaneIds);
+    });
+    menu.addSeparator();
+    auto* duplicate = menu.addAction(
+        batchSelection
+            ? tr("Duplicate selected signals")
+            : tr("Duplicate signal"));
     duplicate->setObjectName(QStringLiteral("DuplicateLaneContextAction"));
     duplicate->setToolTip(
-        tr("Copy this signal and its waveform immediately below the source"));
-    connect(duplicate, &QAction::triggered, this, [this, laneId] {
-        duplicateLaneById(laneId);
+        batchSelection
+            ? tr("Copy all selected signals and waveforms as one block below the last source")
+            : tr("Copy this signal and its waveform immediately below the source"));
+    connect(duplicate, &QAction::triggered, this, [this, laneId, selectedLaneIds] {
+        if (selectedLaneIds.size() > 1) {
+            duplicateLanesById(selectedLaneIds);
+        } else {
+            duplicateLaneById(laneId);
+        }
     });
-    auto* hide = menu.addAction(tr("Hide signal"));
+    auto* hide = menu.addAction(
+        batchSelection
+            ? tr("Hide selected signals")
+            : tr("Hide signal"));
     hide->setObjectName(QStringLiteral("HideLaneContextAction"));
     hide->setToolTip(
-        tr("Hide this signal; Show hidden items restores it"));
-    connect(hide, &QAction::triggered, this, [this, laneId] {
-        hideLaneById(laneId);
+        batchSelection
+            ? tr("Hide all selected signals as one undoable edit")
+            : tr("Hide this signal; Show hidden items restores it"));
+    connect(hide, &QAction::triggered, this, [this, laneId, selectedLaneIds] {
+        if (selectedLaneIds.size() > 1) {
+            hideLanesById(selectedLaneIds);
+        } else {
+            hideLaneById(laneId);
+        }
+    });
+    auto* remove = menu.addAction(
+        batchSelection
+            ? tr("Remove selected signals…")
+            : tr("Remove signal…"));
+    remove->setObjectName(QStringLiteral("RemoveLaneContextAction"));
+    remove->setToolTip(
+        batchSelection
+            ? tr("Preview dependencies, then remove all selected signals as one undoable edit")
+            : tr("Preview dependencies, then remove this signal as one undoable edit"));
+    connect(remove, &QAction::triggered, this, [this, laneId, selectedLaneIds] {
+        if (selectedLaneIds.size() > 1) {
+            removeLanesById(selectedLaneIds);
+        } else {
+            removeLaneById(laneId);
+        }
     });
     menu.exec(globalPosition);
+}
+
+void MainWindow::setLaneGroupById(
+    const QString& laneId,
+    const QString& groupId)
+{
+    setLanesGroupById(QStringList{laneId}, groupId);
+}
+
+void MainWindow::setLanesGroupById(
+    const QStringList& laneIds,
+    const QString& groupId)
+{
+    if (!canvas_ || laneIds.isEmpty()) return;
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before moving whole signals"),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+
+    auto* scenario = activeScenario();
+    if (!scenario) return;
+    std::vector<std::string> orderedIds;
+    QStringList orderedLaneIds;
+    orderedIds.reserve(static_cast<std::size_t>(laneIds.size()));
+    for (const auto& candidate : scenario->lanes) {
+        const auto candidateId = QString::fromStdString(candidate.id);
+        if (candidate.kind != LaneKind::Group
+            && laneIds.contains(candidateId)
+            && std::find(
+                   orderedIds.begin(),
+                   orderedIds.end(),
+                   candidate.id)
+                == orderedIds.end()) {
+            orderedIds.push_back(candidate.id);
+            orderedLaneIds.push_back(candidateId);
+        }
+    }
+    if (orderedIds.empty()) return;
+
+    auto activeLaneId = canvas_->selectedLaneId();
+    if (!orderedLaneIds.contains(activeLaneId)) {
+        activeLaneId = orderedLaneIds.front();
+    }
+    const auto* activeLane =
+        findLane(*scenario, activeLaneId.toStdString());
+    if (!activeLane) return;
+    const auto laneName = QString::fromStdString(activeLane->name);
+    const auto previousGroupId = activeLane->groupId;
+    const auto* previousGroup = previousGroupId.empty()
+        ? nullptr
+        : findLane(*scenario, previousGroupId);
+    const auto previousGroupName = previousGroup
+        ? QString::fromStdString(previousGroup->name)
+        : tr("its previous group");
+
+    const auto targetId = groupId.toStdString();
+    const auto* targetGroup = targetId.empty()
+        ? nullptr
+        : findLane(*scenario, targetId);
+    if (!targetId.empty()
+        && (!targetGroup
+            || targetGroup->kind != LaneKind::Group
+            || !targetGroup->visible)) {
+        statusBar()->showMessage(
+            tr("The target group is no longer visible"),
+            4'000);
+        return;
+    }
+    const auto targetGroupName = targetGroup
+        ? QString::fromStdString(targetGroup->name)
+        : QString{};
+    const auto changedSignalCount = static_cast<std::size_t>(std::count_if(
+        orderedIds.begin(),
+        orderedIds.end(),
+        [scenario, &targetId](const std::string& selectedId) {
+            const auto* selected = findLane(*scenario, selectedId);
+            return selected
+                && (targetId.empty()
+                        ? !selected->groupId.empty()
+                        : selected->groupId != targetId);
+        }));
+    const auto existingTargetMembers = targetGroup
+        ? static_cast<std::size_t>(std::count_if(
+              scenario->lanes.begin(),
+              scenario->lanes.end(),
+              [&targetId, &orderedIds](const Lane& candidate) {
+                  return std::find(
+                             orderedIds.begin(),
+                             orderedIds.end(),
+                             candidate.id)
+                          == orderedIds.end()
+                      && candidate.groupId == targetId;
+              }))
+        : std::size_t{0};
+
+    bool changed = false;
+    try {
+        changed = commandStack_.execute(std::make_unique<SetLanesGroupCommand>(
+            *scenario,
+            orderedIds,
+            targetId));
+    } catch (const std::exception& exception) {
+        QMessageBox::warning(
+            this,
+            orderedIds.size() == 1
+                ? tr("Cannot move signal to group")
+                : tr("Cannot move selected signals to group"),
+            QString::fromUtf8(exception.what()));
+        return;
+    }
+    if (!changed) {
+        statusBar()->showMessage(
+            orderedIds.size() > 1
+                ? targetGroup
+                    ? tr("All %1 selected signals are already in group %2")
+                          .arg(static_cast<qulonglong>(orderedIds.size()))
+                          .arg(targetGroupName)
+                    : tr("All %1 selected signals are already outside every group")
+                          .arg(static_cast<qulonglong>(orderedIds.size()))
+                : targetGroup
+                ? tr("%1 is already in group %2")
+                      .arg(laneName, targetGroupName)
+                : tr("%1 is already outside every group")
+                      .arg(laneName),
+            4'000);
+        updateCommandActions();
+        return;
+    }
+
+    canvas_->refreshModel();
+    markEdited();
+    if (orderedLaneIds.size() > 1) {
+        canvas_->selectLaneHeaders(orderedLaneIds, activeLaneId);
+    } else {
+        canvas_->revealLocation(activeLaneId, canvas_->cursorTick());
+    }
+    selectLaneItem(signalTree_, activeLaneId);
+    selectLaneItem(groupTree_, activeLaneId);
+    if (orderedIds.size() > 1) {
+        statusBar()->showMessage(
+            targetGroup
+                ? tr("Placed %1 selected signals in group %2 · %3 moved · %4 already there · Ctrl+Z to undo")
+                      .arg(static_cast<qulonglong>(orderedIds.size()))
+                      .arg(targetGroupName)
+                      .arg(static_cast<qulonglong>(changedSignalCount))
+                      .arg(static_cast<qulonglong>(
+                          orderedIds.size() - changedSignalCount))
+                : tr("Removed group membership from %1 of %2 selected signals · signal order unchanged · Ctrl+Z to undo")
+                      .arg(static_cast<qulonglong>(changedSignalCount))
+                      .arg(static_cast<qulonglong>(orderedIds.size())),
+            8'000);
+        return;
+    }
+    statusBar()->showMessage(
+        targetGroup
+            ? tr("Moved %1 to group %2 路 placed after %3 existing member signal(s) 路 Ctrl+Z to undo")
+                  .arg(laneName, targetGroupName)
+                  .arg(static_cast<qulonglong>(existingTargetMembers))
+            : tr("Removed %1 from group %2 路 signal order unchanged 路 Ctrl+Z to undo")
+                  .arg(laneName, previousGroupName),
+        7'000);
+}
+
+void MainWindow::createGroupWithLane(const QString& laneId)
+{
+    createGroupWithLanes(QStringList{laneId});
+}
+
+void MainWindow::createGroupWithLanes(const QStringList& laneIds)
+{
+    if (!canvas_ || laneIds.isEmpty()) return;
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before grouping whole signals"),
+            5'000);
+        return;
+    }
+    if (!commitPendingEdits()) return;
+
+    auto* scenario = activeScenario();
+    if (!scenario) return;
+    std::vector<std::string> orderedIds;
+    QStringList orderedLaneIds;
+    orderedIds.reserve(static_cast<std::size_t>(laneIds.size()));
+    for (const auto& candidate : scenario->lanes) {
+        const auto candidateId = QString::fromStdString(candidate.id);
+        if (candidate.kind != LaneKind::Group
+            && laneIds.contains(candidateId)
+            && std::find(
+                   orderedIds.begin(),
+                   orderedIds.end(),
+                   candidate.id)
+                == orderedIds.end()) {
+            orderedIds.push_back(candidate.id);
+            orderedLaneIds.push_back(candidateId);
+        }
+    }
+    if (orderedIds.empty()) return;
+
+    auto activeLaneId = canvas_->selectedLaneId();
+    if (!orderedLaneIds.contains(activeLaneId)) {
+        activeLaneId = orderedLaneIds.front();
+    }
+    const auto* lane = findLane(*scenario, activeLaneId.toStdString());
+    if (!lane) return;
+    const auto laneName = QString::fromStdString(lane->name);
+    const auto previousGroup = lane->groupId.empty()
+        ? nullptr
+        : findLane(*scenario, lane->groupId);
+    const auto previousGroupName = previousGroup
+        ? QString::fromStdString(previousGroup->name)
+        : QString{};
+    std::set<std::string> previousGroupIds;
+    for (const auto& selectedId : orderedIds) {
+        const auto* selected = findLane(*scenario, selectedId);
+        if (selected && !selected->groupId.empty()) {
+            previousGroupIds.insert(selected->groupId);
+        }
+    }
+    const auto defaultName = uniqueLaneName(
+        *scenario,
+        lane->name + "_group");
+    auto description = orderedIds.size() == 1
+        ? tr("Create a Group immediately above %1 and make this signal its first member.")
+              .arg(laneName)
+        : tr("Create a Group immediately above the first of %1 selected signals and move all of them into it.")
+              .arg(static_cast<qulonglong>(orderedIds.size()));
+    if (orderedIds.size() == 1 && previousGroup) {
+        description.append(
+            tr(" It will leave %1.").arg(previousGroupName));
+    } else if (!previousGroupIds.empty()) {
+        description.append(
+            tr(" The selection will leave %1 existing group(s).")
+                .arg(static_cast<qulonglong>(previousGroupIds.size())));
+    }
+    const auto name = promptNewGroupName(
+        this,
+        *scenario,
+        orderedIds.size() == 1
+            ? tr("Create group with %1").arg(laneName)
+            : tr("Create group with %1 selected signals")
+                  .arg(static_cast<qulonglong>(orderedIds.size())),
+        description,
+        defaultName);
+    if (!name) {
+        statusBar()->showMessage(
+            orderedIds.size() == 1
+                ? tr("Group creation cancelled · %1 unchanged").arg(laneName)
+                : tr("Group creation cancelled · %1 selected signals unchanged")
+                      .arg(static_cast<qulonglong>(orderedIds.size())),
+            3'000);
+        return;
+    }
+
+    Lane group;
+    group.id = makeStableId("group");
+    group.name = *name;
+    group.kind = LaneKind::Group;
+    group.color = randomReadableLaneColor(*scenario);
+    group.height = 40;
+    try {
+        commandStack_.execute(
+            std::make_unique<CreateGroupWithLanesCommand>(
+                *scenario,
+                group,
+                orderedIds));
+    } catch (const std::exception& exception) {
+        QMessageBox::warning(
+            this,
+            tr("Cannot create group"),
+            QString::fromUtf8(exception.what()));
+        return;
+    }
+
+    canvas_->refreshModel();
+    markEdited();
+    if (orderedLaneIds.size() > 1) {
+        canvas_->selectLaneHeaders(orderedLaneIds, activeLaneId);
+    } else {
+        canvas_->revealLocation(activeLaneId, canvas_->cursorTick());
+    }
+    selectLaneItem(signalTree_, activeLaneId);
+    selectLaneItem(groupTree_, QString::fromStdString(group.id));
+    if (orderedIds.size() > 1) {
+        auto message = tr("Created group %1 with %2 selected signals")
+                           .arg(QString::fromStdString(group.name))
+                           .arg(static_cast<qulonglong>(orderedIds.size()));
+        if (!previousGroupIds.empty()) {
+            message.append(
+                tr(" · moved from %1 existing group(s)")
+                    .arg(static_cast<qulonglong>(previousGroupIds.size())));
+        }
+        message.append(
+            tr(" · one Undo step · Ctrl+Z to undo · drag more signals onto the group"));
+        statusBar()->showMessage(message, 9'000);
+        return;
+    }
+    auto message = tr("Created group %1 with %2 as its first member")
+                       .arg(
+                           QString::fromStdString(group.name),
+                           laneName);
+    if (previousGroup) {
+        message.append(
+            tr(" · moved from %1").arg(previousGroupName));
+    }
+    message.append(
+        tr(" · Ctrl+Z to undo · drag more signals onto the group"));
+    statusBar()->showMessage(message, 8'000);
 }
 
 void MainWindow::editLaneKeyParameters(const QString& laneId)
@@ -2896,6 +4467,9 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         auto* value = new QLineEdit(
             QString::fromStdString(formatTick(original->period, project_.timeBase)));
         value->setObjectName(QStringLiteral("ClockRateValue"));
+        value->setPlaceholderText(tr("For example 2.5 ns"));
+        value->setToolTip(
+            tr("Period accepts decimal ps, ns, us, or ms values; frequency accepts Hz"));
         layout->addRow(tr("Edit as"), mode);
         layout->addRow(tr("Value"), value);
         auto* error = new QLabel;
@@ -2970,6 +4544,10 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
                               12)
                         : QString::fromStdString(
                               formatTick(original->period, project_.timeBase)));
+                value->setPlaceholderText(
+                    mode->currentData().toString() == QStringLiteral("frequency")
+                        ? tr("For example 100000000")
+                        : tr("For example 2.5 ns"));
             });
         if (dialog.exec() != QDialog::Accepted || !period) return;
         auto replacement = *original;
@@ -3128,10 +4706,193 @@ void MainWindow::moveSelectedLaneDown()
     moveSelectedLaneBy(1);
 }
 
+std::optional<std::size_t> MainWindow::batchLaneStepInsertionSlot(
+    const Scenario& scenario,
+    const QStringList& laneIds,
+    const int offset) const
+{
+    if (!canvas_
+        || laneIds.size() < 2
+        || (offset != -1 && offset != 1)
+        || scenario.lanes.empty()) {
+        return std::nullopt;
+    }
+
+    std::vector<bool> selected(scenario.lanes.size(), false);
+    auto selectedCount = std::size_t{0};
+    for (const auto& laneId : laneIds) {
+        const auto id = laneId.toStdString();
+        auto matchCount = std::size_t{0};
+        auto matchIndex = std::size_t{0};
+        for (auto index = std::size_t{0};
+             index < scenario.lanes.size();
+             ++index) {
+            if (scenario.lanes[index].id != id) continue;
+            ++matchCount;
+            matchIndex = index;
+        }
+        if (matchCount != 1
+            || selected[matchIndex]
+            || !scenario.lanes[matchIndex].visible
+            || scenario.lanes[matchIndex].kind == LaneKind::Group
+            || !canvas_->isLaneDisplayed(laneId)) {
+            return std::nullopt;
+        }
+        selected[matchIndex] = true;
+        ++selectedCount;
+    }
+    if (selectedCount != static_cast<std::size_t>(laneIds.size())) {
+        return std::nullopt;
+    }
+
+    const auto first = std::find(selected.begin(), selected.end(), true);
+    const auto last = std::find(selected.rbegin(), selected.rend(), true);
+    if (first == selected.end() || last == selected.rend()) {
+        return std::nullopt;
+    }
+    const auto firstIndex = static_cast<std::size_t>(
+        std::distance(selected.begin(), first));
+    const auto lastIndex = scenario.lanes.size() - 1
+        - static_cast<std::size_t>(
+            std::distance(selected.rbegin(), last));
+
+    if (offset < 0) {
+        for (auto index = firstIndex; index > 0;) {
+            --index;
+            if (selected[index]) continue;
+            if (canvas_->isLaneDisplayed(
+                    QString::fromStdString(
+                        scenario.lanes[index].id))) {
+                return index;
+            }
+        }
+        return std::nullopt;
+    }
+
+    for (auto index = lastIndex + 1;
+         index < scenario.lanes.size();
+         ++index) {
+        if (selected[index]) continue;
+        if (canvas_->isLaneDisplayed(
+                QString::fromStdString(
+                    scenario.lanes[index].id))) {
+            return index + 1;
+        }
+    }
+    return std::nullopt;
+}
+
 void MainWindow::moveSelectedLaneBy(const int offset)
 {
     if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
+    if (scenario
+        && canvas_
+        && canvas_->hasLaneHeaderSelection()
+        && canvas_->selectedLaneIds().size() > 1) {
+        const auto selectedLaneIds = canvas_->selectedLaneIds();
+        std::vector<std::string> orderedLaneIds;
+        orderedLaneIds.reserve(
+            static_cast<std::size_t>(
+                selectedLaneIds.size()));
+        for (const auto& lane : scenario->lanes) {
+            if (!selectedLaneIds.contains(
+                    QString::fromStdString(lane.id))) {
+                continue;
+            }
+            if (!lane.visible
+                || lane.kind == LaneKind::Group
+                || !canvas_->isLaneDisplayed(
+                    QString::fromStdString(lane.id))) {
+                statusBar()->showMessage(
+                    tr("The selected signals changed before they could be reordered"),
+                    5'000);
+                updateLaneOrderActions();
+                return;
+            }
+            orderedLaneIds.push_back(lane.id);
+        }
+        if (orderedLaneIds.size()
+            != static_cast<std::size_t>(
+                selectedLaneIds.size())) {
+            statusBar()->showMessage(
+                tr("The selected signals changed before they could be reordered"),
+                5'000);
+            updateLaneOrderActions();
+            return;
+        }
+
+        const auto insertionSlot = batchLaneStepInsertionSlot(
+            *scenario,
+            selectedLaneIds,
+            offset);
+        if (!insertionSlot) {
+            statusBar()->showMessage(
+                offset < 0
+                    ? tr("The selected signals are already at the visible top boundary")
+                    : tr("The selected signals are already at the visible bottom boundary"),
+                4'000);
+            updateLaneOrderActions();
+            return;
+        }
+
+        const auto activeLaneId = canvas_->selectedLaneId();
+        const auto beforeStateId = commandStack_.stateId();
+        canvas_->beginCommandSelectionTransition(beforeStateId);
+        try {
+            if (!commandStack_.execute(
+                    std::make_unique<MoveLanesCommand>(
+                        *scenario,
+                        orderedLaneIds,
+                        *insertionSlot))) {
+                canvas_->cancelCommandSelectionTransition();
+                statusBar()->showMessage(
+                    tr("The selected signals already occupy that visible position"),
+                    4'000);
+                updateLaneOrderActions();
+                return;
+            }
+        } catch (const std::exception& exception) {
+            canvas_->cancelCommandSelectionTransition();
+            QMessageBox::warning(
+                this,
+                tr("Cannot reorder selected signals"),
+                QString::fromUtf8(exception.what()));
+            return;
+        }
+
+        canvas_->refreshModel();
+        QStringList reorderedIds;
+        reorderedIds.reserve(selectedLaneIds.size());
+        for (const auto& lane : scenario->lanes) {
+            if (std::find(
+                    orderedLaneIds.begin(),
+                    orderedLaneIds.end(),
+                    lane.id)
+                != orderedLaneIds.end()) {
+                reorderedIds.push_back(
+                    QString::fromStdString(lane.id));
+            }
+        }
+        canvas_->selectLaneHeaders(
+            reorderedIds,
+            activeLaneId);
+        canvas_->finishCommandSelectionTransition(
+            commandStack_.stateId());
+        markEdited();
+        selectLaneItem(signalTree_, activeLaneId);
+        selectLaneItem(groupTree_, activeLaneId);
+        updateLaneOrderActions();
+        statusBar()->showMessage(
+            offset < 0
+                ? tr("Moved %1 selected signals one visible row up · relative order and Group memberships kept · Ctrl+Z to undo")
+                      .arg(selectedLaneIds.size())
+                : tr("Moved %1 selected signals one visible row down · relative order and Group memberships kept · Ctrl+Z to undo")
+                      .arg(selectedLaneIds.size()),
+            6'000);
+        return;
+    }
+
     const auto laneId = selectedLaneIdForEditing();
     if (!scenario || laneId.isEmpty() || offset == 0) return;
     const auto iterator = std::find_if(
@@ -3180,14 +4941,156 @@ void MainWindow::moveSelectedLaneBy(const int offset)
 
 void MainWindow::updateLaneOrderActions()
 {
-    if (moveLaneUpAction_) moveLaneUpAction_->setEnabled(false);
-    if (moveLaneDownAction_) moveLaneDownAction_->setEnabled(false);
-    if (duplicateLaneAction_) duplicateLaneAction_->setEnabled(false);
+    if (cutRangeAction_) {
+        const auto toolTip =
+            tr("Copy and clear the selected time range as one undo command");
+        cutRangeAction_->setToolTip(toolTip);
+        cutRangeAction_->setStatusTip(toolTip);
+    }
+    if (moveLaneUpAction_) {
+        moveLaneUpAction_->setEnabled(false);
+        moveLaneUpAction_->setText(
+            tr("Move selected lane &up"));
+        moveLaneUpAction_->setToolTip(
+            tr("Move the selected lane or group one position earlier in display order"));
+    }
+    if (moveLaneDownAction_) {
+        moveLaneDownAction_->setEnabled(false);
+        moveLaneDownAction_->setText(
+            tr("Move selected lane &down"));
+        moveLaneDownAction_->setToolTip(
+            tr("Move the selected lane or group one position later in display order"));
+    }
+    if (duplicateLaneAction_) {
+        duplicateLaneAction_->setEnabled(false);
+        duplicateLaneAction_->setText(
+            tr("&Duplicate selected signal"));
+        duplicateLaneAction_->setToolTip(
+            tr("Copy the selected signal, properties, and waveform below the source"));
+        duplicateLaneAction_->setStatusTip(
+            duplicateLaneAction_->toolTip());
+    }
     if (hideLaneAction_) {
         hideLaneAction_->setEnabled(false);
         hideLaneAction_->setText(tr("&Hide selected item"));
     }
+    if (removeLaneAction_) {
+        removeLaneAction_->setEnabled(false);
+        removeLaneAction_->setText(tr("&Remove selected lane / group…"));
+    }
     const auto* scenario = activeScenario();
+    if (scenario
+        && canvas_
+        && canvas_->hasExplicitRangeSelection()) {
+        if (cutRangeAction_) {
+            const auto [clearEnabled, clearToolTip] =
+                canvas_->selectedRangeClearAvailability();
+            const auto toolTip = clearEnabled
+                ? tr("Copy the selected range, then clear its source as one undo command\n%1")
+                      .arg(clearToolTip)
+                : tr("Copy the selected range; the source already uses implicit values, so Cut will not remove waveform values\n%1")
+                      .arg(clearToolTip);
+            cutRangeAction_->setToolTip(toolTip);
+            auto statusTip = toolTip;
+            statusTip.replace(QLatin1Char('\n'), QStringLiteral(" · "));
+            cutRangeAction_->setStatusTip(statusTip);
+        }
+        if (duplicateLaneAction_) {
+            const auto [repeatEnabled, repeatToolTip] =
+                canvas_->selectedRangeRepeatAvailability();
+            const auto relationRemovalCount =
+                canvas_->selectedRangeRepeatRelationRemovalCount();
+            duplicateLaneAction_->setEnabled(repeatEnabled);
+            duplicateLaneAction_->setText(
+                relationRemovalCount > 0
+                    ? tr("&Duplicate selected range after · removes %1 relation(s)")
+                          .arg(static_cast<qulonglong>(
+                              relationRemovalCount))
+                    : tr("&Duplicate selected range after"));
+            duplicateLaneAction_->setToolTip(repeatToolTip);
+            auto repeatStatusTip = repeatToolTip;
+            repeatStatusTip.replace(
+                QLatin1Char('\n'),
+                QStringLiteral(" · "));
+            duplicateLaneAction_->setStatusTip(repeatStatusTip);
+        }
+        if (hideLaneAction_) {
+            const auto laneId = selectedLaneIdForEditing();
+            const auto* lane = findLane(*scenario, laneId.toStdString());
+            hideLaneAction_->setEnabled(lane && lane->visible);
+            hideLaneAction_->setText(
+                lane && lane->kind == LaneKind::Group
+                    ? tr("&Hide selected group")
+                    : tr("&Hide selected signal"));
+            hideLaneAction_->setToolTip(
+                tr("Press Esc to clear the selected waveform range before hiding the whole item"));
+        }
+        return;
+    }
+    if (scenario
+        && canvas_
+        && canvas_->hasLaneHeaderSelection()
+        && canvas_->selectedLaneIds().size() > 1) {
+        const auto selectedLaneIds = canvas_->selectedLaneIds();
+        const auto allVisibleSignals = std::all_of(
+            selectedLaneIds.begin(),
+            selectedLaneIds.end(),
+            [scenario](const QString& selectedId) {
+                const auto* lane =
+                    findLane(*scenario, selectedId.toStdString());
+                return lane
+                    && lane->visible
+                    && lane->kind != LaneKind::Group;
+            });
+        if (!allVisibleSignals) return;
+        if (moveLaneUpAction_) {
+            moveLaneUpAction_->setText(
+                tr("Move %1 selected signals &up")
+                    .arg(selectedLaneIds.size()));
+            moveLaneUpAction_->setToolTip(
+                tr("Move all selected signals together one visible row earlier; keep their relative order and Group memberships"));
+            moveLaneUpAction_->setEnabled(
+                batchLaneStepInsertionSlot(
+                    *scenario,
+                    selectedLaneIds,
+                    -1)
+                    .has_value());
+        }
+        if (moveLaneDownAction_) {
+            moveLaneDownAction_->setText(
+                tr("Move %1 selected signals &down")
+                    .arg(selectedLaneIds.size()));
+            moveLaneDownAction_->setToolTip(
+                tr("Move all selected signals together one visible row later; keep their relative order and Group memberships"));
+            moveLaneDownAction_->setEnabled(
+                batchLaneStepInsertionSlot(
+                    *scenario,
+                    selectedLaneIds,
+                    1)
+                    .has_value());
+        }
+        if (duplicateLaneAction_) {
+            duplicateLaneAction_->setEnabled(true);
+            duplicateLaneAction_->setText(
+                tr("&Duplicate %1 selected signals")
+                    .arg(selectedLaneIds.size()));
+            duplicateLaneAction_->setToolTip(
+                tr("Copy the selected signals and waveforms as one block below the last source; one Ctrl+Z removes the block"));
+        }
+        if (hideLaneAction_) {
+            hideLaneAction_->setEnabled(true);
+            hideLaneAction_->setText(
+                tr("&Hide %1 selected signals").arg(
+                    selectedLaneIds.size()));
+        }
+        if (removeLaneAction_) {
+            removeLaneAction_->setEnabled(true);
+            removeLaneAction_->setText(
+                tr("&Remove %1 selected signals…").arg(
+                    selectedLaneIds.size()));
+        }
+        return;
+    }
     const auto laneId = selectedLaneIdForEditing().toStdString();
     if (!scenario || laneId.empty()) return;
     const auto iterator = std::find_if(
@@ -3200,6 +5103,10 @@ void MainWindow::updateLaneOrderActions()
     if (duplicateLaneAction_) {
         duplicateLaneAction_->setEnabled(
             iterator->visible && iterator->kind != LaneKind::Group);
+        duplicateLaneAction_->setText(
+            tr("&Duplicate selected signal"));
+        duplicateLaneAction_->setToolTip(
+            tr("Copy the selected signal, properties, and waveform below the source"));
     }
     if (hideLaneAction_) {
         hideLaneAction_->setEnabled(iterator->visible);
@@ -3207,6 +5114,13 @@ void MainWindow::updateLaneOrderActions()
             iterator->kind == LaneKind::Group
                 ? tr("&Hide selected group")
                 : tr("&Hide selected signal"));
+    }
+    if (removeLaneAction_) {
+        removeLaneAction_->setEnabled(true);
+        removeLaneAction_->setText(
+            iterator->kind == LaneKind::Group
+                ? tr("&Remove selected group…")
+                : tr("&Remove selected signal…"));
     }
     const auto index = std::distance(scenario->lanes.begin(), iterator);
     if (moveLaneUpAction_) moveLaneUpAction_->setEnabled(index > 0);
@@ -4157,14 +6071,50 @@ void MainWindow::loadFirstTraceReference()
         return;
     }
     const auto& reference = project_.importedTraces.front();
-    const auto formatText = QString::fromStdString(reference.format).toLower();
+    if (reference.id.empty()) {
+        traceSummary_->setText(
+            tr("Imported trace has no stable ID"));
+        return;
+    }
+    const auto idMatchCount =
+        std::count_if(
+            project_.importedTraces.begin(),
+            project_.importedTraces.end(),
+            [&reference](
+                const ImportedTrace& candidate) {
+                return candidate.id == reference.id;
+            });
+    if (idMatchCount != 1) {
+        traceSummary_->setText(
+            tr("Duplicate imported trace ID: %1")
+                .arg(QString::fromStdString(
+                    reference.id)));
+        return;
+    }
+    const auto storedPath =
+        QString::fromStdString(reference.path);
+    if (storedPath.trimmed().isEmpty()) {
+        traceSummary_->setText(
+            tr("Imported trace path is empty"));
+        return;
+    }
+    const auto formatText =
+        QString::fromStdString(reference.format)
+            .trimmed()
+            .toLower();
     if (formatText != QStringLiteral("vcd") && formatText != QStringLiteral("csv")) {
-        traceSummary_->setText(tr("Unsupported trace reference"));
+        traceSummary_->setText(
+            tr("Unsupported trace format '%1'; expected VCD or CSV")
+                .arg(
+                    QString::fromStdString(
+                        reference.format)));
         return;
     }
     const auto path = resolvedTracePath(reference);
-    if (!QFileInfo::exists(path)) {
-        traceSummary_->setText(tr("Missing trace: %1").arg(path));
+    if (!QFileInfo(path).isFile()) {
+        traceSummary_->setText(
+            tr("Trace file is missing or not a file: %1")
+                .arg(path));
         return;
     }
     activeTraceId_ = reference.id;
@@ -4200,7 +6150,7 @@ void MainWindow::runCompare()
             this,
             tr("Invalid edge tolerance"),
             parseError.isEmpty()
-                ? tr("Edge tolerance must be a non-negative integer time.")
+                ? tr("Edge tolerance must be a non-negative exactly representable time.")
                 : parseError);
         return;
     }
@@ -4504,6 +6454,7 @@ void MainWindow::createActions()
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
     editMenu_ = menuBar()->addMenu(tr("&Edit"));
+    editMenu_->setToolTipsVisible(true);
     undoAction_ = editMenu_->addAction(
         themedIcon(QStringLiteral("edit-undo"), style(), QStyle::SP_ArrowBack),
         tr("Undo"),
@@ -4520,12 +6471,71 @@ void MainWindow::createActions()
         &MainWindow::redo);
     redoAction_->setObjectName(QStringLiteral("RedoAction"));
     redoAction_->setToolTip(tr("Redo the last reverted edit"));
+    connect(
+        qApp,
+        &QApplication::focusChanged,
+        this,
+        [this](QWidget*, QWidget* now) {
+            if (auto* editor = qobject_cast<QLineEdit*>(now);
+                editor && (editor->window() == this || isAncestorOf(editor))) {
+                connect(
+                    editor,
+                    &QLineEdit::textChanged,
+                    this,
+                    &MainWindow::updateCommandActions,
+                    Qt::UniqueConnection);
+            }
+            updateCommandActions();
+        });
+    for (auto* editor : findChildren<QLineEdit*>()) {
+        connect(
+            editor,
+            &QLineEdit::textChanged,
+            this,
+            &MainWindow::updateCommandActions,
+            Qt::UniqueConnection);
+    }
+    connect(
+        editMenu_,
+        &QMenu::aboutToShow,
+        this,
+        &MainWindow::updateCommandActions);
+    previousScenarioAction_ = new QAction(tr("Previous waveform"), this);
+    previousScenarioAction_->setObjectName(
+        QStringLiteral("PreviousWaveformAction"));
+    previousScenarioAction_->setShortcut(
+        QKeySequence(Qt::CTRL | Qt::Key_PageUp));
+    previousScenarioAction_->setShortcutContext(Qt::WindowShortcut);
+    previousScenarioAction_->setToolTip(
+        tr("Switch to the previous waveform without changing the project"));
+    addAction(previousScenarioAction_);
+    connect(
+        previousScenarioAction_,
+        &QAction::triggered,
+        this,
+        [this] { switchAdjacentScenario(false); });
+
+    nextScenarioAction_ = new QAction(tr("Next waveform"), this);
+    nextScenarioAction_->setObjectName(
+        QStringLiteral("NextWaveformAction"));
+    nextScenarioAction_->setShortcut(
+        QKeySequence(Qt::CTRL | Qt::Key_PageDown));
+    nextScenarioAction_->setShortcutContext(Qt::WindowShortcut);
+    nextScenarioAction_->setToolTip(
+        tr("Switch to the next waveform without changing the project"));
+    addAction(nextScenarioAction_);
+    connect(
+        nextScenarioAction_,
+        &QAction::triggered,
+        this,
+        [this] { switchAdjacentScenario(true); });
     editMenu_->addSeparator();
-    auto* cutAction = editMenu_->addAction(tr("Cu&t range"));
-    cutAction->setObjectName(QStringLiteral("CutRangeAction"));
-    cutAction->setShortcut(QKeySequence::Cut);
-    cutAction->setToolTip(tr("Copy and clear the selected time range as one undo command"));
-    connect(cutAction, &QAction::triggered, this, [this] {
+    cutRangeAction_ = editMenu_->addAction(tr("Cu&t range"));
+    cutRangeAction_->setObjectName(QStringLiteral("CutRangeAction"));
+    cutRangeAction_->setShortcut(QKeySequence::Cut);
+    cutRangeAction_->setToolTip(
+        tr("Copy and clear the selected time range as one undo command"));
+    connect(cutRangeAction_, &QAction::triggered, this, [this] {
         if (auto* editor = qobject_cast<QLineEdit*>(focusWidget())) {
             editor->cut();
             return;
@@ -4554,6 +6564,24 @@ void MainWindow::createActions()
         }
         canvas_->pasteAtCursor();
     });
+    duplicateLaneAction_ = editMenu_->addAction(
+        tr("&Duplicate selected signal"));
+    duplicateLaneAction_->setObjectName(
+        QStringLiteral("DuplicateLaneAction"));
+    duplicateLaneAction_->setShortcut(
+        QKeySequence(Qt::CTRL | Qt::Key_D));
+    duplicateLaneAction_->setToolTip(
+        tr("Copy the selected signal, properties, and waveform below the source"));
+    duplicateLaneAction_->setEnabled(false);
+    connect(duplicateLaneAction_, &QAction::triggered, this, [this] {
+        if (qobject_cast<QLineEdit*>(focusWidget())) {
+            statusBar()->showMessage(
+                tr("Finish or cancel the text edit before duplicating the current target"),
+                4'000);
+            return;
+        }
+        duplicateSelectedLane();
+    });
     auto* selectAllAction = editMenu_->addAction(tr("Select &full signal range"));
     selectAllAction->setObjectName(QStringLiteral("SelectFullRangeAction"));
     selectAllAction->setShortcut(QKeySequence::SelectAll);
@@ -4577,8 +6605,197 @@ void MainWindow::createActions()
     goToTimeAction_->setObjectName(QStringLiteral("GoToTimeAction"));
     goToTimeAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_G));
     goToTimeAction_->setToolTip(
-        tr("Move the edit cursor to an exact time without changing the waveform"));
+        tr("Move the edit cursor, or set the active selected range edge or width exactly"));
     connect(goToTimeAction_, &QAction::triggered, this, &MainWindow::showGoToTime);
+
+    segmentMenu_ = editMenu_->addMenu(tr("&Segment"));
+    segmentMenu_->setObjectName(QStringLiteral("SegmentMenu"));
+    segmentMenu_->setToolTipsVisible(true);
+
+    selectSegmentAtCursorAction_ = segmentMenu_->addAction(
+        tr("Select Segment at edit cursor"));
+    selectSegmentAtCursorAction_->setObjectName(
+        QStringLiteral("SelectSegmentAtCursorAction"));
+    selectSegmentAtCursorAction_->setShortcut(QKeySequence(Qt::Key_F6));
+    selectSegmentAtCursorAction_->setToolTip(
+        tr("Select the explicit Bus, Enum, or Clock Segment at the edit cursor"));
+    connect(selectSegmentAtCursorAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        canvas_->selectSegmentAtCursor();
+    });
+
+    previousSegmentAction_ = segmentMenu_->addAction(tr("Previous Segment"));
+    previousSegmentAction_->setObjectName(QStringLiteral("PreviousSegmentAction"));
+    previousSegmentAction_->setShortcut(QKeySequence(Qt::Key_F7));
+    previousSegmentAction_->setToolTip(
+        tr("Select the previous explicit Segment on the current signal"));
+    connect(previousSegmentAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        canvas_->selectPreviousSegment();
+    });
+
+    nextSegmentAction_ = segmentMenu_->addAction(tr("Next Segment"));
+    nextSegmentAction_->setObjectName(QStringLiteral("NextSegmentAction"));
+    nextSegmentAction_->setShortcut(QKeySequence(Qt::Key_F8));
+    nextSegmentAction_->setToolTip(
+        tr("Select the next explicit Segment on the current signal"));
+    connect(nextSegmentAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        canvas_->selectNextSegment();
+    });
+
+    segmentMenu_->addSeparator();
+    duplicateSegmentBeforeAction_ = segmentMenu_->addAction(
+        tr("Duplicate Segment before"));
+    duplicateSegmentBeforeAction_->setObjectName(
+        QStringLiteral("DuplicateSelectedSegmentBeforeAction"));
+    duplicateSegmentBeforeAction_->setToolTip(
+        tr("Copy the selected Bus or Enum Segment into the preceding interval"));
+    connect(duplicateSegmentBeforeAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        static_cast<void>(canvas_->duplicateSelectedSegmentBefore());
+    });
+    duplicateSegmentAfterAction_ = segmentMenu_->addAction(
+        tr("Duplicate Segment after"));
+    duplicateSegmentAfterAction_->setObjectName(
+        QStringLiteral("DuplicateSelectedSegmentAfterAction"));
+    duplicateSegmentAfterAction_->setToolTip(
+        tr("Copy the selected Bus or Enum Segment into the following interval"));
+    connect(duplicateSegmentAfterAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        static_cast<void>(canvas_->duplicateSelectedSegmentAfter());
+    });
+
+    segmentMenu_->addSeparator();
+    moveSegmentEarlierAction_ = segmentMenu_->addAction(tr("Move Segment earlier"));
+    moveSegmentEarlierAction_->setObjectName(
+        QStringLiteral("MoveSelectedSegmentEarlierAction"));
+    moveSegmentEarlierAction_->setToolTip(
+        tr("Move the selected Segment earlier by one current editing step"));
+    connect(moveSegmentEarlierAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        static_cast<void>(canvas_->moveSelectedSegmentEarlier());
+    });
+    moveSegmentLaterAction_ = segmentMenu_->addAction(tr("Move Segment later"));
+    moveSegmentLaterAction_->setObjectName(
+        QStringLiteral("MoveSelectedSegmentLaterAction"));
+    moveSegmentLaterAction_->setToolTip(
+        tr("Move the selected Segment later by one current editing step"));
+    connect(moveSegmentLaterAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        static_cast<void>(canvas_->moveSelectedSegmentLater());
+    });
+
+    segmentMenu_->addSeparator();
+    expandSegmentStartAction_ = segmentMenu_->addAction(
+        tr("Expand Segment start"));
+    expandSegmentStartAction_->setObjectName(
+        QStringLiteral("ExpandSelectedSegmentStartAction"));
+    expandSegmentStartAction_->setToolTip(
+        tr("Move the selected Segment start earlier by one editing step"));
+    connect(expandSegmentStartAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        static_cast<void>(canvas_->expandSelectedSegmentStart());
+    });
+    trimSegmentStartAction_ = segmentMenu_->addAction(
+        tr("Trim Segment start"));
+    trimSegmentStartAction_->setObjectName(
+        QStringLiteral("TrimSelectedSegmentStartAction"));
+    trimSegmentStartAction_->setToolTip(
+        tr("Move the selected Segment start later by one editing step"));
+    connect(trimSegmentStartAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        static_cast<void>(canvas_->trimSelectedSegmentStart());
+    });
+    expandSegmentEndAction_ = segmentMenu_->addAction(tr("Expand Segment end"));
+    expandSegmentEndAction_->setObjectName(
+        QStringLiteral("ExpandSelectedSegmentEndAction"));
+    expandSegmentEndAction_->setToolTip(
+        tr("Move the selected Segment end later by one editing step"));
+    connect(expandSegmentEndAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        static_cast<void>(canvas_->expandSelectedSegmentEnd());
+    });
+    trimSegmentEndAction_ = segmentMenu_->addAction(tr("Trim Segment end"));
+    trimSegmentEndAction_->setObjectName(
+        QStringLiteral("TrimSelectedSegmentEndAction"));
+    trimSegmentEndAction_->setToolTip(
+        tr("Move the selected Segment end earlier by one editing step"));
+    connect(trimSegmentEndAction_, &QAction::triggered, this, [this] {
+        if (!canvas_->commitPendingInlineEdits()) return;
+        static_cast<void>(canvas_->trimSelectedSegmentEnd());
+    });
+
+    const auto connectSegmentPreview =
+        [this](
+            QAction* action,
+            const WaveCanvas::SegmentAction segmentAction) {
+            connect(action, &QAction::hovered, this, [this, segmentAction] {
+                updateSegmentActions();
+                static_cast<void>(
+                    canvas_->previewSelectedSegmentAction(segmentAction));
+            });
+        };
+    connectSegmentPreview(
+        duplicateSegmentBeforeAction_,
+        WaveCanvas::SegmentAction::DuplicateBefore);
+    connectSegmentPreview(
+        duplicateSegmentAfterAction_,
+        WaveCanvas::SegmentAction::DuplicateAfter);
+    connectSegmentPreview(
+        moveSegmentEarlierAction_,
+        WaveCanvas::SegmentAction::MoveEarlier);
+    connectSegmentPreview(
+        moveSegmentLaterAction_,
+        WaveCanvas::SegmentAction::MoveLater);
+    connectSegmentPreview(
+        expandSegmentStartAction_,
+        WaveCanvas::SegmentAction::ExpandStart);
+    connectSegmentPreview(
+        trimSegmentStartAction_,
+        WaveCanvas::SegmentAction::TrimStart);
+    connectSegmentPreview(
+        expandSegmentEndAction_,
+        WaveCanvas::SegmentAction::ExpandEnd);
+    connectSegmentPreview(
+        trimSegmentEndAction_,
+        WaveCanvas::SegmentAction::TrimEnd);
+    const auto clearSegmentPreviewOnHover = [this](QAction* action) {
+        connect(action, &QAction::hovered, this, [this] {
+            canvas_->clearSelectedSegmentActionPreview();
+        });
+    };
+    clearSegmentPreviewOnHover(selectSegmentAtCursorAction_);
+    clearSegmentPreviewOnHover(previousSegmentAction_);
+    clearSegmentPreviewOnHover(nextSegmentAction_);
+    connect(
+        segmentMenu_,
+        &QMenu::hovered,
+        this,
+        [this](QAction* hovered) {
+            const auto previewsSegment =
+                hovered == duplicateSegmentBeforeAction_
+                || hovered == duplicateSegmentAfterAction_
+                || hovered == moveSegmentEarlierAction_
+                || hovered == moveSegmentLaterAction_
+                || hovered == expandSegmentStartAction_
+                || hovered == trimSegmentStartAction_
+                || hovered == expandSegmentEndAction_
+                || hovered == trimSegmentEndAction_;
+            if (!previewsSegment) {
+                canvas_->clearSelectedSegmentActionPreview();
+            }
+        });
+    connect(
+        segmentMenu_,
+        &QMenu::aboutToShow,
+        this,
+        &MainWindow::updateSegmentActions);
+    connect(
+        segmentMenu_,
+        &QMenu::aboutToHide,
+        canvas_,
+        &WaveCanvas::clearSelectedSegmentActionPreview);
 
     editMenu_->addSeparator();
     auto* addLaneAction = editMenu_->addAction(
@@ -4590,29 +6807,9 @@ void MainWindow::createActions()
         tr("Add &group…"),
         this,
         &MainWindow::addGroup);
-    addGroupAction->setToolTip(tr("Add a stable-ID signal group"));
-    duplicateLaneAction_ = editMenu_->addAction(
-        tr("&Duplicate selected signal"));
-    duplicateLaneAction_->setObjectName(QStringLiteral("DuplicateLaneAction"));
-    duplicateLaneAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_D));
-    duplicateLaneAction_->setToolTip(
-        tr("Copy the selected signal, properties, and waveform below the source"));
-    duplicateLaneAction_->setEnabled(false);
-    connect(duplicateLaneAction_, &QAction::triggered, this, [this] {
-        if (qobject_cast<QLineEdit*>(focusWidget())) {
-            statusBar()->showMessage(
-                tr("Finish or cancel the text edit before duplicating a signal"),
-                4'000);
-            return;
-        }
-        if (canvas_
-            && canvas_->tool() == WaveCanvas::Tool::WaveEdit
-            && !canvas_->selectedSegmentId().isEmpty()) {
-            static_cast<void>(canvas_->duplicateSelectedSegmentAfter());
-            return;
-        }
-        duplicateSelectedLane();
-    });
+    addGroupAction->setObjectName(QStringLiteral("AddGroupAction"));
+    addGroupAction->setToolTip(
+        tr("Create an empty Group by name; advanced properties remain available from its header"));
     auto* editLaneAction = editMenu_->addAction(
         tr("Lane / group &properties…"),
         this,
@@ -4639,6 +6836,8 @@ void MainWindow::createActions()
         tr("Move selected lane &up"),
         this,
         &MainWindow::moveSelectedLaneUp);
+    moveLaneUpAction_->setObjectName(
+        QStringLiteral("MoveLaneUpAction"));
     moveLaneUpAction_->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Up));
     moveLaneUpAction_->setToolTip(
         tr("Move the selected lane or group one position earlier in display order"));
@@ -4647,15 +6846,518 @@ void MainWindow::createActions()
         tr("Move selected lane &down"),
         this,
         &MainWindow::moveSelectedLaneDown);
+    moveLaneDownAction_->setObjectName(
+        QStringLiteral("MoveLaneDownAction"));
     moveLaneDownAction_->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Down));
     moveLaneDownAction_->setToolTip(
         tr("Move the selected lane or group one position later in display order"));
-    auto* removeLaneAction = editMenu_->addAction(
+    removeLaneAction_ = editMenu_->addAction(
         tr("&Remove selected lane / group…"),
         this,
         &MainWindow::removeSelectedLane);
-    removeLaneAction->setToolTip(
+    removeLaneAction_->setObjectName(QStringLiteral("RemoveLaneAction"));
+    removeLaneAction_->setToolTip(
         tr("Remove the selected lane and dependent scenario references as one undo command"));
+    removeLaneAction_->setEnabled(false);
+}
+
+QString MainWindow::scenarioPreferenceKey() const
+{
+    const auto path = normalizedProjectPath(projectFile_);
+    if (path.isEmpty() || project_.id.empty()) return {};
+    const auto identity = path.toCaseFolded()
+        + QLatin1Char('\n')
+        + QString::fromStdString(project_.id);
+    const auto digest = QCryptographicHash::hash(
+        identity.toUtf8(),
+        QCryptographicHash::Sha256).toHex();
+    return QStringLiteral("waveforms/lastScenario/")
+        + QString::fromLatin1(digest);
+}
+
+std::optional<std::size_t> MainWindow::rememberedActiveScenarioIndex()
+{
+    const auto key = scenarioPreferenceKey();
+    if (key.isEmpty()) return std::nullopt;
+    QSettings settings;
+    const auto storedId = settings.value(key).toString();
+    if (storedId.isEmpty()) return std::nullopt;
+
+    const auto matchCount = std::count_if(
+        project_.scenarios.begin(),
+        project_.scenarios.end(),
+        [&storedId](const Scenario& scenario) {
+            return scenario.id == storedId.toStdString();
+        });
+    if (matchCount != 1) {
+        settings.remove(key);
+        settings.sync();
+        return std::nullopt;
+    }
+    const auto match = std::find_if(
+        project_.scenarios.begin(),
+        project_.scenarios.end(),
+        [&storedId](const Scenario& scenario) {
+            return scenario.id == storedId.toStdString();
+        });
+    return static_cast<std::size_t>(
+        std::distance(project_.scenarios.begin(), match));
+}
+
+void MainWindow::rememberActiveScenario()
+{
+    const auto key = scenarioPreferenceKey();
+    if (key.isEmpty()) return;
+    QSettings settings;
+    const auto* scenario = activeScenario();
+    const auto uniqueIdentity = scenario
+        && !scenario->id.empty()
+        && std::count_if(
+               project_.scenarios.begin(),
+               project_.scenarios.end(),
+               [scenario](const Scenario& candidate) {
+                   return candidate.id == scenario->id;
+               })
+            == 1;
+    if (project_.scenarios.size() > 1 && uniqueIdentity) {
+        settings.setValue(key, QString::fromStdString(scenario->id));
+    } else {
+        settings.remove(key);
+    }
+    settings.sync();
+}
+
+void MainWindow::scheduleActiveScenarioLocationMemory()
+{
+    if (!scenarioLocationMemoryTimer_
+        || projectFile_.isEmpty()
+        || !activeScenario()
+        || !pendingQuickLaneId_.isEmpty()) {
+        return;
+    }
+    scenarioLocationMemoryTimer_->start();
+}
+
+QString MainWindow::scenarioLocationPreferenceKey() const
+{
+    const auto path = normalizedProjectPath(projectFile_);
+    const auto* scenario = activeScenario();
+    if (path.isEmpty() || project_.id.empty()
+        || !scenario || scenario->id.empty()) {
+        return {};
+    }
+    const auto identity = path.toCaseFolded()
+        + QLatin1Char('\n')
+        + QString::fromStdString(project_.id)
+        + QLatin1Char('\n')
+        + QString::fromStdString(scenario->id);
+    const auto digest = QCryptographicHash::hash(
+        identity.toUtf8(),
+        QCryptographicHash::Sha256).toHex();
+    return QStringLiteral("waveforms/lastLocation/")
+        + QString::fromLatin1(digest);
+}
+
+void MainWindow::rememberActiveScenarioLocation()
+{
+    if (scenarioLocationMemoryTimer_) {
+        scenarioLocationMemoryTimer_->stop();
+    }
+    if (!canvas_ || !pendingQuickLaneId_.isEmpty()) return;
+    const auto key = scenarioLocationPreferenceKey();
+    if (key.isEmpty()) return;
+
+    const auto* scenario = activeScenario();
+    QSettings settings;
+    const auto uniqueScenario = scenario
+        && std::count_if(
+               project_.scenarios.begin(),
+               project_.scenarios.end(),
+               [scenario](const Scenario& candidate) {
+                   return candidate.id == scenario->id;
+               })
+            == 1;
+    if (!uniqueScenario) {
+        settings.remove(key);
+        settings.sync();
+        return;
+    }
+
+    auto laneId = canvas_->selectedLaneId().toStdString();
+    if (!laneId.empty()) {
+        const auto laneMatches = std::count_if(
+            scenario->lanes.begin(),
+            scenario->lanes.end(),
+            [&laneId](const Lane& lane) {
+                return lane.id == laneId;
+            });
+        const auto* lane = laneMatches == 1
+            ? findLane(*scenario, laneId)
+            : nullptr;
+        if (!lane || !lane->visible || lane->kind == LaneKind::Group) {
+            laneId.clear();
+        }
+    }
+
+    const auto tick = std::clamp<Tick>(
+        canvas_->cursorTick(),
+        0,
+        std::max<Tick>(0, scenario->duration));
+    settings.setValue(
+        key + QStringLiteral("/scenarioId"),
+        QString::fromStdString(scenario->id));
+    settings.setValue(
+        key + QStringLiteral("/laneId"),
+        QString::fromStdString(laneId));
+    settings.setValue(
+        key + QStringLiteral("/tick"),
+        QString::number(tick));
+    const auto visibleSpan = canvas_->visibleTimeSpan();
+    if (visibleSpan > 0) {
+        settings.setValue(
+            key + QStringLiteral("/visibleSpanTick"),
+            QString::number(visibleSpan));
+    } else {
+        settings.remove(key + QStringLiteral("/visibleSpanTick"));
+    }
+    settings.sync();
+}
+
+std::optional<QString> MainWindow::restoreActiveScenarioLocation()
+{
+    if (!canvas_) return std::nullopt;
+    const auto key = scenarioLocationPreferenceKey();
+    if (key.isEmpty()) return std::nullopt;
+
+    const auto* scenario = activeScenario();
+    QSettings settings;
+    const auto storedScenarioId =
+        settings.value(key + QStringLiteral("/scenarioId")).toString();
+    if (storedScenarioId.isEmpty()) return std::nullopt;
+    const auto uniqueScenario = scenario
+        && std::count_if(
+               project_.scenarios.begin(),
+               project_.scenarios.end(),
+               [scenario](const Scenario& candidate) {
+                   return candidate.id == scenario->id;
+               })
+            == 1;
+    if (!uniqueScenario
+        || storedScenarioId != QString::fromStdString(scenario->id)) {
+        settings.remove(key);
+        settings.sync();
+        return std::nullopt;
+    }
+
+    bool tickValid = false;
+    const auto storedTick =
+        settings.value(key + QStringLiteral("/tick")).toString().toLongLong(
+            &tickValid);
+    if (!tickValid) {
+        settings.remove(key);
+        settings.sync();
+        return std::nullopt;
+    }
+    const auto tick = std::clamp<Tick>(
+        storedTick,
+        0,
+        std::max<Tick>(0, scenario->duration));
+    if (tick != storedTick) {
+        settings.setValue(
+            key + QStringLiteral("/tick"),
+            QString::number(tick));
+    }
+
+    const auto storedLaneId =
+        settings.value(key + QStringLiteral("/laneId")).toString();
+    const auto laneId = storedLaneId.toStdString();
+    const auto laneMatches = laneId.empty()
+        ? std::size_t{0}
+        : static_cast<std::size_t>(std::count_if(
+              scenario->lanes.begin(),
+              scenario->lanes.end(),
+              [&laneId](const Lane& lane) {
+                  return lane.id == laneId;
+              }));
+    const auto* lane = laneMatches == 1
+        ? findLane(*scenario, laneId)
+        : nullptr;
+    const auto restoreLane = lane
+        && lane->visible
+        && lane->kind != LaneKind::Group;
+
+    canvas_->goToTick(tick);
+    if (restoreLane) {
+        canvas_->revealLocation(storedLaneId, tick);
+    } else if (!storedLaneId.isEmpty()) {
+        settings.setValue(key + QStringLiteral("/laneId"), QString{});
+    }
+
+    std::optional<Tick> restoredVisibleSpan;
+    const auto visibleSpanKey =
+        key + QStringLiteral("/visibleSpanTick");
+    if (settings.contains(visibleSpanKey)) {
+        bool visibleSpanValid = false;
+        const auto storedVisibleSpan =
+            settings.value(visibleSpanKey).toString().toLongLong(
+                &visibleSpanValid);
+        if (visibleSpanValid
+            && storedVisibleSpan > 0
+            && canvas_->restoreVisibleTimeSpan(
+                storedVisibleSpan,
+                tick)) {
+            restoredVisibleSpan = std::clamp<Tick>(
+                storedVisibleSpan,
+                1,
+                scenario->duration);
+            settings.setValue(
+                visibleSpanKey,
+                QString::number(*restoredVisibleSpan));
+        } else {
+            settings.remove(visibleSpanKey);
+        }
+    }
+    settings.sync();
+
+    const auto time = QString::fromStdString(
+        formatTick(tick, project_.timeBase));
+    const auto view = restoredVisibleSpan
+        ? tr(" · %1 view")
+              .arg(QString::fromStdString(
+                  formatTick(*restoredVisibleSpan, project_.timeBase)))
+        : QString{};
+    if (restoreLane) {
+        return tr("%1 at %2")
+                .arg(QString::fromStdString(lane->name), time)
+            + view;
+    }
+    if (!storedLaneId.isEmpty()) {
+        return tr("%1 (saved signal unavailable)").arg(time)
+            + view;
+    }
+    return time + view;
+}
+
+QString MainWindow::activeScenarioLabel() const
+{
+    const auto* scenario = activeScenario();
+    if (!scenario) return tr("No waveform");
+    auto label = scenario->name.empty()
+        ? tr("Waveform %1").arg(
+              static_cast<qulonglong>(activeScenarioIndex_ + 1))
+        : QString::fromStdString(scenario->name);
+    const auto duplicateNameCount = scenario->name.empty()
+        ? std::size_t{0}
+        : static_cast<std::size_t>(std::count_if(
+              project_.scenarios.begin(),
+              project_.scenarios.end(),
+              [scenario](const Scenario& candidate) {
+                  return QString::compare(
+                             QString::fromStdString(candidate.name),
+                             QString::fromStdString(scenario->name),
+                             Qt::CaseInsensitive)
+                      == 0;
+              }));
+    if (duplicateNameCount > 1) {
+        const auto duplicateIdCount = scenario->id.empty()
+            ? std::size_t{0}
+            : static_cast<std::size_t>(std::count_if(
+                  project_.scenarios.begin(),
+                  project_.scenarios.end(),
+                  [scenario](const Scenario& candidate) {
+                      return candidate.id == scenario->id;
+                  }));
+        const auto identity =
+            scenario->id.empty() || duplicateIdCount > 1
+            ? tr("#%1").arg(
+                  static_cast<qulonglong>(activeScenarioIndex_ + 1))
+            : QString::fromStdString(scenario->id);
+        label = tr("%1 · %2").arg(label, identity);
+    }
+    return label;
+}
+
+void MainWindow::populateScenarioSelector()
+{
+    if (!scenarioSelector_) return;
+    const QSignalBlocker blocker(scenarioSelector_);
+    scenarioSelector_->clear();
+    for (std::size_t index = 0; index < project_.scenarios.size(); ++index) {
+        const auto& scenario = project_.scenarios.at(index);
+        auto label = scenario.name.empty()
+            ? tr("Waveform %1").arg(static_cast<qulonglong>(index + 1))
+            : QString::fromStdString(scenario.name);
+        const auto duplicateNameCount = std::count_if(
+            project_.scenarios.begin(),
+            project_.scenarios.end(),
+            [&label](const Scenario& candidate) {
+                return QString::compare(
+                           QString::fromStdString(candidate.name),
+                           label,
+                           Qt::CaseInsensitive)
+                    == 0;
+            });
+        if (duplicateNameCount > 1) {
+            const auto duplicateIdCount = scenario.id.empty()
+                ? std::size_t{0}
+                : static_cast<std::size_t>(std::count_if(
+                      project_.scenarios.begin(),
+                      project_.scenarios.end(),
+                      [&scenario](const Scenario& candidate) {
+                          return candidate.id == scenario.id;
+                      }));
+            const auto identity =
+                scenario.id.empty() || duplicateIdCount > 1
+                ? tr("#%1").arg(static_cast<qulonglong>(index + 1))
+                : QString::fromStdString(scenario.id);
+            label = tr("%1 · %2").arg(label, identity);
+        }
+        scenarioSelector_->addItem(
+            label,
+            QVariant::fromValue<qulonglong>(
+                static_cast<qulonglong>(index)));
+        const auto id = scenario.id.empty()
+            ? tr("(no stable ID)")
+            : QString::fromStdString(scenario.id);
+        scenarioSelector_->setItemData(
+            static_cast<int>(index),
+            tr("Waveform %1 of %2 · ID: %3")
+                .arg(static_cast<qulonglong>(index + 1))
+                .arg(static_cast<qulonglong>(project_.scenarios.size()))
+                .arg(id),
+            Qt::ToolTipRole);
+    }
+    if (!project_.scenarios.empty()) {
+        activeScenarioIndex_ = std::min(
+            activeScenarioIndex_,
+            project_.scenarios.size() - 1);
+        scenarioSelector_->setCurrentIndex(
+            static_cast<int>(activeScenarioIndex_));
+    }
+    const auto multiple = project_.scenarios.size() > 1;
+    if (scenarioSelectorLabel_) scenarioSelectorLabel_->setVisible(multiple);
+    if (scenarioSelectorLabelAction_) {
+        scenarioSelectorLabelAction_->setVisible(multiple);
+    }
+    scenarioSelector_->setVisible(multiple);
+    if (scenarioSelectorAction_) scenarioSelectorAction_->setVisible(multiple);
+    if (scenarioSelectorSeparatorAction_) {
+        scenarioSelectorSeparatorAction_->setVisible(multiple);
+    }
+    scenarioSelector_->setToolTip(
+        multiple
+            ? tr("%1 waveforms in this project · Ctrl+PageUp/PageDown switches")
+                  .arg(static_cast<qulonglong>(project_.scenarios.size()))
+            : tr("This project contains one waveform"));
+    updateScenarioNavigationActions();
+}
+
+bool MainWindow::switchActiveScenario(
+    const std::size_t index,
+    const bool announce)
+{
+    const auto restoreSelector = [this] {
+        if (!scenarioSelector_) return;
+        const QSignalBlocker blocker(scenarioSelector_);
+        scenarioSelector_->setCurrentIndex(
+            static_cast<int>(activeScenarioIndex_));
+    };
+    if (index >= project_.scenarios.size()) {
+        restoreSelector();
+        return false;
+    }
+    if (index == activeScenarioIndex_) {
+        restoreSelector();
+        return true;
+    }
+    if (announce && !commitPendingEdits()) {
+        restoreSelector();
+        return false;
+    }
+
+    rememberActiveScenarioLocation();
+    const auto targetHasSessionContext =
+        canvas_->hasDocumentContext(&project_.scenarios.at(index));
+    closeSignalFind(false);
+    closeGoToTime(false);
+    activeScenarioIndex_ = index;
+    if (scenarioSelector_) {
+        const QSignalBlocker blocker(scenarioSelector_);
+        scenarioSelector_->setCurrentIndex(static_cast<int>(index));
+    }
+    canvas_->setDocument(&project_, activeScenario(), &commandStack_);
+    const auto restoredLocation = targetHasSessionContext
+        ? std::optional<QString>{}
+        : restoreActiveScenarioLocation();
+    if (traceCanvas_) {
+        traceCanvas_->setTrace(
+            &project_,
+            activeScenario(),
+            traceIndex_ ? &*traceIndex_ : nullptr,
+            activeTraceReference());
+        traceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    }
+    if (compareTraceCanvas_) {
+        compareTraceCanvas_->setTrace(
+            &project_,
+            activeScenario(),
+            traceIndex_ ? &*traceIndex_ : nullptr,
+            activeTraceReference());
+        compareTraceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    }
+    invalidateCompareResult();
+    rememberActiveScenario();
+    updateCommandActions();
+    updateWindowTitle();
+    if (announce) {
+        auto message = tr("Editing waveform %1 of %2: %3")
+                           .arg(static_cast<qulonglong>(
+                               activeScenarioIndex_ + 1))
+                           .arg(static_cast<qulonglong>(
+                               project_.scenarios.size()))
+                           .arg(activeScenarioLabel());
+        if (restoredLocation) {
+            message.append(tr(" · resumed %1").arg(*restoredLocation));
+        }
+        message.append(tr(" · Ctrl+PageUp/PageDown switches"));
+        statusBar()->showMessage(
+            message,
+            5'000);
+    }
+    return true;
+}
+
+void MainWindow::switchAdjacentScenario(const bool forward)
+{
+    if (project_.scenarios.size() <= 1) return;
+    if ((!forward && activeScenarioIndex_ == 0)
+        || (forward && activeScenarioIndex_ + 1 >= project_.scenarios.size())) {
+        statusBar()->showMessage(
+            forward
+                ? tr("Already at the last waveform · Ctrl+PageUp goes back")
+                : tr("Already at the first waveform · Ctrl+PageDown goes next"),
+            5'000);
+        return;
+    }
+    switchActiveScenario(
+        forward ? activeScenarioIndex_ + 1 : activeScenarioIndex_ - 1);
+}
+
+void MainWindow::updateScenarioNavigationActions()
+{
+    const auto multiple = project_.scenarios.size() > 1;
+    if (previousScenarioAction_) previousScenarioAction_->setEnabled(multiple);
+    if (nextScenarioAction_) nextScenarioAction_->setEnabled(multiple);
+}
+
+bool MainWindow::selectScenarioForHistoryState(const std::uint64_t stateId)
+{
+    const auto owner = commandScenarioIndices_.find(stateId);
+    if (owner == commandScenarioIndices_.end()
+        || owner->second == activeScenarioIndex_) {
+        return false;
+    }
+    return switchActiveScenario(owner->second, false);
 }
 
 void MainWindow::createToolBars()
@@ -4668,6 +7370,40 @@ void MainWindow::createToolBars()
     editBar->setAllowedAreas(Qt::TopToolBarArea);
     editBar->toggleViewAction()->setEnabled(false);
     editBar->toggleViewAction()->setVisible(false);
+
+    scenarioSelectorLabel_ = new QLabel(tr("Waveform"), editBar);
+    scenarioSelectorLabel_->setObjectName(
+        QStringLiteral("WaveformSelectorLabel"));
+    scenarioSelectorLabel_->setAccessibleName(tr("Waveform selector label"));
+    scenarioSelectorLabelAction_ = editBar->addWidget(
+        scenarioSelectorLabel_);
+    scenarioSelectorLabelAction_->setObjectName(
+        QStringLiteral("WaveformSelectorLabelToolbarAction"));
+
+    scenarioSelector_ = new QComboBox(editBar);
+    scenarioSelector_->setObjectName(QStringLiteral("WaveformSelector"));
+    scenarioSelector_->setAccessibleName(tr("Waveform to edit"));
+    scenarioSelector_->setMinimumWidth(150);
+    scenarioSelector_->setMaximumWidth(260);
+    scenarioSelector_->setSizeAdjustPolicy(
+        QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    scenarioSelector_->setMinimumContentsLength(16);
+    scenarioSelectorAction_ = editBar->addWidget(scenarioSelector_);
+    scenarioSelectorAction_->setObjectName(
+        QStringLiteral("WaveformSelectorToolbarAction"));
+    connect(
+        scenarioSelector_,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](const int row) {
+            if (row < 0) return;
+            const auto index = scenarioSelector_->itemData(row).toULongLong();
+            switchActiveScenario(static_cast<std::size_t>(index));
+        });
+    scenarioSelectorSeparatorAction_ = editBar->addSeparator();
+    scenarioSelectorSeparatorAction_->setObjectName(
+        QStringLiteral("WaveformSelectorSeparatorAction"));
+    populateScenarioSelector();
 
     markerAction_ = editBar->addAction(
         themedIcon(QStringLiteral("flag"), style(), QStyle::SP_DialogYesButton),
@@ -4688,6 +7424,8 @@ void MainWindow::createToolBars()
             closeGoToTime(false);
         }
         canvas_->setTool(checked ? WaveCanvas::Tool::Marker : WaveCanvas::Tool::WaveEdit);
+        updateWaveContext();
+        updateSegmentActions();
         statusBar()->showMessage(
             checked
                 ? tr("Measure: click or drag · Ctrl locks · Shift compares · Esc exits")
@@ -4695,12 +7433,12 @@ void MainWindow::createToolBars()
             5'000);
     });
 
-    asyncTimingAction_ = editBar->addAction(tr("Sync"));
+    asyncTimingAction_ = editBar->addAction(tr("Timing: Sync"));
     asyncTimingAction_->setObjectName(QStringLiteral("AsyncTimingAction"));
     asyncTimingAction_->setCheckable(true);
     asyncTimingAction_->setChecked(false);
     asyncTimingAction_->setToolTip(
-        tr("Sync: edits use one associated-clock beat. Click to allow asynchronous tick offsets."));
+        tr("Sync: edits and Left/Right range navigation use one associated-clock beat. Click to allow asynchronous tick offsets."));
     connect(asyncTimingAction_, &QAction::toggled, this, [this](const bool enabled) {
         if (!canvas_->commitPendingInlineEdits()) {
             const QSignalBlocker blocker(asyncTimingAction_);
@@ -4708,22 +7446,27 @@ void MainWindow::createToolBars()
             return;
         }
         canvas_->setAsynchronousEditing(enabled);
-        asyncTimingAction_->setText(enabled ? tr("Async") : tr("Sync"));
-        asyncTimingAction_->setToolTip(
-            enabled
-                ? tr("Async: edges may use arbitrary ticks with light snapping. Click for one-beat Sync editing.")
-                : tr("Sync: edits use one associated-clock beat. Click to allow asynchronous tick offsets."));
+        updateWaveContext();
+        updateSegmentActions();
     });
 
-    auto* busEditPalette = canvas_->busEditPaletteWidget();
-    busEditPaletteAction_ = editBar->addWidget(busEditPalette);
-    busEditPaletteAction_->setObjectName(QStringLiteral("BusEditToolbarAction"));
-    busEditPaletteAction_->setVisible(false);
-    connect(
-        canvas_,
-        &WaveCanvas::busEditPaletteVisibilityChanged,
-        busEditPaletteAction_,
-        &QAction::setVisible);
+    editBar->addSeparator();
+    waveTargetLabel_ = new QLabel(editBar);
+    waveTargetLabel_->setObjectName(QStringLiteral("WaveTargetLabel"));
+    waveTargetLabel_->setAccessibleName(tr("Current waveform edit target"));
+    waveTargetLabel_->setTextInteractionFlags(Qt::NoTextInteraction);
+    waveTargetLabel_->setMinimumWidth(190);
+    waveTargetLabel_->setMaximumWidth(440);
+    waveTargetLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    waveTargetLabel_->setStyleSheet(QStringLiteral(
+        "QLabel#WaveTargetLabel {"
+        " color: #edf2f8; background: #2d3949;"
+        " border: 1px solid #65758b; border-radius: 4px;"
+        " padding: 3px 8px;"
+        "}"));
+    waveTargetAction_ = editBar->addWidget(waveTargetLabel_);
+    waveTargetAction_->setObjectName(QStringLiteral("WaveTargetToolbarAction"));
+    editBar->addSeparator();
 
     auto* rangeEditPalette = canvas_->rangeEditPaletteWidget();
     rangeEditPaletteAction_ = editBar->addWidget(rangeEditPalette);
@@ -4821,16 +7564,17 @@ void MainWindow::createToolBars()
     goToTimeLayout->setContentsMargins(0, 0, 0, 0);
     goToTimeLayout->setSpacing(4);
     goToTimeLayout->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    auto* goToTimeLabel = new QLabel(tr("Go to"), goToTimeWidget_);
-    goToTimeLabel->setObjectName(QStringLiteral("GoToTimeLabel"));
-    goToTimeLayout->addWidget(goToTimeLabel);
+    goToTimeLabel_ = new QLabel(tr("Go to"), goToTimeWidget_);
+    goToTimeLabel_->setObjectName(QStringLiteral("GoToTimeLabel"));
+    goToTimeLabel_->installEventFilter(this);
+    goToTimeLayout->addWidget(goToTimeLabel_);
 
     goToTimeEdit_ = new QLineEdit(goToTimeWidget_);
     goToTimeEdit_->setObjectName(QStringLiteral("GoToTimeEdit"));
-    goToTimeEdit_->setPlaceholderText(tr("125 ns or cycle 25"));
+    goToTimeEdit_->setPlaceholderText(tr("2.5 ns or cycle 25"));
     goToTimeEdit_->setAccessibleName(tr("Exact timeline position"));
     goToTimeEdit_->setToolTip(
-        tr("Enter an exact ps, ns, us, ms, tick, or clock cycle within the scenario"));
+        tr("Enter a decimal ps, ns, us, or ms value, an integer tick, or a clock cycle within the scenario"));
     goToTimeEdit_->setClearButtonEnabled(true);
     goToTimeEdit_->setMinimumWidth(170);
     goToTimeEdit_->setMaximumWidth(240);
@@ -4859,6 +7603,12 @@ void MainWindow::createToolBars()
         goToTimeLayout->addWidget(button);
         return button;
     };
+    goToTimeOtherEdgeButton_ = makeGoToTimeButton(
+        tr("Other edge"),
+        QStringLiteral("GoToTimeOtherEdgeButton"),
+        tr("Edit the other selected range edge"),
+        tr("Keep the range and switch the exact editor to its other edge"));
+    goToTimeOtherEdgeButton_->setVisible(false);
     goToTimeGoButton_ = makeGoToTimeButton(
         tr("Go"),
         QStringLiteral("GoToTimeGoButton"),
@@ -4877,7 +7627,22 @@ void MainWindow::createToolBars()
         if (!goToTimeWidgetAction_ || !goToTimeWidgetAction_->isVisible()) return;
         goToTimeEdit_->setStyleSheet({});
         statusBar()->showMessage(
-            tr("Enter jumps to this exact time · Esc closes without moving"));
+            goToTimeEditsRange_
+                ? goToTimeEditsRangeWidth_
+                    ? tr("Enter sets the exact range width · Other edge reverses direction · Esc returns to the range")
+                    : tr("Enter sets the active range edge exactly · Other edge switches endpoints · Esc returns to the range")
+                : tr("Enter jumps to this exact time · Esc closes without moving"));
+    });
+    connect(goToTimeOtherEdgeButton_, &QToolButton::clicked, this, [this] {
+        if (!goToTimeEditsRange_ || !canvas_) return;
+        const auto anchor = canvas_->explicitRangeAnchorTick();
+        if (!anchor) return;
+        canvas_->goToTick(*anchor);
+        syncGoToTimeEditor(true);
+        statusBar()->showMessage(
+            goToTimeEditsRangeWidth_
+                ? tr("Range width direction reversed · enter an exact width · Enter applies · Esc returns")
+                : tr("Editing the other range edge · enter an exact time · Enter applies · Esc returns"));
     });
     connect(goToTimeGoButton_, &QToolButton::clicked, this, [this] {
         submitGoToTime();
@@ -4887,9 +7652,34 @@ void MainWindow::createToolBars()
     });
     connect(
         canvas_,
+        &WaveCanvas::exactRangeTimeEditRequested,
+        this,
+        &MainWindow::showGoToTime);
+    connect(
+        canvas_,
+        &WaveCanvas::busEditPaletteVisibilityChanged,
+        this,
+        [this](const bool visible) {
+            if (visible && signalFindWidgetAction_
+                && signalFindWidgetAction_->isVisible()) {
+                closeSignalFind(false);
+            }
+            if (visible && goToTimeWidgetAction_
+                && goToTimeWidgetAction_->isVisible()) {
+                closeGoToTime(false);
+            }
+        });
+    connect(
+        canvas_,
         &WaveCanvas::rangeEditPaletteVisibilityChanged,
         this,
         [this](const bool visible) {
+            if (waveTargetAction_) waveTargetAction_->setVisible(!visible);
+            if (!visible && goToTimeEditsRange_
+                && goToTimeWidgetAction_
+                && goToTimeWidgetAction_->isVisible()) {
+                closeGoToTime(false);
+            }
             if (visible && signalFindWidgetAction_ && signalFindWidgetAction_->isVisible()) {
                 closeSignalFind(false);
             }
@@ -5667,9 +8457,12 @@ void MainWindow::updateWindowTitle()
     const auto name = project_.name.empty()
         ? tr("Untitled")
         : QString::fromStdString(project_.name);
+    const auto displayName = project_.scenarios.size() > 1
+        ? tr("%1 · %2").arg(name, activeScenarioLabel())
+        : name;
     setWindowTitle(
         tr("%1%2 — Wave Workbench")
-            .arg(name)
+            .arg(displayName)
             .arg(dirty_ ? QStringLiteral(" *") : QString{}));
     if (!saveStateLabel_) return;
 
@@ -5705,6 +8498,7 @@ bool MainWindow::loadFromPath(const QString& path)
         QMessageBox::critical(this, tr("Open failed"), result.error);
         return false;
     }
+    rememberActiveScenarioLocation();
     if (autosaveTimer_) autosaveTimer_->stop();
     ++autosaveGeneration_;
     autosavePending_ = false;
@@ -5717,18 +8511,24 @@ bool MainWindow::loadFromPath(const QString& path)
     traceIndex_.reset();
     activeTraceId_.clear();
     traceVisibleSignalIds_.clear();
+    canvas_->clearDocumentContexts();
     project_ = *result.project;
     const auto recoveredSnapshot = selectedPath.endsWith(
         QStringLiteral(".autosave"),
         Qt::CaseInsensitive);
     recoveryLoaded_ = recoveredSnapshot;
     projectFile_ = projectPathForLoadedFile(selectedPath);
+    activeScenarioIndex_ = rememberedActiveScenarioIndex().value_or(
+        std::size_t{0});
     if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
         rememberProjectPath(projectFile_);
     }
     commandStack_.clear();
     resetEditTracking(!result.migrated && !recoveredSnapshot);
     canvas_->setDocument(&project_, activeScenario(), &commandStack_);
+    populateScenarioSelector();
+    rememberActiveScenario();
+    const auto restoredLocation = restoreActiveScenarioLocation();
     closeSignalFind(false);
     closeGoToTime(false);
     updateCommandActions();
@@ -5742,7 +8542,13 @@ bool MainWindow::loadFromPath(const QString& path)
     } else if (!result.warnings.isEmpty()) {
         statusBar()->showMessage(result.warnings.join(QStringLiteral("; ")), 10'000);
     } else {
-        statusBar()->showMessage(tr("Opened %1").arg(selectedPath), 5'000);
+        auto message = tr("Opened %1").arg(selectedPath);
+        if (restoredLocation) {
+            message.append(
+                tr(" · resumed %1 · no edit range restored")
+                    .arg(*restoredLocation));
+        }
+        statusBar()->showMessage(message, 5'000);
     }
     if (traceCanvas_) traceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
     if (compareTraceCanvas_) {
@@ -5776,6 +8582,8 @@ bool MainWindow::writeToPath(const QString& path)
     }
     projectFile_ = path;
     rememberProjectPath(projectFile_);
+    rememberActiveScenario();
+    rememberActiveScenarioLocation();
     recoveryLoaded_ = false;
     observedCommandStateId_ = commandStack_.stateId();
     cleanCommandStateId_ = observedCommandStateId_;
@@ -5862,23 +8670,28 @@ bool MainWindow::confirmDiscardChanges()
 
 Scenario* MainWindow::activeScenario() noexcept
 {
-    return project_.scenarios.empty() ? nullptr : &project_.scenarios.front();
+    return activeScenarioIndex_ < project_.scenarios.size()
+        ? &project_.scenarios.at(activeScenarioIndex_)
+        : nullptr;
 }
 
 const Scenario* MainWindow::activeScenario() const noexcept
 {
-    return project_.scenarios.empty() ? nullptr : &project_.scenarios.front();
+    return activeScenarioIndex_ < project_.scenarios.size()
+        ? &project_.scenarios.at(activeScenarioIndex_)
+        : nullptr;
 }
 
 ImportedTrace* MainWindow::activeTraceReference() noexcept
 {
-    const auto iterator = std::find_if(
-        project_.importedTraces.begin(),
-        project_.importedTraces.end(),
-        [this](const ImportedTrace& trace) {
-            return trace.id == activeTraceId_;
-        });
-    return iterator == project_.importedTraces.end() ? nullptr : &*iterator;
+    if (activeTraceId_.empty()) return nullptr;
+    ImportedTrace* match = nullptr;
+    for (auto& trace : project_.importedTraces) {
+        if (trace.id != activeTraceId_) continue;
+        if (match) return nullptr;
+        match = &trace;
+    }
+    return match;
 }
 
 const ImportedTrace* MainWindow::activeTraceReference() const noexcept

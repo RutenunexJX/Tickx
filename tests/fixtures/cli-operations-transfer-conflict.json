@@ -1,0 +1,15 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "expectedProjectId": "project-wave-workbench-demo",
+    "scenarioId": "scenario-handshake",
+    "operations": [
+        {
+            "op": "transfer-range",
+            "mode": "copy",
+            "laneId": "lane-data",
+            "sourceStart": "80 ns",
+            "sourceEnd": "100 ns",
+            "destination": "0 ns"
+        }
+    ]
+}

@@ -5,6 +5,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace wave {
 
@@ -74,6 +75,14 @@ struct SnapContext {
 
 [[nodiscard]] std::optional<Tick> toTicks(
     std::int64_t value,
+    TimeUnit unit,
+    const TimeBase& timeBase) noexcept;
+
+// Converts a decimal physical-unit value without using floating point.
+// The result is returned only when both the picosecond value and project tick
+// are exactly representable.
+[[nodiscard]] std::optional<Tick> toTicks(
+    std::string_view decimalValue,
     TimeUnit unit,
     const TimeBase& timeBase) noexcept;
 

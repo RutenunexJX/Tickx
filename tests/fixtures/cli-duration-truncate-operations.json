@@ -1,0 +1,12 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "expectedProjectId": "project-wave-workbench-demo",
+    "scenarioId": "scenario-handshake",
+    "operations": [
+        {
+            "op": "set-duration",
+            "duration": "120 ns",
+            "truncate": true
+        }
+    ]
+}

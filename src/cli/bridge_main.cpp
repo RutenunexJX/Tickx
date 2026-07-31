@@ -1,11 +1,15 @@
 #include "wave/integration.h"
 #include "wave/project_io.h"
 
+#include "scenario_selection.h"
+
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QTextStream>
+
+#include <optional>
 
 namespace {
 
@@ -42,10 +46,32 @@ int usage()
     QTextStream(stderr)
         << "Usage:\n"
            "  wave-bridge describe <project.wave.json> <manifest.json>\n"
-           "  wave-bridge import-signals <project.wave.json> <signals.json> <output-project.wave.json>\n"
+           "  wave-bridge import-signals <project.wave.json> <signals.json> <output-project.wave.json> [--scenario=SELECTOR]\n"
            "  wave-bridge link-frame <project.wave.json> <frame-reference.json> <output-project.wave.json>\n"
-           "  wave-bridge pinloom-entry <project.wave.json> <artifact-directory> <entry.json>\n";
+           "  wave-bridge pinloom-entry <project.wave.json> <artifact-directory> <entry.json> [--scenario=SELECTOR]\n";
     return 2;
+}
+
+bool parseScenarioOption(
+    const QStringList& arguments,
+    int requiredSize,
+    std::optional<QString>& selector,
+    QString& error)
+{
+    if (arguments.size() == requiredSize) {
+        return true;
+    }
+    if (arguments.size() != requiredSize + 1
+        || !arguments.back().startsWith(
+            QStringLiteral("--scenario="))) {
+        error = QStringLiteral(
+            "Expected an optional trailing --scenario=SELECTOR.");
+        return false;
+    }
+    selector =
+        arguments.back().mid(
+            QStringLiteral("--scenario=").size());
+    return true;
 }
 
 } // namespace
@@ -76,7 +102,26 @@ int main(int argc, char* argv[])
         return 0;
     }
     if (command == QStringLiteral("import-signals")) {
-        if (arguments.size() != 5 || project.scenarios.empty()) return usage();
+        std::optional<QString> scenarioSelector;
+        if (!parseScenarioOption(
+                arguments,
+                5,
+                scenarioSelector,
+                error)) {
+            QTextStream(stderr) << error << '\n';
+            return usage();
+        }
+        const auto scenarioIndex =
+            wave::cli::resolveScenarioIndex(
+                project,
+                scenarioSelector,
+                error);
+        if (!scenarioIndex) {
+            QTextStream(stderr) << error << '\n';
+            return 2;
+        }
+        auto& scenario =
+            project.scenarios.at(*scenarioIndex);
         QByteArray document;
         if (!readFile(arguments[3], document, error)) {
             QTextStream(stderr) << "Cannot read signal list: " << error << '\n';
@@ -89,7 +134,7 @@ int main(int argc, char* argv[])
         }
         const auto imported = wave::applyZeroSlackSignalList(
             project,
-            project.scenarios.front(),
+            scenario,
             *parsed.signalList);
         const auto output = QFileInfo(arguments[4]).absoluteFilePath();
         if (!wave::saveProjectFileAtomic(project, output, &error)) {
@@ -98,7 +143,9 @@ int main(int argc, char* argv[])
         }
         QTextStream(stdout)
             << "Imported ZeroSlack signals: " << imported.added
-            << " added, " << imported.existing << " existing\n";
+            << " added, " << imported.existing << " existing in "
+            << scenario.name.c_str() << " ("
+            << scenario.id.c_str() << ")\n";
         for (const auto& diagnostic : imported.diagnostics) {
             QTextStream(stdout) << "warning: " << diagnostic << '\n';
         }
@@ -131,11 +178,30 @@ int main(int argc, char* argv[])
         return 0;
     }
     if (command == QStringLiteral("pinloom-entry")) {
-        if (arguments.size() != 5 || project.scenarios.empty()) return usage();
+        std::optional<QString> scenarioSelector;
+        if (!parseScenarioOption(
+                arguments,
+                5,
+                scenarioSelector,
+                error)) {
+            QTextStream(stderr) << error << '\n';
+            return usage();
+        }
+        const auto scenarioIndex =
+            wave::cli::resolveScenarioIndex(
+                project,
+                scenarioSelector,
+                error);
+        if (!scenarioIndex) {
+            QTextStream(stderr) << error << '\n';
+            return 2;
+        }
+        const auto& scenario =
+            project.scenarios.at(*scenarioIndex);
         const auto output = QFileInfo(arguments[4]).absoluteFilePath();
         const auto entry = wave::makePinloomEntry(
             project,
-            project.scenarios.front(),
+            scenario,
             projectPath,
             QFileInfo(arguments[3]).absoluteFilePath(),
             output);
@@ -144,7 +210,10 @@ int main(int argc, char* argv[])
             return 2;
         }
         QTextStream(stdout)
-            << "Pinloom archive URI: " << entry.archiveUri.toString(QUrl::FullyEncoded) << '\n';
+            << "Pinloom archive URI for "
+            << scenario.name.c_str() << " ("
+            << scenario.id.c_str() << "): "
+            << entry.archiveUri.toString(QUrl::FullyEncoded) << '\n';
         return 0;
     }
     return usage();

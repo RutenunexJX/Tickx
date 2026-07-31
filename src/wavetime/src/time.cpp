@@ -30,6 +30,37 @@ std::int64_t unitScale(const TimeUnit unit) noexcept
     return 1;
 }
 
+bool parseUnsignedDecimal(
+    const std::string_view digits,
+    std::uint64_t& result) noexcept
+{
+    result = 0;
+    if (digits.empty()) return false;
+    for (const auto character : digits) {
+        if (character < '0' || character > '9') return false;
+        const auto digit = static_cast<std::uint64_t>(character - '0');
+        if (result > (std::numeric_limits<std::uint64_t>::max() - digit) / 10) {
+            return false;
+        }
+        result = result * 10 + digit;
+    }
+    return true;
+}
+
+std::uint64_t signedMagnitudeLimit(const bool negative) noexcept
+{
+    const auto maximum =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    return negative ? maximum + 1U : maximum;
+}
+
+std::uint64_t unsignedMagnitude(const std::int64_t value) noexcept
+{
+    return value < 0
+        ? static_cast<std::uint64_t>(-(value + 1)) + 1U
+        : static_cast<std::uint64_t>(value);
+}
+
 bool checkedMultiply(
     const std::int64_t left,
     const std::int64_t right,
@@ -236,6 +267,82 @@ std::optional<Tick> toTicks(
     return picoseconds / timeBase.picosecondsPerTick;
 }
 
+std::optional<Tick> toTicks(
+    std::string_view decimalValue,
+    const TimeUnit unit,
+    const TimeBase& timeBase) noexcept
+{
+    if (!timeBase.isValid() || decimalValue.empty()) return std::nullopt;
+
+    auto negative = false;
+    if (decimalValue.front() == '-' || decimalValue.front() == '+') {
+        negative = decimalValue.front() == '-';
+        decimalValue.remove_prefix(1);
+    }
+    if (decimalValue.empty()) return std::nullopt;
+
+    const auto decimalPoint = decimalValue.find('.');
+    if (decimalPoint != std::string_view::npos
+        && decimalValue.find('.', decimalPoint + 1) != std::string_view::npos) {
+        return std::nullopt;
+    }
+    auto wholeDigits = decimalPoint == std::string_view::npos
+        ? decimalValue
+        : decimalValue.substr(0, decimalPoint);
+    auto fractionalDigits = decimalPoint == std::string_view::npos
+        ? std::string_view{}
+        : decimalValue.substr(decimalPoint + 1);
+    if (wholeDigits.empty()) wholeDigits = std::string_view{"0"};
+    if (fractionalDigits.empty() && decimalPoint != std::string_view::npos
+        && decimalPoint == 0) {
+        return std::nullopt;
+    }
+    while (!fractionalDigits.empty() && fractionalDigits.back() == '0') {
+        fractionalDigits.remove_suffix(1);
+    }
+
+    std::uint64_t whole = 0;
+    if (!parseUnsignedDecimal(wholeDigits, whole)) return std::nullopt;
+    std::uint64_t fraction = 0;
+    if (!fractionalDigits.empty()
+        && !parseUnsignedDecimal(fractionalDigits, fraction)) {
+        return std::nullopt;
+    }
+
+    const auto scale = static_cast<std::uint64_t>(unitScale(unit));
+    auto fractionalScale = std::uint64_t{1};
+    for (std::size_t index = 0; index < fractionalDigits.size(); ++index) {
+        if (fractionalScale > scale / 10U) return std::nullopt;
+        fractionalScale *= 10U;
+    }
+    if (scale % fractionalScale != 0) return std::nullopt;
+
+    const auto fractionalPicoseconds =
+        fraction * (scale / fractionalScale);
+    const auto magnitudeLimit = signedMagnitudeLimit(negative);
+    if (fractionalPicoseconds > magnitudeLimit
+        || whole > (magnitudeLimit - fractionalPicoseconds) / scale) {
+        return std::nullopt;
+    }
+    const auto picosecondMagnitude =
+        whole * scale + fractionalPicoseconds;
+    const auto timeBaseMagnitude =
+        static_cast<std::uint64_t>(timeBase.picosecondsPerTick);
+    if (picosecondMagnitude % timeBaseMagnitude != 0) {
+        return std::nullopt;
+    }
+    const auto tickMagnitude = picosecondMagnitude / timeBaseMagnitude;
+    if (negative
+        && tickMagnitude
+            == static_cast<std::uint64_t>(
+                   std::numeric_limits<std::int64_t>::max())
+                + 1U) {
+        return std::numeric_limits<std::int64_t>::min();
+    }
+    const auto ticks = static_cast<std::int64_t>(tickMagnitude);
+    return negative ? -ticks : ticks;
+}
+
 std::optional<std::int64_t> fromTicks(
     const Tick ticks,
     const TimeUnit unit,
@@ -327,19 +434,49 @@ std::string formatTick(const Tick tick, const TimeBase& timeBase)
         return "0 ps";
     }
 
-    constexpr std::array<std::pair<TimeUnit, std::int64_t>, 4> units{{
-        {TimeUnit::Millisecond, kPsPerMillisecond},
-        {TimeUnit::Microsecond, kPsPerMicrosecond},
-        {TimeUnit::Nanosecond, kPsPerNanosecond},
-        {TimeUnit::Picosecond, 1},
+    struct DisplayUnit {
+        TimeUnit unit;
+        std::uint64_t scale;
+        std::uint64_t fractionalQuantum;
+    };
+    constexpr std::array<DisplayUnit, 3> units{{
+        {
+            TimeUnit::Millisecond,
+            static_cast<std::uint64_t>(kPsPerMillisecond),
+            static_cast<std::uint64_t>(kPsPerMillisecond / 1'000),
+        },
+        {
+            TimeUnit::Microsecond,
+            static_cast<std::uint64_t>(kPsPerMicrosecond),
+            static_cast<std::uint64_t>(kPsPerMicrosecond / 1'000),
+        },
+        {
+            TimeUnit::Nanosecond,
+            static_cast<std::uint64_t>(kPsPerNanosecond),
+            1,
+        },
     }};
-    for (const auto& [unit, scale] : units) {
-        if (picoseconds % scale == 0) {
-            return std::to_string(picoseconds / scale) + " "
-                + std::string(timeUnitSuffix(unit));
+    const auto magnitude = unsignedMagnitude(picoseconds);
+    for (const auto& [unit, scale, fractionalQuantum] : units) {
+        if (magnitude < scale || magnitude % fractionalQuantum != 0) continue;
+
+        auto result = picoseconds < 0 ? std::string{"-"} : std::string{};
+        result += std::to_string(magnitude / scale);
+        auto fraction = (magnitude % scale) / fractionalQuantum;
+        if (fraction != 0) {
+            auto fractionText = std::to_string(fraction);
+            fractionText.insert(
+                fractionText.begin(),
+                3U - fractionText.size(),
+                '0');
+            while (!fractionText.empty() && fractionText.back() == '0') {
+                fractionText.pop_back();
+            }
+            result += "." + fractionText;
         }
+        return result + " " + std::string(timeUnitSuffix(unit));
     }
-    return std::to_string(tick) + " tick";
+    return std::to_string(picoseconds) + " ps";
 }
 
 std::string_view timeUnitSuffix(const TimeUnit unit) noexcept

@@ -1,0 +1,40 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "expectedProjectId": "project-wave-workbench-demo",
+    "scenarioId": "scenario-handshake",
+    "operations": [
+        {
+            "op": "set-range",
+            "laneId": "lane-request",
+            "start": "cycle 5",
+            "end": "60 ns",
+            "value": "1"
+        },
+        {
+            "op": "update-signal",
+            "laneId": "lane-data",
+            "name": "payload",
+            "radix": "binary",
+            "color": "#4fc3f7"
+        },
+        {
+            "op": "move-signal",
+            "laneId": "lane-data",
+            "beforeLaneId": "lane-request"
+        },
+        {
+            "op": "update-clock",
+            "clockId": "clock-main",
+            "period": "12 ns",
+            "activeEdge": "falling"
+        },
+        {
+            "op": "delete-signal",
+            "laneId": "lane-transaction"
+        },
+        {
+            "op": "set-duration",
+            "duration": "230 ns"
+        }
+    ]
+}

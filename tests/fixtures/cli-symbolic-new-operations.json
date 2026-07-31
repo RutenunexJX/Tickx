@@ -1,0 +1,57 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "operations": [
+        {
+            "op": "add-group",
+            "name": "Control"
+        },
+        {
+            "op": "add-signal",
+            "name": "clk",
+            "kind": "clock",
+            "period": "10 ns",
+            "groupId": "CONTROL"
+        },
+        {
+            "op": "add-signal",
+            "name": "enable",
+            "kind": "bit",
+            "groupId": "control"
+        },
+        {
+            "op": "add-signal",
+            "name": "state",
+            "kind": "enum",
+            "width": 2,
+            "enumMap": {
+                "IDLE": "0",
+                "BUSY": "1",
+                "DONE": "2"
+            },
+            "clockDomainId": "CLK",
+            "groupId": "Control"
+        },
+        {
+            "op": "set-sequence",
+            "start": "cycle 0",
+            "stepCycles": 1,
+            "clockId": "clk",
+            "sequences": [
+                {
+                    "laneId": "ENABLE",
+                    "values": ["0", "1", "1", "0"]
+                },
+                {
+                    "laneId": "STATE",
+                    "values": ["IDLE", "BUSY", "DONE", "IDLE"]
+                }
+            ]
+        },
+        {
+            "op": "assert-value",
+            "laneId": "state",
+            "at": "cycle 2",
+            "value": "DONE"
+        }
+    ]
+}

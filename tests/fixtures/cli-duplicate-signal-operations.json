@@ -1,0 +1,23 @@
+{
+  "schema": "wave-workbench.operations/v1",
+  "scenarioId": "Request / acknowledge",
+  "operations": [
+    {
+      "op": "duplicate-signal",
+      "laneId": "DATA[7:0]",
+      "name": "payload_copy"
+    },
+    {
+      "op": "duplicate-signal",
+      "laneId": "PAYLOAD_COPY",
+      "afterLaneId": "ack"
+    },
+    {
+      "op": "duplicate-signal",
+      "laneId": "CLK",
+      "name": "clk_shadow",
+      "newClockId": "clock-shadow",
+      "beforeLaneId": "payload_copy"
+    }
+  ]
+}

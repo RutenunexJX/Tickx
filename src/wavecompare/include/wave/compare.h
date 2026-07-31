@@ -21,6 +21,7 @@ enum class XHandling {
 
 enum class CompareDifferenceKind {
     ValueMismatch,
+    UnmappedSignal,
     MissingSignal,
     WidthMismatch,
     RelationViolation,

@@ -1,0 +1,14 @@
+{
+  "schema": "wave-workbench.operations/v1",
+  "operations": [
+    {
+      "op": "update-group",
+      "groupId": "Control",
+      "visible": true
+    },
+    {
+      "op": "delete-group",
+      "groupId": "req"
+    }
+  ]
+}

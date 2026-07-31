@@ -17,15 +17,18 @@ wave-bridge describe project.wave.json workspace.json
 命令模板。ZeroSlack 可在指定 workspace 调用：
 
 ```powershell
-wave-generate project.wave.json <workspace>
+wave-generate project.wave.json <workspace> --scenario=<稳定 ID 或唯一名称>
 ```
 
-生成物是单向派生产物，不回写场景事实源。
+工程只有一个 Scenario 时可省略 `--scenario`；工程包含多个 Scenario 时必须明确选择。
+manifest 中的 Generate/Compare 命令模板包含该选择器占位，不再暗示数组首项。生成物是单向
+派生产物，不回写场景事实源。
 
 ### 导入信号清单
 
 ```powershell
-wave-bridge import-signals project.wave.json signals.json output.wave.json
+wave-bridge import-signals project.wave.json signals.json output.wave.json `
+  --scenario=<稳定 ID 或唯一名称>
 ```
 
 输入格式：
@@ -48,7 +51,8 @@ wave-bridge import-signals project.wave.json signals.json output.wave.json
 ```
 
 已有稳定 ID 不重复创建。若已有 lane 的 kind/width 冲突，则保留 Wave Workbench 中的定义并
-输出诊断。命令始终写到显式输出工程，不覆盖输入文件。
+输出诊断。多 Scenario 工程必须显式选择；单 Scenario 工程可省略。选择失败发生在读取
+`signals.json` 和写出工程之前。命令始终写到显式输出工程，不覆盖输入文件。
 
 ## Private Frame Workbench
 
@@ -82,13 +86,15 @@ unresolved 诊断。
 ## Pinloom
 
 ```powershell
-wave-bridge pinloom-entry project.wave.json exports pinloom-entry.json
+wave-bridge pinloom-entry project.wave.json exports pinloom-entry.json `
+  --scenario=<稳定 ID 或唯一名称>
 ```
 
 输出包含 Project/Scenario 稳定 ID、工程路径、导出文件清单、字节数及
 `pinloom://archive?...` URI。桌面端 File > Export and Open in Pinloom 使用同一格式；
 只有用户在确认框选择 Open in Pinloom 后才交由操作系统打开 URI。Pinloom 不存在或未注册
-URI handler 时，JSON 归档条目仍保留。
+URI handler 时，JSON 归档条目仍保留。多 Scenario 工程必须显式选择，单 Scenario 工程可
+省略；成功输出回显最终 Scenario 名称与稳定 ID。
 
 ## Wave Workbench URI
 
@@ -97,12 +103,30 @@ waveworkbench://open?project=<path>&scenario=<stable-id>&lane=<stable-id>&tick=<
 waveworkbench://compare?project=<path>&scenario=<stable-id>&lane=<stable-id>&tick=<integer>
 ```
 
-`project` 必填。`scenario`、`lane`、`tick` 可选；`tick` 是工程整数 tick。`compare`
-动作打开 Expected/Actual 分屏并在 trace 后台加载完成后运行比较。等价命令行形式：
+`project` 必填。`scenario`、`lane`、`tick` 可选；`tick` 是工程整数 tick。`scenario`
+若提供，必须唯一精确匹配稳定 ID；桌面端直接选中该波形，不重排工程中的 Scenario 数组。
+显式 `scenario` 优先于桌面端为该工程记住的最后波形，并成为本次会话的新选择；因此同一 URI
+在不同用户设置下仍打开相同目标。未提供 `scenario` 时，桌面端可恢复该正式工程最后一次唯一
+稳定 ID 选择；记忆缺失、目标已删除或身份重复时回到第一项，不影响 URI 校验或工程内容。
+正式工程还可按 Scenario 记住最后安全 lane/tick 和可见 tick 跨度；未提供 `lane`/`tick` 时，
+普通打开恢复唯一可见非 Group Lane、整数光标位置和与像素无关的时间细节尺度，但不恢复 Beat、
+Segment 或时间范围。URI 中有效的显式 `lane`/`tick` 在该恢复之后应用，确定性覆盖本地位置，
+保留有效尺度并以显式 tick 重新锚定；若目标是已折叠 Group 的成员，桌面端先展开该 Group，
+随后成为普通打开的新安全位置。已记住的 Lane 隐藏、删除
+或身份重复时只恢复时间和尺度，不猜测相似名称；缺失或非法跨度不影响 URI 或工程打开。
+已有正式路径的工程在选择、定位、缩放或水平视图连续变化停止 400 ms 后更新安全位置，因此
+调用方不需要触发 Save 或正常关闭才能获得异常退出恢复；生命周期边界仍同步写入。连续调用只
+保留最终 lane/tick/跨度，Untitled 工程和未提交快速新增 Lane 不产生持久身份。加载
+`<project>.autosave` 时按 `<project>` 的正式路径查找该位置，使恢复数据和最后安全视图同时
+生效，但仍不恢复范围、Segment 或可被 Delete 直接修改的目标。
+当前桌面端保持纯波形工作区，`compare` 动作与 `open` 一样打开并定位波形；无界面比较由
+`wave-compare` 提供。等价命令行形式：
 
 ```powershell
 wave-workbench --uri="<waveworkbench URI>"
 ```
 
-未知 action、缺失 project、非法 tick 或不存在的 scenario 会明确失败，不回退到其他
-工程或显示名称匹配。
+未知 action、缺失 project、非法 tick、不存在或重复的 scenario ID 会明确失败，不回退到
+其他工程或显示名称匹配。多 Scenario 工程打开后在工具栏显示当前 `Waveform`；单 Scenario
+工程不显示选择器。打开后可用 `Ctrl+PageUp` / `Ctrl+PageDown` 前后切换；该导航不改变
+URI、工程数组或 Saved 状态。

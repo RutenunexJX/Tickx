@@ -23,6 +23,12 @@ enum class ValidationCode {
     UndefinedRegion,
     MissingLane,
     EventOutsideScenario,
+    EventWaveformMismatch,
+    EventCycleMismatch,
+    EventClockDomainInvalid,
+    LaneClockDomainInvalid,
+    LaneGroupReferenceInvalid,
+    RelationClockDomainInvalid,
     InvalidRelationCondition,
     RelationNotApplicable,
 };

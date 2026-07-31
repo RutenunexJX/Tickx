@@ -1,0 +1,61 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "expectedProjectId": "project-wave-workbench-demo",
+    "scenarioId": "scenario-handshake",
+    "operations": [
+        {
+            "op": "assert-value",
+            "laneId": "lane-request",
+            "at": "70 ns",
+            "value": "0"
+        },
+        {
+            "op": "set-range",
+            "start": "50 ns",
+            "end": "60 ns",
+            "assignments": [
+                {"laneId": "lane-request", "value": "1"},
+                {"laneId": "lane-ack", "value": "1"}
+            ]
+        },
+        {
+            "op": "add-signal",
+            "id": "lane-data-mirror",
+            "name": "data_mirror",
+            "kind": "bus",
+            "width": 8
+        },
+        {
+            "op": "add-signal",
+            "id": "lane-request-moved",
+            "name": "request_moved",
+            "kind": "bit"
+        },
+        {
+            "op": "transfer-range",
+            "mode": "copy",
+            "sourceStart": "80 ns",
+            "sourceEnd": "100 ns",
+            "destination": "0 ns",
+            "mappings": [
+                {
+                    "sourceLaneId": "lane-data",
+                    "targetLaneId": "lane-data-mirror"
+                }
+            ]
+        },
+        {
+            "op": "transfer-range",
+            "mode": "move",
+            "sourceStart": "80 ns",
+            "sourceEnd": "100 ns",
+            "destination": "0 ns",
+            "mappings": [
+                {
+                    "sourceLaneId": "lane-request",
+                    "targetLaneId": "lane-request-moved"
+                }
+            ]
+        }
+    ]
+}

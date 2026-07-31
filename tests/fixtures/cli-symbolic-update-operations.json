@@ -1,0 +1,36 @@
+{
+    "schema": "wave-workbench.operations/v1",
+    "scenarioId": "Waveform",
+    "operations": [
+        {
+            "op": "assert-value",
+            "laneId": "STATE",
+            "at": "cycle 1",
+            "clockId": "CLK",
+            "value": "BUSY"
+        },
+        {
+            "op": "update-signal",
+            "laneId": "state",
+            "enumMap": {
+                "IDLE": "0",
+                "BUSY": "1",
+                "DONE": "2",
+                "ERROR": "3"
+            }
+        },
+        {
+            "op": "set-range",
+            "laneId": "State",
+            "start": "cycle 3",
+            "end": "cycle 4",
+            "value": "ERROR"
+        },
+        {
+            "op": "assert-value",
+            "laneId": "state",
+            "at": "cycle 3",
+            "value": "ERROR"
+        }
+    ]
+}
