@@ -8,6 +8,7 @@
 #include "wave/project_io.h"
 #include "wave/simulation_pipeline.h"
 #include "wave/simulation_runner.h"
+#include "wave/simulation_session.h"
 #include "wave/time.h"
 #include "wave/trace.h"
 #include "wave/validation.h"
@@ -5998,7 +5999,8 @@ wave::ToolchainProbeReport runToolchainFixture(
 
 wave::SimulationRunReport runSimulationFixture(
     wave::SimulationRunRequest request,
-    const std::optional<int> cancelAfterMs = std::nullopt)
+    const std::optional<int> cancelAfterMs = std::nullopt,
+    std::vector<wave::SimulationRunStage>* observedStages = nullptr)
 {
     wave::VerilatorSimulationRunner runner;
     QEventLoop loop;
@@ -6013,6 +6015,9 @@ wave::SimulationRunReport runSimulationFixture(
         [&](wave::SimulationRunReport completed) {
             report = std::move(completed);
             loop.quit();
+        },
+        [observedStages](const wave::SimulationRunStage stage) {
+            if (observedStages) observedStages->push_back(stage);
         });
     expect(started, "fixture simulation could not be started asynchronously");
     if (cancelAfterMs) {
@@ -6026,6 +6031,96 @@ wave::SimulationRunReport runSimulationFixture(
     expect(report.has_value(), "fixture simulation did not complete before watchdog");
     expect(!runner.running(), "completed fixture simulation remained active");
     return std::move(*report);
+}
+
+void testSimulationSessionContractAndState()
+{
+    wave::SimulationRunRequest request;
+    request.manifestPath = QStringLiteral("C:/cache/run/module-manifest.json");
+    request.stimulusPath = QStringLiteral("C:/cache/run/stimulus.json");
+    request.workspaceRoot = QStringLiteral("C:/cache/run/workspace");
+    request.artifactDirectory = QStringLiteral("C:/cache/run/artifacts");
+    request.resultProjectPath = QStringLiteral("C:/cache/run/result.wave.json");
+    request.toolchain.verilatorProgram = QStringLiteral("C:/tools/verilator.exe");
+    request.toolchain.verilatorArguments = {QStringLiteral("--quiet")};
+    request.toolchain.cxxProgram = QStringLiteral("C:/tools/g++.exe");
+    request.toolchain.cxxArguments = {QStringLiteral("-v")};
+    request.toolchain.inheritCurrentProcessPath = false;
+    request.toolchain.timeoutMs = 1'234;
+    request.buildTimeoutMs = 4'567;
+    request.runTimeoutMs = 8'901;
+    request.maxOutputBytes = 123'456;
+    request.toolchain.environment.insert(
+        QStringLiteral("WAVE_PRIVATE_TEST_VALUE"),
+        QStringLiteral("must-not-be-persisted"));
+
+    wave::Project project;
+    wave::attachSimulationSession(project, request);
+    const auto restored = wave::simulationSessionFromProject(project);
+    expect(restored.ok() && restored.request
+               && restored.request->manifestPath == request.manifestPath
+               && restored.request->stimulusPath == request.stimulusPath
+               && restored.request->workspaceRoot == request.workspaceRoot
+               && restored.request->artifactDirectory == request.artifactDirectory
+               && restored.request->resultProjectPath == request.resultProjectPath
+               && restored.request->toolchain.verilatorProgram
+                   == request.toolchain.verilatorProgram
+               && restored.request->toolchain.verilatorArguments
+                   == request.toolchain.verilatorArguments
+               && restored.request->toolchain.cxxProgram
+                   == request.toolchain.cxxProgram
+               && restored.request->toolchain.cxxArguments
+                   == request.toolchain.cxxArguments
+               && !restored.request->toolchain.inheritCurrentProcessPath
+               && restored.request->toolchain.timeoutMs == 1'234
+               && restored.request->buildTimeoutMs == 4'567
+               && restored.request->runTimeoutMs == 8'901
+               && restored.request->maxOutputBytes == 123'456
+               && !restored.request->toolchain.environment.contains(
+                   QStringLiteral("WAVE_PRIVATE_TEST_VALUE")),
+           "simulation session did not round-trip its rerun contract safely");
+
+    auto malformed = project;
+    malformed.extensions[wave::SimulationSessionExtension] =
+        R"({"schema":"wave-workbench.simulation-session/v999"})";
+    const auto rejected = wave::simulationSessionFromProject(malformed);
+    expect(rejected.found && !rejected.ok() && !rejected.error.isEmpty(),
+           "unsupported simulation session schema was accepted");
+
+    wave::SimulationSessionStateMachine states;
+    states.configure(true, true);
+    expect(states.state() == wave::SimulationSessionState::Current
+               && !states.actions().runEnabled
+               && states.actions().rerunEnabled
+               && !states.actions().stopEnabled,
+           "current simulation session exposed incorrect actions");
+    states.markStimulusEdited();
+    expect(states.state() == wave::SimulationSessionState::Stale
+               && states.actions().runEnabled
+               && states.actions().rerunEnabled,
+           "stimulus edit did not make the result stale");
+    expect(states.beginRun()
+               && states.state() == wave::SimulationSessionState::Compiling
+               && states.actions().stopEnabled,
+           "simulation run did not enter compiling state");
+    states.observeStage(wave::SimulationRunStage::RunModel);
+    expect(states.state() == wave::SimulationSessionState::Running,
+           "run-model stage did not enter running state");
+    states.finish(wave::SimulationRunStatus::Succeeded);
+    expect(states.state() == wave::SimulationSessionState::Current,
+           "successful run did not make the result current");
+
+    expect(states.beginRun(), "current result could not be rerun");
+    states.markStimulusEdited();
+    states.finish(wave::SimulationRunStatus::Cancelled);
+    expect(states.state() == wave::SimulationSessionState::Stale,
+           "cancelled run lost an edit made while running");
+    expect(states.beginRun(), "stale result could not be run again");
+    states.finish(wave::SimulationRunStatus::BuildFailed);
+    expect(states.state() == wave::SimulationSessionState::Failed
+               && states.actions().runEnabled
+               && states.actions().rerunEnabled,
+           "failed run did not expose a recoverable failed state");
 }
 
 void testAsynchronousProcessRunner()
@@ -6237,7 +6332,9 @@ void testFixedFixtureSimulationPipeline()
     auto completedRequest = requestFor(artifacts.path(), simulator);
     completedRequest.resultProjectPath = artifacts.filePath(
         QStringLiteral("counter-result.wave.json"));
-    const auto completed = runSimulationFixture(std::move(completedRequest));
+    std::vector<wave::SimulationRunStage> observedStages;
+    const auto completed = runSimulationFixture(
+        std::move(completedRequest), std::nullopt, &observedStages);
     const auto json = wave::simulationRunReportJson(completed);
     expect(completed.ok() && completed.trace
                && completed.stage == wave::SimulationRunStage::Completed
@@ -6255,10 +6352,22 @@ void testFixedFixtureSimulationPipeline()
                && json.value(QStringLiteral("trace")).toObject()
                       .value(QStringLiteral("signalCount")).toInt() == 4,
            "fixed fixture did not complete build, run, VCD, and TraceIndex stages");
+    expect(observedStages == std::vector<wave::SimulationRunStage>{
+               wave::SimulationRunStage::ValidateInputs,
+               wave::SimulationRunStage::ProbeToolchain,
+               wave::SimulationRunStage::GenerateHarness,
+               wave::SimulationRunStage::BuildModel,
+               wave::SimulationRunStage::RunModel,
+               wave::SimulationRunStage::ImportTrace,
+               wave::SimulationRunStage::MaterializeProject,
+               wave::SimulationRunStage::Completed,
+           },
+           "simulation runner did not publish its ordered live stages");
     const auto resultProject = wave::loadProjectFile(
         completed.artifacts.resultProjectPath);
     expect(resultProject.ok()
                && resultProject.project->importedTraces.size() == 1
+               && wave::simulationSessionFromProject(*resultProject.project).ok()
                && !resultProject.project->importedTraces.front()
                        .signalMapping.empty()
                && QFileInfo(
@@ -18254,6 +18363,7 @@ int main(int argc, char* argv[])
         {"ZeroSlack Stimulus Scenario contract", testZeroSlackStimulusScenarioContract},
         {"asynchronous process runner", testAsynchronousProcessRunner},
         {"Verilator toolchain probe", testVerilatorToolchainProbe},
+        {"simulation session contract and state", testSimulationSessionContractAndState},
         {"fixed fixture simulation pipeline", testFixedFixtureSimulationPipeline},
         {"headless automation JSON contracts", testAutomationContracts},
         {"Relation repair reference contracts", testAutomationRelationRepairReferenceContracts},

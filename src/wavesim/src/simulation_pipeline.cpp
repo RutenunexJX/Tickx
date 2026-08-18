@@ -2,6 +2,7 @@
 
 #include "wave/module_manifest.h"
 #include "wave/project_io.h"
+#include "wave/simulation_session.h"
 #include "wave/stimulus_scenario.h"
 
 #include <QDir>
@@ -403,12 +404,19 @@ struct VerilatorSimulationRunner::Impl {
     ProcessRunner processRunner;
     SimulationRunRequest request;
     Completion completion;
+    StageChanged stageChanged;
     SimulationRunReport report;
     std::optional<PreparedSimulation> prepared;
     QElapsedTimer elapsed;
     bool active{false};
     bool cancelRequested{false};
     QObject deferredContext;
+
+    void enterStage(const SimulationRunStage stage)
+    {
+        report.stage = stage;
+        if (stageChanged) stageChanged(stage);
+    }
 
     void materializeProject()
     {
@@ -417,7 +425,7 @@ struct VerilatorSimulationRunner::Impl {
             return;
         }
 
-        report.stage = SimulationRunStage::MaterializeProject;
+        enterStage(SimulationRunStage::MaterializeProject);
         const QFileInfo outputInfo(request.resultProjectPath);
         QDir outputDirectory = outputInfo.absoluteDir();
         if (!outputDirectory.mkpath(QStringLiteral("."))) {
@@ -451,6 +459,7 @@ struct VerilatorSimulationRunner::Impl {
         prepared->project.importedTraces.clear();
         prepared->project.importedTraces.push_back(
             std::move(traceReference));
+        attachSimulationSession(prepared->project, request);
 
         QString error;
         const auto outputPath = outputInfo.absoluteFilePath();
@@ -470,18 +479,19 @@ struct VerilatorSimulationRunner::Impl {
         if (!diagnostic.isEmpty()) report.diagnostic = std::move(diagnostic);
         report.durationMs = elapsed.isValid() ? elapsed.elapsed() : 0;
         if (status == SimulationRunStatus::Succeeded) {
-            report.stage = SimulationRunStage::Completed;
+            enterStage(SimulationRunStage::Completed);
         }
         auto callback = std::move(completion);
         auto completed = std::move(report);
         active = false;
         prepared.reset();
+        stageChanged = {};
         callback(std::move(completed));
     }
 
     void importTrace()
     {
-        report.stage = SimulationRunStage::ImportTrace;
+        enterStage(SimulationRunStage::ImportTrace);
         TraceParseOptions options;
         options.projectTimeBase = prepared->stimulus.timeBase;
         options.identity = {
@@ -502,7 +512,7 @@ struct VerilatorSimulationRunner::Impl {
 
     void runModel()
     {
-        report.stage = SimulationRunStage::RunModel;
+        enterStage(SimulationRunStage::RunModel);
         ProcessRunRequest process;
         process.program = report.artifacts.executablePath;
         process.arguments = {
@@ -542,7 +552,7 @@ struct VerilatorSimulationRunner::Impl {
 
     void buildModel()
     {
-        report.stage = SimulationRunStage::BuildModel;
+        enterStage(SimulationRunStage::BuildModel);
         const auto& probe = *report.toolchain;
         QStringList arguments{
             QStringLiteral("--cc"),
@@ -619,7 +629,7 @@ struct VerilatorSimulationRunner::Impl {
 
     void generateHarness()
     {
-        report.stage = SimulationRunStage::GenerateHarness;
+        enterStage(SimulationRunStage::GenerateHarness);
         QDir artifacts(request.artifactDirectory);
         if (!artifacts.mkpath(QStringLiteral("."))) {
             finish(
@@ -683,7 +693,7 @@ struct VerilatorSimulationRunner::Impl {
             finish(SimulationRunStatus::Cancelled, QStringLiteral("Simulation was cancelled."));
             return;
         }
-        report.stage = SimulationRunStage::ValidateInputs;
+        enterStage(SimulationRunStage::ValidateInputs);
         SimulationRunStatus status = SimulationRunStatus::InvalidRequest;
         QString error;
         prepared = prepareSimulation(request, status, error);
@@ -691,7 +701,7 @@ struct VerilatorSimulationRunner::Impl {
             finish(status, error);
             return;
         }
-        report.stage = SimulationRunStage::ProbeToolchain;
+        enterStage(SimulationRunStage::ProbeToolchain);
         const auto started = probeRunner.start(
             request.toolchain,
             [this](ToolchainProbeReport completed) {
@@ -704,7 +714,10 @@ struct VerilatorSimulationRunner::Impl {
         }
     }
 
-    bool start(SimulationRunRequest nextRequest, Completion nextCompletion)
+    bool start(
+        SimulationRunRequest nextRequest,
+        Completion nextCompletion,
+        StageChanged nextStageChanged)
     {
         if (active || !nextCompletion || nextRequest.buildTimeoutMs <= 0
             || nextRequest.runTimeoutMs <= 0 || nextRequest.maxOutputBytes < 0) {
@@ -712,6 +725,7 @@ struct VerilatorSimulationRunner::Impl {
         }
         request = std::move(nextRequest);
         completion = std::move(nextCompletion);
+        stageChanged = std::move(nextStageChanged);
         report = {};
         prepared.reset();
         active = true;
@@ -743,9 +757,13 @@ VerilatorSimulationRunner::~VerilatorSimulationRunner()
 
 bool VerilatorSimulationRunner::start(
     SimulationRunRequest request,
-    Completion completion)
+    Completion completion,
+    StageChanged stageChanged)
 {
-    return impl_->start(std::move(request), std::move(completion));
+    return impl_->start(
+        std::move(request),
+        std::move(completion),
+        std::move(stageChanged));
 }
 
 bool VerilatorSimulationRunner::cancel()

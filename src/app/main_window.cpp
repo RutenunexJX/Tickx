@@ -3,6 +3,8 @@
 #include "wave/export.h"
 #include "wave/integration.h"
 #include "wave/project_io.h"
+#include "wave/simulation_session.h"
+#include "wave/stimulus_scenario.h"
 #include "wave/trace.h"
 #include "wave/validation.h"
 #include "trace_canvas.h"
@@ -1190,6 +1192,7 @@ MainWindow::MainWindow(
             : rememberedActiveScenarioIndex().value_or(std::size_t{0});
     }
     resetEditTracking(!recoveredSnapshot);
+    if (simulationResultMode_) configureSimulationSession();
     setObjectName(QStringLiteral("WaveWorkbenchMainWindow"));
     setMinimumSize(960, 620);
     resize(1440, 900);
@@ -1197,9 +1200,46 @@ MainWindow::MainWindow(
     canvas_ = new WaveCanvas(this);
     compareTraceCanvas_ = new TraceCanvas(this);
     if (simulationResultMode_) {
-        canvas_->hide();
+        simulationResultSplitter_ = new QSplitter(Qt::Vertical, this);
+        simulationResultSplitter_->setObjectName(
+            QStringLiteral("SimulationResultSplitter"));
+        simulationResultSplitter_->setChildrenCollapsible(false);
+
+        const auto section = [this](
+                                 const QString& title,
+                                 QWidget* content,
+                                 const QString& objectName) {
+            auto* panel = new QWidget(simulationResultSplitter_);
+            panel->setObjectName(objectName);
+            auto* layout = new QVBoxLayout(panel);
+            layout->setContentsMargins(0, 0, 0, 0);
+            layout->setSpacing(0);
+            auto* label = new QLabel(title, panel);
+            label->setObjectName(objectName + QStringLiteral("Label"));
+            label->setMinimumHeight(24);
+            label->setContentsMargins(10, 2, 10, 2);
+            label->setStyleSheet(QStringLiteral(
+                "font-weight:600;color:#39465a;background:#f3f6fa;"
+                "border-bottom:1px solid #d7dee8;"));
+            layout->addWidget(label);
+            layout->addWidget(content, 1);
+            return panel;
+        };
+
+        canvas_->setProperty("simulationStimulusCanvas", true);
         compareTraceCanvas_->setProperty("simulationResultCanvas", true);
-        setCentralWidget(compareTraceCanvas_);
+        simulationResultSplitter_->addWidget(section(
+            tr("Stimulus"),
+            canvas_,
+            QStringLiteral("SimulationStimulusPanel")));
+        simulationResultSplitter_->addWidget(section(
+            tr("Actual"),
+            compareTraceCanvas_,
+            QStringLiteral("SimulationActualPanel")));
+        simulationResultSplitter_->setStretchFactor(0, 1);
+        simulationResultSplitter_->setStretchFactor(1, 1);
+        simulationResultSplitter_->setSizes({400, 430});
+        setCentralWidget(simulationResultSplitter_);
     } else {
         setCentralWidget(canvas_);
         compareTraceCanvas_->hide();
@@ -1326,6 +1366,34 @@ MainWindow::MainWindow(
         resultToolbar->setAllowedAreas(Qt::TopToolBarArea);
         resultToolbar->toggleViewAction()->setEnabled(false);
         resultToolbar->toggleViewAction()->setVisible(false);
+        runSimulationAction_ = resultToolbar->addAction(
+            themedIcon(
+                QStringLiteral("media-playback-start"),
+                style(),
+                QStyle::SP_MediaPlay),
+            tr("Run"),
+            this,
+            &MainWindow::runSimulation);
+        runSimulationAction_->setObjectName(QStringLiteral("RunSimulationAction"));
+        stopSimulationAction_ = resultToolbar->addAction(
+            themedIcon(
+                QStringLiteral("media-playback-stop"),
+                style(),
+                QStyle::SP_MediaStop),
+            tr("Stop"),
+            this,
+            &MainWindow::stopSimulation);
+        stopSimulationAction_->setObjectName(QStringLiteral("StopSimulationAction"));
+        rerunSimulationAction_ = resultToolbar->addAction(
+            themedIcon(
+                QStringLiteral("view-refresh"),
+                style(),
+                QStyle::SP_BrowserReload),
+            tr("Rerun"),
+            this,
+            &MainWindow::rerunSimulation);
+        rerunSimulationAction_->setObjectName(QStringLiteral("RerunSimulationAction"));
+        resultToolbar->addSeparator();
         resultToolbar->addAction(
             themedIcon(QStringLiteral("zoom-in"), style(), QStyle::SP_ArrowUp),
             tr("Zoom in"),
@@ -1344,6 +1412,16 @@ MainWindow::MainWindow(
             tr("Fit trace"),
             compareTraceCanvas_,
             &TraceCanvas::fitTrace);
+        auto* spacer = new QWidget(resultToolbar);
+        spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        resultToolbar->addWidget(spacer);
+        simulationStateLabel_ = new QLabel(resultToolbar);
+        simulationStateLabel_->setObjectName(QStringLiteral("SimulationStateLabel"));
+        simulationStateLabel_->setMinimumWidth(92);
+        simulationStateLabel_->setAlignment(Qt::AlignCenter);
+        simulationStateLabel_->setContentsMargins(10, 3, 10, 3);
+        resultToolbar->addWidget(simulationStateLabel_);
+        updateSimulationControls(simulationSessionError_);
     }
     rememberActiveScenario();
     const auto restoredLocation = restoreActiveScenarioLocation();
@@ -1406,7 +1484,6 @@ MainWindow::MainWindow(
     updateCommandActions();
     updateWindowTitle();
     if (simulationResultMode_) {
-        setProperty("simulationResultState", QStringLiteral("loading"));
         setWindowTitle(
             tr("%1 - Simulation Result - Wave Workbench")
                 .arg(QString::fromStdString(project_.name)));
@@ -1429,6 +1506,330 @@ MainWindow::MainWindow(
         QTimer::singleShot(
             0, this, &MainWindow::loadFirstTraceReference);
     }
+}
+
+MainWindow::~MainWindow() = default;
+
+void MainWindow::configureSimulationSession()
+{
+    const auto parsed = simulationSessionFromProject(project_);
+    if (parsed.ok()) {
+        simulationRequest_ = *parsed.request;
+        simulationRunner_ = std::make_unique<VerilatorSimulationRunner>();
+        simulationStateMachine_.configure(true, false);
+        return;
+    }
+
+    simulationStateMachine_.configure(false, false);
+    if (parsed.found) {
+        simulationSessionError_ = parsed.error.isEmpty()
+            ? tr("Simulation session metadata is invalid")
+            : parsed.error;
+        simulationStateMachine_.markFailed();
+    } else {
+        simulationSessionError_ = tr(
+            "This trace has no rerun session; Run controls are unavailable");
+    }
+    simulationStateDetail_ = simulationSessionError_;
+}
+
+void MainWindow::updateSimulationControls(const QString& detail)
+{
+    if (!simulationResultMode_) return;
+    if (!detail.isNull()) simulationStateDetail_ = detail;
+
+    const auto state = simulationStateMachine_.state();
+    const auto key = QString::fromLatin1(toString(state).data());
+    const auto previous = property("simulationResultState").toString();
+    setProperty("simulationResultState", key);
+
+    QString label;
+    QString foreground;
+    QString background;
+    switch (state) {
+    case SimulationSessionState::Ready:
+        label = tr("Ready");
+        foreground = QStringLiteral("#435066");
+        background = QStringLiteral("#e9eef5");
+        break;
+    case SimulationSessionState::Compiling:
+        label = tr("Compiling");
+        foreground = QStringLiteral("#1659a7");
+        background = QStringLiteral("#e3efff");
+        break;
+    case SimulationSessionState::Running:
+        label = tr("Running");
+        foreground = QStringLiteral("#1659a7");
+        background = QStringLiteral("#e3efff");
+        break;
+    case SimulationSessionState::Current:
+        label = tr("Current");
+        foreground = QStringLiteral("#126442");
+        background = QStringLiteral("#dff4e9");
+        break;
+    case SimulationSessionState::Stale:
+        label = tr("Stale");
+        foreground = QStringLiteral("#815400");
+        background = QStringLiteral("#fff0c7");
+        break;
+    case SimulationSessionState::Failed:
+        label = tr("Failed");
+        foreground = QStringLiteral("#a52222");
+        background = QStringLiteral("#fde7e7");
+        break;
+    }
+
+    if (simulationStateLabel_) {
+        simulationStateLabel_->setText(label);
+        simulationStateLabel_->setProperty("simulationState", key);
+        simulationStateLabel_->setToolTip(simulationStateDetail_);
+        simulationStateLabel_->setStyleSheet(QStringLiteral(
+            "QLabel{color:%1;background:%2;border:1px solid %1;"
+            "border-radius:3px;font-weight:600;}")
+            .arg(foreground, background));
+    }
+
+    const auto actions = simulationStateMachine_.actions();
+    if (runSimulationAction_) {
+        runSimulationAction_->setEnabled(actions.runEnabled);
+        runSimulationAction_->setToolTip(
+            actions.runEnabled ? tr("Run the current graphical stimulus")
+                               : simulationSessionError_);
+    }
+    if (stopSimulationAction_) {
+        stopSimulationAction_->setEnabled(
+            actions.stopEnabled && !simulationStopRequested_);
+        stopSimulationAction_->setToolTip(
+            simulationStopRequested_ ? tr("Cancellation requested")
+                                     : tr("Stop the active simulation"));
+    }
+    if (rerunSimulationAction_) {
+        rerunSimulationAction_->setEnabled(actions.rerunEnabled);
+        rerunSimulationAction_->setToolTip(
+            actions.rerunEnabled ? tr("Run the current stimulus again")
+                                 : simulationSessionError_);
+    }
+    if (canvas_) {
+        canvas_->setEnabled(
+            state != SimulationSessionState::Compiling
+            && state != SimulationSessionState::Running);
+    }
+    if (previous != key) emit simulationSessionStateChanged(key);
+}
+
+bool MainWindow::exportSimulationStimulus(QString& error)
+{
+    if (!simulationRequest_) {
+        error = simulationSessionError_.isEmpty()
+            ? tr("Simulation session is unavailable")
+            : simulationSessionError_;
+        return false;
+    }
+    const auto* scenario = activeScenario();
+    if (!scenario) {
+        error = tr("No active graphical stimulus scenario");
+        return false;
+    }
+    const auto exported = exportZeroSlackStimulusScenario(project_, *scenario);
+    if (!exported.ok()) {
+        error = exported.error.isEmpty()
+            ? tr("The graphical stimulus could not be exported")
+            : exported.error;
+        return false;
+    }
+
+    const QFileInfo outputInfo(simulationRequest_->stimulusPath);
+    auto outputDirectory = outputInfo.absoluteDir();
+    if (!outputDirectory.mkpath(QStringLiteral("."))) {
+        error = tr("Cannot create the stimulus directory: %1")
+                    .arg(outputDirectory.absolutePath());
+        return false;
+    }
+    const auto document = serializeZeroSlackStimulusScenario(*exported.scenario);
+    QSaveFile file(outputInfo.absoluteFilePath());
+    file.setDirectWriteFallback(false);
+    if (!file.open(QIODevice::WriteOnly)
+        || file.write(document) != document.size()
+        || !file.commit()) {
+        error = tr("Cannot save the graphical stimulus: %1")
+                    .arg(file.errorString());
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::runSimulation()
+{
+    if (!simulationResultMode_ || !simulationRequest_ || !simulationRunner_)
+        return;
+    if (!commitPendingEdits()) return;
+
+    if (!projectFile_.isEmpty()) {
+        simulationRequest_->resultProjectPath =
+            QFileInfo(projectFile_).absoluteFilePath();
+    }
+    attachSimulationSession(project_, *simulationRequest_);
+
+    QString error;
+    if (!exportSimulationStimulus(error)) {
+        simulationStateMachine_.markFailed();
+        updateSimulationControls(error);
+        statusBar()->showMessage(error, 10'000);
+        return;
+    }
+    if (!simulationStateMachine_.beginRun()) return;
+
+    simulationStopRequested_ = false;
+    updateSimulationControls(tr("Preparing the simulation inputs"));
+    statusBar()->showMessage(tr("Compiling simulation model"));
+    const auto started = simulationRunner_->start(
+        *simulationRequest_,
+        [this](SimulationRunReport report) {
+            finishSimulationRun(std::move(report));
+        },
+        [this](const SimulationRunStage stage) {
+            simulationStateMachine_.observeStage(stage);
+            QString detail;
+            switch (stage) {
+            case SimulationRunStage::ValidateInputs:
+                detail = tr("Validating simulation inputs");
+                break;
+            case SimulationRunStage::ProbeToolchain:
+                detail = tr("Checking Verilator and the C++ toolchain");
+                break;
+            case SimulationRunStage::GenerateHarness:
+                detail = tr("Generating the simulation harness");
+                break;
+            case SimulationRunStage::BuildModel:
+                detail = tr("Compiling the simulation model");
+                break;
+            case SimulationRunStage::RunModel:
+                detail = tr("Running the graphical stimulus");
+                break;
+            case SimulationRunStage::ImportTrace:
+                detail = tr("Importing the generated waveform");
+                break;
+            case SimulationRunStage::MaterializeProject:
+                detail = tr("Updating the result workspace");
+                break;
+            case SimulationRunStage::Completed:
+                detail = tr("Simulation completed");
+                break;
+            }
+            updateSimulationControls(detail);
+            statusBar()->showMessage(detail);
+        });
+    if (!started) {
+        simulationStateMachine_.finish(SimulationRunStatus::RunFailed);
+        updateSimulationControls(tr("Simulation runner is already active"));
+        statusBar()->showMessage(tr("Simulation could not be started"), 10'000);
+    }
+}
+
+void MainWindow::rerunSimulation()
+{
+    runSimulation();
+}
+
+void MainWindow::stopSimulation()
+{
+    if (!simulationRunner_ || !simulationRunner_->running()
+        || simulationStopRequested_) {
+        return;
+    }
+    simulationStopRequested_ = simulationRunner_->cancel();
+    updateSimulationControls(
+        simulationStopRequested_ ? tr("Cancellation requested")
+                                 : tr("The active simulation could not be cancelled"));
+    statusBar()->showMessage(
+        simulationStopRequested_ ? tr("Stopping simulation")
+                                 : tr("Simulation stop request failed"),
+        5'000);
+}
+
+bool MainWindow::applySimulationResult(
+    SimulationRunReport& report,
+    QString& error)
+{
+    if (!report.trace) {
+        error = tr("Simulation completed without a waveform index");
+        return false;
+    }
+    const auto resultPath = report.artifacts.resultProjectPath.isEmpty()
+        ? simulationRequest_->resultProjectPath
+        : report.artifacts.resultProjectPath;
+    const auto loaded = loadProjectFile(resultPath);
+    if (!loaded.ok() || loaded.project->importedTraces.size() != 1) {
+        error = loaded.error.isEmpty()
+            ? tr("Simulation result project has no unique trace reference")
+            : loaded.error;
+        return false;
+    }
+
+    project_.importedTraces = loaded.project->importedTraces;
+    const auto session = loaded.project->extensions.find(
+        SimulationSessionExtension);
+    if (session != loaded.project->extensions.end()) {
+        project_.extensions[SimulationSessionExtension] = session->second;
+    } else {
+        attachSimulationSession(project_, *simulationRequest_);
+    }
+
+    traceIndex_ = std::move(*report.trace);
+    activeTraceId_ = project_.importedTraces.front().id;
+    traceVisibleSignalIds_.clear();
+    for (const auto& signal : traceIndex_->traceSignals) {
+        traceVisibleSignalIds_.insert(signal.id);
+    }
+    if (traceCanvas_) {
+        traceCanvas_->setTrace(
+            &project_, activeScenario(), &*traceIndex_, activeTraceReference());
+        traceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    }
+    compareTraceCanvas_->setTrace(
+        &project_, activeScenario(), &*traceIndex_, activeTraceReference());
+    compareTraceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    compareTraceCanvas_->show();
+    compareTraceCanvas_->fitTrace();
+
+    const auto targetPath = projectFile_.isEmpty() ? resultPath : projectFile_;
+    loadedProjectRevision_ = projectFileRevision(targetPath);
+    if (!writeToPath(targetPath)) {
+        error = tr("The updated simulation result could not be saved");
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::finishSimulationRun(SimulationRunReport report)
+{
+    simulationStopRequested_ = false;
+    simulationStateMachine_.finish(report.status);
+    if (report.ok()) {
+        QString error;
+        if (!applySimulationResult(report, error)) {
+            simulationStateMachine_.markFailed();
+            updateSimulationControls(error);
+            statusBar()->showMessage(error, 10'000);
+            return;
+        }
+        simulationStateMachine_.markCurrent();
+        const auto message = tr("Simulation result is current · %1 ms")
+                                 .arg(report.durationMs);
+        updateSimulationControls(message);
+        statusBar()->showMessage(message, 8'000);
+        return;
+    }
+
+    const auto stopped = report.status == SimulationRunStatus::Cancelled;
+    const auto message = stopped
+        ? tr("Simulation stopped; the previous result was retained")
+        : report.diagnostic.isEmpty()
+            ? tr("Simulation failed during %1")
+                  .arg(QString::fromLatin1(toString(report.stage).data()))
+            : report.diagnostic;
+    updateSimulationControls(message);
+    statusBar()->showMessage(message, 10'000);
 }
 
 const Project& MainWindow::project() const noexcept
@@ -2042,6 +2443,9 @@ void MainWindow::closeEvent(QCloseEvent* event)
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     if (confirmDiscardChanges()) {
         if (traceCancelFlag_) traceCancelFlag_->store(true);
+        if (simulationRunner_ && simulationRunner_->running()) {
+            static_cast<void>(simulationRunner_->cancel());
+        }
         rememberActiveScenarioLocation();
         event->accept();
     } else {
@@ -2417,6 +2821,10 @@ void MainWindow::redo()
 void MainWindow::markEdited()
 {
     invalidateCompareResult();
+    if (simulationResultMode_) {
+        simulationStateMachine_.markStimulusEdited();
+        updateSimulationControls();
+    }
     const auto currentStateId = commandStack_.stateId();
     if (currentStateId == observedCommandStateId_) {
         ++externalRevision_;
@@ -6193,7 +6601,8 @@ void MainWindow::finishTraceImport()
         if (traceSummary_) traceSummary_->setText(message);
         statusBar()->showMessage(message, 10'000);
         if (simulationResultMode_) {
-            setProperty("simulationResultState", QStringLiteral("failed"));
+            simulationStateMachine_.markFailed();
+            updateSimulationControls(message);
             emit initialTraceReferenceLoaded(false, message);
         }
         reloadIfNeeded();
@@ -6271,9 +6680,10 @@ void MainWindow::finishTraceImport()
               .arg(warnings.join(QStringLiteral("; ")));
     if (simulationResultMode_) {
         compareTraceCanvas_->show();
-        compareTraceCanvas_->setFocus(Qt::OtherFocusReason);
+        compareTraceCanvas_->fitTrace();
         statusBar()->showMessage(successMessage, 10'000);
-        setProperty("simulationResultState", QStringLiteral("ready"));
+        simulationStateMachine_.markCurrent();
+        updateSimulationControls(successMessage);
         emit initialTraceReferenceLoaded(true, successMessage);
         reloadIfNeeded();
         return;
@@ -6338,7 +6748,8 @@ void MainWindow::loadFirstTraceReference()
         if (traceSummary_) traceSummary_->setText(message);
         statusBar()->showMessage(message, 10'000);
         if (simulationResultMode_) {
-            setProperty("simulationResultState", QStringLiteral("failed"));
+            simulationStateMachine_.markFailed();
+            updateSimulationControls(message);
             emit initialTraceReferenceLoaded(false, message);
         }
     };

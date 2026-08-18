@@ -99,6 +99,7 @@ wave_enable_warnings(waveintegration)
 add_library(wavesim STATIC
     src/wavesim/src/simulation_runner.cpp
     src/wavesim/src/simulation_pipeline.cpp
+    src/wavesim/src/simulation_session.cpp
 )
 target_include_directories(wavesim
     PUBLIC src/wavesim/include
@@ -139,7 +140,7 @@ add_executable(wave-workbench
     src/app/wave_canvas.h
 )
 target_link_libraries(wave-workbench
-    PRIVATE wavecore wavetime waveedit waveproject wavevalidate wavegenerate waveimport wavecompare waveintegration
+    PRIVATE wavecore wavetime waveedit waveproject wavevalidate wavegenerate waveimport wavecompare waveintegration wavesim
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent
 )
 wave_enable_warnings(wave-workbench)

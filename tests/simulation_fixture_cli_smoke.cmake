@@ -6,13 +6,15 @@ endif()
 
 file(REMOVE_RECURSE "${OUTPUT}")
 file(MAKE_DIRECTORY "${OUTPUT}")
+set(session_root "${OUTPUT}/session-input")
+file(COPY "${FIXTURE_ROOT}/" DESTINATION "${session_root}")
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env
             "WAVE_SIMULATOR_FIXTURE=${SIMULATOR_FIXTURE}"
             "${WAVE_SIM_RUNNER}" run-module
-            "--manifest=${FIXTURE_ROOT}/manifest.json"
-            "--stimulus=${FIXTURE_ROOT}/stimulus.json"
-            "--workspace=${FIXTURE_ROOT}"
+            "--manifest=${session_root}/manifest.json"
+            "--stimulus=${session_root}/stimulus.json"
+            "--workspace=${session_root}"
             "--artifacts=${OUTPUT}"
             "--result-project=${OUTPUT}/result.wave.json"
             "--verilator=${VERILATOR_FIXTURE}"

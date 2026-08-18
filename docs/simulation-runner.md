@@ -43,15 +43,16 @@ wave-sim-runner probe `
   `cancel()` 和硬超时；实现不调用 `waitForStarted`、`waitForFinished` 或 GUI
   `processEvents`。
 - `ToolchainProbeRunner` 并行探测两个工具，在两个结果都终止后只回调一次。
-- runner 依赖 QtCore 事件循环，不依赖 QtWidgets；正式 GUI 后续可以直接持有该对象，
-  不需要在 UI 线程同步等待。
+- runner 依赖 QtCore 事件循环，不依赖 QtWidgets；GUI 直接持有该对象，不在 UI 线程
+  同步等待。
 - 默认在请求环境的 PATH 之外继承 runner 进程当前 PATH；需要严格隔离的测试或宿主可将
   `inheritCurrentProcessPath` 设为 `false`，此时空 PATH 不会回退到系统环境。
 - `VerilatorSimulationRunner` 依次执行契约校验、工具链探测、harness 生成、模型构建、
-  仿真和 VCD 导入。所有外部进程均复用 `ProcessRunner`，调用线程不会同步等待。
+  仿真和 VCD 导入。所有外部进程均复用 `ProcessRunner`，调用线程不会同步等待；可选的
+  stage 回调将各阶段实时映射为 GUI 的 `Compiling` 或 `Running` 状态。
 
-`--cancel-after-ms` 用于自动化和宿主生命周期联调。正式 GUI 的 Stop 操作应直接调用
-`ToolchainProbeRunner::cancel()`，不需要启动第二个控制进程。
+`--cancel-after-ms` 用于自动化和宿主生命周期联调。GUI 的 Stop 操作直接调用
+`VerilatorSimulationRunner::cancel()`，不启动第二个控制进程。
 
 ## 固定 Fixture 闭环
 
@@ -131,5 +132,13 @@ harness、构建、运行、VCD 导入、结果工程物化、超时与取消。
 | 7 | cancelled |
 
 宿主以 `wave-workbench --load-first-trace result.wave.json` 打开结果时，WaveWorkbench
-会异步载入首个 trace 引用，不阻塞窗口创建；普通项目打开行为不受影响。正式 GUI 内的
-Run/Stop/Rerun 仍属于后续切片。
+会异步载入首个 trace 引用，不阻塞窗口创建；普通项目打开行为不受影响。结果工作区上方
+为可编辑的 `Stimulus`，下方为只读的 `Actual`，并提供 `Run`、`Stop`、`Rerun` 和
+`Ready`、`Compiling`、`Running`、`Current`、`Stale`、`Failed` 六种可见状态。
+
+结果工程的 `waveSimulation.session` 扩展使用
+`wave-workbench.simulation-session/v1`。它保存重跑所需的 Manifest、Stimulus、工作区、
+产物目录、结果工程及显式工具参数；进程环境不写入工程，加载时重新从当前进程获取。
+图形激励发生变化后状态转为 `Stale`，Run/Rerun 将当前内存场景直接导出并运行，成功后
+直接刷新 Actual 波形；取消或失败保留上一份结果。S7 每次重跑仍会重新构建 Verilator
+模型，构建指纹与模型复用属于 S8。

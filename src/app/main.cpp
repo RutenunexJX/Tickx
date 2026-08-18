@@ -88,6 +88,8 @@ int main(int argc, char* argv[])
 
     bool smokeTest = false;
     bool loadFirstTrace = false;
+    bool simulationControlsSmoke = false;
+    bool simulationStopSmoke = false;
     bool compareMode = false;
     QString projectPath;
     QString screenshotPath;
@@ -133,6 +135,10 @@ int main(int argc, char* argv[])
             smokeTest = true;
         } else if (argument == QStringLiteral("--load-first-trace")) {
             loadFirstTrace = true;
+        } else if (argument == QStringLiteral("--simulation-controls-smoke")) {
+            simulationControlsSmoke = true;
+        } else if (argument == QStringLiteral("--simulation-stop-smoke")) {
+            simulationStopSmoke = true;
         } else if (argument == QStringLiteral("--mode=compare")) {
             compareMode = true;
         } else if (argument.startsWith(QStringLiteral("--screenshot="))) {
@@ -34199,6 +34205,120 @@ int main(int argc, char* argv[])
                     (*runner)();
                 });
                 state->ok->click();
+            });
+    } else if (simulationControlsSmoke || simulationStopSmoke) {
+        auto* watchdog = new QTimer(&application);
+        watchdog->setSingleShot(true);
+        QObject::connect(watchdog, &QTimer::timeout, &application, [&application] {
+            qCritical().noquote() << "Simulation control smoke timed out";
+            application.exit(9);
+        });
+        watchdog->start(12'000);
+        QObject::connect(
+            &window,
+            &wave::MainWindow::initialTraceReferenceLoaded,
+            &application,
+            [&application,
+             &window,
+             projectPath,
+             simulationControlsSmoke,
+             simulationStopSmoke,
+             watchdog](const bool success, const QString& message) {
+                if (!success) {
+                    qCritical().noquote()
+                        << "Cannot initialize simulation controls:" << message;
+                    application.exit(4);
+                    return;
+                }
+                auto* run = window.findChild<QAction*>(
+                    QStringLiteral("RunSimulationAction"));
+                auto* stop = window.findChild<QAction*>(
+                    QStringLiteral("StopSimulationAction"));
+                auto* rerun = window.findChild<QAction*>(
+                    QStringLiteral("RerunSimulationAction"));
+                auto* splitter = window.findChild<QWidget*>(
+                    QStringLiteral("SimulationResultSplitter"));
+                auto* stimulus = window.findChild<QWidget*>(
+                    QStringLiteral("SimulationStimulusPanel"));
+                auto* actual = window.findChild<QWidget*>(
+                    QStringLiteral("SimulationActualPanel"));
+                if (!run || !stop || !rerun || !splitter || !stimulus || !actual
+                    || window.property("simulationResultState").toString()
+                        != QStringLiteral("current")
+                    || run->isEnabled() || stop->isEnabled() || !rerun->isEnabled()
+                    || !stimulus->isVisibleTo(&window)
+                    || !actual->isVisibleTo(&window)) {
+                    qCritical().noquote()
+                        << "Simulation controls or dual-canvas result layout are incomplete";
+                    application.exit(5);
+                    return;
+                }
+
+                auto* observed = new QStringList;
+                auto* stopIssued = new bool(false);
+                QObject::connect(
+                    &window,
+                    &wave::MainWindow::simulationSessionStateChanged,
+                    &application,
+                    [&application,
+                     &window,
+                     projectPath,
+                     simulationStopSmoke,
+                     observed,
+                     stopIssued,
+                     stop,
+                     watchdog](const QString& state) {
+                        observed->push_back(state);
+                        if (simulationStopSmoke
+                            && state == QStringLiteral("running")
+                            && !*stopIssued) {
+                            *stopIssued = true;
+                            QTimer::singleShot(0, stop, &QAction::trigger);
+                            return;
+                        }
+                        if (state != QStringLiteral("current")) return;
+                        const auto hasStages = observed->contains(
+                            QStringLiteral("compiling"))
+                            && observed->contains(QStringLiteral("running"));
+                        const auto stopValid = !simulationStopSmoke || *stopIssued;
+                        const auto result = wave::loadProjectFile(projectPath);
+                        const auto sessionValid = result.ok()
+                            && wave::simulationSessionFromProject(*result.project).ok()
+                            && result.project->importedTraces.size() == 1;
+                        if (!hasStages || !stopValid || !sessionValid) {
+                            qCritical().noquote()
+                                << "Simulation controls lost state, cancellation, or result persistence";
+                            application.exit(6);
+                            return;
+                        }
+                        watchdog->stop();
+                        window.hide();
+                        application.exit(0);
+                    });
+
+                if (simulationControlsSmoke) {
+                    if (!QMetaObject::invokeMethod(
+                            &window,
+                            "markEdited",
+                            Qt::DirectConnection)
+                        || window.property("simulationResultState").toString()
+                            != QStringLiteral("stale")
+                        || !run->isEnabled() || !rerun->isEnabled()
+                        || stop->isEnabled()) {
+                        qCritical().noquote()
+                            << "Graphical stimulus edit did not invalidate the result";
+                        application.exit(7);
+                        return;
+                    }
+                }
+                rerun->trigger();
+                if (window.property("simulationResultState").toString()
+                        != QStringLiteral("compiling")
+                    || !stop->isEnabled()) {
+                    qCritical().noquote()
+                        << "Rerun did not enter an asynchronous compiling state";
+                    application.exit(8);
+                }
             });
     } else if (waveformOnlySmoke) {
         QTimer::singleShot(

@@ -3,6 +3,7 @@
 #include "wave/commands.h"
 #include "wave/compare.h"
 #include "wave/model.h"
+#include "wave/simulation_session.h"
 #include "wave/trace.h"
 
 #include <QFutureWatcher>
@@ -31,6 +32,7 @@ class QLabel;
 class QLineEdit;
 class QMenu;
 class QProgressBar;
+class QSplitter;
 class QTableWidget;
 class QTabWidget;
 class QToolButton;
@@ -56,6 +58,7 @@ public:
         QWidget* parent = nullptr,
         std::optional<std::size_t> initialScenarioIndex = std::nullopt,
         bool loadFirstTrace = false);
+    ~MainWindow() override;
 
     [[nodiscard]] const Project& project() const noexcept;
     void requestCompareMode();
@@ -65,6 +68,7 @@ public:
 
 signals:
     void initialTraceReferenceLoaded(bool success, const QString& message);
+    void simulationSessionStateChanged(const QString& state);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -104,6 +108,9 @@ private slots:
     void autoMapImportedTrace();
     void traceMappingCellChanged(int row, int column);
     void finishTraceImport();
+    void runSimulation();
+    void rerunSimulation();
+    void stopSimulation();
     void runCompare();
     void revealCompareDifference(int row, int column);
     void exportCompareReport();
@@ -226,6 +233,13 @@ private:
         Tick offset,
         bool addReference);
     void loadFirstTraceReference();
+    void configureSimulationSession();
+    void updateSimulationControls(const QString& detail = {});
+    [[nodiscard]] bool exportSimulationStimulus(QString& error);
+    void finishSimulationRun(SimulationRunReport report);
+    [[nodiscard]] bool applySimulationResult(
+        SimulationRunReport& report,
+        QString& error);
 
     Project project_;
     QString projectFile_;
@@ -253,6 +267,7 @@ private:
     QTableWidget* traceMappingTable_{nullptr};
     TraceCanvas* traceCanvas_{nullptr};
     TraceCanvas* compareTraceCanvas_{nullptr};
+    QSplitter* simulationResultSplitter_{nullptr};
     QTabWidget* bottomTabs_{nullptr};
     QWidget* tracePanel_{nullptr};
     QWidget* comparePanel_{nullptr};
@@ -323,6 +338,9 @@ private:
     QAction* exportAction_{nullptr};
     QAction* importTraceAction_{nullptr};
     QAction* cancelTraceAction_{nullptr};
+    QAction* runSimulationAction_{nullptr};
+    QAction* stopSimulationAction_{nullptr};
+    QAction* rerunSimulationAction_{nullptr};
     QAction* compareModeAction_{nullptr};
     QMenu* editMenu_{nullptr};
     QMenu* segmentMenu_{nullptr};
@@ -355,6 +373,13 @@ private:
     bool reloadTraceAfterCurrent_{false};
     bool compareModeRequested_{false};
     bool simulationResultMode_{false};
+    QLabel* simulationStateLabel_{nullptr};
+    std::optional<SimulationRunRequest> simulationRequest_;
+    SimulationSessionStateMachine simulationStateMachine_;
+    std::unique_ptr<VerilatorSimulationRunner> simulationRunner_;
+    QString simulationSessionError_;
+    QString simulationStateDetail_;
+    bool simulationStopRequested_{false};
     QString pendingRevealLaneId_;
     std::optional<Tick> pendingRevealTick_;
     ProjectFileRevision loadedProjectRevision_;

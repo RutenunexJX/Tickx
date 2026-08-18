@@ -85,6 +85,7 @@ struct SimulationRunReport {
 class VerilatorSimulationRunner final {
 public:
     using Completion = std::function<void(SimulationRunReport)>;
+    using StageChanged = std::function<void(SimulationRunStage)>;
 
     VerilatorSimulationRunner();
     ~VerilatorSimulationRunner();
@@ -96,7 +97,8 @@ public:
 
     [[nodiscard]] bool start(
         SimulationRunRequest request,
-        Completion completion);
+        Completion completion,
+        StageChanged stageChanged = {});
     [[nodiscard]] bool cancel();
     [[nodiscard]] bool running() const noexcept;
 
