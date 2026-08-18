@@ -47,6 +47,8 @@ int usage()
         << "Usage:\n"
            "  wave-bridge describe <project.wave.json> <manifest.json>\n"
            "  wave-bridge import-module <module-manifest.json> <output-project.wave.json>\n"
+           "  wave-bridge export-stimulus <project.wave.json> <stimulus.json> [--scenario=SELECTOR]\n"
+           "  wave-bridge import-stimulus <module-manifest.json> <stimulus.json> <output-project.wave.json>\n"
            "  wave-bridge import-signals <project.wave.json> <signals.json> <output-project.wave.json> [--scenario=SELECTOR]\n"
            "  wave-bridge link-frame <project.wave.json> <frame-reference.json> <output-project.wave.json>\n"
            "  wave-bridge pinloom-entry <project.wave.json> <artifact-directory> <entry.json> [--scenario=SELECTOR]\n";
@@ -120,6 +122,48 @@ int main(int argc, char* argv[])
         }
         return 0;
     }
+    if (command == QStringLiteral("import-stimulus")) {
+        if (arguments.size() != 5) return usage();
+        QByteArray manifestDocument;
+        QByteArray stimulusDocument;
+        if (!readFile(arguments[2], manifestDocument, error)) {
+            QTextStream(stderr) << "Cannot read Module Manifest: " << error << '\n';
+            return 2;
+        }
+        if (!readFile(arguments[3], stimulusDocument, error)) {
+            QTextStream(stderr) << "Cannot read Stimulus Scenario: " << error << '\n';
+            return 2;
+        }
+        const auto manifest = wave::parseZeroSlackModuleManifest(manifestDocument);
+        if (!manifest.ok()) {
+            QTextStream(stderr) << manifest.error << '\n';
+            return 2;
+        }
+        const auto stimulus = wave::parseZeroSlackStimulusScenario(stimulusDocument);
+        if (!stimulus.ok()) {
+            QTextStream(stderr) << stimulus.error << '\n';
+            return 2;
+        }
+        const auto restored = wave::restoreZeroSlackStimulusScenario(
+            *manifest.manifest, *stimulus.scenario);
+        if (!restored.ok()) {
+            QTextStream(stderr) << restored.error << '\n';
+            return 2;
+        }
+        const auto output = QFileInfo(arguments[4]).absoluteFilePath();
+        if (!wave::saveProjectFileAtomic(*restored.project, output, &error)) {
+            QTextStream(stderr) << "Cannot write restored project: " << error << '\n';
+            return 2;
+        }
+        QTextStream(stdout)
+            << "Restored ZeroSlack stimulus: " << restored.restoredPortCount
+            << " port(s), manifest "
+            << (restored.manifestChanged ? "changed" : "unchanged") << '\n';
+        for (const auto& diagnostic : restored.diagnostics) {
+            QTextStream(stdout) << "warning: " << diagnostic << '\n';
+        }
+        return 0;
+    }
     if (arguments.size() < 4) return usage();
     const auto projectPath = QFileInfo(arguments[2]).absoluteFilePath();
     const auto loaded = wave::loadProjectFile(projectPath);
@@ -128,6 +172,42 @@ int main(int argc, char* argv[])
         return 2;
     }
     auto project = *loaded.project;
+
+    if (command == QStringLiteral("export-stimulus")) {
+        std::optional<QString> scenarioSelector;
+        if (!parseScenarioOption(arguments, 4, scenarioSelector, error)) {
+            QTextStream(stderr) << error << '\n';
+            return usage();
+        }
+        const auto scenarioIndex = wave::cli::resolveScenarioIndex(
+            project, scenarioSelector, error);
+        if (!scenarioIndex) {
+            QTextStream(stderr) << error << '\n';
+            return 2;
+        }
+        const auto& scenario = project.scenarios.at(*scenarioIndex);
+        const auto exported = wave::exportZeroSlackStimulusScenario(project, scenario);
+        if (!exported.ok()) {
+            QTextStream(stderr) << exported.error << '\n';
+            return 2;
+        }
+        const auto output = QFileInfo(arguments[3]).absoluteFilePath();
+        if (!writeAtomic(
+                output,
+                wave::serializeZeroSlackStimulusScenario(*exported.scenario),
+                error)) {
+            QTextStream(stderr) << "Cannot write Stimulus Scenario: " << error << '\n';
+            return 2;
+        }
+        QTextStream(stdout)
+            << "Exported ZeroSlack stimulus for " << scenario.name.c_str()
+            << " (" << scenario.id.c_str() << "): "
+            << exported.scenario->ports.size() << " port(s)\n";
+        for (const auto& diagnostic : exported.diagnostics) {
+            QTextStream(stdout) << "warning: " << diagnostic << '\n';
+        }
+        return 0;
+    }
 
     if (command == QStringLiteral("describe")) {
         if (arguments.size() != 4) return usage();

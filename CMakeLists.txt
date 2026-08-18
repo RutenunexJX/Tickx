@@ -88,6 +88,7 @@ wave_enable_warnings(wavecompare)
 add_library(waveintegration STATIC
     src/waveintegration/src/integration.cpp
     src/waveintegration/src/module_manifest.cpp
+    src/waveintegration/src/stimulus_scenario.cpp
 )
 target_include_directories(waveintegration
     PUBLIC src/waveintegration/include
@@ -213,6 +214,11 @@ install(
 install(
     DIRECTORY "${CMAKE_SOURCE_DIR}/src/waveautomation/schemas/automation/"
     DESTINATION schemas/automation
+    COMPONENT Portable
+)
+install(
+    DIRECTORY "${CMAKE_SOURCE_DIR}/src/waveintegration/schemas/stimulus/"
+    DESTINATION schemas/stimulus
     COMPONENT Portable
 )
 install(

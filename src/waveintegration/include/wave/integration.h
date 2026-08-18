@@ -2,6 +2,7 @@
 
 #include "wave/model.h"
 #include "wave/module_manifest.h"
+#include "wave/stimulus_scenario.h"
 
 #include <QByteArray>
 #include <QString>

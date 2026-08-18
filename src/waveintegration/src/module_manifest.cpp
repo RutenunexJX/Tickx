@@ -850,6 +850,9 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
         "waveSimulation.moduleManifestIdentity",
         jsonStringValue(manifest.identity));
     project.extensions.emplace(
+        "waveSimulation.moduleManifestSchemaVersion",
+        std::to_string(manifest.schemaVersion));
+    project.extensions.emplace(
         "waveSimulation.workspaceId",
         jsonStringValue(manifest.workspaceId));
     project.extensions.emplace(
@@ -976,6 +979,12 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
         lane.extensions.emplace(
             "waveSimulation.canonicalTypeId",
             jsonStringValue(shape.canonicalTypeId));
+        lane.extensions.emplace(
+            "waveSimulation.declarationShapeId",
+            jsonStringValue(shape.declarationShapeId));
+        lane.extensions.emplace(
+            "waveSimulation.sourceOrder",
+            std::to_string(index));
         lane.extensions.emplace(
             "waveSimulation.resolvedTypeText",
             jsonStringValue(shape.resolvedTypeText));

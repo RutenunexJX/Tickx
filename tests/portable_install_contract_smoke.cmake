@@ -44,6 +44,7 @@ foreach(document IN ITEMS
     schemas/automation/v1/capabilities.schema.json
     schemas/automation/v1/report.schema.json
     schemas/automation/v1/operation-batch.schema.json
+    schemas/stimulus/v1/stimulus-scenario.schema.json
     examples/handshake/project.wave.json)
     if(NOT EXISTS "${OUTPUT}/${document}")
         message(FATAL_ERROR "Portable install omitted ${document}")

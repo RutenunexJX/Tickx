@@ -176,6 +176,37 @@ add_test(
 set_tests_properties(wave-bridge-module-manifest-load-smoke PROPERTIES
     DEPENDS wave-bridge-module-manifest-smoke TIMEOUT 60)
 add_test(
+    NAME wave-bridge-stimulus-export-smoke
+    COMMAND wave-bridge export-stimulus
+            "${CMAKE_BINARY_DIR}/bridge-module.wave.json"
+            "${CMAKE_BINARY_DIR}/bridge-stimulus.json"
+)
+set_tests_properties(wave-bridge-stimulus-export-smoke PROPERTIES
+    DEPENDS wave-bridge-module-manifest-smoke TIMEOUT 60)
+add_test(
+    NAME wave-bridge-stimulus-import-smoke
+    COMMAND wave-bridge import-stimulus
+            "${CMAKE_SOURCE_DIR}/examples/handshake/integration/zeroslack_module_manifest_v1.json"
+            "${CMAKE_BINARY_DIR}/bridge-stimulus.json"
+            "${CMAKE_BINARY_DIR}/bridge-stimulus-restored.wave.json"
+)
+set_tests_properties(wave-bridge-stimulus-import-smoke PROPERTIES
+    DEPENDS wave-bridge-stimulus-export-smoke TIMEOUT 60)
+add_test(
+    NAME wave-bridge-stimulus-load-smoke
+    COMMAND wave-cli inspect
+            "${CMAKE_BINARY_DIR}/bridge-stimulus-restored.wave.json"
+)
+set_tests_properties(wave-bridge-stimulus-load-smoke PROPERTIES
+    DEPENDS wave-bridge-stimulus-import-smoke TIMEOUT 60)
+add_test(
+    NAME wave-bridge-stimulus-validate-smoke
+    COMMAND wave-cli validate
+            "${CMAKE_BINARY_DIR}/bridge-stimulus-restored.wave.json"
+)
+set_tests_properties(wave-bridge-stimulus-validate-smoke PROPERTIES
+    DEPENDS wave-bridge-stimulus-import-smoke TIMEOUT 60)
+add_test(
     NAME wave-bridge-frame-smoke
     COMMAND wave-bridge link-frame
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
@@ -586,6 +617,8 @@ set_tests_properties(
     wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
     wave-bridge-module-manifest-smoke wave-bridge-pinloom-smoke wave-cli-inspect-smoke wave-cli-validate-smoke
+    wave-bridge-stimulus-export-smoke wave-bridge-stimulus-import-smoke
+    wave-bridge-stimulus-load-smoke wave-bridge-stimulus-validate-smoke
     wave-cli-summary-smoke wave-cli-sample-smoke wave-cli-window-smoke
     wave-cli-apply-dry-run-smoke wave-cli-apply-smoke wave-cli-contract-smoke
     wave-cli-advanced-contract-smoke wave-cli-window-range-contract-smoke
@@ -628,6 +661,8 @@ set_tests_properties(
     wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
     wave-bridge-module-manifest-smoke wave-bridge-pinloom-smoke wave-cli-inspect-smoke wave-cli-validate-smoke
+    wave-bridge-stimulus-export-smoke wave-bridge-stimulus-import-smoke
+    wave-bridge-stimulus-load-smoke wave-bridge-stimulus-validate-smoke
     wave-cli-summary-smoke wave-cli-sample-smoke wave-cli-window-smoke
     wave-cli-apply-dry-run-smoke wave-cli-apply-smoke wave-cli-contract-smoke
     wave-cli-advanced-contract-smoke wave-cli-window-range-contract-smoke

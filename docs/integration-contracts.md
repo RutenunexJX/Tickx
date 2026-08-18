@@ -47,6 +47,44 @@ SystemVerilog：
 候选状态和端口角色均写入工程扩展字段，输入默认 Segment 直接进入工程 JSON，不存在隐藏的
 激励生成逻辑。该 CLI 是正式 ZeroSlack 入口开放前的实验性边界；本阶段不调用 Verilator。
 
+### 保存和恢复 Stimulus Scenario v1
+
+```powershell
+wave-bridge export-stimulus module.wave.json stimulus.json `
+  --scenario=<稳定 ID 或唯一名称>
+wave-bridge import-stimulus module-manifest.json stimulus.json restored.wave.json
+```
+
+`stimulus.json` 是独立于 `.wave.json` 的便携契约。它只保存用户可见的仿真意图，不保存
+结果波形、绝对路径或 Wave Workbench 窗口状态：
+
+- Module Manifest identity、schema、workspace identity 和 module/instance target；
+- Scenario 稳定 ID、名称、整数 tick timebase 和 duration；
+- port 的名称、方向、宽度、signed、canonical type、declaration shape 和原始顺序；
+- stimulus/watch 角色、显示顺序、分组、可见性、radix 和 enum map；
+- bit、bus、enum、reset 的显式连续 Segment；
+- clock 的 period、phase、duty、edge、初始值及显式 override Segment；
+- reset 的 active level、同步属性及由可见 Segment 表达的 assert/deassert 区间。
+
+tick 使用十进制字符串，避免 JSON number 在跨语言实现中丢失 int64 精度。正式 schema 位于
+`schemas/stimulus/v1/stimulus-scenario.schema.json`。解析器还执行 schema 难以完整表达的
+约束，包括端口身份唯一、显示顺序唯一、stimulus 全时段覆盖、Segment 不重叠、值符合
+lane 类型，以及内容哈希 identity 校验。
+
+恢复不重新解释 SystemVerilog，而是先用当前 Module Manifest 建立工程，再应用保存的场景：
+
+- Manifest identity 未变化时，端口契约必须精确一致；任何缺失、类型冲突或新增端口均视为
+  契约损坏并拒绝恢复。
+- Manifest identity 已变化时，只迁移名称相同且方向、宽度、signed、canonical type
+  兼容的端口。
+- 已删除端口报告为 missing；同名但类型变化的端口保留当前 Manifest 默认值并报告为
+  incompatible；新增端口按当前 Manifest 默认值追加。
+- 不按相似名称、源码行号或端口顺序猜测映射。
+- 保存文件移动到其他目录后内容与 identity 不变，恢复只依赖显式传入的当前 Manifest。
+
+该切片只建立场景契约和确定性迁移边界，不调用 Verilator，也不把结果波形写入
+`stimulus.json`。
+
 ### 导入信号清单
 
 ```powershell

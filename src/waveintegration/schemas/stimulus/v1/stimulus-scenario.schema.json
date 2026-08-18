@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zeroslack.local/schemas/stimulus/v1/stimulus-scenario.schema.json",
+  "title": "ZeroSlack Stimulus Scenario v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "manifestSchemaVersion",
+    "identity",
+    "manifestIdentity",
+    "workspaceId",
+    "target",
+    "scenario"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "manifestSchemaVersion": {"const": 1},
+    "identity": {"$ref": "#/$defs/sha256"},
+    "manifestIdentity": {"$ref": "#/$defs/sha256"},
+    "workspaceId": {"type": "string", "minLength": 1},
+    "target": {"$ref": "#/$defs/target"},
+    "scenario": {"$ref": "#/$defs/scenario"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "tick": {
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]*)$"
+    },
+    "positiveTick": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "module", "instancePath"],
+      "properties": {
+        "mode": {"enum": ["module-definition", "instance"]},
+        "module": {"type": "string", "minLength": 1},
+        "instancePath": {"type": "string"}
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "timeBasePicosecondsPerTick",
+        "durationTicks",
+        "groups",
+        "ports"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "timeBasePicosecondsPerTick": {"$ref": "#/$defs/positiveTick"},
+        "durationTicks": {"$ref": "#/$defs/positiveTick"},
+        "groups": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/group"}
+        },
+        "ports": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/port"}
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "displayOrder", "visible"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "displayOrder": {"type": "integer", "minimum": 0},
+        "visible": {"type": "boolean"}
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "direction",
+        "canonicalTypeId",
+        "declarationShapeId",
+        "width",
+        "signed",
+        "sourceOrder"
+      ],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "direction": {"enum": ["input", "output", "inout", "ref"]},
+        "canonicalTypeId": {"type": "string"},
+        "declarationShapeId": {"type": "string"},
+        "width": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "signed": {"type": "boolean"},
+        "sourceOrder": {"type": "integer", "minimum": 0}
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startTick", "endTick", "value"],
+      "properties": {
+        "startTick": {"$ref": "#/$defs/tick"},
+        "endTick": {"$ref": "#/$defs/positiveTick"},
+        "value": {"type": "string", "minLength": 1}
+      }
+    },
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "periodTicks",
+        "phaseTicks",
+        "dutyNumerator",
+        "dutyDenominator",
+        "activeEdge",
+        "initialValue"
+      ],
+      "properties": {
+        "periodTicks": {"$ref": "#/$defs/positiveTick"},
+        "phaseTicks": {"$ref": "#/$defs/tick"},
+        "dutyNumerator": {"$ref": "#/$defs/positiveTick"},
+        "dutyDenominator": {"$ref": "#/$defs/positiveTick"},
+        "activeEdge": {"enum": ["rising", "falling"]},
+        "initialValue": {"enum": ["0", "1"]}
+      }
+    },
+    "reset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["activeLevel", "synchronization"],
+      "properties": {
+        "activeLevel": {"enum": ["unspecified", "low", "high"]},
+        "synchronization": {
+          "enum": ["unspecified", "synchronous", "asynchronous"]
+        }
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "laneId",
+        "displayOrder",
+        "role",
+        "kind",
+        "radix",
+        "visible",
+        "groupId",
+        "binding",
+        "enumMap",
+        "segments",
+        "clock",
+        "reset"
+      ],
+      "properties": {
+        "laneId": {"type": "string", "minLength": 1},
+        "displayOrder": {"type": "integer", "minimum": 0},
+        "role": {"enum": ["stimulus", "watch", "stimulus-watch"]},
+        "kind": {"enum": ["clock", "bit", "bus", "enum"]},
+        "radix": {"enum": ["binary", "octal", "decimal", "hexadecimal"]},
+        "visible": {"type": "boolean"},
+        "groupId": {"type": "string"},
+        "binding": {"$ref": "#/$defs/binding"},
+        "enumMap": {
+          "type": "object",
+          "additionalProperties": {"type": "string"}
+        },
+        "segments": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/range"}
+        },
+        "clock": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/clock"}
+          ]
+        },
+        "reset": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/reset"}
+          ]
+        }
+      }
+    }
+  }
+}

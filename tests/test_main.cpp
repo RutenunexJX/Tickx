@@ -5608,6 +5608,315 @@ void testZeroSlackModuleManifestImport()
         "absolute source path was accepted by the portable manifest reader");
 }
 
+void testZeroSlackStimulusScenarioContract()
+{
+    const auto manifestPath = std::filesystem::path(WAVE_SOURCE_DIR)
+        / "examples" / "handshake" / "integration"
+        / "zeroslack_module_manifest_v1.json";
+    QFile fixture(QString::fromStdWString(manifestPath.wstring()));
+    expect(fixture.open(QIODevice::ReadOnly), "cannot open Module Manifest fixture");
+    const auto manifestDocument = fixture.readAll();
+    const auto parsedManifest = wave::parseZeroSlackModuleManifest(manifestDocument);
+    expect(parsedManifest.ok(), parsedManifest.error.toStdString());
+    const auto imported = wave::importZeroSlackModuleManifest(*parsedManifest.manifest);
+    expect(imported.ok(), imported.error.toStdString());
+
+    auto project = *imported.project;
+    auto& scenario = project.scenarios.front();
+    const auto laneByName = [&scenario](const std::string_view name) -> wave::Lane* {
+        const auto found = std::find_if(
+            scenario.lanes.begin(), scenario.lanes.end(),
+            [name](const wave::Lane& lane) { return lane.name == name; });
+        return found == scenario.lanes.end() ? nullptr : &*found;
+    };
+    auto* clock = laneByName("clk_i");
+    auto* reset = laneByName("rst_ni");
+    auto* request = laneByName("req_i");
+    auto* data = laneByName("data_i");
+    auto* mode = laneByName("mode_i");
+    expect(clock && reset && request && data && mode,
+           "stimulus fixture is missing editable input lanes");
+
+    auto* clockDomain = wave::findClock(project, clock->clockDomainId);
+    expect(clockDomain != nullptr, "stimulus fixture has no clock domain");
+    clockDomain->period = 20'000;
+    clockDomain->phase = 5'000;
+    clockDomain->dutyCycle = {1, 4};
+    clockDomain->activeEdge = wave::ClockEdge::Falling;
+
+    reset->segments.clear();
+    wave::setSegmentRange(*reset, 0, 15'000, "0", "reset-asserted");
+    wave::setSegmentRange(*reset, 15'000, scenario.duration, "1", "reset-released");
+    reset->extensions["waveSimulation.resetActiveLevel"] = R"("low")";
+    reset->extensions["waveSimulation.resetSynchronization"] = R"("asynchronous")";
+    request->segments.clear();
+    wave::setSegmentRange(*request, 0, 40'000, "0", "request-low");
+    wave::setSegmentRange(*request, 40'000, scenario.duration, "1", "request-high");
+    data->segments.clear();
+    data->radix = wave::Radix::Binary;
+    wave::setSegmentRange(*data, 0, 60'000, "0x12", "data-a");
+    wave::setSegmentRange(*data, 60'000, scenario.duration, "0x34", "data-b");
+    mode->segments.clear();
+    wave::setSegmentRange(*mode, 0, 70'000, "MODE_IDLE", "mode-idle");
+    wave::setSegmentRange(*mode, 70'000, scenario.duration, "MODE_RUN", "mode-run");
+
+    wave::Lane group;
+    group.id = "group-inputs";
+    group.name = "Input stimulus";
+    group.kind = wave::LaneKind::Group;
+    group.visible = false;
+    request->groupId = group.id;
+    data->groupId = group.id;
+    scenario.lanes.insert(scenario.lanes.begin() + 2, group);
+
+    const auto exported = wave::exportZeroSlackStimulusScenario(project, scenario);
+    expect(exported.ok(), exported.error.toStdString());
+    const auto document = wave::serializeZeroSlackStimulusScenario(*exported.scenario);
+    expect(!document.contains("E:/") && !document.contains("E:\\\\")
+               && !document.contains("C:/") && !document.contains("C:\\\\"),
+           "portable stimulus contract leaked an absolute path");
+    const auto parsedScenario = wave::parseZeroSlackStimulusScenario(document);
+    expect(parsedScenario.ok(), parsedScenario.error.toStdString());
+    expect(
+        parsedScenario.scenario->groups.size() == 1
+            && parsedScenario.scenario->ports.size() == 8
+            && parsedScenario.scenario->duration == scenario.duration,
+        "stimulus contract did not preserve groups, ports, or duration");
+    const auto savedPort = [&parsedScenario](const std::string_view name)
+        -> const wave::StimulusScenarioPort* {
+        const auto found = std::find_if(
+            parsedScenario.scenario->ports.begin(),
+            parsedScenario.scenario->ports.end(),
+            [name](const wave::StimulusScenarioPort& port) {
+                return port.binding.name == name;
+            });
+        return found == parsedScenario.scenario->ports.end() ? nullptr : &*found;
+    };
+    const auto* savedClock = savedPort("clk_i");
+    const auto* savedReset = savedPort("rst_ni");
+    const auto* savedData = savedPort("data_i");
+    const auto* savedMode = savedPort("mode_i");
+    expect(
+        savedClock && savedClock->clock
+            && savedClock->clock->period == 20'000
+            && savedClock->clock->phase == 5'000
+            && savedClock->clock->dutyCycle == wave::Rational{1, 4}
+            && savedClock->clock->activeEdge == wave::ClockEdge::Falling
+            && savedClock->clock->initialValue == '0',
+        "clock configuration was not exported explicitly");
+    expect(
+        savedReset && savedReset->reset
+            && savedReset->reset->activeLevel
+                == wave::StimulusResetActiveLevel::Low
+            && savedReset->reset->synchronization
+                == wave::StimulusResetSynchronization::Asynchronous
+            && savedReset->segments.size() == 2,
+        "reset metadata or visible assertion ranges were not exported");
+    expect(
+        savedData && savedData->radix == wave::Radix::Binary
+            && savedData->segments.size() == 2
+            && savedData->groupId == "group-inputs"
+            && savedMode && savedMode->kind == wave::LaneKind::Enum
+            && savedMode->segments.size() == 2,
+        "bus/enum stimulus or display metadata was not exported");
+
+    QTemporaryDir firstDirectory;
+    QTemporaryDir movedDirectory;
+    expect(firstDirectory.isValid() && movedDirectory.isValid(),
+           "cannot create stimulus portability directories");
+    const auto firstPath = firstDirectory.filePath(QStringLiteral("stimulus.json"));
+    const auto movedPath = movedDirectory.filePath(QStringLiteral("stimulus.json"));
+    {
+        QFile output(firstPath);
+        expect(output.open(QIODevice::WriteOnly)
+                   && output.write(document) == document.size(),
+               "cannot save portable stimulus fixture");
+    }
+    expect(QFile::copy(firstPath, movedPath), "cannot move portable stimulus fixture");
+    QFile movedFile(movedPath);
+    expect(movedFile.open(QIODevice::ReadOnly), "cannot reopen moved stimulus fixture");
+    const auto movedScenario = wave::parseZeroSlackStimulusScenario(movedFile.readAll());
+    expect(movedScenario.ok()
+               && movedScenario.scenario->identity == parsedScenario.scenario->identity,
+           "moving the workspace changed the stimulus contract identity");
+
+    const auto restored = wave::restoreZeroSlackStimulusScenario(
+        *parsedManifest.manifest, *movedScenario.scenario);
+    expect(restored.ok(), restored.error.toStdString());
+    expect(!restored.manifestChanged && restored.restoredPortCount == 8
+               && restored.missingSavedPortCount == 0
+               && restored.incompatiblePortCount == 0
+               && restored.newPortCount == 0,
+           "unchanged manifest did not restore exactly");
+    const auto& restoredScenario = restored.project->scenarios.front();
+    const auto restoredLane = [&restoredScenario](const std::string_view name)
+        -> const wave::Lane* {
+        const auto found = std::find_if(
+            restoredScenario.lanes.begin(), restoredScenario.lanes.end(),
+            [name](const wave::Lane& lane) { return lane.name == name; });
+        return found == restoredScenario.lanes.end() ? nullptr : &*found;
+    };
+    const auto* restoredData = restoredLane("data_i");
+    const auto* restoredMode = restoredLane("mode_i");
+    expect(restored.project->clockDomains.size() == 1
+               && restored.project->clockDomains.front().period == 20'000
+               && restoredData && restoredData->radix == wave::Radix::Binary
+               && restoredData->segments.size() == 2
+               && restoredMode && restoredMode->segments.size() == 2,
+           "restored project lost explicit stimulus configuration");
+    const auto reopenedPath = movedDirectory.filePath(QStringLiteral("restored.wave.json"));
+    QString saveError;
+    expect(wave::saveProjectFileAtomic(*restored.project, reopenedPath, &saveError),
+           saveError.toStdString());
+    const auto reopened = wave::loadProjectFile(reopenedPath);
+    expect(reopened.ok()
+               && reopened.project->scenarios.front().duration == scenario.duration
+               && reopened.project->clockDomains.front().period == 20'000,
+           "restored project did not survive normal project save/reopen");
+
+    auto changedRoot = QJsonDocument::fromJson(manifestDocument).object();
+    auto changedPorts = changedRoot.value(QStringLiteral("ports")).toArray();
+    QJsonArray rebuiltPorts;
+    QJsonObject newPort;
+    for (const auto& value : changedPorts) {
+        auto portObject = value.toObject();
+        const auto name = portObject.value(QStringLiteral("name")).toString();
+        if (name == QStringLiteral("req_i")) {
+            newPort = portObject;
+            continue;
+        }
+        if (name == QStringLiteral("data_i")) {
+            auto type = portObject.value(QStringLiteral("type")).toObject();
+            type.insert(QStringLiteral("bitWidth"), 16);
+            type.insert(QStringLiteral("canonicalTypeId"), QStringLiteral("logic:16"));
+            type.insert(QStringLiteral("declarationShapeId"), QStringLiteral("logic[15:0]"));
+            type.insert(QStringLiteral("rawTypeText"), QStringLiteral("logic [15:0]"));
+            type.insert(QStringLiteral("resolvedTypeText"), QStringLiteral("logic [15:0]"));
+            type.insert(QStringLiteral("packedDimensions"), QStringLiteral("[15:0]"));
+            portObject.insert(QStringLiteral("type"), type);
+            portObject.insert(QStringLiteral("declarationText"),
+                              QStringLiteral("input logic [15:0] data_i"));
+        }
+        rebuiltPorts.append(portObject);
+    }
+    newPort.insert(QStringLiteral("name"), QStringLiteral("new_i"));
+    newPort.insert(QStringLiteral("declarationText"), QStringLiteral("input logic new_i"));
+    newPort.insert(QStringLiteral("sourceLine"), 15);
+    rebuiltPorts.append(newPort);
+    changedRoot.insert(QStringLiteral("ports"), rebuiltPorts);
+    const auto changedManifest = wave::parseZeroSlackModuleManifest(
+        QJsonDocument(changedRoot).toJson());
+    expect(changedManifest.ok(), changedManifest.error.toStdString());
+    const auto migrated = wave::restoreZeroSlackStimulusScenario(
+        *changedManifest.manifest, *movedScenario.scenario);
+    expect(migrated.ok(), migrated.error.toStdString());
+    expect(migrated.manifestChanged && migrated.missingSavedPortCount == 1
+               && migrated.incompatiblePortCount == 1
+               && migrated.newPortCount == 1
+               && migrated.restoredPortCount == 6,
+           "changed manifest did not report deterministic port migration results");
+    const auto& migratedLanes = migrated.project->scenarios.front().lanes;
+    const auto migratedByName = [&migratedLanes](const std::string_view name)
+        -> const wave::Lane* {
+        const auto found = std::find_if(
+            migratedLanes.begin(), migratedLanes.end(),
+            [name](const wave::Lane& lane) { return lane.name == name; });
+        return found == migratedLanes.end() ? nullptr : &*found;
+    };
+    expect(!migratedByName("req_i") && migratedByName("new_i")
+               && migratedByName("data_i")
+               && migratedByName("data_i")->width == 16
+               && migratedByName("data_i")->segments.size() == 1,
+           "migration guessed a removed port or overwrote incompatible current defaults");
+
+    auto mismatchedManifest = *parsedManifest.manifest;
+    mismatchedManifest.target.module = "other_dut";
+    expect(!wave::restoreZeroSlackStimulusScenario(
+                mismatchedManifest, *movedScenario.scenario).ok(),
+           "stimulus scenario was restored onto a different target");
+    auto tamperedScenario = *movedScenario.scenario;
+    tamperedScenario.name = "tampered";
+    expect(!wave::restoreZeroSlackStimulusScenario(
+                *parsedManifest.manifest, tamperedScenario).ok(),
+           "in-memory stimulus content bypassed its identity check");
+    auto mismatchedWorkspace = *parsedManifest.manifest;
+    mismatchedWorkspace.workspaceId = "other-workspace";
+    expect(!wave::restoreZeroSlackStimulusScenario(
+                mismatchedWorkspace, *movedScenario.scenario).ok(),
+           "stimulus scenario was restored into a different workspace identity");
+
+    auto enumChangedRoot = QJsonDocument::fromJson(manifestDocument).object();
+    auto enumChangedPorts = enumChangedRoot.value(QStringLiteral("ports")).toArray();
+    for (qsizetype index = 0; index < enumChangedPorts.size(); ++index) {
+        auto portObject = enumChangedPorts.at(index).toObject();
+        if (portObject.value(QStringLiteral("name")).toString()
+            != QStringLiteral("mode_i")) {
+            continue;
+        }
+        auto type = portObject.value(QStringLiteral("type")).toObject();
+        auto values = type.value(QStringLiteral("enumValues")).toArray();
+        auto added = values.at(0).toObject();
+        added.insert(QStringLiteral("name"), QStringLiteral("MODE_NEW"));
+        added.insert(QStringLiteral("declarationText"), QStringLiteral("MODE_NEW = 2'd2"));
+        added.insert(QStringLiteral("valueText"), QStringLiteral("2'd2"));
+        added.insert(QStringLiteral("displayValueText"), QStringLiteral("2'd2"));
+        values.append(added);
+        type.insert(QStringLiteral("enumValues"), values);
+        portObject.insert(QStringLiteral("type"), type);
+        enumChangedPorts[index] = portObject;
+        break;
+    }
+    enumChangedRoot.insert(QStringLiteral("ports"), enumChangedPorts);
+    const auto enumChangedManifest = wave::parseZeroSlackModuleManifest(
+        QJsonDocument(enumChangedRoot).toJson());
+    expect(enumChangedManifest.ok(), enumChangedManifest.error.toStdString());
+    const auto enumMigration = wave::restoreZeroSlackStimulusScenario(
+        *enumChangedManifest.manifest, *movedScenario.scenario);
+    expect(enumMigration.ok() && enumMigration.incompatiblePortCount == 1
+               && enumMigration.restoredPortCount == 7,
+           "changed enum members were treated as a compatible typedef name");
+
+    auto unknownRoot = QJsonDocument::fromJson(document).object();
+    auto unknownScenario = unknownRoot.value(QStringLiteral("scenario")).toObject();
+    unknownScenario.insert(QStringLiteral("absolutePath"), QStringLiteral("C:/forbidden"));
+    unknownRoot.insert(QStringLiteral("scenario"), unknownScenario);
+    expect(!wave::parseZeroSlackStimulusScenario(
+                QJsonDocument(unknownRoot).toJson()).ok(),
+           "unknown or absolute-path stimulus property was accepted");
+    auto futureRoot = QJsonDocument::fromJson(document).object();
+    futureRoot.insert(QStringLiteral("schemaVersion"), 2);
+    expect(!wave::parseZeroSlackStimulusScenario(
+                QJsonDocument(futureRoot).toJson()).ok(),
+           "unsupported stimulus schema version was accepted");
+
+    auto collisionRoot = QJsonDocument::fromJson(document).object();
+    auto collisionScenario = collisionRoot.value(QStringLiteral("scenario")).toObject();
+    auto collisionPorts = collisionScenario.value(QStringLiteral("ports")).toArray();
+    auto collisionPort = collisionPorts.at(0).toObject();
+    collisionPort.insert(QStringLiteral("laneId"), QStringLiteral("group-inputs"));
+    collisionPorts[0] = collisionPort;
+    collisionScenario.insert(QStringLiteral("ports"), collisionPorts);
+    collisionRoot.insert(QStringLiteral("scenario"), collisionScenario);
+    expect(!wave::parseZeroSlackStimulusScenario(
+                QJsonDocument(collisionRoot).toJson()).ok(),
+           "group and port lane identity collision was accepted");
+
+    auto inconsistentClockRoot = QJsonDocument::fromJson(document).object();
+    auto inconsistentScenario =
+        inconsistentClockRoot.value(QStringLiteral("scenario")).toObject();
+    auto inconsistentPorts = inconsistentScenario.value(QStringLiteral("ports")).toArray();
+    auto clockPort = inconsistentPorts.at(0).toObject();
+    auto clockObject = clockPort.value(QStringLiteral("clock")).toObject();
+    clockObject.insert(QStringLiteral("initialValue"), QStringLiteral("1"));
+    clockPort.insert(QStringLiteral("clock"), clockObject);
+    inconsistentPorts[0] = clockPort;
+    inconsistentScenario.insert(QStringLiteral("ports"), inconsistentPorts);
+    inconsistentClockRoot.insert(QStringLiteral("scenario"), inconsistentScenario);
+    expect(!wave::parseZeroSlackStimulusScenario(
+                QJsonDocument(inconsistentClockRoot).toJson()).ok(),
+           "clock initial value inconsistent with period/phase/duty was accepted");
+}
+
 void testAutomationContracts()
 {
     auto source = wave::makeDemonstrationProject();
@@ -17557,6 +17866,7 @@ int main(int argc, char* argv[])
         {"compare diagnostics, relations, and reports", testCompareDiagnosticsRelationsAndReports},
         {"cross-application file and URI contracts", testCrossApplicationContracts},
         {"ZeroSlack Module Manifest import", testZeroSlackModuleManifestImport},
+        {"ZeroSlack Stimulus Scenario contract", testZeroSlackStimulusScenarioContract},
         {"headless automation JSON contracts", testAutomationContracts},
         {"Relation repair reference contracts", testAutomationRelationRepairReferenceContracts},
         {"structural identity validation contracts", testAutomationStructuralIdentityValidationContracts},
