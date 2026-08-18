@@ -49,7 +49,15 @@ int main(int argc, char* argv[])
         return 0;
     }
     if (qEnvironmentVariable("WAVE_VERILATOR_FIXTURE_BUILD_FAIL") == QStringLiteral("1")) {
-        error << "fixture Verilator build failure\n";
+        QString sourcePath;
+        for (const auto& argument : arguments) {
+            if (argument.endsWith(QStringLiteral(".sv"), Qt::CaseInsensitive)) {
+                sourcePath = argument;
+                break;
+            }
+        }
+        error << "%Error: " << sourcePath
+              << ":2:7: fixture Verilator build failure\n";
         error.flush();
         return 23;
     }

@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace wave {
 
@@ -79,6 +80,16 @@ struct SimulationRunRequest {
     quint64 generation{0};
 };
 
+struct SimulationSourceDiagnostic {
+    QString sourceFile;
+    int line{0};
+    int column{0};
+    QString severity;
+    QString stage;
+    QString message;
+    QString code;
+};
+
 struct SimulationRunReport {
     SimulationRunStatus status{SimulationRunStatus::InvalidRequest};
     SimulationRunStage stage{SimulationRunStage::ValidateInputs};
@@ -90,6 +101,7 @@ struct SimulationRunReport {
     std::optional<ProcessRunResult> buildProcess;
     std::optional<ProcessRunResult> simulationProcess;
     std::optional<TraceIndex> trace;
+    std::vector<SimulationSourceDiagnostic> diagnostics;
     qint64 durationMs{0};
 
     [[nodiscard]] bool ok() const noexcept

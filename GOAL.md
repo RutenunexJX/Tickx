@@ -1,8 +1,12 @@
 # Wave Workbench 长期目标
 
-更新时间：2026-08-13
+更新时间：2026-08-19
 
 ## 目标
+
+ZeroSlack Wave Simulation S10 已完成正式接入。WaveWorkbench 现在兼容 Module Manifest
+v1/v2，能够恢复 scoped observation lanes，并向宿主返回可导航的结构化构建/运行诊断。
+本次全量 offscreen CTest 为 88/88；共享控件嵌入属于后续 S11。
 
 交付一个可独立运行的 Qt 6/C++20 波形桌面应用，使用户能够人工定义与直接编辑 FPGA
 预期数字波形；同一场景模型继续支撑 SystemVerilog/SVA/cocotb、文档图、trace 导入及

@@ -1,9 +1,22 @@
 # Wave Workbench 实施计划
 
-更新时间：2026-08-13
+更新时间：2026-08-19
 
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
+
+## ZeroSlack 正式接入切片 S10
+
+状态：完成
+
+- Module Manifest 当前版本为 v2，解析器继续兼容 v1。v2 新增 module/always observation
+  scope 和语义 observation；内部信号以 watch lane 导入，选中 always 时未观察的 output
+  默认隐藏，stimulus input 始终保留。
+- 同一声明的不同成员允许共享 semantic ID，以 access path 区分，并生成不同 lane ID。
+- `wave-sim-runner` 从 Verilator/C++ 构建与运行输出提取结构化源码诊断；JSON 报告包含
+  file、line、column、severity、stage、code 和 message。
+- 全量 offscreen CTest `88/88` 通过。当前机器未安装真实 Verilator，外部进程路径使用
+  确定性 fixture 验证。
 
 ## 阶段 1：工程模型和基础画布
 

@@ -1,6 +1,6 @@
 # Simulation Runner
 
-`wave-sim-runner` 是 Wave Simulation 的实验性独立进程边界。它提供工具链探测，
+`wave-sim-runner` 是 Wave Simulation 的正式独立进程边界。它提供工具链探测，
 并可使用版本化 Module Manifest 与 Stimulus Scenario 契约运行固定 DUT 或宿主提供的
 完整模块源码镜像。runner 不修改输入工程文件；宿主可请求生成带 VCD 引用的结果工程。
 
@@ -140,6 +140,10 @@ stdout 始终输出 `wave-workbench.toolchain-probe/v1` JSON。总体状态为�
 证据，以及导入后 TraceIndex 的 signal 和 transition 计数。失败状态区分输入、Manifest、
 Stimulus、契约、能力限制、工具链、harness、构建、运行、VCD 导入、结果工程物化、超时、
 取消与被新 generation 取代。
+
+构建或运行失败时，报告的 `diagnostics` 数组按条目提供 `sourceFile`、`line`、`column`、
+`severity`、`stage`、`code` 和 `message`。源码路径必须位于 workspace 内并转换为相对路径；
+无法解析工具输出时生成指向目标模块声明的保守诊断。ZeroSlack 将这些条目映射为可跳转通知。
 
 退出码：
 

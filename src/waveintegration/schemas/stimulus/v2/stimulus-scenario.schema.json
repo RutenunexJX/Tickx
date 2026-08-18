@@ -15,7 +15,7 @@
   ],
   "properties": {
     "schemaVersion": {"const": 2},
-    "manifestSchemaVersion": {"const": 1},
+    "manifestSchemaVersion": {"enum": [1, 2]},
     "identity": {"$ref": "../v1/stimulus-scenario.schema.json#/$defs/sha256"},
     "manifestIdentity": {"$ref": "../v1/stimulus-scenario.schema.json#/$defs/sha256"},
     "workspaceId": {"type": "string", "minLength": 1},

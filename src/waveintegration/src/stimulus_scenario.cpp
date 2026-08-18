@@ -695,7 +695,10 @@ StimulusScenarioParseResult parseZeroSlackStimulusScenario(
         || schemaVersion > ZeroSlackStimulusScenario::CurrentSchemaVersion
         || !readUnsigned(root, QStringLiteral("manifestSchemaVersion"),
                          QStringLiteral("stimulus"), manifestSchemaVersion, error, 1)
-        || manifestSchemaVersion != ZeroSlackModuleManifest::CurrentSchemaVersion) {
+        || manifestSchemaVersion
+               < ZeroSlackModuleManifest::MinimumSupportedSchemaVersion
+        || manifestSchemaVersion
+               > ZeroSlackModuleManifest::CurrentSchemaVersion) {
         result.error = error.isEmpty()
             ? QStringLiteral("Unsupported ZeroSlack Stimulus Scenario schema version")
             : error;
@@ -1307,10 +1310,14 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     StimulusScenarioRestoreResult result;
     if (saved.schemaVersion < ZeroSlackStimulusScenario::MinimumSupportedSchemaVersion
         || saved.schemaVersion > ZeroSlackStimulusScenario::CurrentSchemaVersion
-        || saved.manifestSchemaVersion != ZeroSlackModuleManifest::CurrentSchemaVersion
+        || saved.manifestSchemaVersion
+               < ZeroSlackModuleManifest::MinimumSupportedSchemaVersion
+        || saved.manifestSchemaVersion
+               > ZeroSlackModuleManifest::CurrentSchemaVersion
         || saved.identity != computeIdentity(saved)
         || saved.duration <= 0 || !saved.timeBase.isValid()
-        || manifest.schemaVersion != saved.manifestSchemaVersion
+        || manifest.schemaVersion < saved.manifestSchemaVersion
+        || manifest.schemaVersion > ZeroSlackModuleManifest::CurrentSchemaVersion
         || manifest.workspaceId != saved.workspaceId
         || manifest.target.mode != saved.target.mode
         || manifest.target.module != saved.target.module

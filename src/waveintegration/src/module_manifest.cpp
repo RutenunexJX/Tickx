@@ -503,26 +503,43 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
     }
     const auto root = parsed.object();
     QString error;
-    if (!exactKeys(
-            root,
-            {QStringLiteral("schemaVersion"), QStringLiteral("workspaceId"),
-             QStringLiteral("target"), QStringLiteral("sources"),
-             QStringLiteral("includeDirs"), QStringLiteral("defines"),
-             QStringLiteral("parameters"), QStringLiteral("ports"),
-             QStringLiteral("clockCandidates"), QStringLiteral("resetCandidates")},
-            QStringLiteral("manifest"),
-            error)) {
-        result.error = error;
-        return result;
-    }
     const auto version = root.value(QStringLiteral("schemaVersion"));
     if (!version.isDouble()
-        || version.toDouble() != ZeroSlackModuleManifest::CurrentSchemaVersion) {
+        || std::floor(version.toDouble()) != version.toDouble()
+        || version.toInt() < ZeroSlackModuleManifest::MinimumSupportedSchemaVersion
+        || version.toInt() > ZeroSlackModuleManifest::CurrentSchemaVersion) {
         result.error = QStringLiteral("Unsupported ZeroSlack Module Manifest schemaVersion");
+        return result;
+    }
+    const int schemaVersion = version.toInt();
+    const bool hasObservationContract = schemaVersion >= 2;
+    const bool keysValid = hasObservationContract
+        ? exactKeys(
+              root,
+              {QStringLiteral("schemaVersion"), QStringLiteral("workspaceId"),
+               QStringLiteral("target"), QStringLiteral("observationScope"),
+               QStringLiteral("observations"), QStringLiteral("sources"),
+               QStringLiteral("includeDirs"), QStringLiteral("defines"),
+               QStringLiteral("parameters"), QStringLiteral("ports"),
+               QStringLiteral("clockCandidates"), QStringLiteral("resetCandidates")},
+              QStringLiteral("manifest"),
+              error)
+        : exactKeys(
+              root,
+              {QStringLiteral("schemaVersion"), QStringLiteral("workspaceId"),
+               QStringLiteral("target"), QStringLiteral("sources"),
+               QStringLiteral("includeDirs"), QStringLiteral("defines"),
+               QStringLiteral("parameters"), QStringLiteral("ports"),
+               QStringLiteral("clockCandidates"), QStringLiteral("resetCandidates")},
+              QStringLiteral("manifest"),
+              error);
+    if (!keysValid) {
+        result.error = error;
         return result;
     }
 
     ZeroSlackModuleManifest manifest;
+    manifest.schemaVersion = schemaVersion;
     if (!readString(root, QStringLiteral("workspaceId"), QStringLiteral("manifest"),
                     manifest.workspaceId, error, false)
         || !QRegularExpression(QStringLiteral("^sha256:[0-9a-f]{64}$"))
@@ -583,6 +600,132 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
         return result;
     }
 
+    if (hasObservationContract) {
+        const auto scopeValue = root.value(QStringLiteral("observationScope"));
+        if (!scopeValue.isObject()) {
+            result.error = QStringLiteral("manifest.observationScope must be an object");
+            return result;
+        }
+        const auto scope = scopeValue.toObject();
+        if (!exactKeys(
+                scope,
+                {QStringLiteral("mode"), QStringLiteral("label"),
+                 QStringLiteral("sourceFile"), QStringLiteral("startLine"),
+                 QStringLiteral("endLine")},
+                QStringLiteral("manifest.observationScope"),
+                error)) {
+            result.error = error;
+            return result;
+        }
+        std::string scopeMode;
+        std::uint64_t startLine = 0;
+        std::uint64_t endLine = 0;
+        if (!readString(scope, QStringLiteral("mode"),
+                        QStringLiteral("manifest.observationScope"),
+                        scopeMode, error, false)
+            || !readString(scope, QStringLiteral("label"),
+                           QStringLiteral("manifest.observationScope"),
+                           manifest.observationScope.label, error)
+            || !readRelativePath(scope, QStringLiteral("sourceFile"),
+                                 QStringLiteral("manifest.observationScope"),
+                                 manifest.observationScope.sourceFile, error)
+            || !readInteger(scope, QStringLiteral("startLine"),
+                            QStringLiteral("manifest.observationScope"),
+                            startLine, error)
+            || !readInteger(scope, QStringLiteral("endLine"),
+                            QStringLiteral("manifest.observationScope"),
+                            endLine, error)
+            || startLine > static_cast<std::uint64_t>(std::numeric_limits<int>::max())
+            || endLine > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
+            result.error = error.isEmpty()
+                ? QStringLiteral("manifest.observationScope line range is unsupported")
+                : error;
+            return result;
+        }
+        manifest.observationScope.startLine = static_cast<int>(startLine);
+        manifest.observationScope.endLine = static_cast<int>(endLine);
+        if (scopeMode == "module") {
+            manifest.observationScope.mode =
+                ModuleManifestObservationScopeMode::Module;
+        } else if (scopeMode == "always" && startLine > 0
+                   && endLine >= startLine) {
+            manifest.observationScope.mode =
+                ModuleManifestObservationScopeMode::Always;
+        } else {
+            result.error = QStringLiteral(
+                "manifest.observationScope mode or line range is unsupported");
+            return result;
+        }
+
+        const auto observations = root.value(QStringLiteral("observations"));
+        if (!observations.isArray()) {
+            result.error = QStringLiteral("manifest.observations must be an array");
+            return result;
+        }
+        QSet<QString> observationPaths;
+        for (qsizetype index = 0; index < observations.toArray().size(); ++index) {
+            const auto value = observations.toArray().at(index);
+            const auto context = QStringLiteral("manifest.observations[%1]").arg(index);
+            if (!value.isObject()) {
+                result.error = context + QStringLiteral(" must be an object");
+                return result;
+            }
+            const auto object = value.toObject();
+            if (!exactKeys(
+                    object,
+                    {QStringLiteral("name"), QStringLiteral("accessPath"),
+                     QStringLiteral("semanticId"), QStringLiteral("declarationText"),
+                     QStringLiteral("type"), QStringLiteral("sourceFile"),
+                     QStringLiteral("sourceLine"), QStringLiteral("port")},
+                    context,
+                    error)) {
+                result.error = error;
+                return result;
+            }
+            ModuleManifestObservation observation;
+            if (!readString(object, QStringLiteral("name"), context,
+                            observation.name, error, false)
+                || !readString(object, QStringLiteral("accessPath"), context,
+                               observation.accessPath, error, false)
+                || !readString(object, QStringLiteral("semanticId"), context,
+                               observation.semanticId, error, false)
+                || !readString(object, QStringLiteral("declarationText"), context,
+                               observation.declarationText, error)
+                || !readRelativePath(object, QStringLiteral("sourceFile"), context,
+                                    observation.sourceFile, error)
+                || !readPositiveInt(object, QStringLiteral("sourceLine"), context,
+                                   observation.sourceLine, error)
+                || !readBool(object, QStringLiteral("port"), context,
+                             observation.port, error)) {
+                result.error = error;
+                return result;
+            }
+            if (!object.value(QStringLiteral("type")).isObject()
+                || !parseType(object.value(QStringLiteral("type")).toObject(),
+                              context + QStringLiteral(".type"),
+                              observation.type, error)) {
+                result.error = error.isEmpty()
+                    ? context + QStringLiteral(".type must be an object")
+                    : error;
+                return result;
+            }
+            const QString accessPath = qString(observation.accessPath);
+            if (observationPaths.contains(accessPath)) {
+                result.error = context + QStringLiteral(" duplicates accessPath ")
+                    + accessPath;
+                return result;
+            }
+            observationPaths.insert(accessPath);
+            manifest.observations.push_back(std::move(observation));
+        }
+    } else {
+        manifest.observationScope.mode =
+            ModuleManifestObservationScopeMode::Module;
+        manifest.observationScope.sourceFile = manifest.target.sourceFile;
+        manifest.observationScope.startLine = manifest.target.sourceLine;
+        manifest.observationScope.endLine = manifest.target.sourceLine;
+    }
+
     const auto sources = root.value(QStringLiteral("sources"));
     if (!sources.isArray()) {
         result.error = QStringLiteral("manifest.sources must be an array");
@@ -630,6 +773,19 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
     if (!sourcePaths.contains(qString(manifest.target.sourceFile))) {
         result.error = QStringLiteral("manifest.target.sourceFile is absent from sources");
         return result;
+    }
+    if (hasObservationContract
+        && !sourcePaths.contains(qString(manifest.observationScope.sourceFile))) {
+        result.error = QStringLiteral(
+            "manifest.observationScope.sourceFile is absent from sources");
+        return result;
+    }
+    for (const auto& observation : manifest.observations) {
+        if (!sourcePaths.contains(qString(observation.sourceFile))) {
+            result.error = QStringLiteral(
+                "manifest observation sourceFile is absent from sources");
+            return result;
+        }
     }
     if (!readStringArray(root.value(QStringLiteral("includeDirs")),
                          QStringLiteral("manifest.includeDirs"),
@@ -777,6 +933,15 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
         portNames.insert(qString(parsedPort.name));
         manifest.ports.push_back(std::move(parsedPort));
     }
+    for (const auto& observation : manifest.observations) {
+        if (observation.port
+            && !portNames.contains(qString(observation.name))) {
+            result.error = QStringLiteral(
+                "manifest port observation references unknown port %1")
+                               .arg(qString(observation.name));
+            return result;
+        }
+    }
 
     if (!readStringArray(root.value(QStringLiteral("clockCandidates")),
                          QStringLiteral("manifest.clockCandidates"),
@@ -818,7 +983,10 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
     const ModuleManifestImportOptions& options)
 {
     ModuleManifestImportResult result;
-    if (manifest.schemaVersion != ZeroSlackModuleManifest::CurrentSchemaVersion) {
+    if (manifest.schemaVersion
+            < ZeroSlackModuleManifest::MinimumSupportedSchemaVersion
+        || manifest.schemaVersion
+            > ZeroSlackModuleManifest::CurrentSchemaVersion) {
         result.error = QStringLiteral("Unsupported ZeroSlack Module Manifest schemaVersion");
         return result;
     }
@@ -896,7 +1064,16 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
         bool watch{false};
     };
     std::vector<OrderedLane> lanes;
-    lanes.reserve(manifest.ports.size());
+    lanes.reserve(manifest.ports.size() + manifest.observations.size());
+    const bool focusedObservationScope =
+        manifest.schemaVersion >= 2
+        && manifest.observationScope.mode
+            == ModuleManifestObservationScopeMode::Always;
+    QSet<QString> observedPortNames;
+    for (const auto& observation : manifest.observations) {
+        if (observation.port)
+            observedPortNames.insert(qString(observation.name));
+    }
 
     for (std::size_t index = 0; index < manifest.ports.size(); ++index) {
         const auto& port = manifest.ports[index];
@@ -942,7 +1119,9 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
             : lane.width == 1 ? LaneKind::Bit : LaneKind::Bus;
         lane.radix = Radix::Hexadecimal;
         lane.height = 56;
-        lane.visible = true;
+        lane.visible = !focusedObservationScope
+            || stimulus
+            || observedPortNames.contains(qString(port.name));
 
         const bool selectedClock =
             result.clockSuggestion.state == ModuleCandidateState::Unique
@@ -1055,6 +1234,92 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
         else if (stimulus) priority = 3;
         lanes.push_back({
             priority, index, std::move(lane), stimulus, watch});
+    }
+
+    QSet<QString> importedObservationPaths;
+    for (std::size_t index = 0; index < manifest.observations.size(); ++index) {
+        const auto& observation = manifest.observations[index];
+        if (observation.port) continue;
+        const auto& shape = observation.type.shape;
+        if (!shape.semanticAvailable || !shape.fixedSize || !shape.integral
+            || shape.unpackedArray || shape.interfaceType || shape.bitWidth == 0
+            || shape.bitWidth > std::numeric_limits<std::uint32_t>::max()) {
+            result.diagnostics.append(
+                QStringLiteral("Observation %1 has no supported fixed integral width and was not imported.")
+                    .arg(qString(observation.accessPath)));
+            continue;
+        }
+        const QString accessPath = qString(observation.accessPath);
+        if (importedObservationPaths.contains(accessPath)) continue;
+        importedObservationPaths.insert(accessPath);
+
+        Lane lane;
+        lane.id = stableDigestId(
+            "zs-observation",
+            manifest.identity,
+            observation.semanticId + "\n" + observation.accessPath);
+        lane.name = observation.accessPath;
+        lane.width = static_cast<std::uint32_t>(shape.bitWidth);
+        lane.isSigned = shape.isSigned;
+        lane.kind = !observation.type.enumValues.empty()
+                || shape.semanticKind == "enum"
+            ? LaneKind::Enum
+            : lane.width == 1 ? LaneKind::Bit : LaneKind::Bus;
+        lane.radix = Radix::Hexadecimal;
+        lane.height = 56;
+        lane.visible = true;
+        lane.color = "#ffb74d";
+        lane.extensions.emplace("sourceApplication", jsonStringValue("ZeroSlack"));
+        lane.extensions.emplace(
+            "waveSimulation.moduleManifestIdentity",
+            jsonStringValue(manifest.identity));
+        lane.extensions.emplace("waveSimulation.role", jsonStringValue("watch"));
+        lane.extensions.emplace("waveSimulation.direction", jsonStringValue("output"));
+        lane.extensions.emplace(
+            "waveSimulation.observation", "true");
+        lane.extensions.emplace(
+            "waveSimulation.accessPath",
+            jsonStringValue(observation.accessPath));
+        lane.extensions.emplace(
+            "waveSimulation.semanticId",
+            jsonStringValue(observation.semanticId));
+        lane.extensions.emplace(
+            "waveSimulation.declarationText",
+            jsonStringValue(observation.declarationText));
+        lane.extensions.emplace(
+            "waveSimulation.sourceFile",
+            jsonStringValue(observation.sourceFile));
+        lane.extensions.emplace(
+            "waveSimulation.sourceLine",
+            std::to_string(observation.sourceLine));
+        lane.extensions.emplace(
+            "waveSimulation.canonicalTypeId",
+            jsonStringValue(shape.canonicalTypeId));
+        lane.extensions.emplace(
+            "waveSimulation.declarationShapeId",
+            jsonStringValue(shape.declarationShapeId));
+        lane.extensions.emplace(
+            "waveSimulation.sourceOrder",
+            std::to_string(manifest.ports.size() + index));
+        lane.extensions.emplace(
+            "waveSimulation.resolvedTypeText",
+            jsonStringValue(shape.resolvedTypeText));
+        lane.extensions.emplace(
+            "waveSimulation.typedefChain",
+            jsonStringArrayValue(shape.typedefChain));
+        lane.extensions.emplace("waveSimulation.clockCandidate", "false");
+        lane.extensions.emplace("waveSimulation.resetCandidate", "false");
+        for (const auto& value : observation.type.enumValues) {
+            const auto normalized = normalizedEnumValue(value);
+            if (value.semanticAvailable && normalized)
+                lane.enumMap.emplace(value.name, *normalized);
+        }
+        lanes.push_back({
+            4,
+            manifest.ports.size() + index,
+            std::move(lane),
+            false,
+            true});
     }
 
     if (result.clockSuggestion.state == ModuleCandidateState::Unique

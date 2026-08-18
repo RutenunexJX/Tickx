@@ -5564,6 +5564,94 @@ void testZeroSlackModuleManifestImport()
             && output->extensions.at("waveSimulation.role") == R"("watch")",
         "output port was not created as an undriven watch lane");
 
+    auto v2Object = QJsonDocument::fromJson(document).object();
+    v2Object.insert(QStringLiteral("schemaVersion"), 2);
+    v2Object.insert(
+        QStringLiteral("observationScope"),
+        QJsonObject{
+            {QStringLiteral("mode"), QStringLiteral("always")},
+            {QStringLiteral("label"), QStringLiteral("always_ff lines 20-30")},
+            {QStringLiteral("sourceFile"), QStringLiteral("rtl/handshake_dut.sv")},
+            {QStringLiteral("startLine"), 20},
+            {QStringLiteral("endLine"), 30},
+        });
+    const auto portArray = v2Object.value(QStringLiteral("ports")).toArray();
+    const auto ackPort = portArray.at(6).toObject();
+    const auto dataPort = portArray.at(7).toObject();
+    v2Object.insert(
+        QStringLiteral("observations"),
+        QJsonArray{
+            QJsonObject{
+                {QStringLiteral("name"), QStringLiteral("ack_o")},
+                {QStringLiteral("accessPath"), QStringLiteral("ack_o")},
+                {QStringLiteral("semanticId"), QStringLiteral("port:ack_o")},
+                {QStringLiteral("declarationText"), ackPort.value(QStringLiteral("declarationText"))},
+                {QStringLiteral("type"), ackPort.value(QStringLiteral("type"))},
+                {QStringLiteral("sourceFile"), ackPort.value(QStringLiteral("sourceFile"))},
+                {QStringLiteral("sourceLine"), ackPort.value(QStringLiteral("sourceLine"))},
+                {QStringLiteral("port"), true},
+            },
+            QJsonObject{
+                {QStringLiteral("name"), QStringLiteral("next_state")},
+                {QStringLiteral("accessPath"), QStringLiteral("next_state")},
+                {QStringLiteral("semanticId"), QStringLiteral("signal:next_state")},
+                {QStringLiteral("declarationText"), QStringLiteral("logic [8:0] next_state")},
+                {QStringLiteral("type"), dataPort.value(QStringLiteral("type"))},
+                {QStringLiteral("sourceFile"), QStringLiteral("rtl/handshake_dut.sv")},
+                {QStringLiteral("sourceLine"), 18},
+                {QStringLiteral("port"), false},
+            },
+            QJsonObject{
+                {QStringLiteral("name"), QStringLiteral("next_state")},
+                {QStringLiteral("accessPath"), QStringLiteral("next_state.member")},
+                {QStringLiteral("semanticId"), QStringLiteral("signal:next_state")},
+                {QStringLiteral("declarationText"), QStringLiteral("logic [8:0] next_state")},
+                {QStringLiteral("type"), dataPort.value(QStringLiteral("type"))},
+                {QStringLiteral("sourceFile"), QStringLiteral("rtl/handshake_dut.sv")},
+                {QStringLiteral("sourceLine"), 18},
+                {QStringLiteral("port"), false},
+            },
+        });
+    const auto parsedV2 = wave::parseZeroSlackModuleManifest(
+        QJsonDocument(v2Object).toJson());
+    expect(parsedV2.ok(), parsedV2.error.toStdString());
+    expect(
+        parsedV2.manifest->schemaVersion == 2
+            && parsedV2.manifest->observationScope.mode
+                == wave::ModuleManifestObservationScopeMode::Always
+            && parsedV2.manifest->observations.size() == 3,
+        "Module Manifest v2 observation contract was not preserved");
+    const auto importedV2 = wave::importZeroSlackModuleManifest(*parsedV2.manifest);
+    expect(importedV2.ok(), importedV2.error.toStdString());
+    const auto& v2Lanes = importedV2.project->scenarios.front().lanes;
+    const auto v2Lane = [&v2Lanes](const std::string_view name) -> const wave::Lane* {
+        const auto found = std::find_if(
+            v2Lanes.begin(), v2Lanes.end(),
+            [name](const wave::Lane& lane) { return lane.name == name; });
+        return found == v2Lanes.end() ? nullptr : &*found;
+    };
+    const auto* observedOutput = v2Lane("ack_o");
+    const auto* unobservedOutput = v2Lane("data_o");
+    const auto* internalObservation = v2Lane("next_state");
+    const auto* memberObservation = v2Lane("next_state.member");
+    expect(
+        v2Lane("data_i") && v2Lane("data_i")->visible
+            && observedOutput && observedOutput->visible
+            && unobservedOutput && !unobservedOutput->visible
+            && internalObservation && internalObservation->visible
+            && internalObservation->segments.empty()
+            && internalObservation->extensions.at("waveSimulation.role")
+                == R"("watch")"
+            && internalObservation->extensions.at("waveSimulation.accessPath")
+                == R"("next_state")"
+            && memberObservation && memberObservation->visible
+            && memberObservation->id != internalObservation->id
+            && memberObservation->extensions.at("waveSimulation.semanticId")
+                == internalObservation->extensions.at("waveSimulation.semanticId")
+            && memberObservation->extensions.at("waveSimulation.accessPath")
+                == R"("next_state.member")",
+        "always-scope import did not preserve focused watch lanes or member identities");
+
     wave::SetLaneRangeCommand edit(
         scenario,
         data->id,
@@ -6839,7 +6927,17 @@ void testFixedFixtureSimulationPipeline()
     expect(failed.status == wave::SimulationRunStatus::BuildFailed
                && failed.stage == wave::SimulationRunStage::BuildModel
                && failed.buildProcess
-               && failed.buildProcess->state == wave::ProcessRunState::NonZeroExit,
+               && failed.buildProcess->state == wave::ProcessRunState::NonZeroExit
+               && failed.diagnostics.size() == 1
+               && failed.diagnostics.front().sourceFile
+                      == QStringLiteral("rtl/wave_fixed_counter.sv")
+               && failed.diagnostics.front().line == 2
+               && failed.diagnostics.front().column == 7
+               && failed.diagnostics.front().severity
+                      == QStringLiteral("error")
+               && wave::simulationRunReportJson(failed)
+                      .value(QStringLiteral("diagnostics"))
+                      .toArray().size() == 1,
            "fixed simulation build failure lost stage or process evidence");
 
     QTemporaryDir timedOutArtifacts;

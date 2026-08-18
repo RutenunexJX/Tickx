@@ -1,6 +1,6 @@
 # Wave Workbench 跨应用接口
 
-当前接口 schema 版本：`1`
+当前 Module Manifest schema 版本：`2`（兼容读取 `1`）
 
 接口仅使用显式 JSON 文件、CLI 参数和 URI。任何命令都不读取 ZeroSlack、Private Frame
 Workbench 或 Pinloom 的内部数据库。
@@ -24,7 +24,7 @@ wave-generate project.wave.json <workspace> --scenario=<稳定 ID 或唯一名�
 manifest 中的 Generate/Compare 命令模板包含该选择器占位，不再暗示数组首项。生成物是单向
 派生产物，不回写场景事实源。
 
-### 导入 Wave Simulation Module Manifest v1
+### 导入 Wave Simulation Module Manifest v1/v2
 
 ```powershell
 wave-bridge import-module module-manifest.json output.wave.json
@@ -41,11 +41,17 @@ SystemVerilog：
 - `output` 创建无驱动的 watch lane；`inout` / `ref` 同时保留 stimulus 和 watch 意图。
 - enum 名称和值映射到 Enum lane；完整声明、方向、源码位置、类型 identity 和 manifest
   identity 保存在扩展字段中。
+- v2 的 `observationScope` 区分完整 module 与选中 `always` 的初始观察范围；范围不改变
+  编译目标。`observations` 携带语义 ID、access path、类型和源码位置，内部信号作为
+  watch lane 导入。
+- `always` 范围下，stimulus input 始终可见，已观察的 output 和内部信号可见，其他
+  output 默认隐藏但不从工程模型删除。同一声明的不同成员按 access path 保持独立。
 - 当前切片不展开 interface 或 unpacked array，导入时给出明确 warning；该限制属于后续
   structured-input 切片，不会静默扁平化。
 
 候选状态和端口角色均写入工程扩展字段，输入默认 Segment 直接进入工程 JSON，不存在隐藏的
-激励生成逻辑。该 CLI 是正式 ZeroSlack 入口开放前的实验性边界；本阶段不调用 Verilator。
+激励生成逻辑。ZeroSlack 正式入口仍通过该显式文件契约调用独立 runner，两个进程不共享
+内部数据库或可变对象。
 
 ### 保存和恢复 Stimulus Scenario v2
 

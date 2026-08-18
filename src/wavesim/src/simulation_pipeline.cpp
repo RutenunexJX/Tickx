@@ -16,6 +16,7 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QLockFile>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QTextStream>
 #include <QTimer>
@@ -703,6 +704,112 @@ QJsonObject processJson(const ProcessRunResult& process)
     };
 }
 
+QString portableDiagnosticPath(
+    const QString& rawPath,
+    const QString& workspaceRoot)
+{
+    const QString normalized = QDir::cleanPath(
+        QDir::fromNativeSeparators(rawPath.trimmed()));
+    if (normalized.isEmpty()) return {};
+    if (QDir::isRelativePath(normalized)) {
+        if (normalized == QStringLiteral("..")
+            || normalized.startsWith(QStringLiteral("../"))) {
+            return {};
+        }
+        return normalized;
+    }
+    const QString relative = QDir::cleanPath(
+        QDir(QFileInfo(workspaceRoot).absoluteFilePath())
+            .relativeFilePath(normalized));
+    if (relative == QStringLiteral("..")
+        || relative.startsWith(QStringLiteral("../"))) {
+        return {};
+    }
+    return QDir::fromNativeSeparators(relative);
+}
+
+std::vector<SimulationSourceDiagnostic> processDiagnostics(
+    const ProcessRunResult& process,
+    const SimulationRunStage stage,
+    const QString& workspaceRoot)
+{
+    std::vector<SimulationSourceDiagnostic> diagnostics;
+    const QString output = QString::fromUtf8(process.standardError)
+        + QLatin1Char('\n') + QString::fromUtf8(process.standardOutput);
+    static const QRegularExpression verilator(
+        QStringLiteral(
+            "^%(Error|Warning)(?:-([A-Za-z0-9_]+))?:\\s+(.+):(\\d+):(\\d+):\\s*(.*)$"));
+    static const QRegularExpression compiler(
+        QStringLiteral(
+            "^(.+):(\\d+):(\\d+):\\s*(fatal error|error|warning|note):\\s*(.*)$"),
+        QRegularExpression::CaseInsensitiveOption);
+    const QStringList lines = output.split(QLatin1Char('\n'));
+    for (QString line : lines) {
+        line.remove(QLatin1Char('\r'));
+        SimulationSourceDiagnostic diagnostic;
+        const auto verilatorMatch = verilator.match(line.trimmed());
+        if (verilatorMatch.hasMatch()) {
+            diagnostic.severity = verilatorMatch.captured(1).toLower();
+            diagnostic.code = verilatorMatch.captured(2);
+            diagnostic.sourceFile = portableDiagnosticPath(
+                verilatorMatch.captured(3), workspaceRoot);
+            diagnostic.line = verilatorMatch.captured(4).toInt();
+            diagnostic.column = verilatorMatch.captured(5).toInt();
+            diagnostic.message = verilatorMatch.captured(6).trimmed();
+        } else {
+            const auto compilerMatch = compiler.match(line.trimmed());
+            if (!compilerMatch.hasMatch()) continue;
+            diagnostic.sourceFile = portableDiagnosticPath(
+                compilerMatch.captured(1), workspaceRoot);
+            diagnostic.line = compilerMatch.captured(2).toInt();
+            diagnostic.column = compilerMatch.captured(3).toInt();
+            diagnostic.severity = compilerMatch.captured(4).toLower();
+            if (diagnostic.severity == QStringLiteral("fatal error"))
+                diagnostic.severity = QStringLiteral("error");
+            diagnostic.message = compilerMatch.captured(5).trimmed();
+        }
+        if (diagnostic.sourceFile.isEmpty()
+            || diagnostic.line <= 0 || diagnostic.column <= 0
+            || diagnostic.message.isEmpty()) {
+            continue;
+        }
+        diagnostic.stage = text(toString(stage));
+        diagnostics.push_back(std::move(diagnostic));
+    }
+    return diagnostics;
+}
+
+void appendProcessDiagnostics(
+    SimulationRunReport& report,
+    const ProcessRunResult& process,
+    const PreparedSimulation& prepared,
+    const SimulationRunRequest& request,
+    const SimulationRunStage stage)
+{
+    auto diagnostics = processDiagnostics(
+        process, stage, request.workspaceRoot);
+    if (diagnostics.empty()) {
+        SimulationSourceDiagnostic fallback;
+        fallback.sourceFile = qString(prepared.manifest.target.sourceFile);
+        fallback.line = prepared.manifest.target.sourceLine;
+        fallback.column = 1;
+        fallback.severity = QStringLiteral("error");
+        fallback.stage = text(toString(stage));
+        fallback.message = process.errorMessage.trimmed();
+        if (fallback.message.isEmpty()) {
+            fallback.message = QString::fromUtf8(process.standardError)
+                                   .trimmed().section(QLatin1Char('\n'), 0, 0);
+        }
+        if (fallback.message.isEmpty())
+            fallback.message = QStringLiteral("Simulation process failed.");
+        diagnostics.push_back(std::move(fallback));
+    }
+    report.diagnostics.insert(
+        report.diagnostics.end(),
+        std::make_move_iterator(diagnostics.begin()),
+        std::make_move_iterator(diagnostics.end()));
+}
+
 SimulationRunStatus processFailureStatus(
     const ProcessRunResult& process,
     const SimulationRunStatus ordinaryFailure)
@@ -913,6 +1020,12 @@ struct VerilatorSimulationRunner::Impl {
             [this](ProcessRunResult result) {
                 report.simulationProcess = std::move(result);
                 if (!report.simulationProcess->ok()) {
+                    appendProcessDiagnostics(
+                        report,
+                        *report.simulationProcess,
+                        *prepared,
+                        request,
+                        SimulationRunStage::RunModel);
                     finish(
                         processFailureStatus(
                             *report.simulationProcess,
@@ -1042,6 +1155,12 @@ struct VerilatorSimulationRunner::Impl {
             [this](ProcessRunResult result) {
                 report.buildProcess = std::move(result);
                 if (!report.buildProcess->ok()) {
+                    appendProcessDiagnostics(
+                        report,
+                        *report.buildProcess,
+                        *prepared,
+                        request,
+                        SimulationRunStage::BuildModel);
                     finish(
                         processFailureStatus(
                             *report.buildProcess,
@@ -1313,6 +1432,18 @@ bool VerilatorSimulationRunner::running() const noexcept
 
 QJsonObject simulationRunReportJson(const SimulationRunReport& report)
 {
+    QJsonArray diagnostics;
+    for (const auto& diagnostic : report.diagnostics) {
+        diagnostics.append(QJsonObject{
+            {QStringLiteral("sourceFile"), diagnostic.sourceFile},
+            {QStringLiteral("line"), diagnostic.line},
+            {QStringLiteral("column"), diagnostic.column},
+            {QStringLiteral("severity"), diagnostic.severity},
+            {QStringLiteral("stage"), diagnostic.stage},
+            {QStringLiteral("message"), diagnostic.message},
+            {QStringLiteral("code"), diagnostic.code},
+        });
+    }
     QJsonObject trace;
     if (report.trace) {
         QJsonArray signalArray;
@@ -1345,6 +1476,7 @@ QJsonObject simulationRunReportJson(const SimulationRunReport& report)
         {QStringLiteral("ok"), report.ok()},
         {QStringLiteral("durationMs"), report.durationMs},
         {QStringLiteral("diagnostic"), report.diagnostic},
+        {QStringLiteral("diagnostics"), diagnostics},
         {QStringLiteral("artifacts"),
          QJsonObject{
              {QStringLiteral("runDirectory"), report.artifacts.runDirectory},

@@ -20,6 +20,11 @@ enum class ModuleManifestTargetMode {
     Instance,
 };
 
+enum class ModuleManifestObservationScopeMode {
+    Module,
+    Always,
+};
+
 enum class ModulePortDirection {
     Input,
     Output,
@@ -112,13 +117,36 @@ struct ModuleManifestTarget {
     int sourceLine{0};
 };
 
+struct ModuleManifestObservationScope {
+    ModuleManifestObservationScopeMode mode{
+        ModuleManifestObservationScopeMode::Module};
+    std::string label;
+    std::string sourceFile;
+    int startLine{0};
+    int endLine{0};
+};
+
+struct ModuleManifestObservation {
+    std::string name;
+    std::string accessPath;
+    std::string semanticId;
+    std::string declarationText;
+    ModuleManifestType type;
+    std::string sourceFile;
+    int sourceLine{0};
+    bool port{false};
+};
+
 struct ZeroSlackModuleManifest {
-    static constexpr int CurrentSchemaVersion = 1;
+    static constexpr int MinimumSupportedSchemaVersion = 1;
+    static constexpr int CurrentSchemaVersion = 2;
 
     int schemaVersion{CurrentSchemaVersion};
     std::string identity;
     std::string workspaceId;
     ModuleManifestTarget target;
+    ModuleManifestObservationScope observationScope;
+    std::vector<ModuleManifestObservation> observations;
     std::vector<ModuleManifestSource> sources;
     std::vector<std::string> includeDirs;
     std::map<std::string, std::string> defines;
