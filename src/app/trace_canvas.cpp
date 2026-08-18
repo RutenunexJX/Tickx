@@ -95,6 +95,7 @@ void TraceCanvas::setTrace(
     reference_ = reference;
     visibleSignalIndices_.clear();
     if (trace_) {
+        timeline_.setDomain(trace_->startTick, trace_->endTick);
         visibleSignalIndices_.reserve(trace_->traceSignals.size());
         for (std::size_t index = 0; index < trace_->traceSignals.size(); ++index) {
             visibleSignalIndices_.push_back(index);
@@ -144,11 +145,8 @@ void TraceCanvas::fitTrace()
 {
     if (!trace_) return;
     const auto width = std::max(1, viewport()->width() - kNameWidth - 12);
-    const auto duration = std::max<Tick>(1, trace_->endTick - trace_->startTick);
-    pixelsPerTick_ = std::clamp(
-        static_cast<double>(width) / static_cast<double>(duration),
-        1.0e-12,
-        1.0e6);
+    timeline_.setPixelsPerTick(TimelineViewport::fittedPixelsPerTick(
+        trace_->startTick, trace_->endTick, width));
     fitPending_ = false;
     updateScrollBars();
     horizontalScrollBar()->setValue(0);
@@ -157,19 +155,22 @@ void TraceCanvas::fitTrace()
 
 void TraceCanvas::zoomIn()
 {
-    setZoom(pixelsPerTick_ * 1.35, (viewport()->width() + kNameWidth) / 2.0);
+    setZoom(timeline_.pixelsPerTick() * 1.35,
+            (viewport()->width() + kNameWidth) / 2.0);
 }
 
 void TraceCanvas::zoomOut()
 {
-    setZoom(pixelsPerTick_ / 1.35, (viewport()->width() + kNameWidth) / 2.0);
+    setZoom(timeline_.pixelsPerTick() / 1.35,
+            (viewport()->width() + kNameWidth) / 2.0);
 }
 
 Tick TraceCanvas::visibleStart() const noexcept
 {
     if (!trace_) return 0;
     const auto drawable = std::max(1, viewport()->width() - kNameWidth);
-    const auto visibleSpan = static_cast<long double>(drawable) / pixelsPerTick_;
+    const auto visibleSpan = static_cast<long double>(drawable)
+        / timeline_.pixelsPerTick();
     const auto duration = static_cast<long double>(trace_->endTick)
         - static_cast<long double>(trace_->startTick);
     const auto scrollable = std::max(0.0L, duration - visibleSpan);
@@ -185,7 +186,8 @@ Tick TraceCanvas::visibleEnd() const noexcept
 {
     if (!trace_) return 0;
     const auto drawable = std::max(1, viewport()->width() - kNameWidth);
-    const auto span = static_cast<long double>(drawable) / pixelsPerTick_;
+    const auto span = static_cast<long double>(drawable)
+        / timeline_.pixelsPerTick();
     return std::min(
         trace_->endTick,
         clampedRound(static_cast<long double>(visibleStart()) + span));
@@ -193,17 +195,21 @@ Tick TraceCanvas::visibleEnd() const noexcept
 
 double TraceCanvas::tickToX(const Tick tick) const noexcept
 {
-    return kNameWidth
-        + static_cast<double>(
-            static_cast<long double>(tick) - static_cast<long double>(visibleStart()))
-            * pixelsPerTick_;
+    auto viewport = timeline_;
+    viewport.setPixelOffset(
+        static_cast<double>(visibleStart() - trace_->startTick)
+        * timeline_.pixelsPerTick());
+    return viewport.pixelForTick(tick);
 }
 
 Tick TraceCanvas::xToTick(const double x) const noexcept
 {
-    return clampedRound(
-        static_cast<long double>(visibleStart())
-        + static_cast<long double>(x - kNameWidth) / pixelsPerTick_);
+    if (!trace_) return 0;
+    auto viewport = timeline_;
+    viewport.setPixelOffset(
+        static_cast<double>(visibleStart() - trace_->startTick)
+        * timeline_.pixelsPerTick());
+    return viewport.tickAtPixel(x);
 }
 
 void TraceCanvas::updateScrollBars()
@@ -219,7 +225,8 @@ void TraceCanvas::updateScrollBars()
     const auto duration = static_cast<long double>(trace_->endTick)
         - static_cast<long double>(trace_->startTick);
     const auto drawable = std::max(1, viewport()->width() - kNameWidth);
-    const auto visibleSpan = static_cast<long double>(drawable) / pixelsPerTick_;
+    const auto visibleSpan = static_cast<long double>(drawable)
+        / timeline_.pixelsPerTick();
     if (duration <= visibleSpan) {
         horizontalScrollBar()->setRange(0, 0);
     } else {
@@ -236,7 +243,8 @@ void TraceCanvas::setViewStart(const Tick tick)
 {
     if (!trace_ || horizontalScrollBar()->maximum() <= 0) return;
     const auto drawable = std::max(1, viewport()->width() - kNameWidth);
-    const auto visibleSpan = static_cast<long double>(drawable) / pixelsPerTick_;
+    const auto visibleSpan = static_cast<long double>(drawable)
+        / timeline_.pixelsPerTick();
     const auto scrollable = std::max(
         0.0L,
         static_cast<long double>(trace_->endTick)
@@ -258,11 +266,12 @@ void TraceCanvas::setZoom(const double pixelsPerTick, const double anchorX)
 {
     if (!trace_) return;
     const auto anchorTick = xToTick(anchorX);
-    pixelsPerTick_ = std::clamp(pixelsPerTick, 1.0e-12, 1.0e6);
+    timeline_.setPixelsPerTick(pixelsPerTick);
     updateScrollBars();
     const auto desiredStart = clampedRound(
         static_cast<long double>(anchorTick)
-        - static_cast<long double>(anchorX - kNameWidth) / pixelsPerTick_);
+        - static_cast<long double>(anchorX - kNameWidth)
+            / timeline_.pixelsPerTick());
     setViewStart(desiredStart);
     viewport()->update();
 }
@@ -304,7 +313,7 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
 
     const auto start = visibleStart();
     const auto end = visibleEnd();
-    const auto gridStep = niceGridStep(pixelsPerTick_);
+    const auto gridStep = niceGridStep(timeline_.pixelsPerTick());
     const auto firstGrid = floorToStep(start, gridStep);
     painter.setFont(QFont(painter.font().family(), 8));
     for (auto tick = firstGrid; tick <= end; ) {
@@ -445,7 +454,7 @@ void TraceCanvas::wheelEvent(QWheelEvent* event)
 {
     if ((event->modifiers() & Qt::ControlModifier) != 0) {
         const auto factor = event->angleDelta().y() > 0 ? 1.25 : 0.8;
-        setZoom(pixelsPerTick_ * factor, event->position().x());
+        setZoom(timeline_.pixelsPerTick() * factor, event->position().x());
         event->accept();
         return;
     }

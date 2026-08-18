@@ -1,5 +1,7 @@
 #include "wave_canvas.h"
 
+#include "wave/timeline_viewport.h"
+
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
@@ -315,6 +317,7 @@ QString laneKindLabel(const LaneKind kind)
 WaveCanvas::WaveCanvas(QWidget* parent)
     : QAbstractScrollArea(parent)
 {
+    setObjectName(QStringLiteral("StimulusCanvas"));
     setFrameShape(QFrame::NoFrame);
     setMouseTracking(true);
     viewport()->setMouseTracking(true);
@@ -18025,20 +18028,24 @@ int WaveCanvas::waveViewportWidth() const
 Tick WaveCanvas::tickAtX(const int x) const
 {
     if (!scenario_) return 0;
-    const auto contentX = static_cast<double>(horizontalScrollBar()->value())
-        + static_cast<double>(x - headerWidth_);
-    const auto tick = static_cast<long double>(contentX) / pixelsPerTick_;
-    return std::clamp<Tick>(
-        static_cast<Tick>(std::llround(tick)),
+    const TimelineViewport timeline(
         0,
-        scenario_->duration);
+        scenario_->duration,
+        pixelsPerTick_,
+        headerWidth_,
+        horizontalScrollBar()->value());
+    return timeline.tickAtPixel(x);
 }
 
 int WaveCanvas::xAtTick(const Tick tick) const
 {
-    const auto x = static_cast<double>(headerWidth_)
-        + static_cast<double>(tick) * pixelsPerTick_
-        - horizontalScrollBar()->value();
+    const TimelineViewport timeline(
+        0,
+        scenario_ ? scenario_->duration : 0,
+        pixelsPerTick_,
+        headerWidth_,
+        horizontalScrollBar()->value());
+    const auto x = timeline.pixelForTick(tick);
     return static_cast<int>(std::clamp(
         x,
         static_cast<double>(std::numeric_limits<int>::min()),

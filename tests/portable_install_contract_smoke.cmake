@@ -34,6 +34,18 @@ foreach(executable IN ITEMS
     endif()
 endforeach()
 
+if(WIN32)
+    set(wavewidgets_library "wavewidgets.dll")
+elseif(APPLE)
+    set(wavewidgets_library "libwavewidgets.dylib")
+else()
+    set(wavewidgets_library "libwavewidgets.so")
+endif()
+if(NOT EXISTS "${OUTPUT}/${wavewidgets_library}")
+    message(FATAL_ERROR
+        "Portable install omitted ${wavewidgets_library}")
+endif()
+
 foreach(document IN ITEMS
     PACKAGE-README.txt
     docs/automation-cli.md

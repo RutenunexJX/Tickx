@@ -34,13 +34,9 @@ target_compile_definitions(wave-tests
 
 add_executable(wave-fixed-fixture-ui-smoke
     fixed_fixture_ui_smoke.cpp
-    "${CMAKE_SOURCE_DIR}/src/app/trace_canvas.cpp"
-    "${CMAKE_SOURCE_DIR}/src/app/trace_canvas.h"
 )
-target_include_directories(wave-fixed-fixture-ui-smoke
-    PRIVATE "${CMAKE_SOURCE_DIR}/src/app")
 target_link_libraries(wave-fixed-fixture-ui-smoke
-    PRIVATE wavesim waveintegration waveimport wavecore
+    PRIVATE wavewidgets wavesim waveintegration wavetrace wavecore
             Qt6::Core Qt6::Gui Qt6::Widgets)
 target_compile_definitions(wave-fixed-fixture-ui-smoke
     PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -50,7 +46,20 @@ add_dependencies(wave-fixed-fixture-ui-smoke
     wave-simulator-fixture)
 wave_enable_warnings(wave-fixed-fixture-ui-smoke)
 
+add_executable(wave-timeline-viewport-test timeline_viewport_test.cpp)
+target_link_libraries(wave-timeline-viewport-test PRIVATE wavetime)
+wave_enable_warnings(wave-timeline-viewport-test)
+
+add_executable(wavewidgets-abi-test wavewidgets_abi_test.cpp)
+target_link_libraries(wavewidgets-abi-test
+    PRIVATE wavewidgets waveproject Qt6::Core Qt6::Gui Qt6::Widgets)
+target_compile_definitions(wavewidgets-abi-test
+    PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+wave_enable_warnings(wavewidgets-abi-test)
+
 add_test(NAME wave-core-tests COMMAND wave-tests)
+add_test(NAME wave-timeline-viewport-test COMMAND wave-timeline-viewport-test)
+add_test(NAME wavewidgets-abi-test COMMAND wavewidgets-abi-test)
 add_test(NAME wave-app-smoke COMMAND wave-workbench --smoke-test)
 add_test(
     NAME wave-example-smoke
@@ -736,7 +745,7 @@ if(WIN32 AND EXISTS "C:/Windows/Fonts/segoeui.ttf")
         "QT_QPA_FONTDIR=${_wave_test_font_dir}")
 endif()
 set_tests_properties(
-    wave-core-tests wave-app-smoke wave-example-smoke wave-simulation-result-window-smoke wave-simulation-controls-smoke wave-simulation-stop-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke wave-generate-smoke wave-compare-smoke
+    wave-core-tests wave-timeline-viewport-test wavewidgets-abi-test wave-app-smoke wave-example-smoke wave-simulation-result-window-smoke wave-simulation-controls-smoke wave-simulation-stop-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
     wave-bridge-module-manifest-smoke wave-bridge-module-manifest-load-smoke wave-bridge-pinloom-smoke wave-cli-inspect-smoke wave-cli-validate-smoke
     wave-bridge-stimulus-export-smoke wave-bridge-stimulus-import-smoke
@@ -778,10 +787,10 @@ set_tests_properties(
     wave-portable-install-contract-smoke
     PROPERTIES
     ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+        "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
 )
 set_tests_properties(
-    wave-core-tests wave-app-smoke wave-example-smoke wave-simulation-result-window-smoke wave-simulation-controls-smoke wave-simulation-stop-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke wave-generate-smoke wave-compare-smoke
+    wave-core-tests wave-timeline-viewport-test wavewidgets-abi-test wave-app-smoke wave-example-smoke wave-simulation-result-window-smoke wave-simulation-controls-smoke wave-simulation-stop-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
     wave-bridge-module-manifest-smoke wave-bridge-module-manifest-load-smoke wave-bridge-pinloom-smoke wave-cli-inspect-smoke wave-cli-validate-smoke
     wave-bridge-stimulus-export-smoke wave-bridge-stimulus-import-smoke
@@ -850,7 +859,7 @@ if(TEST wave-fixed-fixture-real-verilator)
 endif()
 set_tests_properties(${_wave_fixed_fixture_tests} PROPERTIES
     ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+        "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
     ENVIRONMENT "${_wave_test_environment}"
     TIMEOUT 180
 )

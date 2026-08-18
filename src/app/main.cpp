@@ -74,7 +74,8 @@ int main(int argc, char* argv[])
     }
     QCoreApplication::setOrganizationName(QStringLiteral("WaveWorkbench"));
     QCoreApplication::setApplicationName(QStringLiteral("Wave Workbench"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QCoreApplication::setApplicationVersion(
+        QStringLiteral(WAVEWORKBENCH_VERSION));
     const auto testSettingsDirectory =
         qEnvironmentVariable("WAVEWORKBENCH_SETTINGS_DIR");
     if (!testSettingsDirectory.isEmpty()) {

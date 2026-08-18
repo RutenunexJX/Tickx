@@ -1,5 +1,7 @@
 #pragma once
 
+#include "wave/widgets_export.h"
+
 #include "wave/commands.h"
 #include "wave/compare.h"
 #include "wave/model.h"
@@ -46,10 +48,11 @@ namespace wave {
 class WaveCanvas;
 class TraceCanvas;
 
-[[nodiscard]] QString preferredProjectLoadPath(const QString& requestedPath);
-[[nodiscard]] QString untitledRecoveryPath();
+[[nodiscard]] WAVEWIDGETS_API QString preferredProjectLoadPath(
+    const QString& requestedPath);
+[[nodiscard]] WAVEWIDGETS_API QString untitledRecoveryPath();
 
-class MainWindow final : public QMainWindow {
+class WAVEWIDGETS_API MainWindow final : public QMainWindow {
     Q_OBJECT
 
 public:

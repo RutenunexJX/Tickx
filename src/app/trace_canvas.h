@@ -1,7 +1,9 @@
 #pragma once
 
 #include "wave/model.h"
+#include "wave/timeline_viewport.h"
 #include "wave/trace.h"
+#include "wave/widgets_export.h"
 
 #include <QAbstractScrollArea>
 
@@ -11,7 +13,7 @@
 
 namespace wave {
 
-class TraceCanvas final : public QAbstractScrollArea {
+class WAVEWIDGETS_API TraceCanvas final : public QAbstractScrollArea {
     Q_OBJECT
 
 public:
@@ -57,7 +59,7 @@ private:
     const ImportedTrace* reference_{nullptr};
     std::vector<std::size_t> visibleSignalIndices_;
     std::vector<std::pair<Tick, Tick>> differenceRanges_;
-    double pixelsPerTick_{0.01};
+    TimelineViewport timeline_{0, 0, 0.01, 230.0, 0.0};
     bool fitPending_{false};
 };
 

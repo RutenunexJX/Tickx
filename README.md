@@ -15,9 +15,10 @@ JSON。VCD/CSV 导入、Expected/Actual 比较、报告生成及跨应用桥接�
 领域模块中，不再占用桌面编辑界面。验收证据见
 [PLAN.md](PLAN.md)。
 
-ZeroSlack 的正式 Wave Simulation 工作流可直接启动本应用并载入结果，无需用户手工传递
-文件。当前兼容 Module Manifest v1/v2；v2 可携带选中 `always` 的观察范围和内部信号
-access path，并将构建或运行错误以源码文件、行、列回传 ZeroSlack。
+ZeroSlack 的正式 Wave Simulation 工作流通过版本化 `wavewidgets` C ABI 将完整工作区
+嵌入编辑区 Wave Tab，无需用户手工传递文件。独立应用链接同一共享控件实现并继续作为
+可单独运行的工具。当前兼容 Module Manifest v1/v2；v2 可携带选中 `always` 的观察范围
+和内部信号 access path，并将构建或运行错误以源码文件、行、列回传 ZeroSlack。
 
 ## 构建
 

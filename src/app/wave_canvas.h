@@ -1,5 +1,7 @@
 #pragma once
 
+#include "wave/widgets_export.h"
+
 #include "wave/commands.h"
 #include "wave/model.h"
 
@@ -38,7 +40,7 @@ class QWheelEvent;
 
 namespace wave {
 
-class WaveCanvas final : public QAbstractScrollArea {
+class WAVEWIDGETS_API WaveCanvas final : public QAbstractScrollArea {
     Q_OBJECT
 
 public:

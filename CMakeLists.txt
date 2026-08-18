@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(WaveWorkbench VERSION 0.1.0 LANGUAGES CXX)
+project(WaveWorkbench VERSION 0.2.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -24,6 +24,7 @@ endfunction()
 
 add_library(wavetime STATIC
     src/wavetime/src/time.cpp
+    src/wavetime/src/timeline_viewport.cpp
 )
 target_include_directories(wavetime
     PUBLIC src/wavetime/include
@@ -67,14 +68,19 @@ target_include_directories(wavevalidate
 target_link_libraries(wavevalidate PUBLIC wavecore)
 wave_enable_warnings(wavevalidate)
 
-add_library(waveimport STATIC
+add_library(wavetrace STATIC
     src/waveimport/src/trace.cpp
 )
-target_include_directories(waveimport
+target_include_directories(wavetrace
     PUBLIC src/waveimport/include
 )
-target_link_libraries(waveimport PUBLIC wavecore)
-wave_enable_warnings(waveimport)
+target_link_libraries(wavetrace PUBLIC wavecore)
+wave_enable_warnings(wavetrace)
+
+# Compatibility target for existing consumers. Trace parsing now has a
+# dedicated ownership boundary without forcing downstream source changes.
+add_library(waveimport INTERFACE)
+target_link_libraries(waveimport INTERFACE wavetrace)
 
 add_library(wavecompare STATIC
     src/wavecompare/src/compare.cpp
@@ -132,19 +138,39 @@ target_link_libraries(waveautomation
 )
 wave_enable_warnings(waveautomation)
 
-add_executable(wave-workbench
-    src/app/main.cpp
+add_library(wavewidgets SHARED
     src/app/main_window.cpp
     src/app/main_window.h
     src/app/trace_canvas.cpp
     src/app/trace_canvas.h
     src/app/wave_canvas.cpp
     src/app/wave_canvas.h
+    src/wavewidgets/src/widgets.cpp
+    src/wavewidgets/include/wave/widgets.h
+    src/wavewidgets/include/wave/widgets_export.h
 )
-target_link_libraries(wave-workbench
-    PRIVATE wavecore wavetime waveedit waveproject wavevalidate wavegenerate waveimport wavecompare waveintegration wavesim
+target_include_directories(wavewidgets
+    PUBLIC
+        src/app
+        src/wavewidgets/include
+)
+target_link_libraries(wavewidgets
+    PUBLIC wavecore wavetime waveedit waveproject wavevalidate wavegenerate wavetrace wavecompare waveintegration wavesim
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent
 )
+set_target_properties(wavewidgets PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "wavewidgets"
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+wave_enable_warnings(wavewidgets)
+
+add_executable(wave-workbench
+    src/app/main.cpp
+)
+target_link_libraries(wave-workbench PRIVATE wavewidgets)
+target_compile_definitions(wave-workbench
+    PRIVATE WAVEWORKBENCH_VERSION="${PROJECT_VERSION}")
 wave_enable_warnings(wave-workbench)
 
 add_executable(wave-generate
@@ -190,6 +216,7 @@ target_link_libraries(wave-cli
 wave_enable_warnings(wave-cli)
 
 set(WAVEWORKBENCH_PORTABLE_TARGETS
+    wavewidgets
     wave-workbench
     wave-cli
     wave-generate
@@ -206,8 +233,9 @@ configure_file(
 
 install(
     TARGETS ${WAVEWORKBENCH_PORTABLE_TARGETS}
-    RUNTIME DESTINATION .
-    COMPONENT Portable
+    RUNTIME DESTINATION . COMPONENT Portable
+    LIBRARY DESTINATION . COMPONENT Portable
+    ARCHIVE DESTINATION lib COMPONENT Portable
 )
 install(
     FILES
