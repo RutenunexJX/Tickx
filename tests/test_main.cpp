@@ -5447,6 +5447,167 @@ void testCrossApplicationContracts()
     expectEqual(launch.request->laneId, QStringLiteral("lane-request"), "URI lane ID is incorrect");
 }
 
+void testZeroSlackModuleManifestImport()
+{
+    const auto manifestPath = std::filesystem::path(WAVE_SOURCE_DIR)
+        / "examples"
+        / "handshake"
+        / "integration"
+        / "zeroslack_module_manifest_v1.json";
+    QFile file(QString::fromStdWString(manifestPath.wstring()));
+    expect(file.open(QIODevice::ReadOnly), "cannot open Module Manifest v1 fixture");
+    const auto document = file.readAll();
+    const auto parsed = wave::parseZeroSlackModuleManifest(document);
+    expect(parsed.ok(), parsed.error.toStdString());
+    expect(
+        parsed.manifest->target.mode == wave::ModuleManifestTargetMode::Instance
+            && parsed.manifest->target.module == "handshake_dut"
+            && parsed.manifest->target.instancePath == "tb.u_dut"
+            && parsed.manifest->ports.size() == 9
+            && parsed.manifest->parameters.size() == 1,
+        "Module Manifest semantic target or members were not preserved");
+
+    const auto imported = wave::importZeroSlackModuleManifest(*parsed.manifest);
+    expect(imported.ok(), imported.error.toStdString());
+    expect(
+        imported.clockSuggestion.state == wave::ModuleCandidateState::Unique
+            && imported.clockSuggestion.selectedPortName == "clk_i"
+            && !imported.clockSuggestion.selectedLaneId.empty()
+            && imported.resetSuggestion.state == wave::ModuleCandidateState::Unique
+            && imported.resetSuggestion.selectedPortName == "rst_ni"
+            && !imported.resetSuggestion.selectedLaneId.empty(),
+        "unique clock/reset candidates were not selected explicitly");
+    expect(
+        imported.project->clockDomains.size() == 1
+            && imported.project->clockDomains.front().name == "clk_i"
+            && imported.project->clockDomains.front().period == 10'000,
+        "unique clock candidate did not create a visible clock domain");
+    expect(
+        imported.project->scenarios.size() == 1
+            && imported.project->scenarios.front().lanes.size() == 8
+            && imported.stimulusLaneIds.size() == 6
+            && imported.watchLaneIds.size() == 3,
+        "manifest ports were not classified into stimulus/watch lanes");
+    expect(
+        std::any_of(
+            imported.diagnostics.begin(),
+            imported.diagnostics.end(),
+            [](const QString& diagnostic) {
+                return diagnostic.contains(QStringLiteral("control_if"))
+                    && diagnostic.contains(QStringLiteral("interface"));
+            }),
+        "deferred interface input was not reported explicitly");
+
+    const auto& importedScenario = imported.project->scenarios.front();
+    expect(
+        importedScenario.events.empty()
+            && std::all_of(
+                importedScenario.lanes.begin(),
+                importedScenario.lanes.end(),
+                [](const wave::Lane& lane) { return lane.visible; }),
+        "manifest import introduced hidden lanes or hidden generated stimulus");
+
+    auto project = *imported.project;
+    auto& scenario = project.scenarios.front();
+    const auto laneByName = [&scenario](const std::string_view name) -> wave::Lane* {
+        const auto found = std::find_if(
+            scenario.lanes.begin(),
+            scenario.lanes.end(),
+            [name](const wave::Lane& lane) { return lane.name == name; });
+        return found == scenario.lanes.end() ? nullptr : &*found;
+    };
+    auto* clock = laneByName("clk_i");
+    auto* reset = laneByName("rst_ni");
+    auto* data = laneByName("data_i");
+    auto* mode = laneByName("mode_i");
+    auto* bidirectional = laneByName("ready_io");
+    auto* output = laneByName("data_o");
+    expect(
+        clock && clock->kind == wave::LaneKind::Clock && clock->visible
+            && !clock->clockDomainId.empty(),
+        "clock lane is not directly visible and configured");
+    expect(
+        reset && reset->kind == wave::LaneKind::Bit && reset->visible
+            && reset->segments.size() == 1
+            && reset->segments.front().start == 0
+            && reset->segments.front().end == scenario.duration
+            && reset->segments.front().value == "0",
+        "reset input has no visible default stimulus");
+    expect(
+        data && data->kind == wave::LaneKind::Bus && data->width == 8
+            && data->segments.size() == 1
+            && data->segments.front().value == "0x0",
+        "bus input has no visible zero stimulus");
+    expect(
+        mode && mode->kind == wave::LaneKind::Enum
+            && mode->enumMap.at("MODE_IDLE") == "0"
+            && mode->enumMap.at("MODE_RUN") == "1"
+            && mode->segments.size() == 1,
+        "enum metadata or default stimulus was not imported");
+    expect(
+        bidirectional
+            && bidirectional->extensions.at("waveSimulation.role")
+                == R"("stimulus-watch")"
+            && !bidirectional->segments.empty(),
+        "inout port was not represented as visible stimulus and watch intent");
+    expect(
+        output && output->segments.empty()
+            && output->extensions.at("waveSimulation.role") == R"("watch")",
+        "output port was not created as an undriven watch lane");
+
+    wave::SetLaneRangeCommand edit(
+        scenario,
+        data->id,
+        0,
+        20'000,
+        "0x5a");
+    edit.redo();
+    data = laneByName("data_i");
+    expect(
+        data && data->segments.front().start == 0
+            && data->segments.front().end == 20'000
+            && data->segments.front().value == "0x5a",
+        "imported input lane cannot be edited through the normal command path");
+
+    auto ambiguousObject = QJsonDocument::fromJson(document).object();
+    ambiguousObject.insert(
+        QStringLiteral("clockCandidates"),
+        QJsonArray{QStringLiteral("clk_i"), QStringLiteral("rst_ni")});
+    const auto ambiguousParsed = wave::parseZeroSlackModuleManifest(
+        QJsonDocument(ambiguousObject).toJson());
+    expect(ambiguousParsed.ok(), ambiguousParsed.error.toStdString());
+    const auto ambiguous = wave::importZeroSlackModuleManifest(*ambiguousParsed.manifest);
+    expect(
+        ambiguous.ok()
+            && ambiguous.clockSuggestion.state == wave::ModuleCandidateState::Ambiguous
+            && ambiguous.clockSuggestion.selectedLaneId.empty()
+            && ambiguous.project->clockDomains.empty()
+            && std::any_of(
+                ambiguous.diagnostics.begin(),
+                ambiguous.diagnostics.end(),
+                [](const QString& diagnostic) {
+                    return diagnostic.contains(QStringLiteral("ambiguous"));
+                }),
+        "ambiguous clock candidates were guessed or hidden");
+
+    auto invalidObject = QJsonDocument::fromJson(document).object();
+    invalidObject.insert(QStringLiteral("unexpected"), true);
+    expect(
+        !wave::parseZeroSlackModuleManifest(
+             QJsonDocument(invalidObject).toJson()).ok(),
+        "unknown top-level Module Manifest property was accepted");
+    invalidObject = QJsonDocument::fromJson(document).object();
+    auto sources = invalidObject.value(QStringLiteral("sources")).toArray();
+    auto source = sources.at(0).toObject();
+    source.insert(QStringLiteral("path"), QStringLiteral("C:/absolute/dut.sv"));
+    sources[0] = source;
+    invalidObject.insert(QStringLiteral("sources"), sources);
+    expect(
+        !wave::parseZeroSlackModuleManifest(
+             QJsonDocument(invalidObject).toJson()).ok(),
+        "absolute source path was accepted by the portable manifest reader");
+}
+
 void testAutomationContracts()
 {
     auto source = wave::makeDemonstrationProject();
@@ -17395,6 +17556,7 @@ int main(int argc, char* argv[])
         {"Expected/Actual compare rules", testExpectedActualCompareRules},
         {"compare diagnostics, relations, and reports", testCompareDiagnosticsRelationsAndReports},
         {"cross-application file and URI contracts", testCrossApplicationContracts},
+        {"ZeroSlack Module Manifest import", testZeroSlackModuleManifestImport},
         {"headless automation JSON contracts", testAutomationContracts},
         {"Relation repair reference contracts", testAutomationRelationRepairReferenceContracts},
         {"structural identity validation contracts", testAutomationStructuralIdentityValidationContracts},

@@ -46,6 +46,7 @@ int usage()
     QTextStream(stderr)
         << "Usage:\n"
            "  wave-bridge describe <project.wave.json> <manifest.json>\n"
+           "  wave-bridge import-module <module-manifest.json> <output-project.wave.json>\n"
            "  wave-bridge import-signals <project.wave.json> <signals.json> <output-project.wave.json> [--scenario=SELECTOR]\n"
            "  wave-bridge link-frame <project.wave.json> <frame-reference.json> <output-project.wave.json>\n"
            "  wave-bridge pinloom-entry <project.wave.json> <artifact-directory> <entry.json> [--scenario=SELECTOR]\n";
@@ -80,8 +81,46 @@ int main(int argc, char* argv[])
 {
     QCoreApplication application(argc, argv);
     const auto arguments = application.arguments();
-    if (arguments.size() < 4) return usage();
+    if (arguments.size() < 2) return usage();
     const auto command = arguments[1];
+    QString error;
+    if (command == QStringLiteral("import-module")) {
+        if (arguments.size() != 4) return usage();
+        QByteArray document;
+        if (!readFile(arguments[2], document, error)) {
+            QTextStream(stderr) << "Cannot read Module Manifest: " << error << '\n';
+            return 2;
+        }
+        const auto parsed = wave::parseZeroSlackModuleManifest(document);
+        if (!parsed.ok()) {
+            QTextStream(stderr) << parsed.error << '\n';
+            return 2;
+        }
+        const auto imported = wave::importZeroSlackModuleManifest(*parsed.manifest);
+        if (!imported.ok()) {
+            QTextStream(stderr) << imported.error << '\n';
+            return 2;
+        }
+        const auto output = QFileInfo(arguments[3]).absoluteFilePath();
+        if (!wave::saveProjectFileAtomic(*imported.project, output, &error)) {
+            QTextStream(stderr) << "Cannot write output project: " << error << '\n';
+            return 2;
+        }
+        QTextStream(stdout)
+            << "Imported ZeroSlack module target: "
+            << parsed.manifest->target.module.c_str() << "\n"
+            << "Clock suggestion: "
+            << wave::toString(imported.clockSuggestion.state).data() << "\n"
+            << "Reset suggestion: "
+            << wave::toString(imported.resetSuggestion.state).data() << "\n"
+            << imported.stimulusLaneIds.size() << " stimulus lane(s), "
+            << imported.watchLaneIds.size() << " watch lane(s)\n";
+        for (const auto& diagnostic : imported.diagnostics) {
+            QTextStream(stdout) << "warning: " << diagnostic << '\n';
+        }
+        return 0;
+    }
+    if (arguments.size() < 4) return usage();
     const auto projectPath = QFileInfo(arguments[2]).absoluteFilePath();
     const auto loaded = wave::loadProjectFile(projectPath);
     if (!loaded.ok()) {
@@ -89,7 +128,6 @@ int main(int argc, char* argv[])
         return 2;
     }
     auto project = *loaded.project;
-    QString error;
 
     if (command == QStringLiteral("describe")) {
         if (arguments.size() != 4) return usage();

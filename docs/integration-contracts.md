@@ -24,6 +24,29 @@ wave-generate project.wave.json <workspace> --scenario=<稳定 ID 或唯一名�
 manifest 中的 Generate/Compare 命令模板包含该选择器占位，不再暗示数组首项。生成物是单向
 派生产物，不回写场景事实源。
 
+### 导入 Wave Simulation Module Manifest v1
+
+```powershell
+wave-bridge import-module module-manifest.json output.wave.json
+```
+
+该命令严格读取 ZeroSlack 输出的版本化 Module Manifest，并创建一个可直接在
+Wave Workbench 中打开的未保存仿真目标工程。它不读取 ZeroSlack 内部数据库，也不重新解释
+SystemVerilog：
+
+- 唯一 clock candidate 转换为可见 Clock lane 和显式 ClockDomain；多个候选保持
+  `ambiguous`，不自动选择。
+- 唯一 reset candidate 标注在对应输入 lane；多个候选保持 `ambiguous`。
+- `input` 创建 stimulus lane，整个默认时段有一个可见的零值 Segment，可立即编辑。
+- `output` 创建无驱动的 watch lane；`inout` / `ref` 同时保留 stimulus 和 watch 意图。
+- enum 名称和值映射到 Enum lane；完整声明、方向、源码位置、类型 identity 和 manifest
+  identity 保存在扩展字段中。
+- 当前切片不展开 interface 或 unpacked array，导入时给出明确 warning；该限制属于后续
+  structured-input 切片，不会静默扁平化。
+
+候选状态和端口角色均写入工程扩展字段，输入默认 Segment 直接进入工程 JSON，不存在隐藏的
+激励生成逻辑。该 CLI 是正式 ZeroSlack 入口开放前的实验性边界；本阶段不调用 Verilator。
+
 ### 导入信号清单
 
 ```powershell

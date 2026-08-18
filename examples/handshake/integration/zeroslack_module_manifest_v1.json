@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "workspaceId": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "target": {
+    "mode": "instance",
+    "module": "handshake_dut",
+    "instancePath": "tb.u_dut",
+    "sourceFile": "rtl/handshake_dut.sv",
+    "sourceLine": 3
+  },
+  "sources": [
+    {"path": "rtl/handshake_dut.sv", "role": "design"},
+    {"path": "rtl/include/handshake_types.svh", "role": "header"}
+  ],
+  "includeDirs": ["rtl/include"],
+  "defines": {"WAVE_PREVIEW": "1"},
+  "parameters": {
+    "WIDTH": {
+      "name": "WIDTH",
+      "declarationText": "parameter int WIDTH = 8",
+      "expressionText": "8",
+      "valueText": "8",
+      "displayValueText": "8",
+      "semanticAvailable": true,
+      "type": {
+        "semanticAvailable": true,
+        "rawTypeText": "int",
+        "resolvedTypeName": "int",
+        "semanticKind": "integral",
+        "resolvedTypeText": "int",
+        "canonicalTypeId": "builtin:int",
+        "declarationShapeId": "int",
+        "fixedSize": true,
+        "integral": true,
+        "signed": true,
+        "unpackedArray": false,
+        "interfaceType": false,
+        "bitWidth": 32,
+        "packedDimensions": "",
+        "unpackedDimensions": "",
+        "unpackedElementCount": "",
+        "interfaceName": "",
+        "modportName": "",
+        "typedefChain": [],
+        "failureReason": "",
+        "enumValues": [],
+        "structMembers": []
+      },
+      "sourceFile": "rtl/handshake_dut.sv",
+      "sourceLine": 4
+    }
+  },
+  "ports": [
+    {
+      "name": "clk_i",
+      "direction": "input",
+      "declarationText": "input logic clk_i",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic", "canonicalTypeId": "logic:1",
+        "declarationShapeId": "logic", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 1,
+        "packedDimensions": "", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/handshake_dut.sv",
+      "sourceLine": 6
+    },
+    {
+      "name": "rst_ni",
+      "direction": "input",
+      "declarationText": "input logic rst_ni",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic", "canonicalTypeId": "logic:1",
+        "declarationShapeId": "logic", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 1,
+        "packedDimensions": "", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/handshake_dut.sv",
+      "sourceLine": 7
+    },
+    {
+      "name": "req_i",
+      "direction": "input",
+      "declarationText": "input logic req_i",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic", "canonicalTypeId": "logic:1",
+        "declarationShapeId": "logic", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 1,
+        "packedDimensions": "", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/handshake_dut.sv",
+      "sourceLine": 8
+    },
+    {
+      "name": "data_i",
+      "direction": "input",
+      "declarationText": "input logic [7:0] data_i",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic [7:0]", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic [7:0]", "canonicalTypeId": "logic:8",
+        "declarationShapeId": "logic[7:0]", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 8,
+        "packedDimensions": "[7:0]", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/handshake_dut.sv",
+      "sourceLine": 9
+    },
+    {
+      "name": "mode_i",
+      "direction": "input",
+      "declarationText": "input handshake_mode_t mode_i",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "handshake_mode_t", "resolvedTypeName": "handshake_mode_t",
+        "semanticKind": "enum", "resolvedTypeText": "handshake_mode_t", "canonicalTypeId": "enum:handshake_mode_t",
+        "declarationShapeId": "handshake_mode_t", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 2,
+        "packedDimensions": "[1:0]", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": ["handshake_mode_t"], "failureReason": "",
+        "enumValues": [
+          {"name": "MODE_IDLE", "declarationText": "MODE_IDLE = 2'd0", "valueText": "2'd0", "displayValueText": "2'd0", "semanticAvailable": true},
+          {"name": "MODE_RUN", "declarationText": "MODE_RUN = 2'd1", "valueText": "2'd1", "displayValueText": "2'd1", "semanticAvailable": true}
+        ],
+        "structMembers": []
+      },
+      "sourceFile": "rtl/handshake_dut.sv",
+      "sourceLine": 10
+    },
+    {
+      "name": "ready_io",
+      "direction": "inout",
+      "declarationText": "inout logic ready_io",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic", "canonicalTypeId": "logic:1",
+        "declarationShapeId": "logic", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 1,
+        "packedDimensions": "", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/handshake_dut.sv",
+      "sourceLine": 11
+    },
+    {
+      "name": "ack_o",
+      "direction": "output",
+      "declarationText": "output logic ack_o",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic", "canonicalTypeId": "logic:1",
+        "declarationShapeId": "logic", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 1,
+        "packedDimensions": "", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/handshake_dut.sv",
+      "sourceLine": 12
+    },
+    {
+      "name": "data_o",
+      "direction": "output",
+      "declarationText": "output logic [8:0] data_o",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic [8:0]", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic [8:0]", "canonicalTypeId": "logic:9",
+        "declarationShapeId": "logic[8:0]", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 9,
+        "packedDimensions": "[8:0]", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/handshake_dut.sv",
+      "sourceLine": 13
+    },
+    {
+      "name": "control_if",
+      "direction": "interface",
+      "declarationText": "handshake_if.dut control_if",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "handshake_if.dut", "resolvedTypeName": "handshake_if",
+        "semanticKind": "interface", "resolvedTypeText": "handshake_if.dut", "canonicalTypeId": "interface:handshake_if",
+        "declarationShapeId": "handshake_if.dut", "fixedSize": false, "integral": false, "signed": false,
+        "unpackedArray": false, "interfaceType": true, "bitWidth": 0,
+        "packedDimensions": "", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "handshake_if", "modportName": "dut", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/handshake_dut.sv",
+      "sourceLine": 14
+    }
+  ],
+  "clockCandidates": ["clk_i"],
+  "resetCandidates": ["rst_ni"]
+}

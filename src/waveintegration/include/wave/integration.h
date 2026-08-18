@@ -1,6 +1,7 @@
 #pragma once
 
 #include "wave/model.h"
+#include "wave/module_manifest.h"
 
 #include <QByteArray>
 #include <QString>
