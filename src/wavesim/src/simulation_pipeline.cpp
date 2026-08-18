@@ -1242,6 +1242,10 @@ struct VerilatorSimulationRunner::Impl {
             request.buildCacheDirectory =
                 QDir(request.buildCacheDirectory).absolutePath();
         }
+        if (!request.scenarioDirectory.trimmed().isEmpty()) {
+            request.scenarioDirectory =
+                QDir(request.scenarioDirectory).absolutePath();
+        }
         if (!request.resultProjectPath.trimmed().isEmpty()) {
             request.resultProjectPath =
                 QFileInfo(request.resultProjectPath).absoluteFilePath();

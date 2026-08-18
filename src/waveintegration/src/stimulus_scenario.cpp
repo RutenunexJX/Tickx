@@ -390,6 +390,30 @@ QJsonObject scenarioToJson(
         {QStringLiteral("groups"), groups},
         {QStringLiteral("ports"), ports},
     };
+    if (scenario.schemaVersion >= 2) {
+        QJsonArray markers;
+        for (const auto& marker : scenario.markers) {
+            markers.append(QJsonObject{
+                {QStringLiteral("id"), qString(marker.id)},
+                {QStringLiteral("name"), qString(marker.name)},
+                {QStringLiteral("startTick"), QString::number(marker.start)},
+                {QStringLiteral("endTick"), QString::number(marker.end)},
+                {QStringLiteral("kind"), latinString(toString(marker.kind))},
+                {QStringLiteral("note"), qString(marker.note)},
+            });
+        }
+        scenarioObject.insert(QStringLiteral("markers"), markers);
+        scenarioObject.insert(
+            QStringLiteral("view"),
+            QJsonObject{
+                {QStringLiteral("selectedPortName"),
+                 qString(scenario.view.selectedPortName)},
+                {QStringLiteral("cursorTick"),
+                 QString::number(scenario.view.cursorTick)},
+                {QStringLiteral("visibleSpanTicks"),
+                 QString::number(scenario.view.visibleSpanTicks)},
+            });
+    }
     QJsonObject root{
         {QStringLiteral("schemaVersion"), scenario.schemaVersion},
         {QStringLiteral("manifestSchemaVersion"), scenario.manifestSchemaVersion},
@@ -597,6 +621,22 @@ bool compatibleBinding(
         && saved.binding.declarationShapeId == binding->declarationShapeId;
 }
 
+bool sameBindingExceptWidth(
+    const StimulusScenarioPort& saved,
+    const Lane& current)
+{
+    QStringList ignored;
+    const auto binding = bindingFromLane(current, 0, ignored);
+    const auto savedKind = saved.kind == LaneKind::Clock ? LaneKind::Bit : saved.kind;
+    const auto currentKind = current.kind == LaneKind::Clock ? LaneKind::Bit : current.kind;
+    return binding
+        && saved.binding.direction == binding->direction
+        && saved.binding.isSigned == binding->isSigned
+        && saved.binding.width != binding->width
+        && savedKind == currentKind
+        && (savedKind != LaneKind::Enum || saved.enumMap == current.enumMap);
+}
+
 Lane makeGroupLane(const StimulusScenarioGroup& group)
 {
     Lane lane;
@@ -650,7 +690,9 @@ StimulusScenarioParseResult parseZeroSlackStimulusScenario(
     std::uint64_t manifestSchemaVersion = 0;
     if (!readUnsigned(root, QStringLiteral("schemaVersion"), QStringLiteral("stimulus"),
                       schemaVersion, error, 1)
-        || schemaVersion != ZeroSlackStimulusScenario::CurrentSchemaVersion
+        || schemaVersion
+               < ZeroSlackStimulusScenario::MinimumSupportedSchemaVersion
+        || schemaVersion > ZeroSlackStimulusScenario::CurrentSchemaVersion
         || !readUnsigned(root, QStringLiteral("manifestSchemaVersion"),
                          QStringLiteral("stimulus"), manifestSchemaVersion, error, 1)
         || manifestSchemaVersion != ZeroSlackModuleManifest::CurrentSchemaVersion) {
@@ -710,12 +752,21 @@ StimulusScenarioParseResult parseZeroSlackStimulusScenario(
     }
     const auto scenarioObject = root.value(QStringLiteral("scenario")).toObject();
     const auto scenarioContext = QStringLiteral("stimulus.scenario");
+    const auto scenarioKeys = scenario.schemaVersion >= 2
+        ? std::initializer_list<QString>{
+              QStringLiteral("id"), QStringLiteral("name"),
+              QStringLiteral("timeBasePicosecondsPerTick"),
+              QStringLiteral("durationTicks"), QStringLiteral("groups"),
+              QStringLiteral("ports"), QStringLiteral("markers"),
+              QStringLiteral("view")}
+        : std::initializer_list<QString>{
+              QStringLiteral("id"), QStringLiteral("name"),
+              QStringLiteral("timeBasePicosecondsPerTick"),
+              QStringLiteral("durationTicks"), QStringLiteral("groups"),
+              QStringLiteral("ports")};
     if (!exactKeys(
             scenarioObject,
-            {QStringLiteral("id"), QStringLiteral("name"),
-             QStringLiteral("timeBasePicosecondsPerTick"),
-             QStringLiteral("durationTicks"), QStringLiteral("groups"),
-             QStringLiteral("ports")},
+            scenarioKeys,
             scenarioContext,
             error)
         || !readString(scenarioObject, QStringLiteral("id"), scenarioContext,
@@ -998,6 +1049,96 @@ StimulusScenarioParseResult parseZeroSlackStimulusScenario(
         result.error = QStringLiteral("stimulus.scenario.ports cannot be empty");
         return result;
     }
+    if (scenario.schemaVersion >= 2) {
+        const auto markersValue = scenarioObject.value(QStringLiteral("markers"));
+        const auto viewValue = scenarioObject.value(QStringLiteral("view"));
+        if (!markersValue.isArray() || !viewValue.isObject()) {
+            result.error = QStringLiteral(
+                "stimulus.scenario markers and view must be an array and object");
+            return result;
+        }
+        std::set<std::string> markerIds;
+        const auto markers = markersValue.toArray();
+        for (qsizetype index = 0; index < markers.size(); ++index) {
+            if (!markers.at(index).isObject()) {
+                result.error = QStringLiteral(
+                    "stimulus.scenario.markers[%1] must be an object").arg(index);
+                return result;
+            }
+            const auto object = markers.at(index).toObject();
+            const auto context = QStringLiteral("stimulus.scenario.markers[%1]")
+                                     .arg(index);
+            StimulusScenarioMarker marker;
+            std::string kindText;
+            if (!exactKeys(
+                    object,
+                    {QStringLiteral("id"), QStringLiteral("name"),
+                     QStringLiteral("startTick"), QStringLiteral("endTick"),
+                     QStringLiteral("kind"), QStringLiteral("note")},
+                    context,
+                    error)
+                || !readString(object, QStringLiteral("id"), context,
+                               marker.id, error)
+                || !readString(object, QStringLiteral("name"), context,
+                               marker.name, error)
+                || !readSignedDecimalString(
+                    object, QStringLiteral("startTick"), context,
+                    marker.start, error, false)
+                || !readSignedDecimalString(
+                    object, QStringLiteral("endTick"), context,
+                    marker.end, error, false)
+                || !readString(object, QStringLiteral("kind"), context,
+                               kindText, error)
+                || !readString(object, QStringLiteral("note"), context,
+                               marker.note, error, true)) {
+                result.error = error;
+                return result;
+            }
+            const auto kind = markerKindFromString(kindText);
+            if (!kind || marker.start < 0 || marker.end < marker.start
+                || marker.end > scenario.duration
+                || (*kind == MarkerKind::Point && marker.start != marker.end)
+                || !markerIds.insert(marker.id).second) {
+                result.error = QStringLiteral(
+                    "%1 has invalid or duplicate marker geometry").arg(context);
+                return result;
+            }
+            marker.kind = *kind;
+            scenario.markers.push_back(std::move(marker));
+        }
+
+        const auto view = viewValue.toObject();
+        const auto viewContext = QStringLiteral("stimulus.scenario.view");
+        if (!exactKeys(
+                view,
+                {QStringLiteral("selectedPortName"),
+                 QStringLiteral("cursorTick"),
+                 QStringLiteral("visibleSpanTicks")},
+                viewContext,
+                error)
+            || !readString(view, QStringLiteral("selectedPortName"),
+                           viewContext, scenario.view.selectedPortName,
+                           error, true)
+            || !readSignedDecimalString(
+                view, QStringLiteral("cursorTick"), viewContext,
+                scenario.view.cursorTick, error, false)
+            || !readSignedDecimalString(
+                view, QStringLiteral("visibleSpanTicks"), viewContext,
+                scenario.view.visibleSpanTicks, error, false)) {
+            result.error = error;
+            return result;
+        }
+        if (scenario.view.cursorTick < 0
+            || scenario.view.cursorTick > scenario.duration
+            || scenario.view.visibleSpanTicks < 0
+            || scenario.view.visibleSpanTicks > scenario.duration
+            || (!scenario.view.selectedPortName.empty()
+                && !portNames.contains(scenario.view.selectedPortName))) {
+            result.error = QStringLiteral(
+                "stimulus.scenario.view contains an invalid location");
+            return result;
+        }
+    }
     if (scenario.identity != computeIdentity(scenario)) {
         result.error = QStringLiteral("ZeroSlack Stimulus Scenario identity does not match its content");
         return result;
@@ -1008,7 +1149,8 @@ StimulusScenarioParseResult parseZeroSlackStimulusScenario(
 
 StimulusScenarioExportResult exportZeroSlackStimulusScenario(
     const Project& project,
-    const Scenario& sourceScenario)
+    const Scenario& sourceScenario,
+    const StimulusScenarioViewState& view)
 {
     StimulusScenarioExportResult result;
     const auto manifestIdentity = extensionString(
@@ -1046,6 +1188,7 @@ StimulusScenarioExportResult exportZeroSlackStimulusScenario(
     scenario.name = sourceScenario.name;
     scenario.timeBase = project.timeBase;
     scenario.duration = sourceScenario.duration;
+    scenario.view = view;
 
     for (std::size_t index = 0; index < sourceScenario.lanes.size(); ++index) {
         const auto& lane = sourceScenario.lanes[index];
@@ -1123,6 +1266,28 @@ StimulusScenarioExportResult exportZeroSlackStimulusScenario(
         result.error = QStringLiteral("Scenario has no Module Manifest-bound port lanes");
         return result;
     }
+    for (const auto& sourceMarker : sourceScenario.markers) {
+        scenario.markers.push_back({
+            sourceMarker.id,
+            sourceMarker.name,
+            sourceMarker.start,
+            sourceMarker.end,
+            sourceMarker.kind,
+            sourceMarker.note,
+        });
+    }
+    scenario.view.cursorTick = std::clamp<Tick>(
+        scenario.view.cursorTick, 0, scenario.duration);
+    scenario.view.visibleSpanTicks = std::clamp<Tick>(
+        scenario.view.visibleSpanTicks, 0, scenario.duration);
+    if (!scenario.view.selectedPortName.empty()
+        && std::none_of(
+            scenario.ports.begin(), scenario.ports.end(),
+            [&scenario](const StimulusScenarioPort& port) {
+                return port.binding.name == scenario.view.selectedPortName;
+            })) {
+        scenario.view.selectedPortName.clear();
+    }
     scenario.identity = computeIdentity(scenario);
     const auto verified = parseZeroSlackStimulusScenario(
         serializeZeroSlackStimulusScenario(scenario));
@@ -1140,7 +1305,8 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     const ZeroSlackStimulusScenario& saved)
 {
     StimulusScenarioRestoreResult result;
-    if (saved.schemaVersion != ZeroSlackStimulusScenario::CurrentSchemaVersion
+    if (saved.schemaVersion < ZeroSlackStimulusScenario::MinimumSupportedSchemaVersion
+        || saved.schemaVersion > ZeroSlackStimulusScenario::CurrentSchemaVersion
         || saved.manifestSchemaVersion != ZeroSlackModuleManifest::CurrentSchemaVersion
         || saved.identity != computeIdentity(saved)
         || saved.duration <= 0 || !saved.timeBase.isValid()
@@ -1176,20 +1342,79 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     for (const auto& lane : baseScenario.lanes) {
         if (lane.kind != LaneKind::Group) currentPorts.emplace(lane.name, lane);
     }
-    std::map<std::string, const StimulusScenarioPort*> savedPorts;
-    for (const auto& port : saved.ports) savedPorts.emplace(port.binding.name, &port);
+    std::map<std::string, std::string> restoredNameBySavedName;
+    std::set<std::string> claimedCurrentNames;
+    std::set<std::string> widthChangedSavedNames;
+    std::set<std::string> incompatibleSavedNames;
 
+    // Exact names are authoritative. Missing names are migrated only when the
+    // current manifest provides one unambiguous structural match.
     for (const auto& port : saved.ports) {
         const auto current = currentPorts.find(port.binding.name);
-        if (current == currentPorts.end()) {
-            ++result.missingSavedPortCount;
-        } else if (!compatibleBinding(port, current->second)) {
-            ++result.incompatiblePortCount;
+        if (current == currentPorts.end()) continue;
+        restoredNameBySavedName.emplace(port.binding.name, current->first);
+        claimedCurrentNames.insert(current->first);
+        if (compatibleBinding(port, current->second)) continue;
+        ++result.incompatiblePortCount;
+        incompatibleSavedNames.insert(port.binding.name);
+        if (sameBindingExceptWidth(port, current->second)) {
+            ++result.widthChangedPortCount;
+            widthChangedSavedNames.insert(port.binding.name);
         }
+    }
+
+    for (const auto& port : saved.ports) {
+        if (restoredNameBySavedName.contains(port.binding.name)) continue;
+        std::vector<std::string> compatibleCandidates;
+        std::vector<std::string> widthChangedCandidates;
+        for (const auto& [name, lane] : currentPorts) {
+            if (claimedCurrentNames.contains(name)) continue;
+            if (compatibleBinding(port, lane)) {
+                compatibleCandidates.push_back(name);
+            } else if (sameBindingExceptWidth(port, lane)) {
+                widthChangedCandidates.push_back(name);
+            }
+        }
+        const auto selectUniqueCandidate = [&](const std::vector<std::string>& candidates)
+            -> std::optional<std::string> {
+            if (candidates.size() == 1) return candidates.front();
+            std::vector<std::string> sameOrder;
+            for (const auto& candidate : candidates) {
+                QStringList ignored;
+                const auto binding = bindingFromLane(currentPorts.at(candidate), 0, ignored);
+                if (binding && binding->sourceOrder == port.binding.sourceOrder) {
+                    sameOrder.push_back(candidate);
+                }
+            }
+            return sameOrder.size() == 1
+                ? std::optional<std::string>{sameOrder.front()} : std::nullopt;
+        };
+        auto candidate = selectUniqueCandidate(compatibleCandidates);
+        bool widthChanged = false;
+        if (!candidate) {
+            candidate = selectUniqueCandidate(widthChangedCandidates);
+            widthChanged = candidate.has_value();
+        }
+        if (!candidate) {
+            ++result.missingSavedPortCount;
+            continue;
+        }
+        restoredNameBySavedName.emplace(port.binding.name, *candidate);
+        claimedCurrentNames.insert(*candidate);
+        ++result.renamedPortCount;
+        if (widthChanged) {
+            ++result.widthChangedPortCount;
+            ++result.incompatiblePortCount;
+            widthChangedSavedNames.insert(port.binding.name);
+            incompatibleSavedNames.insert(port.binding.name);
+        }
+        result.diagnostics.append(
+            QStringLiteral("Saved port %1 was migrated to renamed port %2.")
+                .arg(qString(port.binding.name), qString(*candidate)));
     }
     for (const auto& [name, lane] : currentPorts) {
         static_cast<void>(lane);
-        if (!savedPorts.contains(name)) ++result.newPortCount;
+        if (!claimedCurrentNames.contains(name)) ++result.newPortCount;
     }
     if (!result.manifestChanged
         && (result.missingSavedPortCount != 0 || result.incompatiblePortCount != 0
@@ -1220,24 +1445,38 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     std::vector<ClockDomain> restoredClocks;
     for (const auto& port : saved.ports) {
         nextOrder = std::max(nextOrder, port.displayOrder + 1);
-        const auto current = currentPorts.find(port.binding.name);
-        if (current == currentPorts.end()) {
+        const auto mappedName = restoredNameBySavedName.find(port.binding.name);
+        if (mappedName == restoredNameBySavedName.end()) {
             result.diagnostics.append(
                 QStringLiteral("Saved port %1 is missing from the current manifest and was not restored.")
                     .arg(qString(port.binding.name)));
             continue;
         }
-        if (!compatibleBinding(port, current->second)) {
+        const auto current = currentPorts.find(mappedName->second);
+        if (incompatibleSavedNames.contains(port.binding.name)
+            && !widthChangedSavedNames.contains(port.binding.name)) {
             result.diagnostics.append(
                 QStringLiteral("Saved port %1 changed direction or type; current defaults were retained.")
                     .arg(qString(port.binding.name)));
             continue;
         }
         auto lane = current->second;
-        lane.kind = port.kind;
         lane.radix = port.radix;
         lane.visible = port.visible;
         lane.groupId = validGroups.contains(port.groupId) ? port.groupId : std::string{};
+        if (widthChangedSavedNames.contains(port.binding.name)) {
+            restoredNames.insert(current->first);
+            if (!lane.clockDomainId.empty()) {
+                const auto clock = currentClocks.find(lane.clockDomainId);
+                if (clock != currentClocks.end()) restoredClocks.push_back(clock->second);
+            }
+            ordered.push_back({port.displayOrder, tie++, std::move(lane)});
+            result.diagnostics.append(
+                QStringLiteral("Saved port %1 changed width; display settings were restored and stimulus reset to safe defaults.")
+                    .arg(qString(port.binding.name)));
+            continue;
+        }
+        lane.kind = port.kind;
         lane.enumMap = port.enumMap;
         lane.segments.clear();
         lane.clockDomainId.clear();
@@ -1271,8 +1510,9 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
         }
         if (port.clock) {
             ClockDomain clock;
-            clock.id = stableDigestId("zs-clock", manifest.identity, port.binding.name);
-            clock.name = port.binding.name;
+            clock.id = stableDigestId(
+                "zs-clock", saved.scenarioId, current->first);
+            clock.name = current->first;
             clock.period = port.clock->period;
             clock.phase = port.clock->phase;
             clock.dutyCycle = port.clock->dutyCycle;
@@ -1283,7 +1523,7 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
             lane.clockDomainId = clock.id;
             restoredClocks.push_back(std::move(clock));
         }
-        restoredNames.insert(port.binding.name);
+        restoredNames.insert(current->first);
         ordered.push_back({port.displayOrder, tie++, std::move(lane)});
         ++result.restoredPortCount;
     }
@@ -1324,6 +1564,17 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     restored.id = saved.scenarioId;
     restored.name = saved.name;
     restored.duration = saved.duration;
+    restored.markers.reserve(saved.markers.size());
+    for (const auto& marker : saved.markers) {
+        Marker restoredMarker;
+        restoredMarker.id = marker.id;
+        restoredMarker.name = marker.name;
+        restoredMarker.start = marker.start;
+        restoredMarker.end = marker.end;
+        restoredMarker.kind = marker.kind;
+        restoredMarker.note = marker.note;
+        restored.markers.push_back(std::move(restoredMarker));
+    }
     restored.extensions = baseScenario.extensions;
     restored.extensions["waveSimulation.stimulusScenarioIdentity"] =
         jsonStringValue(saved.identity);
@@ -1334,10 +1585,21 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     project.scenarios.push_back(std::move(restored));
     project.extensions["waveSimulation.stimulusScenarioIdentity"] =
         jsonStringValue(saved.identity);
+    result.view = saved.view;
+    if (!result.view.selectedPortName.empty()) {
+        const auto renamed = restoredNameBySavedName.find(result.view.selectedPortName);
+        if (renamed != restoredNameBySavedName.end()) {
+            result.view.selectedPortName = renamed->second;
+        } else {
+            result.view.selectedPortName.clear();
+        }
+    }
     if (result.manifestChanged) {
         result.diagnostics.append(
-            QStringLiteral("Module Manifest changed: %1 port(s) restored, %2 missing, %3 incompatible, %4 new.")
+            QStringLiteral("Module Manifest changed: %1 port(s) restored, %2 renamed, %3 width-changed, %4 missing, %5 incompatible, %6 new.")
                 .arg(result.restoredPortCount)
+                .arg(result.renamedPortCount)
+                .arg(result.widthChangedPortCount)
                 .arg(result.missingSavedPortCount)
                 .arg(result.incompatiblePortCount)
                 .arg(result.newPortCount));

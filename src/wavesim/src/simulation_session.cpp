@@ -119,6 +119,7 @@ void attachSimulationSession(
         {QStringLiteral("workspaceRoot"), request.workspaceRoot},
         {QStringLiteral("artifactDirectory"), request.artifactDirectory},
         {QStringLiteral("buildCacheDirectory"), request.buildCacheDirectory},
+        {QStringLiteral("scenarioDirectory"), request.scenarioDirectory},
         {QStringLiteral("resultProjectPath"), request.resultProjectPath},
         {QStringLiteral("toolchain"), toolchain},
         {QStringLiteral("buildTimeoutMs"), request.buildTimeoutMs},
@@ -154,6 +155,7 @@ SimulationSessionParseResult simulationSessionFromProject(const Project& project
                 QStringLiteral("workspaceRoot"),
                 QStringLiteral("artifactDirectory"),
                 QStringLiteral("buildCacheDirectory"),
+                QStringLiteral("scenarioDirectory"),
                 QStringLiteral("resultProjectPath"),
                 QStringLiteral("toolchain"),
                 QStringLiteral("buildTimeoutMs"),
@@ -200,6 +202,15 @@ SimulationSessionParseResult simulationSessionFromProject(const Project& project
         request.buildCacheDirectory = QDir(request.artifactDirectory)
                                           .filePath(QStringLiteral("build-cache"));
     }
+    const auto scenarioDirectoryValue = object.value(
+        QStringLiteral("scenarioDirectory"));
+    if (!scenarioDirectoryValue.isUndefined()
+        && !scenarioDirectoryValue.isString()) {
+        result.error = QStringLiteral(
+            "Simulation session scenarioDirectory must be a string.");
+        return result;
+    }
+    request.scenarioDirectory = scenarioDirectoryValue.toString().trimmed();
     request.resultProjectPath = *resultProjectPath;
 
     const auto toolchainValue = object.value(QStringLiteral("toolchain"));

@@ -77,6 +77,21 @@ struct StimulusScenarioGroup {
     bool visible{true};
 };
 
+struct StimulusScenarioMarker {
+    std::string id;
+    std::string name;
+    Tick start{0};
+    Tick end{0};
+    MarkerKind kind{MarkerKind::Point};
+    std::string note;
+};
+
+struct StimulusScenarioViewState {
+    std::string selectedPortName;
+    Tick cursorTick{0};
+    Tick visibleSpanTicks{0};
+};
+
 struct StimulusScenarioPort {
     StimulusPortBinding binding;
     std::string laneId;
@@ -93,7 +108,8 @@ struct StimulusScenarioPort {
 };
 
 struct ZeroSlackStimulusScenario {
-    static constexpr int CurrentSchemaVersion = 1;
+    static constexpr int CurrentSchemaVersion = 2;
+    static constexpr int MinimumSupportedSchemaVersion = 1;
 
     int schemaVersion{CurrentSchemaVersion};
     int manifestSchemaVersion{ZeroSlackModuleManifest::CurrentSchemaVersion};
@@ -107,6 +123,8 @@ struct ZeroSlackStimulusScenario {
     Tick duration{0};
     std::vector<StimulusScenarioGroup> groups;
     std::vector<StimulusScenarioPort> ports;
+    std::vector<StimulusScenarioMarker> markers;
+    StimulusScenarioViewState view;
 };
 
 struct StimulusScenarioParseResult {
@@ -131,6 +149,9 @@ struct StimulusScenarioRestoreResult {
     std::size_t missingSavedPortCount{0};
     std::size_t incompatiblePortCount{0};
     std::size_t newPortCount{0};
+    std::size_t renamedPortCount{0};
+    std::size_t widthChangedPortCount{0};
+    StimulusScenarioViewState view;
     QStringList diagnostics;
     QString error;
 
@@ -143,7 +164,8 @@ struct StimulusScenarioRestoreResult {
     const QByteArray& document);
 [[nodiscard]] StimulusScenarioExportResult exportZeroSlackStimulusScenario(
     const Project& project,
-    const Scenario& scenario);
+    const Scenario& scenario,
+    const StimulusScenarioViewState& view = {});
 [[nodiscard]] StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     const ZeroSlackModuleManifest& manifest,
     const ZeroSlackStimulusScenario& scenario);

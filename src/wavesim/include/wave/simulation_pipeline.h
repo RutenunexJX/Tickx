@@ -70,6 +70,7 @@ struct SimulationRunRequest {
     QString workspaceRoot;
     QString artifactDirectory;
     QString buildCacheDirectory;
+    QString scenarioDirectory;
     QString resultProjectPath;
     ToolchainProbeOptions toolchain;
     int buildTimeoutMs{120'000};

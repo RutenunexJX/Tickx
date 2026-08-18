@@ -88,6 +88,7 @@ wave_enable_warnings(wavecompare)
 add_library(waveintegration STATIC
     src/waveintegration/src/integration.cpp
     src/waveintegration/src/module_manifest.cpp
+    src/waveintegration/src/simulation_scenario_store.cpp
     src/waveintegration/src/stimulus_scenario.cpp
 )
 target_include_directories(waveintegration

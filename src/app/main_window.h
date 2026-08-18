@@ -4,6 +4,7 @@
 #include "wave/compare.h"
 #include "wave/model.h"
 #include "wave/simulation_session.h"
+#include "wave/stimulus_scenario.h"
 #include "wave/trace.h"
 
 #include <QFutureWatcher>
@@ -234,6 +235,13 @@ private:
         bool addReference);
     void loadFirstTraceReference();
     void configureSimulationSession();
+    void loadStoredSimulationScenarios();
+    [[nodiscard]] StimulusScenarioViewState activeSimulationViewState() const;
+    [[nodiscard]] bool persistActiveSimulationScenario(QString* error = nullptr);
+    void createSimulationScenario();
+    void renameSimulationScenario();
+    void deleteSimulationScenario();
+    void updateSimulationScenarioActions();
     void updateSimulationControls(const QString& detail = {});
     [[nodiscard]] bool exportSimulationStimulus(QString& error);
     void finishSimulationRun(SimulationRunReport report);
@@ -341,6 +349,9 @@ private:
     QAction* runSimulationAction_{nullptr};
     QAction* stopSimulationAction_{nullptr};
     QAction* rerunSimulationAction_{nullptr};
+    QAction* createSimulationScenarioAction_{nullptr};
+    QAction* renameSimulationScenarioAction_{nullptr};
+    QAction* deleteSimulationScenarioAction_{nullptr};
     QAction* compareModeAction_{nullptr};
     QMenu* editMenu_{nullptr};
     QMenu* segmentMenu_{nullptr};
@@ -379,6 +390,9 @@ private:
     std::unique_ptr<VerilatorSimulationRunner> simulationRunner_;
     QString simulationSessionError_;
     QString simulationStateDetail_;
+    QString simulationScenarioDirectory_;
+    std::string defaultSimulationScenarioId_;
+    std::map<std::string, StimulusScenarioViewState> simulationScenarioViews_;
     quint64 simulationGeneration_{0};
     bool simulationStopRequested_{false};
     QString pendingRevealLaneId_;

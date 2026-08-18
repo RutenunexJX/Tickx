@@ -34236,16 +34236,27 @@ int main(int argc, char* argv[])
                     QStringLiteral("StopSimulationAction"));
                 auto* rerun = window.findChild<QAction*>(
                     QStringLiteral("RerunSimulationAction"));
+                auto* createScenario = window.findChild<QAction*>(
+                    QStringLiteral("CreateSimulationScenarioAction"));
+                auto* renameScenario = window.findChild<QAction*>(
+                    QStringLiteral("RenameSimulationScenarioAction"));
+                auto* deleteScenario = window.findChild<QAction*>(
+                    QStringLiteral("DeleteSimulationScenarioAction"));
                 auto* splitter = window.findChild<QWidget*>(
                     QStringLiteral("SimulationResultSplitter"));
                 auto* stimulus = window.findChild<QWidget*>(
                     QStringLiteral("SimulationStimulusPanel"));
                 auto* actual = window.findChild<QWidget*>(
                     QStringLiteral("SimulationActualPanel"));
-                if (!run || !stop || !rerun || !splitter || !stimulus || !actual
+                if (!run || !stop || !rerun
+                    || !createScenario || !renameScenario || !deleteScenario
+                    || !splitter || !stimulus || !actual
                     || window.property("simulationResultState").toString()
                         != QStringLiteral("current")
                     || run->isEnabled() || stop->isEnabled() || !rerun->isEnabled()
+                    || !createScenario->isEnabled()
+                    || renameScenario->isEnabled()
+                    || deleteScenario->isEnabled()
                     || !stimulus->isVisibleTo(&window)
                     || !actual->isVisibleTo(&window)) {
                     qCritical().noquote()

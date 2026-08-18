@@ -19,12 +19,14 @@ void usage(QTextStream& stream)
            "[--timeout-ms=N] [--cancel-after-ms=N] [--pretty]\n"
            "  wave-sim-runner run-fixture --manifest=FILE --stimulus=FILE "
            "--workspace=DIR --artifacts=DIR [--build-cache=DIR] "
+           "[--scenario-directory=DIR] "
            "[--verilator=PATH] [--cxx=PATH] "
            "[--probe-timeout-ms=N] [--build-timeout-ms=N] "
            "[--run-timeout-ms=N] [--cancel-after-ms=N] [--pretty]\n\n"
            "  wave-sim-runner run-module --manifest=FILE --stimulus=FILE "
            "--workspace=DIR --artifacts=DIR --result-project=FILE "
            "[--build-cache=DIR] [--generation=N] "
+           "[--scenario-directory=DIR] "
            "[--verilator=PATH] [--cxx=PATH] [--probe-timeout-ms=N] "
            "[--build-timeout-ms=N] [--run-timeout-ms=N] "
            "[--cancel-after-ms=N] [--pretty]\n\n"
@@ -188,6 +190,11 @@ int runSimulation(
         }
         if (const auto value = nonEmptyValue(argument, QStringLiteral("--build-cache="))) {
             request.buildCacheDirectory = *value;
+            continue;
+        }
+        if (const auto value = nonEmptyValue(
+                argument, QStringLiteral("--scenario-directory="))) {
+            request.scenarioDirectory = *value;
             continue;
         }
         if (const auto value = nonEmptyValue(

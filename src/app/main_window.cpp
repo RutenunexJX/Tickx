@@ -4,6 +4,7 @@
 #include "wave/integration.h"
 #include "wave/project_io.h"
 #include "wave/simulation_session.h"
+#include "wave/simulation_scenario_store.h"
 #include "wave/stimulus_scenario.h"
 #include "wave/trace.h"
 #include "wave/validation.h"
@@ -1394,6 +1395,27 @@ MainWindow::MainWindow(
             &MainWindow::rerunSimulation);
         rerunSimulationAction_->setObjectName(QStringLiteral("RerunSimulationAction"));
         resultToolbar->addSeparator();
+        createSimulationScenarioAction_ = resultToolbar->addAction(
+            themedIcon(QStringLiteral("document-new"), style(), QStyle::SP_FileIcon),
+            tr("New scenario"),
+            this,
+            &MainWindow::createSimulationScenario);
+        createSimulationScenarioAction_->setObjectName(
+            QStringLiteral("CreateSimulationScenarioAction"));
+        renameSimulationScenarioAction_ = resultToolbar->addAction(
+            tr("Rename scenario"),
+            this,
+            &MainWindow::renameSimulationScenario);
+        renameSimulationScenarioAction_->setObjectName(
+            QStringLiteral("RenameSimulationScenarioAction"));
+        deleteSimulationScenarioAction_ = resultToolbar->addAction(
+            themedIcon(QStringLiteral("edit-delete"), style(), QStyle::SP_TrashIcon),
+            tr("Delete scenario"),
+            this,
+            &MainWindow::deleteSimulationScenario);
+        deleteSimulationScenarioAction_->setObjectName(
+            QStringLiteral("DeleteSimulationScenarioAction"));
+        resultToolbar->addSeparator();
         resultToolbar->addAction(
             themedIcon(QStringLiteral("zoom-in"), style(), QStyle::SP_ArrowUp),
             tr("Zoom in"),
@@ -1444,6 +1466,14 @@ MainWindow::MainWindow(
         [this] {
             scheduleActiveScenarioLocationMemory();
         });
+    if (simulationResultMode_) {
+        QString scenarioError;
+        if (!persistActiveSimulationScenario(&scenarioError)
+            && !scenarioError.isEmpty()) {
+            simulationStateDetail_ = scenarioError;
+        }
+        updateSimulationScenarioActions();
+    }
     connect(
         canvas_->horizontalScrollBar(),
         &QScrollBar::rangeChanged,
@@ -1515,6 +1545,8 @@ void MainWindow::configureSimulationSession()
     const auto parsed = simulationSessionFromProject(project_);
     if (parsed.ok()) {
         simulationRequest_ = *parsed.request;
+        simulationScenarioDirectory_ = simulationRequest_->scenarioDirectory;
+        loadStoredSimulationScenarios();
         simulationRunner_ = std::make_unique<VerilatorSimulationRunner>();
         simulationStateMachine_.configure(true, false);
         return;
@@ -1531,6 +1563,298 @@ void MainWindow::configureSimulationSession()
             "This trace has no rerun session; Run controls are unavailable");
     }
     simulationStateDetail_ = simulationSessionError_;
+}
+
+void MainWindow::loadStoredSimulationScenarios()
+{
+    if (!simulationRequest_ || simulationScenarioDirectory_.trimmed().isEmpty()) {
+        return;
+    }
+    QFile manifestFile(simulationRequest_->manifestPath);
+    if (!manifestFile.open(QIODevice::ReadOnly)) {
+        simulationStateDetail_ = tr("Cannot read the module manifest for saved scenarios: %1")
+                                     .arg(manifestFile.errorString());
+        return;
+    }
+    const auto manifest = parseZeroSlackModuleManifest(manifestFile.readAll());
+    if (!manifest.ok()) {
+        simulationStateDetail_ = manifest.error;
+        return;
+    }
+    const auto stored = loadSimulationScenarioStore(simulationScenarioDirectory_);
+    if (!stored.ok()) {
+        simulationStateDetail_ = stored.error;
+        return;
+    }
+    std::vector<Scenario> restoredScenarios;
+    std::vector<ClockDomain> restoredClocks;
+    std::map<std::string, StimulusScenarioViewState> restoredViews;
+    QStringList diagnostics = stored.diagnostics;
+    for (const auto& entry : stored.scenarios) {
+        const auto restored = restoreZeroSlackStimulusScenario(
+            *manifest.manifest, entry.scenario);
+        diagnostics.append(restored.diagnostics);
+        if (!restored.ok() || restored.project->scenarios.empty()) {
+            diagnostics.append(
+                tr("Ignored saved scenario %1: %2")
+                    .arg(QString::fromStdString(entry.scenario.name),
+                         restored.error));
+            continue;
+        }
+        auto scenario = restored.project->scenarios.front();
+        restoredViews[scenario.id] = restored.view;
+        if (entry.isDefault) defaultSimulationScenarioId_ = scenario.id;
+        restoredScenarios.push_back(std::move(scenario));
+        for (auto clock : restored.project->clockDomains) {
+            if (std::none_of(
+                    restoredClocks.begin(), restoredClocks.end(),
+                    [&clock](const ClockDomain& candidate) {
+                        return candidate.id == clock.id;
+                    })) {
+                restoredClocks.push_back(std::move(clock));
+            }
+        }
+    }
+    if (restoredScenarios.empty()) {
+        if (!diagnostics.isEmpty()) simulationStateDetail_ = diagnostics.join('\n');
+        return;
+    }
+    if (defaultSimulationScenarioId_.empty()) {
+        defaultSimulationScenarioId_ = restoredScenarios.front().id;
+    }
+    project_.scenarios = std::move(restoredScenarios);
+    project_.clockDomains = std::move(restoredClocks);
+    simulationScenarioViews_ = std::move(restoredViews);
+    activeScenarioIndex_ = 0;
+    const auto defaultScenario = std::find_if(
+        project_.scenarios.begin(), project_.scenarios.end(),
+        [this](const Scenario& scenario) {
+            return scenario.id == defaultSimulationScenarioId_;
+        });
+    if (defaultScenario != project_.scenarios.end()) {
+        activeScenarioIndex_ = static_cast<std::size_t>(
+            std::distance(project_.scenarios.begin(), defaultScenario));
+    }
+    if (!diagnostics.isEmpty()) simulationStateDetail_ = diagnostics.join('\n');
+}
+
+StimulusScenarioViewState MainWindow::activeSimulationViewState() const
+{
+    StimulusScenarioViewState view;
+    const auto* scenario = activeScenario();
+    if (!canvas_ || !scenario) return view;
+    const auto laneId = canvas_->selectedLaneId().toStdString();
+    if (const auto* lane = findLane(*scenario, laneId);
+        lane && lane->kind != LaneKind::Group) {
+        view.selectedPortName = lane->name;
+    }
+    view.cursorTick = std::clamp<Tick>(
+        canvas_->cursorTick(), 0, std::max<Tick>(0, scenario->duration));
+    view.visibleSpanTicks = std::clamp<Tick>(
+        canvas_->visibleTimeSpan(), 0, std::max<Tick>(0, scenario->duration));
+    return view;
+}
+
+bool MainWindow::persistActiveSimulationScenario(QString* error)
+{
+    if (!simulationResultMode_ || simulationScenarioDirectory_.trimmed().isEmpty()) {
+        return true;
+    }
+    const auto* scenario = activeScenario();
+    if (!scenario) return true;
+    if (defaultSimulationScenarioId_.empty()) {
+        defaultSimulationScenarioId_ = scenario->id;
+    }
+    const auto view = activeSimulationViewState();
+    const auto exported = exportZeroSlackStimulusScenario(project_, *scenario, view);
+    if (!exported.ok()) {
+        if (error) *error = exported.error;
+        return false;
+    }
+    const auto saved = saveSimulationScenario(
+        simulationScenarioDirectory_,
+        *exported.scenario,
+        scenario->id == defaultSimulationScenarioId_);
+    if (!saved.ok()) {
+        if (error) *error = saved.error;
+        return false;
+    }
+    simulationScenarioViews_[scenario->id] = view;
+    return true;
+}
+
+void MainWindow::createSimulationScenario()
+{
+    const auto* source = activeScenario();
+    if (!source || simulationScenarioDirectory_.isEmpty()) return;
+    QString error;
+    if (!persistActiveSimulationScenario(&error)) {
+        QMessageBox::warning(this, tr("New scenario"), error);
+        return;
+    }
+    bool accepted = false;
+    const auto name = QInputDialog::getText(
+        this,
+        tr("New scenario"),
+        tr("Scenario name"),
+        QLineEdit::Normal,
+        tr("Scenario %1").arg(project_.scenarios.size() + 1),
+        &accepted).trimmed();
+    if (!accepted || name.isEmpty()) return;
+    const auto duplicate = std::any_of(
+        project_.scenarios.begin(), project_.scenarios.end(),
+        [&name](const Scenario& candidate) {
+            return QString::compare(
+                       QString::fromStdString(candidate.name), name,
+                       Qt::CaseInsensitive) == 0;
+        });
+    if (duplicate) {
+        QMessageBox::warning(
+            this, tr("New scenario"), tr("A scenario with this name already exists."));
+        return;
+    }
+
+    auto scenario = *source;
+    scenario.id = makeStableId("simulation-scenario");
+    scenario.name = name.toStdString();
+    std::map<std::string, std::string> clonedClockIds;
+    std::vector<ClockDomain> clonedClocks;
+    for (auto& lane : scenario.lanes) {
+        if (lane.clockDomainId.empty()) continue;
+        const auto existing = clonedClockIds.find(lane.clockDomainId);
+        if (existing != clonedClockIds.end()) {
+            lane.clockDomainId = existing->second;
+            continue;
+        }
+        const auto* sourceClock = findClock(project_, lane.clockDomainId);
+        if (!sourceClock) continue;
+        auto clone = *sourceClock;
+        const auto oldId = lane.clockDomainId;
+        clone.id = makeStableId("simulation-clock");
+        clonedClockIds.emplace(oldId, clone.id);
+        lane.clockDomainId = clone.id;
+        clonedClocks.push_back(std::move(clone));
+    }
+    project_.clockDomains.insert(
+        project_.clockDomains.end(), clonedClocks.begin(), clonedClocks.end());
+    project_.scenarios.push_back(std::move(scenario));
+    const auto targetIndex = project_.scenarios.size() - 1;
+    simulationScenarioViews_[project_.scenarios.back().id] =
+        activeSimulationViewState();
+    populateScenarioSelector();
+    switchActiveScenario(targetIndex, false);
+    markEdited();
+    if (!persistActiveSimulationScenario(&error)) {
+        QMessageBox::warning(this, tr("New scenario"), error);
+    }
+    updateSimulationScenarioActions();
+}
+
+void MainWindow::renameSimulationScenario()
+{
+    auto* scenario = activeScenario();
+    if (!scenario || scenario->id == defaultSimulationScenarioId_) return;
+    bool accepted = false;
+    const auto name = QInputDialog::getText(
+        this,
+        tr("Rename scenario"),
+        tr("Scenario name"),
+        QLineEdit::Normal,
+        QString::fromStdString(scenario->name),
+        &accepted).trimmed();
+    if (!accepted || name.isEmpty()
+        || name == QString::fromStdString(scenario->name)) {
+        return;
+    }
+    const auto duplicate = std::any_of(
+        project_.scenarios.begin(), project_.scenarios.end(),
+        [scenario, &name](const Scenario& candidate) {
+            return &candidate != scenario
+                && QString::compare(
+                       QString::fromStdString(candidate.name), name,
+                       Qt::CaseInsensitive) == 0;
+        });
+    if (duplicate) {
+        QMessageBox::warning(
+            this, tr("Rename scenario"), tr("A scenario with this name already exists."));
+        return;
+    }
+    scenario->name = name.toStdString();
+    markEdited();
+    QString error;
+    if (!persistActiveSimulationScenario(&error)) {
+        QMessageBox::warning(this, tr("Rename scenario"), error);
+    }
+    populateScenarioSelector();
+    updateSimulationScenarioActions();
+}
+
+void MainWindow::deleteSimulationScenario()
+{
+    const auto* scenario = activeScenario();
+    if (!scenario || scenario->id == defaultSimulationScenarioId_
+        || project_.scenarios.size() <= 1) {
+        return;
+    }
+    const auto scenarioId = scenario->id;
+    const auto name = QString::fromStdString(scenario->name);
+    if (QMessageBox::question(
+            this,
+            tr("Delete scenario"),
+            tr("Delete scenario '%1'?").arg(name)) != QMessageBox::Yes) {
+        return;
+    }
+    QString error;
+    if (!removeSimulationScenario(
+            simulationScenarioDirectory_, scenarioId, &error)) {
+        QMessageBox::warning(this, tr("Delete scenario"), error);
+        return;
+    }
+    project_.scenarios.erase(
+        project_.scenarios.begin() + static_cast<std::ptrdiff_t>(activeScenarioIndex_));
+    simulationScenarioViews_.erase(scenarioId);
+    std::set<std::string> usedClockIds;
+    for (const auto& candidate : project_.scenarios) {
+        for (const auto& lane : candidate.lanes) {
+            if (!lane.clockDomainId.empty()) usedClockIds.insert(lane.clockDomainId);
+        }
+    }
+    project_.clockDomains.erase(
+        std::remove_if(
+            project_.clockDomains.begin(), project_.clockDomains.end(),
+            [&usedClockIds](const ClockDomain& clock) {
+                return !usedClockIds.contains(clock.id);
+            }),
+        project_.clockDomains.end());
+    activeScenarioIndex_ = std::min(
+        activeScenarioIndex_, project_.scenarios.size() - 1);
+    commandStack_.clear();
+    resetEditTracking(false);
+    canvas_->setDocument(&project_, activeScenario(), &commandStack_);
+    populateScenarioSelector();
+    static_cast<void>(restoreActiveScenarioLocation());
+    markEdited();
+    updateSimulationScenarioActions();
+}
+
+void MainWindow::updateSimulationScenarioActions()
+{
+    const auto* scenario = activeScenario();
+    const auto available = simulationResultMode_
+        && !simulationScenarioDirectory_.isEmpty()
+        && scenario;
+    if (createSimulationScenarioAction_) {
+        createSimulationScenarioAction_->setEnabled(available);
+    }
+    const auto named = available
+        && scenario->id != defaultSimulationScenarioId_;
+    if (renameSimulationScenarioAction_) {
+        renameSimulationScenarioAction_->setEnabled(named);
+    }
+    if (deleteSimulationScenarioAction_) {
+        deleteSimulationScenarioAction_->setEnabled(
+            named && project_.scenarios.size() > 1);
+    }
 }
 
 void MainWindow::updateSimulationControls(const QString& detail)
@@ -1630,7 +1954,9 @@ bool MainWindow::exportSimulationStimulus(QString& error)
         error = tr("No active graphical stimulus scenario");
         return false;
     }
-    const auto exported = exportZeroSlackStimulusScenario(project_, *scenario);
+    const auto view = activeSimulationViewState();
+    const auto exported = exportZeroSlackStimulusScenario(
+        project_, *scenario, view);
     if (!exported.ok()) {
         error = exported.error.isEmpty()
             ? tr("The graphical stimulus could not be exported")
@@ -1654,6 +1980,17 @@ bool MainWindow::exportSimulationStimulus(QString& error)
         error = tr("Cannot save the graphical stimulus: %1")
                     .arg(file.errorString());
         return false;
+    }
+    if (!simulationScenarioDirectory_.isEmpty()) {
+        const auto saved = saveSimulationScenario(
+            simulationScenarioDirectory_,
+            *exported.scenario,
+            scenario->id == defaultSimulationScenarioId_);
+        if (!saved.ok()) {
+            error = saved.error;
+            return false;
+        }
+        simulationScenarioViews_[scenario->id] = view;
     }
     return true;
 }
@@ -7693,6 +8030,14 @@ void MainWindow::rememberActiveScenarioLocation()
         scenarioLocationMemoryTimer_->stop();
     }
     if (!canvas_ || !pendingQuickLaneId_.isEmpty()) return;
+    if (simulationResultMode_ && !simulationScenarioDirectory_.isEmpty()) {
+        QString error;
+        if (!persistActiveSimulationScenario(&error) && !error.isEmpty()) {
+            simulationStateDetail_ = error;
+            updateSimulationControls(error);
+        }
+        return;
+    }
     const auto key = scenarioLocationPreferenceKey();
     if (key.isEmpty()) return;
 
@@ -7755,10 +8100,36 @@ void MainWindow::rememberActiveScenarioLocation()
 std::optional<QString> MainWindow::restoreActiveScenarioLocation()
 {
     if (!canvas_) return std::nullopt;
+    const auto* scenario = activeScenario();
+    if (simulationResultMode_ && scenario) {
+        const auto stored = simulationScenarioViews_.find(scenario->id);
+        if (stored == simulationScenarioViews_.end()) return std::nullopt;
+        const auto& view = stored->second;
+        const auto tick = std::clamp<Tick>(
+            view.cursorTick, 0, std::max<Tick>(0, scenario->duration));
+        canvas_->goToTick(tick);
+        const auto lane = std::find_if(
+            scenario->lanes.begin(), scenario->lanes.end(),
+            [&view](const Lane& candidate) {
+                return candidate.name == view.selectedPortName
+                    && candidate.visible
+                    && candidate.kind != LaneKind::Group;
+            });
+        if (lane != scenario->lanes.end()) {
+            canvas_->revealLocation(QString::fromStdString(lane->id), tick);
+        }
+        if (view.visibleSpanTicks > 0) {
+            canvas_->restoreVisibleTimeSpan(view.visibleSpanTicks, tick);
+        }
+        return lane == scenario->lanes.end()
+            ? QString::fromStdString(formatTick(tick, project_.timeBase))
+            : tr("%1 at %2")
+                  .arg(QString::fromStdString(lane->name),
+                       QString::fromStdString(formatTick(tick, project_.timeBase)));
+    }
     const auto key = scenarioLocationPreferenceKey();
     if (key.isEmpty()) return std::nullopt;
 
-    const auto* scenario = activeScenario();
     QSettings settings;
     const auto storedScenarioId =
         settings.value(key + QStringLiteral("/scenarioId")).toString();
@@ -7979,6 +8350,7 @@ void MainWindow::populateScenarioSelector()
                   .arg(static_cast<qulonglong>(project_.scenarios.size()))
             : tr("This project contains one waveform"));
     updateScenarioNavigationActions();
+    updateSimulationScenarioActions();
 }
 
 bool MainWindow::switchActiveScenario(
@@ -8037,6 +8409,7 @@ bool MainWindow::switchActiveScenario(
     invalidateCompareResult();
     rememberActiveScenario();
     updateCommandActions();
+    updateSimulationScenarioActions();
     updateWindowTitle();
     if (announce) {
         auto message = tr("Editing waveform %1 of %2: %3")

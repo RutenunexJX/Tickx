@@ -47,7 +47,7 @@ SystemVerilog：
 候选状态和端口角色均写入工程扩展字段，输入默认 Segment 直接进入工程 JSON，不存在隐藏的
 激励生成逻辑。该 CLI 是正式 ZeroSlack 入口开放前的实验性边界；本阶段不调用 Verilator。
 
-### 保存和恢复 Stimulus Scenario v1
+### 保存和恢复 Stimulus Scenario v2
 
 ```powershell
 wave-bridge export-stimulus module.wave.json stimulus.json `
@@ -56,7 +56,7 @@ wave-bridge import-stimulus module-manifest.json stimulus.json restored.wave.jso
 ```
 
 `stimulus.json` 是独立于 `.wave.json` 的便携契约。它只保存用户可见的仿真意图，不保存
-结果波形、绝对路径或 Wave Workbench 窗口状态：
+结果波形或绝对路径：
 
 - Module Manifest identity、schema、workspace identity 和 module/instance target；
 - Scenario 稳定 ID、名称、整数 tick timebase 和 duration；
@@ -65,9 +65,11 @@ wave-bridge import-stimulus module-manifest.json stimulus.json restored.wave.jso
 - bit、bus、enum、reset 的显式连续 Segment；
 - clock 的 period、phase、duty、edge、初始值及显式 override Segment；
 - reset 的 active level、同步属性及由可见 Segment 表达的 assert/deassert 区间。
+- Marker、当前信号、游标位置和可见时间跨度；这些视图信息仍以端口名称和 tick 表达，
+  不依赖窗口像素或绝对路径。
 
 tick 使用十进制字符串，避免 JSON number 在跨语言实现中丢失 int64 精度。正式 schema 位于
-`schemas/stimulus/v1/stimulus-scenario.schema.json`。解析器还执行 schema 难以完整表达的
+`schemas/stimulus/v2/stimulus-scenario.schema.json`；v1 仍可读取和恢复。解析器还执行 schema 难以完整表达的
 约束，包括端口身份唯一、显示顺序唯一、stimulus 全时段覆盖、Segment 不重叠、值符合
 lane 类型，以及内容哈希 identity 校验。
 
@@ -75,15 +77,16 @@ lane 类型，以及内容哈希 identity 校验。
 
 - Manifest identity 未变化时，端口契约必须精确一致；任何缺失、类型冲突或新增端口均视为
   契约损坏并拒绝恢复。
-- Manifest identity 已变化时，只迁移名称相同且方向、宽度、signed、canonical type
-  兼容的端口。
-- 已删除端口报告为 missing；同名但类型变化的端口保留当前 Manifest 默认值并报告为
-  incompatible；新增端口按当前 Manifest 默认值追加。
-- 不按相似名称、源码行号或端口顺序猜测映射。
+- Manifest identity 已变化时，先匹配同名端口；缺失名称仅在方向、signed、lane kind、
+  enum/type 结构形成唯一候选时迁移为重命名，候选不唯一时可用 source order 消歧，
+  不做字符串相似度猜测。
+- 位宽变化保留顺序、radix、分组和可见性，但丢弃不安全的旧 stimulus，使用当前
+  Manifest 默认值；已删除端口报告为 missing，新增端口按当前默认值追加。
 - 保存文件移动到其他目录后内容与 identity 不变，恢复只依赖显式传入的当前 Manifest。
 
-该切片只建立场景契约和确定性迁移边界，不调用 Verilator，也不把结果波形写入
-`stimulus.json`。
+仿真结果窗口把默认场景和命名场景原子保存到调用方提供的场景目录：默认场景固定为
+`default.json`，命名场景使用稳定 scenario ID 的哈希文件名。结果波形、编译模型和运行
+产物仍在独立缓存中，不写入场景目录。
 
 ### 导入信号清单
 

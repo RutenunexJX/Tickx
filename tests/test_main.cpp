@@ -9,6 +9,7 @@
 #include "wave/simulation_build_cache.h"
 #include "wave/simulation_pipeline.h"
 #include "wave/simulation_runner.h"
+#include "wave/simulation_scenario_store.h"
 #include "wave/simulation_session.h"
 #include "wave/time.h"
 #include "wave/trace.h"
@@ -5676,8 +5677,19 @@ void testZeroSlackStimulusScenarioContract()
     request->groupId = group.id;
     data->groupId = group.id;
     scenario.lanes.insert(scenario.lanes.begin() + 2, group);
+    wave::Marker resetReleaseMarker;
+    resetReleaseMarker.id = "marker-reset-release";
+    resetReleaseMarker.name = "Reset released";
+    resetReleaseMarker.start = 15'000;
+    resetReleaseMarker.end = 15'000;
+    resetReleaseMarker.kind = wave::MarkerKind::Point;
+    resetReleaseMarker.note = "first active cycle";
+    scenario.markers.push_back(std::move(resetReleaseMarker));
 
-    const auto exported = wave::exportZeroSlackStimulusScenario(project, scenario);
+    const wave::StimulusScenarioViewState savedView{
+        "data_i", 40'000, 80'000};
+    const auto exported = wave::exportZeroSlackStimulusScenario(
+        project, scenario, savedView);
     expect(exported.ok(), exported.error.toStdString());
     const auto document = wave::serializeZeroSlackStimulusScenario(*exported.scenario);
     expect(!document.contains("E:/") && !document.contains("E:\\\\")
@@ -5688,8 +5700,12 @@ void testZeroSlackStimulusScenarioContract()
     expect(
         parsedScenario.scenario->groups.size() == 1
             && parsedScenario.scenario->ports.size() == 8
-            && parsedScenario.scenario->duration == scenario.duration,
-        "stimulus contract did not preserve groups, ports, or duration");
+            && parsedScenario.scenario->duration == scenario.duration
+            && parsedScenario.scenario->markers.size() == 1
+            && parsedScenario.scenario->view.selectedPortName == "data_i"
+            && parsedScenario.scenario->view.cursorTick == 40'000
+            && parsedScenario.scenario->view.visibleSpanTicks == 80'000,
+        "stimulus contract did not preserve groups, ports, markers, or view state");
     const auto savedPort = [&parsedScenario](const std::string_view name)
         -> const wave::StimulusScenarioPort* {
         const auto found = std::find_if(
@@ -5772,6 +5788,23 @@ void testZeroSlackStimulusScenarioContract()
                && restoredData->segments.size() == 2
                && restoredMode && restoredMode->segments.size() == 2,
            "restored project lost explicit stimulus configuration");
+    expect(restoredScenario.markers.size() == 1
+               && restored.view.selectedPortName == "data_i"
+               && restored.view.cursorTick == 40'000,
+           "restored project lost markers or portable view state");
+
+    auto legacyScenario = *exported.scenario;
+    legacyScenario.schemaVersion = 1;
+    legacyScenario.markers.clear();
+    legacyScenario.view = {};
+    const auto legacyDocument = wave::serializeZeroSlackStimulusScenario(legacyScenario);
+    const auto parsedLegacy = wave::parseZeroSlackStimulusScenario(legacyDocument);
+    expect(parsedLegacy.ok() && parsedLegacy.scenario->schemaVersion == 1
+               && parsedLegacy.scenario->markers.empty(),
+           "version-1 stimulus scenario lost backward compatibility");
+    expect(wave::restoreZeroSlackStimulusScenario(
+               *parsedManifest.manifest, *parsedLegacy.scenario).ok(),
+           "version-1 stimulus scenario could not be restored");
     const auto reopenedPath = movedDirectory.filePath(QStringLiteral("restored.wave.json"));
     QString saveError;
     expect(wave::saveProjectFileAtomic(*restored.project, reopenedPath, &saveError),
@@ -5818,10 +5851,12 @@ void testZeroSlackStimulusScenarioContract()
     const auto migrated = wave::restoreZeroSlackStimulusScenario(
         *changedManifest.manifest, *movedScenario.scenario);
     expect(migrated.ok(), migrated.error.toStdString());
-    expect(migrated.manifestChanged && migrated.missingSavedPortCount == 1
+    expect(migrated.manifestChanged && migrated.missingSavedPortCount == 0
                && migrated.incompatiblePortCount == 1
-               && migrated.newPortCount == 1
-               && migrated.restoredPortCount == 6,
+               && migrated.newPortCount == 0
+               && migrated.renamedPortCount == 1
+               && migrated.widthChangedPortCount == 1
+               && migrated.restoredPortCount == 7,
            "changed manifest did not report deterministic port migration results");
     const auto& migratedLanes = migrated.project->scenarios.front().lanes;
     const auto migratedByName = [&migratedLanes](const std::string_view name)
@@ -5832,10 +5867,14 @@ void testZeroSlackStimulusScenarioContract()
         return found == migratedLanes.end() ? nullptr : &*found;
     };
     expect(!migratedByName("req_i") && migratedByName("new_i")
+               && migratedByName("new_i")->segments.size() == 2
                && migratedByName("data_i")
                && migratedByName("data_i")->width == 16
+               && migratedByName("data_i")->radix == wave::Radix::Binary
                && migratedByName("data_i")->segments.size() == 1,
-           "migration guessed a removed port or overwrote incompatible current defaults");
+           "migration lost a unique rename or overwrote width-safe current defaults");
+    expect(migrated.view.selectedPortName == "data_i",
+           "manifest migration lost the selected portable view lane");
 
     auto mismatchedManifest = *parsedManifest.manifest;
     mismatchedManifest.target.module = "other_dut";
@@ -5892,7 +5931,7 @@ void testZeroSlackStimulusScenarioContract()
                 QJsonDocument(unknownRoot).toJson()).ok(),
            "unknown or absolute-path stimulus property was accepted");
     auto futureRoot = QJsonDocument::fromJson(document).object();
-    futureRoot.insert(QStringLiteral("schemaVersion"), 2);
+    futureRoot.insert(QStringLiteral("schemaVersion"), 3);
     expect(!wave::parseZeroSlackStimulusScenario(
                 QJsonDocument(futureRoot).toJson()).ok(),
            "unsupported stimulus schema version was accepted");
@@ -5923,6 +5962,49 @@ void testZeroSlackStimulusScenarioContract()
     expect(!wave::parseZeroSlackStimulusScenario(
                 QJsonDocument(inconsistentClockRoot).toJson()).ok(),
            "clock initial value inconsistent with period/phase/duty was accepted");
+
+    QTemporaryDir scenarioStore;
+    QTemporaryDir movedStore;
+    expect(scenarioStore.isValid() && movedStore.isValid(),
+           "cannot create simulation scenario stores");
+    const auto defaultWrite = wave::saveSimulationScenario(
+        scenarioStore.path(), *exported.scenario, true);
+    expect(defaultWrite.ok()
+               && QFileInfo(defaultWrite.filePath).fileName()
+                    == QStringLiteral("default.json"),
+           defaultWrite.error.toStdString());
+    auto namedScenario = *exported.scenario;
+    namedScenario.scenarioId = "scenario-high-traffic";
+    namedScenario.name = "High traffic";
+    namedScenario.identity.clear();
+    const auto namedWrite = wave::saveSimulationScenario(
+        scenarioStore.path(), namedScenario, false);
+    expect(namedWrite.ok()
+               && QFileInfo(namedWrite.filePath).fileName().startsWith(
+                    QStringLiteral("scenario-")),
+           namedWrite.error.toStdString());
+    const auto stored = wave::loadSimulationScenarioStore(scenarioStore.path());
+    expect(stored.ok() && stored.scenarios.size() == 2
+               && stored.scenarios.front().isDefault
+               && stored.scenarios.back().scenario.name == "High traffic",
+           "default and named simulation scenarios did not load deterministically");
+    for (const auto& info : QDir(scenarioStore.path()).entryInfoList(
+             {QStringLiteral("*.json")}, QDir::Files)) {
+        expect(QFile::copy(info.absoluteFilePath(),
+                           QDir(movedStore.path()).filePath(info.fileName())),
+               "cannot relocate simulation scenario store");
+    }
+    const auto relocated = wave::loadSimulationScenarioStore(movedStore.path());
+    expect(relocated.ok() && relocated.scenarios.size() == 2
+               && relocated.scenarios.front().scenario.identity
+                    == stored.scenarios.front().scenario.identity,
+           "relocating a simulation scenario store changed its portable content");
+    QString removeError;
+    expect(wave::removeSimulationScenario(
+               scenarioStore.path(), namedScenario.scenarioId, &removeError)
+               && wave::loadSimulationScenarioStore(scenarioStore.path())
+                    .scenarios.size() == 1,
+           removeError.toStdString());
 }
 
 QString toolchainFixturePath(const QString& name)
@@ -6042,6 +6124,7 @@ void testSimulationSessionContractAndState()
     request.workspaceRoot = QStringLiteral("C:/cache/run/workspace");
     request.artifactDirectory = QStringLiteral("C:/cache/run/artifacts");
     request.buildCacheDirectory = QStringLiteral("C:/cache/builds");
+    request.scenarioDirectory = QStringLiteral("C:/workspace/.zs/simulation/dut");
     request.resultProjectPath = QStringLiteral("C:/cache/run/result.wave.json");
     request.toolchain.verilatorProgram = QStringLiteral("C:/tools/verilator.exe");
     request.toolchain.verilatorArguments = {QStringLiteral("--quiet")};
@@ -6066,6 +6149,8 @@ void testSimulationSessionContractAndState()
                && restored.request->artifactDirectory == request.artifactDirectory
                && restored.request->buildCacheDirectory
                    == request.buildCacheDirectory
+               && restored.request->scenarioDirectory
+                   == request.scenarioDirectory
                && restored.request->resultProjectPath == request.resultProjectPath
                && restored.request->toolchain.verilatorProgram
                    == request.toolchain.verilatorProgram
@@ -6090,14 +6175,16 @@ void testSimulationSessionContractAndState()
             legacy.extensions.at(wave::SimulationSessionExtension)))
                              .object();
     legacySession.remove(QStringLiteral("buildCacheDirectory"));
+    legacySession.remove(QStringLiteral("scenarioDirectory"));
     legacy.extensions[wave::SimulationSessionExtension] =
         QJsonDocument(legacySession).toJson(QJsonDocument::Compact).toStdString();
     const auto restoredLegacy = wave::simulationSessionFromProject(legacy);
     expect(restoredLegacy.ok() && restoredLegacy.request
                && restoredLegacy.request->buildCacheDirectory
                    == QDir(request.artifactDirectory)
-                          .filePath(QStringLiteral("build-cache")),
-           "legacy simulation session did not receive a safe build-cache default");
+                          .filePath(QStringLiteral("build-cache"))
+               && restoredLegacy.request->scenarioDirectory.isEmpty(),
+           "legacy simulation session did not receive safe optional-directory defaults");
 
     auto malformed = project;
     malformed.extensions[wave::SimulationSessionExtension] =
