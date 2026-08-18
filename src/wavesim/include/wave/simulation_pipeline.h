@@ -23,6 +23,7 @@ enum class SimulationRunStage {
     BuildModel,
     RunModel,
     ImportTrace,
+    MaterializeProject,
     Completed,
 };
 
@@ -38,6 +39,7 @@ enum class SimulationRunStatus {
     BuildFailed,
     RunFailed,
     TraceImportFailed,
+    ResultProjectFailed,
     TimedOut,
     Cancelled,
 };
@@ -48,6 +50,7 @@ struct SimulationArtifacts {
     QString objectDirectory;
     QString executablePath;
     QString vcdPath;
+    QString resultProjectPath;
 };
 
 struct SimulationRunRequest {
@@ -55,6 +58,7 @@ struct SimulationRunRequest {
     QString stimulusPath;
     QString workspaceRoot;
     QString artifactDirectory;
+    QString resultProjectPath;
     ToolchainProbeOptions toolchain;
     int buildTimeoutMs{120'000};
     int runTimeoutMs{30'000};

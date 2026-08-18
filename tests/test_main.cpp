@@ -6234,8 +6234,10 @@ void testFixedFixtureSimulationPipeline()
 
     QTemporaryDir artifacts;
     expect(artifacts.isValid(), "cannot create fixed simulation artifact directory");
-    const auto completed = runSimulationFixture(
-        requestFor(artifacts.path(), simulator));
+    auto completedRequest = requestFor(artifacts.path(), simulator);
+    completedRequest.resultProjectPath = artifacts.filePath(
+        QStringLiteral("counter-result.wave.json"));
+    const auto completed = runSimulationFixture(std::move(completedRequest));
     const auto json = wave::simulationRunReportJson(completed);
     expect(completed.ok() && completed.trace
                && completed.stage == wave::SimulationRunStage::Completed
@@ -6247,11 +6249,26 @@ void testFixedFixtureSimulationPipeline()
                && QFileInfo(completed.artifacts.harnessPath).isFile()
                && QFileInfo(completed.artifacts.executablePath).isFile()
                && QFileInfo(completed.artifacts.vcdPath).isFile()
+               && QFileInfo(completed.artifacts.resultProjectPath).isFile()
                && json.value(QStringLiteral("schema")).toString()
                    == QString::fromLatin1(wave::SimulationRunReportSchema)
                && json.value(QStringLiteral("trace")).toObject()
                       .value(QStringLiteral("signalCount")).toInt() == 4,
            "fixed fixture did not complete build, run, VCD, and TraceIndex stages");
+    const auto resultProject = wave::loadProjectFile(
+        completed.artifacts.resultProjectPath);
+    expect(resultProject.ok()
+               && resultProject.project->importedTraces.size() == 1
+               && !resultProject.project->importedTraces.front()
+                       .signalMapping.empty()
+               && QFileInfo(
+                      QFileInfo(completed.artifacts.resultProjectPath)
+                          .absoluteDir()
+                          .filePath(QString::fromStdString(
+                              resultProject.project->importedTraces.front().path)))
+                      .absoluteFilePath()
+                   == QFileInfo(completed.artifacts.vcdPath).absoluteFilePath(),
+           "materialized result project did not preserve the VCD reference and lane mapping");
     QFile harness(completed.artifacts.harnessPath);
     expect(harness.open(QIODevice::ReadOnly)
                && harness.readAll().contains("top->clk_i = drive_clk_i(tick)")

@@ -1168,10 +1168,12 @@ MainWindow::MainWindow(
     Project project,
     QString projectFile,
     QWidget* parent,
-    const std::optional<std::size_t> initialScenarioIndex)
+    const std::optional<std::size_t> initialScenarioIndex,
+    const bool loadFirstTrace)
     : QMainWindow(parent)
     , project_(std::move(project))
     , projectFile_(std::move(projectFile))
+    , simulationResultMode_(loadFirstTrace)
 {
     const auto recoveredSnapshot = projectFile_.endsWith(
         QStringLiteral(".autosave"),
@@ -1193,11 +1195,17 @@ MainWindow::MainWindow(
     resize(1440, 900);
 
     canvas_ = new WaveCanvas(this);
-    setCentralWidget(canvas_);
+    compareTraceCanvas_ = new TraceCanvas(this);
+    if (simulationResultMode_) {
+        canvas_->hide();
+        compareTraceCanvas_->setProperty("simulationResultCanvas", true);
+        setCentralWidget(compareTraceCanvas_);
+    } else {
+        setCentralWidget(canvas_);
+        compareTraceCanvas_->hide();
+    }
     canvas_->installEventFilter(this);
     canvas_->viewport()->installEventFilter(this);
-    compareTraceCanvas_ = new TraceCanvas(this);
-    compareTraceCanvas_->hide();
     canvas_->setSignalHeaderWidth(QSettings{}.value(
         QStringLiteral("canvas/signalHeaderWidth"),
         canvas_->signalHeaderWidth()).toInt());
@@ -1305,6 +1313,38 @@ MainWindow::MainWindow(
         rememberProjectPath(projectFile_);
     }
     createToolBars();
+    if (simulationResultMode_) {
+        if (auto* waveformToolbar = findChild<QToolBar*>(
+                QStringLiteral("WaveformToolbar"))) {
+            waveformToolbar->hide();
+        }
+        auto* resultToolbar = addToolBar(tr("Simulation result"));
+        resultToolbar->setObjectName(QStringLiteral("SimulationResultToolbar"));
+        resultToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        resultToolbar->setMovable(false);
+        resultToolbar->setFloatable(false);
+        resultToolbar->setAllowedAreas(Qt::TopToolBarArea);
+        resultToolbar->toggleViewAction()->setEnabled(false);
+        resultToolbar->toggleViewAction()->setVisible(false);
+        resultToolbar->addAction(
+            themedIcon(QStringLiteral("zoom-in"), style(), QStyle::SP_ArrowUp),
+            tr("Zoom in"),
+            compareTraceCanvas_,
+            &TraceCanvas::zoomIn);
+        resultToolbar->addAction(
+            themedIcon(QStringLiteral("zoom-out"), style(), QStyle::SP_ArrowDown),
+            tr("Zoom out"),
+            compareTraceCanvas_,
+            &TraceCanvas::zoomOut);
+        resultToolbar->addAction(
+            themedIcon(
+                QStringLiteral("zoom-fit-best"),
+                style(),
+                QStyle::SP_DesktopIcon),
+            tr("Fit trace"),
+            compareTraceCanvas_,
+            &TraceCanvas::fitTrace);
+    }
     rememberActiveScenario();
     const auto restoredLocation = restoreActiveScenarioLocation();
     updateWaveContext();
@@ -1357,6 +1397,7 @@ MainWindow::MainWindow(
     pointerStatusLabel_->setText(tr("Pointer: move over a signal"));
     pointerStatusLabel_->setTextInteractionFlags(Qt::NoTextInteraction);
     statusBar()->addPermanentWidget(pointerStatusLabel_, 1);
+    pointerStatusLabel_->setVisible(!simulationResultMode_);
     saveStateLabel_ = new QLabel(this);
     saveStateLabel_->setObjectName(QStringLiteral("SaveStateLabel"));
     saveStateLabel_->setMinimumWidth(118);
@@ -1364,6 +1405,12 @@ MainWindow::MainWindow(
     statusBar()->addPermanentWidget(saveStateLabel_);
     updateCommandActions();
     updateWindowTitle();
+    if (simulationResultMode_) {
+        setProperty("simulationResultState", QStringLiteral("loading"));
+        setWindowTitle(
+            tr("%1 - Simulation Result - Wave Workbench")
+                .arg(QString::fromStdString(project_.name)));
+    }
     auto initialStatus = recoveredSnapshot
         ? (projectFile_.isEmpty()
                ? tr("Untitled recovery snapshot loaded; use Save to choose a project file")
@@ -1378,6 +1425,10 @@ MainWindow::MainWindow(
                 .arg(*restoredLocation));
     }
     statusBar()->showMessage(initialStatus);
+    if (loadFirstTrace) {
+        QTimer::singleShot(
+            0, this, &MainWindow::loadFirstTraceReference);
+    }
 }
 
 const Project& MainWindow::project() const noexcept
@@ -6131,39 +6182,43 @@ void MainWindow::traceMappingCellChanged(const int row, const int column)
 
 void MainWindow::finishTraceImport()
 {
-    importTraceAction_->setEnabled(true);
-    cancelTraceAction_->setEnabled(false);
-    traceProgress_->setVisible(false);
+    if (importTraceAction_) importTraceAction_->setEnabled(true);
+    if (cancelTraceAction_) cancelTraceAction_->setEnabled(false);
+    if (traceProgress_) traceProgress_->setVisible(false);
     const auto reloadAfter = std::exchange(reloadTraceAfterCurrent_, false);
     const auto reloadIfNeeded = [this, reloadAfter] {
         if (reloadAfter) loadFirstTraceReference();
     };
+    const auto reportFailure = [this, &reloadIfNeeded](const QString& message) {
+        if (traceSummary_) traceSummary_->setText(message);
+        statusBar()->showMessage(message, 10'000);
+        if (simulationResultMode_) {
+            setProperty("simulationResultState", QStringLiteral("failed"));
+            emit initialTraceReferenceLoaded(false, message);
+        }
+        reloadIfNeeded();
+    };
     const auto parsed = traceWatcher_->result();
     if (!parsed) {
-        traceSummary_->setText(tr("Import failed"));
-        reloadIfNeeded();
+        reportFailure(tr("Trace import returned no result"));
         return;
     }
     if (parsed->cancelled) {
-        traceSummary_->setText(tr("Import cancelled"));
-        statusBar()->showMessage(tr("Trace import cancelled"), 5'000);
-        reloadIfNeeded();
+        reportFailure(tr("Trace import cancelled"));
         return;
     }
     if (!parsed->ok()) {
-        traceSummary_->setText(tr("Import failed"));
-        QMessageBox::critical(
-            this,
-            tr("Trace import failed"),
-            QString::fromStdString(parsed->errorSummary()));
-        reloadIfNeeded();
+        const auto message = QString::fromStdString(parsed->errorSummary());
+        if (!simulationResultMode_) {
+            QMessageBox::critical(this, tr("Trace import failed"), message);
+        }
+        reportFailure(tr("Trace import failed: %1").arg(message));
         return;
     }
     if (parsed->index->identity.projectId != project_.id
         || parsed->index->identity.traceId != pendingTraceId_
         || parsed->index->identity.generation != traceGeneration_) {
-        statusBar()->showMessage(tr("Discarded an obsolete trace import result"), 5'000);
-        reloadIfNeeded();
+        reportFailure(tr("Discarded an obsolete trace import result"));
         return;
     }
 
@@ -6179,8 +6234,7 @@ void MainWindow::finishTraceImport()
         project_.importedTraces.push_back(std::move(reference));
         markEdited();
     } else if (!activeTraceReference()) {
-        statusBar()->showMessage(tr("Imported trace reference no longer exists"), 5'000);
-        reloadIfNeeded();
+        reportFailure(tr("Imported trace reference no longer exists"));
         return;
     }
 
@@ -6190,8 +6244,11 @@ void MainWindow::finishTraceImport()
     for (const auto& signal : traceIndex_->traceSignals) {
         traceVisibleSignalIds_.insert(signal.id);
     }
-    traceCanvas_->setTrace(&project_, activeScenario(), &*traceIndex_, activeTraceReference());
-    traceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    if (traceCanvas_) {
+        traceCanvas_->setTrace(
+            &project_, activeScenario(), &*traceIndex_, activeTraceReference());
+        traceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    }
     compareTraceCanvas_->setTrace(
         &project_,
         activeScenario(),
@@ -6199,8 +6256,27 @@ void MainWindow::finishTraceImport()
         activeTraceReference());
     compareTraceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
     if (pendingRevealTick_) {
-        traceCanvas_->revealTick(*pendingRevealTick_);
+        if (traceCanvas_) traceCanvas_->revealTick(*pendingRevealTick_);
         compareTraceCanvas_->revealTick(*pendingRevealTick_);
+    }
+    QStringList warnings;
+    for (const auto& diagnostic : parsed->diagnostics) {
+        if (diagnostic.severity == TraceDiagnosticSeverity::Warning) {
+            warnings.append(QString::fromStdString(diagnostic.message));
+        }
+    }
+    const auto successMessage = warnings.isEmpty()
+        ? tr("Imported %1").arg(pendingTracePath_)
+        : tr("Imported with warnings: %1")
+              .arg(warnings.join(QStringLiteral("; ")));
+    if (simulationResultMode_) {
+        compareTraceCanvas_->show();
+        compareTraceCanvas_->setFocus(Qt::OtherFocusReason);
+        statusBar()->showMessage(successMessage, 10'000);
+        setProperty("simulationResultState", QStringLiteral("ready"));
+        emit initialTraceReferenceLoaded(true, successMessage);
+        reloadIfNeeded();
+        return;
     }
     invalidateCompareResult();
     populateTraceMappingTable();
@@ -6210,17 +6286,7 @@ void MainWindow::finishTraceImport()
             .arg(traceIndex_->traceSignals.size())
             .arg(traceIndex_->transitionCount));
 
-    QStringList warnings;
-    for (const auto& diagnostic : parsed->diagnostics) {
-        if (diagnostic.severity == TraceDiagnosticSeverity::Warning) {
-            warnings.append(QString::fromStdString(diagnostic.message));
-        }
-    }
-    statusBar()->showMessage(
-        warnings.isEmpty()
-            ? tr("Imported %1").arg(pendingTracePath_)
-            : tr("Imported with warnings: %1").arg(warnings.join(QStringLiteral("; "))),
-        10'000);
+    statusBar()->showMessage(successMessage, 10'000);
     if (compareModeRequested_) runCompare();
     reloadIfNeeded();
 }
@@ -6249,10 +6315,13 @@ void MainWindow::startTraceImport(
         return cancelFlag->load();
     };
     const auto pathValue = nativePath(pendingTracePath_);
-    importTraceAction_->setEnabled(false);
-    cancelTraceAction_->setEnabled(true);
-    traceProgress_->setVisible(true);
-    traceSummary_->setText(tr("Parsing %1…").arg(QFileInfo(path).fileName()));
+    if (importTraceAction_) importTraceAction_->setEnabled(false);
+    if (cancelTraceAction_) cancelTraceAction_->setEnabled(true);
+    if (traceProgress_) traceProgress_->setVisible(true);
+    if (traceSummary_) {
+        traceSummary_->setText(tr("Parsing %1…").arg(QFileInfo(path).fileName()));
+    }
+    statusBar()->showMessage(tr("Parsing %1…").arg(QFileInfo(path).fileName()));
     const auto future = QtConcurrent::run(
         [pathValue, format, options]() mutable {
             auto result = format == TraceFormat::Vcd
@@ -6265,23 +6334,30 @@ void MainWindow::startTraceImport(
 
 void MainWindow::loadFirstTraceReference()
 {
+    const auto reportFailure = [this](const QString& message) {
+        if (traceSummary_) traceSummary_->setText(message);
+        statusBar()->showMessage(message, 10'000);
+        if (simulationResultMode_) {
+            setProperty("simulationResultState", QStringLiteral("failed"));
+            emit initialTraceReferenceLoaded(false, message);
+        }
+    };
     traceIndex_.reset();
     activeTraceId_.clear();
     traceVisibleSignalIds_.clear();
-    populateTraceMappingTable();
+    if (!simulationResultMode_) populateTraceMappingTable();
     if (traceCanvas_) traceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
     if (compareTraceCanvas_) {
         compareTraceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
     }
-    invalidateCompareResult();
+    if (!simulationResultMode_) invalidateCompareResult();
     if (project_.importedTraces.empty()) {
-        if (traceSummary_) traceSummary_->setText(tr("No imported trace"));
+        reportFailure(tr("No imported trace"));
         return;
     }
     const auto& reference = project_.importedTraces.front();
     if (reference.id.empty()) {
-        traceSummary_->setText(
-            tr("Imported trace has no stable ID"));
+        reportFailure(tr("Imported trace has no stable ID"));
         return;
     }
     const auto idMatchCount =
@@ -6293,7 +6369,7 @@ void MainWindow::loadFirstTraceReference()
                 return candidate.id == reference.id;
             });
     if (idMatchCount != 1) {
-        traceSummary_->setText(
+        reportFailure(
             tr("Duplicate imported trace ID: %1")
                 .arg(QString::fromStdString(
                     reference.id)));
@@ -6302,8 +6378,7 @@ void MainWindow::loadFirstTraceReference()
     const auto storedPath =
         QString::fromStdString(reference.path);
     if (storedPath.trimmed().isEmpty()) {
-        traceSummary_->setText(
-            tr("Imported trace path is empty"));
+        reportFailure(tr("Imported trace path is empty"));
         return;
     }
     const auto formatText =
@@ -6311,7 +6386,7 @@ void MainWindow::loadFirstTraceReference()
             .trimmed()
             .toLower();
     if (formatText != QStringLiteral("vcd") && formatText != QStringLiteral("csv")) {
-        traceSummary_->setText(
+        reportFailure(
             tr("Unsupported trace format '%1'; expected VCD or CSV")
                 .arg(
                     QString::fromStdString(
@@ -6320,7 +6395,7 @@ void MainWindow::loadFirstTraceReference()
     }
     const auto path = resolvedTracePath(reference);
     if (!QFileInfo(path).isFile()) {
-        traceSummary_->setText(
+        reportFailure(
             tr("Trace file is missing or not a file: %1")
                 .arg(path));
         return;
@@ -8158,7 +8233,14 @@ void MainWindow::createDocks()
     traceLayout->setSpacing(0);
     auto* traceBar = new QToolBar;
     traceBar->setIconSize(QSize(16, 16));
-    traceBar->addAction(importTraceAction_);
+    importTraceAction_ = traceBar->addAction(
+        themedIcon(
+            QStringLiteral("document-open"),
+            style(),
+            QStyle::SP_DialogOpenButton),
+        tr("Import trace"),
+        this,
+        &MainWindow::importTrace);
     cancelTraceAction_ = traceBar->addAction(
         themedIcon(QStringLiteral("process-stop"), style(), QStyle::SP_DialogCancelButton),
         tr("Cancel import"),

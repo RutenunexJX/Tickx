@@ -87,6 +87,7 @@ int main(int argc, char* argv[])
     }
 
     bool smokeTest = false;
+    bool loadFirstTrace = false;
     bool compareMode = false;
     QString projectPath;
     QString screenshotPath;
@@ -130,6 +131,8 @@ int main(int argc, char* argv[])
         const auto argument = QString::fromLocal8Bit(argv[index]);
         if (argument == QStringLiteral("--smoke-test")) {
             smokeTest = true;
+        } else if (argument == QStringLiteral("--load-first-trace")) {
+            loadFirstTrace = true;
         } else if (argument == QStringLiteral("--mode=compare")) {
             compareMode = true;
         } else if (argument.startsWith(QStringLiteral("--screenshot="))) {
@@ -537,7 +540,8 @@ int main(int argc, char* argv[])
         std::move(project),
         autosaveSmokePath.isEmpty() ? projectPath : autosaveSmokePath,
         nullptr,
-        initialScenarioIndex);
+        initialScenarioIndex,
+        loadFirstTrace);
     window.show();
     if (compareMode) window.requestCompareMode();
     if (launchRequest && launchRequest->tick) {
@@ -34247,14 +34251,35 @@ int main(int argc, char* argv[])
                 application.exit(0);
             });
     } else if (!screenshotPath.isEmpty()) {
-        QTimer::singleShot(350, &application, [&application, &window, screenshotPath] {
-            if (!window.grab().save(screenshotPath)) {
-                qCritical().noquote() << "Cannot save screenshot:" << screenshotPath;
-                application.exit(3);
-                return;
-            }
-            application.quit();
-        });
+        const auto saveScreenshot = [&application, &window, screenshotPath] {
+            QTimer::singleShot(50, &application, [&application, &window, screenshotPath] {
+                if (!window.grab().save(screenshotPath)) {
+                    qCritical().noquote() << "Cannot save screenshot:" << screenshotPath;
+                    application.exit(3);
+                    return;
+                }
+                application.quit();
+            });
+        };
+        if (loadFirstTrace) {
+            QObject::connect(
+                &window,
+                &wave::MainWindow::initialTraceReferenceLoaded,
+                &application,
+                [&application, saveScreenshot](
+                    const bool success,
+                    const QString& message) {
+                    if (!success) {
+                        qCritical().noquote()
+                            << "Cannot load simulation result trace:" << message;
+                        application.exit(4);
+                        return;
+                    }
+                    saveScreenshot();
+                });
+        } else {
+            QTimer::singleShot(350, &application, saveScreenshot);
+        }
     } else if (smokeTest) {
         QTimer::singleShot(250, &application, [&application, &window] {
             window.hide();

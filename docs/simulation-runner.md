@@ -1,8 +1,8 @@
 # Simulation Runner
 
 `wave-sim-runner` 是 Wave Simulation 的实验性独立进程边界。它提供工具链探测，
-并可使用版本化 Module Manifest 与 Stimulus Scenario 契约运行仓库内固定 DUT。
-runner 不修改输入工程文件，正式 GUI 尚未接入该入口。
+并可使用版本化 Module Manifest 与 Stimulus Scenario 契约运行固定 DUT 或宿主提供的
+完整模块源码镜像。runner 不修改输入工程文件；宿主可请求生成带 VCD 引用的结果工程。
 
 ## 探测
 
@@ -75,11 +75,28 @@ Verilator 构建并运行模型，随后将 VCD 解析为现有 `TraceIndex`。�
 - Manifest 中的 source、include、define 与可求值 parameter。
 
 interface、inout/ref、unpacked array、未知位宽、X/Z 激励与未完整 elaboration 的目标会
-返回明确的 `unsupported-fixture` 或契约错误，不会静默降级。
+返回明确的 `unsupported-fixture` 状态码（为了兼容已有自动化名称）或契约错误，不会静默降级。
 
 固定测试 DUT 位于 `tests/fixtures/simulation/fixed-counter/`。常规自动化使用确定性的
 独立进程 fixture 验证完整编排与 TraceCanvas 渲染；若 CMake 配置时发现真实 Verilator，
 会额外注册 `wave-fixed-fixture-real-verilator`，对同一 DUT 执行真实编译和仿真。
+
+## 宿主模块运行
+
+```powershell
+wave-sim-runner run-module `
+  --manifest=run\module-manifest.json `
+  --stimulus=run\stimulus.json `
+  --workspace=run\source-mirror `
+  --artifacts=run\results `
+  --result-project=run\result.wave.json
+```
+
+`run-module` 与固定 fixture 共用同一个异步流水线，但要求输出结果工程。成功后工程包含
+相对 VCD 引用和自动信号映射，可由
+`wave-workbench --load-first-trace result.wave.json` 直接打开结果波形。输入
+Manifest、Stimulus 与源码镜像由宿主负责生成；runner 仍严格校验三者契约，不读取宿主
+编辑器状态，也不回退到磁盘中的其他源码。
 
 ## 结构化结果
 
@@ -96,10 +113,10 @@ stdout 始终输出 `wave-workbench.toolchain-probe/v1` JSON。总体状态为�
 截断状态、识别版本、最低版本和诊断。缺失工具、非零退出、崩溃、超时与取消不会压缩成
 同一个布尔失败。
 
-`run-fixture` 输出 `wave-workbench.simulation-run/v1` JSON，包含终止阶段、诊断、全部
+`run-fixture` 与 `run-module` 输出 `wave-workbench.simulation-run/v1` JSON，包含终止阶段、诊断、全部
 artifact 路径、工具链证据、构建/运行进程证据，以及导入后 TraceIndex 的 signal 和
 transition 计数。失败状态区分输入、Manifest、Stimulus、契约、能力限制、工具链、
-harness、构建、运行、VCD 导入、超时与取消。
+harness、构建、运行、VCD 导入、结果工程物化、超时与取消。
 
 退出码：
 
@@ -113,5 +130,6 @@ harness、构建、运行、VCD 导入、超时与取消。
 | 6 | timed-out |
 | 7 | cancelled |
 
-本切片不提供正式 GUI 入口，也不接受 ZeroSlack 当前选中的用户模块。下一切片应从
-ZeroSlack 选中目标生成临时源码镜像和契约，并继续复用该异步状态模型。
+宿主以 `wave-workbench --load-first-trace result.wave.json` 打开结果时，WaveWorkbench
+会异步载入首个 trace 引用，不阻塞窗口创建；普通项目打开行为不受影响。正式 GUI 内的
+Run/Stop/Rerun 仍属于后续切片。

@@ -54,13 +54,17 @@ public:
         Project project,
         QString projectFile = {},
         QWidget* parent = nullptr,
-        std::optional<std::size_t> initialScenarioIndex = std::nullopt);
+        std::optional<std::size_t> initialScenarioIndex = std::nullopt,
+        bool loadFirstTrace = false);
 
     [[nodiscard]] const Project& project() const noexcept;
     void requestCompareMode();
     void revealLocation(const QString& laneId, Tick tick);
     void openLanePropertiesPreview(const QString& laneId);
     void openEditMenuPreview();
+
+signals:
+    void initialTraceReferenceLoaded(bool success, const QString& message);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -350,6 +354,7 @@ private:
     bool autosavePending_{false};
     bool reloadTraceAfterCurrent_{false};
     bool compareModeRequested_{false};
+    bool simulationResultMode_{false};
     QString pendingRevealLaneId_;
     std::optional<Tick> pendingRevealTick_;
     ProjectFileRevision loadedProjectRevision_;

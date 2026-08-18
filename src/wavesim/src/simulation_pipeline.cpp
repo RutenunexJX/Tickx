@@ -1,6 +1,7 @@
 #include "wave/simulation_pipeline.h"
 
 #include "wave/module_manifest.h"
+#include "wave/project_io.h"
 #include "wave/stimulus_scenario.h"
 
 #include <QDir>
@@ -89,6 +90,7 @@ bool cppIdentifier(const QString& value)
 struct PreparedSimulation {
     ZeroSlackModuleManifest manifest;
     ZeroSlackStimulusScenario stimulus;
+    Project project;
     QStringList sourceFiles;
     QStringList includeDirectories;
 };
@@ -150,6 +152,7 @@ std::optional<PreparedSimulation> prepareSimulation(
     PreparedSimulation prepared;
     prepared.manifest = *parsedManifest.manifest;
     prepared.stimulus = *parsedStimulus.scenario;
+    prepared.project = *restored.project;
     const QDir workspace(workspaceInfo.absoluteFilePath());
     for (const auto& source : prepared.manifest.sources) {
         if (source.role == "header") continue;
@@ -182,7 +185,8 @@ std::optional<PreparedSimulation> prepareSimulation(
 
     if (!cppIdentifier(qString(prepared.manifest.target.module))) {
         status = SimulationRunStatus::UnsupportedFixture;
-        error = QStringLiteral("S5 supports top-module names that map directly to C++ identifiers.");
+        error = QStringLiteral(
+            "Wave Simulation requires a top-module name that maps directly to a C++ identifier.");
         return std::nullopt;
     }
     if (prepared.stimulus.duration <= 0
@@ -207,7 +211,7 @@ std::optional<PreparedSimulation> prepareSimulation(
             || manifestPort.direction == ModulePortDirection::Unknown) {
             status = SimulationRunStatus::UnsupportedFixture;
             error = QStringLiteral(
-                "S5 supports fixed integral input/output ports up to 64 bits; unsupported port: %1")
+                "Wave Simulation supports fixed integral input/output ports up to 64 bits; unsupported port: %1")
                         .arg(qString(manifestPort.name));
             return std::nullopt;
         }
@@ -406,6 +410,59 @@ struct VerilatorSimulationRunner::Impl {
     bool cancelRequested{false};
     QObject deferredContext;
 
+    void materializeProject()
+    {
+        if (request.resultProjectPath.trimmed().isEmpty()) {
+            finish(SimulationRunStatus::Succeeded);
+            return;
+        }
+
+        report.stage = SimulationRunStage::MaterializeProject;
+        const QFileInfo outputInfo(request.resultProjectPath);
+        QDir outputDirectory = outputInfo.absoluteDir();
+        if (!outputDirectory.mkpath(QStringLiteral("."))) {
+            finish(
+                SimulationRunStatus::ResultProjectFailed,
+                QStringLiteral("Result project directory could not be created."));
+            return;
+        }
+
+        ImportedTrace traceReference;
+        traceReference.id = makeStableId("zs-simulation-trace");
+        const auto relativeVcd = outputDirectory.relativeFilePath(
+            report.artifacts.vcdPath);
+        traceReference.path = QDir::fromNativeSeparators(relativeVcd)
+                                  .toUtf8()
+                                  .toStdString();
+        traceReference.format = "vcd";
+        traceReference.offset = 0;
+        if (!prepared->project.scenarios.empty() && report.trace) {
+            traceReference.signalMapping = suggestSignalMapping(
+                prepared->project.scenarios.front(), *report.trace);
+        }
+        traceReference.extensions.emplace(
+            "waveSimulation.moduleManifestIdentity",
+            '"' + prepared->manifest.identity + '"');
+        traceReference.extensions.emplace(
+            "waveSimulation.stimulusIdentity",
+            '"' + prepared->stimulus.identity + '"');
+        traceReference.extensions.emplace(
+            "waveSimulation.resultState", "\"current\"");
+        prepared->project.importedTraces.clear();
+        prepared->project.importedTraces.push_back(
+            std::move(traceReference));
+
+        QString error;
+        const auto outputPath = outputInfo.absoluteFilePath();
+        if (!saveProjectFileAtomic(
+                prepared->project, outputPath, &error)) {
+            finish(SimulationRunStatus::ResultProjectFailed, error);
+            return;
+        }
+        report.artifacts.resultProjectPath = outputPath;
+        finish(SimulationRunStatus::Succeeded);
+    }
+
     void finish(const SimulationRunStatus status, QString diagnostic = {})
     {
         if (!active) return;
@@ -440,7 +497,7 @@ struct VerilatorSimulationRunner::Impl {
             return;
         }
         report.trace = std::move(*parsed.index);
-        finish(SimulationRunStatus::Succeeded);
+        materializeProject();
     }
 
     void runModel()
@@ -741,6 +798,8 @@ QJsonObject simulationRunReportJson(const SimulationRunReport& report)
              {QStringLiteral("objectDirectory"), report.artifacts.objectDirectory},
              {QStringLiteral("executable"), report.artifacts.executablePath},
              {QStringLiteral("vcd"), report.artifacts.vcdPath},
+             {QStringLiteral("resultProject"),
+              report.artifacts.resultProjectPath},
          }},
         {QStringLiteral("trace"), trace},
     };
@@ -769,6 +828,7 @@ std::string_view toString(const SimulationRunStage stage) noexcept
     case SimulationRunStage::BuildModel: return "build-model";
     case SimulationRunStage::RunModel: return "run-model";
     case SimulationRunStage::ImportTrace: return "import-trace";
+    case SimulationRunStage::MaterializeProject: return "materialize-project";
     case SimulationRunStage::Completed: return "completed";
     }
     return "unknown";
@@ -788,6 +848,7 @@ std::string_view toString(const SimulationRunStatus status) noexcept
     case SimulationRunStatus::BuildFailed: return "build-failed";
     case SimulationRunStatus::RunFailed: return "run-failed";
     case SimulationRunStatus::TraceImportFailed: return "trace-import-failed";
+    case SimulationRunStatus::ResultProjectFailed: return "result-project-failed";
     case SimulationRunStatus::TimedOut: return "timed-out";
     case SimulationRunStatus::Cancelled: return "cancelled";
     }

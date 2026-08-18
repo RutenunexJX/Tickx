@@ -9,11 +9,12 @@ file(MAKE_DIRECTORY "${OUTPUT}")
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env
             "WAVE_SIMULATOR_FIXTURE=${SIMULATOR_FIXTURE}"
-            "${WAVE_SIM_RUNNER}" run-fixture
+            "${WAVE_SIM_RUNNER}" run-module
             "--manifest=${FIXTURE_ROOT}/manifest.json"
             "--stimulus=${FIXTURE_ROOT}/stimulus.json"
             "--workspace=${FIXTURE_ROOT}"
             "--artifacts=${OUTPUT}"
+            "--result-project=${OUTPUT}/result.wave.json"
             "--verilator=${VERILATOR_FIXTURE}"
             "--cxx=${CXX_FIXTURE}"
             --probe-timeout-ms=1000
@@ -33,9 +34,17 @@ string(JSON transition_count GET "${report}" trace transitionCount)
 string(JSON harness GET "${report}" artifacts harness)
 string(JSON simulator GET "${report}" artifacts executable)
 string(JSON vcd GET "${report}" artifacts vcd)
+string(JSON result_project GET "${report}" artifacts resultProject)
 if(NOT schema STREQUAL "wave-workbench.simulation-run/v1"
    OR NOT status STREQUAL "succeeded"
    OR signal_count LESS 4 OR transition_count LESS 12
-   OR NOT EXISTS "${harness}" OR NOT EXISTS "${simulator}" OR NOT EXISTS "${vcd}")
+   OR NOT EXISTS "${harness}" OR NOT EXISTS "${simulator}" OR NOT EXISTS "${vcd}"
+   OR NOT EXISTS "${result_project}")
     message(FATAL_ERROR "fixed fixture report or artifacts are incomplete: ${report}")
+endif()
+file(READ "${result_project}" result_document)
+string(JSON imported_trace_count LENGTH "${result_document}" importedTraces)
+string(JSON imported_trace_path GET "${result_document}" importedTraces 0 path)
+if(NOT imported_trace_count EQUAL 1 OR imported_trace_path STREQUAL "")
+    message(FATAL_ERROR "result project did not retain its imported trace: ${result_document}")
 endif()

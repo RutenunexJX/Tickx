@@ -21,6 +21,11 @@ void usage(QTextStream& stream)
            "--workspace=DIR --artifacts=DIR [--verilator=PATH] [--cxx=PATH] "
            "[--probe-timeout-ms=N] [--build-timeout-ms=N] "
            "[--run-timeout-ms=N] [--cancel-after-ms=N] [--pretty]\n\n"
+           "  wave-sim-runner run-module --manifest=FILE --stimulus=FILE "
+           "--workspace=DIR --artifacts=DIR --result-project=FILE "
+           "[--verilator=PATH] [--cxx=PATH] [--probe-timeout-ms=N] "
+           "[--build-timeout-ms=N] [--run-timeout-ms=N] "
+           "[--cancel-after-ms=N] [--pretty]\n\n"
            "run-fixture is an experimental fixed-contract path; it is not a GUI entry.\n"
            "Exit codes: 0 success, 2 usage, 3 unavailable, 4 invalid contract, "
            "5 failed, 6 timed out, 7 cancelled.\n";
@@ -75,6 +80,7 @@ int exitCode(const wave::SimulationRunStatus status)
     case wave::SimulationRunStatus::BuildFailed:
     case wave::SimulationRunStatus::RunFailed:
     case wave::SimulationRunStatus::TraceImportFailed:
+    case wave::SimulationRunStatus::ResultProjectFailed:
         return 5;
     }
     return 5;
@@ -137,7 +143,10 @@ int runProbe(QCoreApplication& application, const QStringList& arguments)
     return application.exec();
 }
 
-int runFixture(QCoreApplication& application, const QStringList& arguments)
+int runSimulation(
+    QCoreApplication& application,
+    const QStringList& arguments,
+    const bool requireResultProject)
 {
     wave::SimulationRunRequest request;
     bool pretty = false;
@@ -162,6 +171,11 @@ int runFixture(QCoreApplication& application, const QStringList& arguments)
         }
         if (const auto value = nonEmptyValue(argument, QStringLiteral("--artifacts="))) {
             request.artifactDirectory = *value;
+            continue;
+        }
+        if (const auto value = nonEmptyValue(
+                argument, QStringLiteral("--result-project="))) {
+            request.resultProjectPath = *value;
             continue;
         }
         if (const auto value = nonEmptyValue(argument, QStringLiteral("--verilator="))) {
@@ -193,14 +207,20 @@ int runFixture(QCoreApplication& application, const QStringList& arguments)
             continue;
         }
         QTextStream error(stderr);
-        error << "Invalid run-fixture option: " << argument << '\n';
+        error << "Invalid simulation option: " << argument << '\n';
         usage(error);
         return 2;
     }
     if (request.manifestPath.isEmpty() || request.stimulusPath.isEmpty()
         || request.workspaceRoot.isEmpty() || request.artifactDirectory.isEmpty()) {
         QTextStream error(stderr);
-        error << "run-fixture requires manifest, stimulus, workspace, and artifacts.\n";
+        error << "Simulation requires manifest, stimulus, workspace, and artifacts.\n";
+        usage(error);
+        return 2;
+    }
+    if (requireResultProject && request.resultProjectPath.isEmpty()) {
+        QTextStream error(stderr);
+        error << "run-module requires result-project.\n";
         usage(error);
         return 2;
     }
@@ -217,7 +237,7 @@ int runFixture(QCoreApplication& application, const QStringList& arguments)
             application.exit(exitCode(report.status));
         });
     if (!started) {
-        QTextStream(stderr) << "The fixture simulation could not be started.\n";
+        QTextStream(stderr) << "The simulation could not be started.\n";
         return 5;
     }
     if (cancelAfterMs) {
@@ -250,7 +270,10 @@ int main(int argc, char* argv[])
         return runProbe(application, arguments);
     }
     if (arguments[1] == QStringLiteral("run-fixture")) {
-        return runFixture(application, arguments);
+        return runSimulation(application, arguments, false);
+    }
+    if (arguments[1] == QStringLiteral("run-module")) {
+        return runSimulation(application, arguments, true);
     }
     QTextStream error(stderr);
     usage(error);
