@@ -47,9 +47,9 @@ wave-sim-runner probe `
   同步等待。
 - 默认在请求环境的 PATH 之外继承 runner 进程当前 PATH；需要严格隔离的测试或宿主可将
   `inheritCurrentProcessPath` 设为 `false`，此时空 PATH 不会回退到系统环境。
-- `VerilatorSimulationRunner` 依次执行契约校验、工具链探测、harness 生成、模型构建、
-  仿真和 VCD 导入。所有外部进程均复用 `ProcessRunner`，调用线程不会同步等待；可选的
-  stage 回调将各阶段实时映射为 GUI 的 `Compiling` 或 `Running` 状态。
+- `VerilatorSimulationRunner` 依次执行契约校验、工具链探测、运行时激励生成、构建缓存解析、
+  必要时的模型构建、仿真和 VCD 导入。所有外部进程均复用 `ProcessRunner`，调用线程不会
+  同步等待；stage 回调携带 generation，GUI 会忽略旧 generation 的阶段与完成回调。
 
 `--cancel-after-ms` 用于自动化和宿主生命周期联调。GUI 的 Stop 操作直接调用
 `VerilatorSimulationRunner::cancel()`，不启动第二个控制进程。
@@ -62,12 +62,14 @@ wave-sim-runner run-fixture `
   --stimulus=tests\fixtures\simulation\fixed-counter\stimulus.json `
   --workspace=tests\fixtures\simulation\fixed-counter `
   --artifacts=build\simulation-runs `
+  --build-cache=build\simulation-build-cache `
   --pretty
 ```
 
-该命令严格恢复 Manifest 与 Stimulus 的同一模块契约，生成独立 C++ harness，调用
-Verilator 构建并运行模型，随后将 VCD 解析为现有 `TraceIndex`。每次运行使用唯一目录，
-保留 harness、Verilator object directory、仿真可执行文件和 VCD。当前 S5 范围仅支持：
+该命令严格恢复 Manifest 与 Stimulus 的同一模块契约，生成稳定 C++ runtime harness，
+调用 Verilator 构建并运行模型，随后将 VCD 解析为现有 `TraceIndex`。每次运行使用唯一目录，
+保留私有运行时激励与 VCD；harness、Verilator object directory 和仿真可执行文件保存在
+按构建指纹寻址的共享缓存中。当前固定运行范围仅支持：
 
 - module-definition 目标；
 - 名称可直接映射为 C++ 标识符的模块与端口；
@@ -90,6 +92,7 @@ wave-sim-runner run-module `
   --stimulus=run\stimulus.json `
   --workspace=run\source-mirror `
   --artifacts=run\results `
+  --build-cache=cache\simulation-builds `
   --result-project=run\result.wave.json
 ```
 
@@ -98,6 +101,24 @@ wave-sim-runner run-module `
 `wave-workbench --load-first-trace result.wave.json` 直接打开结果波形。输入
 Manifest、Stimulus 与源码镜像由宿主负责生成；runner 仍严格校验三者契约，不读取宿主
 编辑器状态，也不回退到磁盘中的其他源码。
+
+## 构建缓存与 generation
+
+模型缓存使用 `wave-workbench.simulation-build-cache/v1` 记录。SHA-256 构建指纹覆盖：
+
+- 原始 Module Manifest，因此端口、parameter、define 和源文件清单变化都会失效；
+- Manifest 中所有 design/header 源码的内容摘要；
+- 稳定 runtime harness 的内容摘要；
+- Verilator/C++ 编译器的解析路径、版本、类型、显式参数和会影响编译的环境字段。
+
+Stimulus Scenario 不属于构建指纹。每次运行把当前激励写入私有 runtime plan，并传给已编译
+模型；因此仅修改激励会跳过 `BuildModel`。缓存命中前会同时校验元数据 evidence 和实际
+可执行文件摘要；损坏或不完整条目不会被复用。缓存未命中时先在唯一 staging 目录构建，
+元数据与可执行文件验证完成后再发布，不会把取消构建留下的半成品作为有效条目。
+
+每次运行携带单调 generation。结果工程旁的声明文件与进程锁保证同一路径只有当前
+generation 可以物化结果；较旧运行无论先启动后完成，还是在较新运行之后才启动，均返回
+`superseded`，不能覆盖新场景。未显式传入 `--generation` 时 runner 使用跨进程时间基编号。
 
 ## 结构化结果
 
@@ -114,10 +135,11 @@ stdout 始终输出 `wave-workbench.toolchain-probe/v1` JSON。总体状态为�
 截断状态、识别版本、最低版本和诊断。缺失工具、非零退出、崩溃、超时与取消不会压缩成
 同一个布尔失败。
 
-`run-fixture` 与 `run-module` 输出 `wave-workbench.simulation-run/v1` JSON，包含终止阶段、诊断、全部
-artifact 路径、工具链证据、构建/运行进程证据，以及导入后 TraceIndex 的 signal 和
-transition 计数。失败状态区分输入、Manifest、Stimulus、契约、能力限制、工具链、
-harness、构建、运行、VCD 导入、结果工程物化、超时与取消。
+`run-fixture` 与 `run-module` 输出 `wave-workbench.simulation-run/v1` JSON，包含 generation、
+终止阶段、诊断、全部 artifact 路径、构建缓存指纹/命中状态、工具链证据、构建/运行进程
+证据，以及导入后 TraceIndex 的 signal 和 transition 计数。失败状态区分输入、Manifest、
+Stimulus、契约、能力限制、工具链、harness、构建、运行、VCD 导入、结果工程物化、超时、
+取消与被新 generation 取代。
 
 退出码：
 
@@ -130,6 +152,7 @@ harness、构建、运行、VCD 导入、结果工程物化、超时与取消。
 | 5 | failed |
 | 6 | timed-out |
 | 7 | cancelled |
+| 8 | superseded |
 
 宿主以 `wave-workbench --load-first-trace result.wave.json` 打开结果时，WaveWorkbench
 会异步载入首个 trace 引用，不阻塞窗口创建；普通项目打开行为不受影响。结果工作区上方
@@ -138,7 +161,7 @@ harness、构建、运行、VCD 导入、结果工程物化、超时与取消。
 
 结果工程的 `waveSimulation.session` 扩展使用
 `wave-workbench.simulation-session/v1`。它保存重跑所需的 Manifest、Stimulus、工作区、
-产物目录、结果工程及显式工具参数；进程环境不写入工程，加载时重新从当前进程获取。
+产物目录、构建缓存目录、结果工程及显式工具参数；进程环境不写入工程，加载时重新从当前进程获取。
 图形激励发生变化后状态转为 `Stale`，Run/Rerun 将当前内存场景直接导出并运行，成功后
-直接刷新 Actual 波形；取消或失败保留上一份结果。S7 每次重跑仍会重新构建 Verilator
-模型，构建指纹与模型复用属于 S8。
+直接刷新 Actual 波形；取消、失败或 superseded 均不会用旧结果覆盖当前场景。仅激励变化时
+复用已验证模型；RTL 或编译契约变化时自动重新构建。

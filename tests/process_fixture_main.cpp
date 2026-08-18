@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QTextStream>
+#include <QThread>
 #include <QTimer>
 
 #ifndef WAVE_TOOLCHAIN_FIXTURE_MODE
@@ -52,6 +53,22 @@ int main(int argc, char* argv[])
         error.flush();
         return 23;
     }
+    bool buildDelayOk = false;
+    const auto buildDelayMs = qEnvironmentVariableIntValue(
+        "WAVE_VERILATOR_FIXTURE_BUILD_DELAY_MS", &buildDelayOk);
+    if (buildDelayOk && buildDelayMs > 0) {
+        QThread::msleep(static_cast<unsigned long>(buildDelayMs));
+    }
+    const auto countPath = qEnvironmentVariable("WAVE_VERILATOR_FIXTURE_COUNT_FILE");
+    if (!countPath.isEmpty()) {
+        QFile countFile(countPath);
+        if (!countFile.open(QIODevice::WriteOnly | QIODevice::Append)
+            || countFile.write("build\n") != 6) {
+            error << "fixture Verilator could not record the build\n";
+            error.flush();
+            return 28;
+        }
+    }
     QString objectDirectory;
     QString executableName;
     for (qsizetype index = 0; index + 1 < arguments.size(); ++index) {
@@ -85,14 +102,24 @@ int main(int argc, char* argv[])
     return 0;
 #elif WAVE_TOOLCHAIN_FIXTURE_MODE == 6
     QString vcdPath;
+    QString stimulusPath;
     for (const auto& argument : application.arguments()) {
         if (argument.startsWith(QStringLiteral("--vcd="))) {
             vcdPath = argument.mid(QStringLiteral("--vcd=").size());
+        } else if (argument.startsWith(QStringLiteral("--stimulus="))) {
+            stimulusPath = argument.mid(QStringLiteral("--stimulus=").size());
         }
     }
+    bool delayOk = false;
+    const auto delayMs = qEnvironmentVariableIntValue(
+        "WAVE_SIMULATOR_FIXTURE_DELAY_MS", &delayOk);
+    if (delayOk && delayMs > 0) {
+        QThread::msleep(static_cast<unsigned long>(delayMs));
+    }
     QSaveFile vcd(vcdPath);
-    if (vcdPath.isEmpty() || !vcd.open(QIODevice::WriteOnly)) {
-        error << "fixture simulator did not receive a writable VCD path\n";
+    if (vcdPath.isEmpty() || !QFileInfo(stimulusPath).isFile()
+        || !vcd.open(QIODevice::WriteOnly)) {
+        error << "fixture simulator did not receive runtime stimulus and writable VCD paths\n";
         error.flush();
         return 26;
     }

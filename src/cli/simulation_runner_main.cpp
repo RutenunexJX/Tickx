@@ -18,17 +18,19 @@ void usage(QTextStream& stream)
            "  wave-sim-runner probe [--verilator=PATH] [--cxx=PATH] "
            "[--timeout-ms=N] [--cancel-after-ms=N] [--pretty]\n"
            "  wave-sim-runner run-fixture --manifest=FILE --stimulus=FILE "
-           "--workspace=DIR --artifacts=DIR [--verilator=PATH] [--cxx=PATH] "
+           "--workspace=DIR --artifacts=DIR [--build-cache=DIR] "
+           "[--verilator=PATH] [--cxx=PATH] "
            "[--probe-timeout-ms=N] [--build-timeout-ms=N] "
            "[--run-timeout-ms=N] [--cancel-after-ms=N] [--pretty]\n\n"
            "  wave-sim-runner run-module --manifest=FILE --stimulus=FILE "
            "--workspace=DIR --artifacts=DIR --result-project=FILE "
+           "[--build-cache=DIR] [--generation=N] "
            "[--verilator=PATH] [--cxx=PATH] [--probe-timeout-ms=N] "
            "[--build-timeout-ms=N] [--run-timeout-ms=N] "
            "[--cancel-after-ms=N] [--pretty]\n\n"
            "run-fixture is an experimental fixed-contract path; it is not a GUI entry.\n"
            "Exit codes: 0 success, 2 usage, 3 unavailable, 4 invalid contract, "
-           "5 failed, 6 timed out, 7 cancelled.\n";
+           "5 failed, 6 timed out, 7 cancelled, 8 superseded.\n";
 }
 
 std::optional<int> positiveInteger(
@@ -48,6 +50,16 @@ std::optional<QString> nonEmptyValue(
     if (!argument.startsWith(prefix)) return std::nullopt;
     const auto value = argument.mid(prefix.size());
     return value.isEmpty() ? std::nullopt : std::optional<QString>{value};
+}
+
+std::optional<quint64> positiveUnsigned(
+    const QString& argument,
+    const QString& prefix)
+{
+    if (!argument.startsWith(prefix)) return std::nullopt;
+    bool ok = false;
+    const auto value = argument.mid(prefix.size()).toULongLong(&ok);
+    return ok && value > 0 ? std::optional<quint64>{value} : std::nullopt;
 }
 
 int exitCode(const wave::ToolchainProbeStatus status)
@@ -76,6 +88,7 @@ int exitCode(const wave::SimulationRunStatus status)
     case wave::SimulationRunStatus::ToolchainUnavailable: return 3;
     case wave::SimulationRunStatus::TimedOut: return 6;
     case wave::SimulationRunStatus::Cancelled: return 7;
+    case wave::SimulationRunStatus::Superseded: return 8;
     case wave::SimulationRunStatus::HarnessGenerationFailed:
     case wave::SimulationRunStatus::BuildFailed:
     case wave::SimulationRunStatus::RunFailed:
@@ -173,6 +186,10 @@ int runSimulation(
             request.artifactDirectory = *value;
             continue;
         }
+        if (const auto value = nonEmptyValue(argument, QStringLiteral("--build-cache="))) {
+            request.buildCacheDirectory = *value;
+            continue;
+        }
         if (const auto value = nonEmptyValue(
                 argument, QStringLiteral("--result-project="))) {
             request.resultProjectPath = *value;
@@ -204,6 +221,11 @@ int runSimulation(
         if (const auto value = positiveInteger(
                 argument, QStringLiteral("--cancel-after-ms="))) {
             cancelAfterMs = *value;
+            continue;
+        }
+        if (const auto value = positiveUnsigned(
+                argument, QStringLiteral("--generation="))) {
+            request.generation = *value;
             continue;
         }
         QTextStream error(stderr);

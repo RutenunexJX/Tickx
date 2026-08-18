@@ -20,6 +20,7 @@ enum class SimulationRunStage {
     ValidateInputs,
     ProbeToolchain,
     GenerateHarness,
+    ResolveBuildCache,
     BuildModel,
     RunModel,
     ImportTrace,
@@ -42,15 +43,25 @@ enum class SimulationRunStatus {
     ResultProjectFailed,
     TimedOut,
     Cancelled,
+    Superseded,
 };
 
 struct SimulationArtifacts {
     QString runDirectory;
     QString harnessPath;
+    QString runtimeStimulusPath;
     QString objectDirectory;
     QString executablePath;
     QString vcdPath;
     QString resultProjectPath;
+};
+
+struct SimulationBuildCacheReport {
+    QString fingerprint;
+    QString directory;
+    QString diagnostic;
+    bool hit{false};
+    bool published{false};
 };
 
 struct SimulationRunRequest {
@@ -58,18 +69,22 @@ struct SimulationRunRequest {
     QString stimulusPath;
     QString workspaceRoot;
     QString artifactDirectory;
+    QString buildCacheDirectory;
     QString resultProjectPath;
     ToolchainProbeOptions toolchain;
     int buildTimeoutMs{120'000};
     int runTimeoutMs{30'000};
     int maxOutputBytes{512 * 1024};
+    quint64 generation{0};
 };
 
 struct SimulationRunReport {
     SimulationRunStatus status{SimulationRunStatus::InvalidRequest};
     SimulationRunStage stage{SimulationRunStage::ValidateInputs};
+    quint64 generation{0};
     QString diagnostic;
     SimulationArtifacts artifacts;
+    SimulationBuildCacheReport buildCache;
     std::optional<ToolchainProbeReport> toolchain;
     std::optional<ProcessRunResult> buildProcess;
     std::optional<ProcessRunResult> simulationProcess;
@@ -85,7 +100,7 @@ struct SimulationRunReport {
 class VerilatorSimulationRunner final {
 public:
     using Completion = std::function<void(SimulationRunReport)>;
-    using StageChanged = std::function<void(SimulationRunStage)>;
+    using StageChanged = std::function<void(quint64, SimulationRunStage)>;
 
     VerilatorSimulationRunner();
     ~VerilatorSimulationRunner();
@@ -109,6 +124,8 @@ private:
 
 [[nodiscard]] QJsonObject simulationRunReportJson(
     const SimulationRunReport& report);
+
+[[nodiscard]] quint64 nextSimulationGeneration() noexcept;
 
 [[nodiscard]] std::string_view toString(SimulationRunStage stage) noexcept;
 [[nodiscard]] std::string_view toString(SimulationRunStatus status) noexcept;

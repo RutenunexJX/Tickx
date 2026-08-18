@@ -1679,15 +1679,28 @@ void MainWindow::runSimulation()
     }
     if (!simulationStateMachine_.beginRun()) return;
 
+    const auto generation = nextSimulationGeneration();
+    simulationGeneration_ = generation;
+    simulationRequest_->generation = generation;
     simulationStopRequested_ = false;
     updateSimulationControls(tr("Preparing the simulation inputs"));
-    statusBar()->showMessage(tr("Compiling simulation model"));
+    statusBar()->showMessage(tr("Checking simulation model"));
     const auto started = simulationRunner_->start(
         *simulationRequest_,
-        [this](SimulationRunReport report) {
+        [this, generation](SimulationRunReport report) {
+            if (report.generation != generation
+                || generation != simulationGeneration_) {
+                return;
+            }
             finishSimulationRun(std::move(report));
         },
-        [this](const SimulationRunStage stage) {
+        [this, generation](
+            const quint64 reportedGeneration,
+            const SimulationRunStage stage) {
+            if (reportedGeneration != generation
+                || generation != simulationGeneration_) {
+                return;
+            }
             simulationStateMachine_.observeStage(stage);
             QString detail;
             switch (stage) {
@@ -1698,7 +1711,10 @@ void MainWindow::runSimulation()
                 detail = tr("Checking Verilator and the C++ toolchain");
                 break;
             case SimulationRunStage::GenerateHarness:
-                detail = tr("Generating the simulation harness");
+                detail = tr("Preparing the runtime stimulus");
+                break;
+            case SimulationRunStage::ResolveBuildCache:
+                detail = tr("Checking the compiled model cache");
                 break;
             case SimulationRunStage::BuildModel:
                 detail = tr("Compiling the simulation model");
@@ -1814,20 +1830,26 @@ void MainWindow::finishSimulationRun(SimulationRunReport report)
             return;
         }
         simulationStateMachine_.markCurrent();
-        const auto message = tr("Simulation result is current · %1 ms")
-                                 .arg(report.durationMs);
+        const auto message = report.buildCache.hit
+            ? tr("Simulation result is current · cached model · %1 ms")
+                  .arg(report.durationMs)
+            : tr("Simulation result is current · model built · %1 ms")
+                  .arg(report.durationMs);
         updateSimulationControls(message);
         statusBar()->showMessage(message, 8'000);
         return;
     }
 
     const auto stopped = report.status == SimulationRunStatus::Cancelled;
+    const auto superseded = report.status == SimulationRunStatus::Superseded;
     const auto message = stopped
         ? tr("Simulation stopped; the previous result was retained")
-        : report.diagnostic.isEmpty()
-            ? tr("Simulation failed during %1")
-                  .arg(QString::fromLatin1(toString(report.stage).data()))
-            : report.diagnostic;
+        : superseded
+            ? tr("A newer simulation retained ownership of the result")
+            : report.diagnostic.isEmpty()
+                ? tr("Simulation failed during %1")
+                      .arg(QString::fromLatin1(toString(report.stage).data()))
+                : report.diagnostic;
     updateSimulationControls(message);
     statusBar()->showMessage(message, 10'000);
 }

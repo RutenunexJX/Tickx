@@ -6,6 +6,7 @@
 #include "wave/integration.h"
 #include "wave/model.h"
 #include "wave/project_io.h"
+#include "wave/simulation_build_cache.h"
 #include "wave/simulation_pipeline.h"
 #include "wave/simulation_runner.h"
 #include "wave/simulation_session.h"
@@ -6016,7 +6017,7 @@ wave::SimulationRunReport runSimulationFixture(
             report = std::move(completed);
             loop.quit();
         },
-        [observedStages](const wave::SimulationRunStage stage) {
+        [observedStages](const quint64, const wave::SimulationRunStage stage) {
             if (observedStages) observedStages->push_back(stage);
         });
     expect(started, "fixture simulation could not be started asynchronously");
@@ -6040,6 +6041,7 @@ void testSimulationSessionContractAndState()
     request.stimulusPath = QStringLiteral("C:/cache/run/stimulus.json");
     request.workspaceRoot = QStringLiteral("C:/cache/run/workspace");
     request.artifactDirectory = QStringLiteral("C:/cache/run/artifacts");
+    request.buildCacheDirectory = QStringLiteral("C:/cache/builds");
     request.resultProjectPath = QStringLiteral("C:/cache/run/result.wave.json");
     request.toolchain.verilatorProgram = QStringLiteral("C:/tools/verilator.exe");
     request.toolchain.verilatorArguments = {QStringLiteral("--quiet")};
@@ -6062,6 +6064,8 @@ void testSimulationSessionContractAndState()
                && restored.request->stimulusPath == request.stimulusPath
                && restored.request->workspaceRoot == request.workspaceRoot
                && restored.request->artifactDirectory == request.artifactDirectory
+               && restored.request->buildCacheDirectory
+                   == request.buildCacheDirectory
                && restored.request->resultProjectPath == request.resultProjectPath
                && restored.request->toolchain.verilatorProgram
                    == request.toolchain.verilatorProgram
@@ -6079,6 +6083,21 @@ void testSimulationSessionContractAndState()
                && !restored.request->toolchain.environment.contains(
                    QStringLiteral("WAVE_PRIVATE_TEST_VALUE")),
            "simulation session did not round-trip its rerun contract safely");
+
+    auto legacy = project;
+    auto legacySession = QJsonDocument::fromJson(
+        QByteArray::fromStdString(
+            legacy.extensions.at(wave::SimulationSessionExtension)))
+                             .object();
+    legacySession.remove(QStringLiteral("buildCacheDirectory"));
+    legacy.extensions[wave::SimulationSessionExtension] =
+        QJsonDocument(legacySession).toJson(QJsonDocument::Compact).toStdString();
+    const auto restoredLegacy = wave::simulationSessionFromProject(legacy);
+    expect(restoredLegacy.ok() && restoredLegacy.request
+               && restoredLegacy.request->buildCacheDirectory
+                   == QDir(request.artifactDirectory)
+                          .filePath(QStringLiteral("build-cache")),
+           "legacy simulation session did not receive a safe build-cache default");
 
     auto malformed = project;
     malformed.extensions[wave::SimulationSessionExtension] =
@@ -6110,6 +6129,11 @@ void testSimulationSessionContractAndState()
     expect(states.state() == wave::SimulationSessionState::Current,
            "successful run did not make the result current");
 
+    expect(states.beginRun(), "current result could not begin a superseded run");
+    states.finish(wave::SimulationRunStatus::Superseded);
+    expect(states.state() == wave::SimulationSessionState::Current,
+           "superseded run discarded the previous current result state");
+
     expect(states.beginRun(), "current result could not be rerun");
     states.markStimulusEdited();
     states.finish(wave::SimulationRunStatus::Cancelled);
@@ -6121,6 +6145,104 @@ void testSimulationSessionContractAndState()
                && states.actions().runEnabled
                && states.actions().rerunEnabled,
            "failed run did not expose a recoverable failed state");
+}
+
+void testSimulationBuildFingerprintContract()
+{
+    const auto firstGeneration = wave::nextSimulationGeneration();
+    const auto secondGeneration = wave::nextSimulationGeneration();
+    expect(secondGeneration > firstGeneration,
+           "automatic simulation generations are not monotonic");
+
+    wave::SimulationBuildFingerprintInput input;
+    input.manifestDocument =
+        R"({"ports":["clk_i","data_o"],"parameters":{"WIDTH":"8"},"defines":{"SIM":"1"}})";
+    input.sources = {
+        {QStringLiteral("rtl/top.sv"), QStringLiteral("design"),
+         QByteArrayLiteral("module top; endmodule\n")},
+        {QStringLiteral("rtl/defs.svh"), QStringLiteral("header"),
+         QByteArrayLiteral("`define WIDTH 8\n")},
+    };
+    input.harnessDocument = QByteArrayLiteral("stable-runtime-harness");
+    input.verilatorProgram = QStringLiteral("C:/tools/verilator.exe");
+    input.verilatorVersion = QStringLiteral("5.028.0");
+    input.cxxProgram = QStringLiteral("C:/tools/g++.exe");
+    input.cxxVersion = QStringLiteral("13.2.0");
+    input.cxxFamily = wave::CxxCompilerFamily::Gcc;
+    input.verilatorArguments = {QStringLiteral("--threads"), QStringLiteral("2")};
+    input.cxxArguments = {QStringLiteral("-O2")};
+    input.environment = QProcessEnvironment{};
+    input.environment.insert(QStringLiteral("CXXFLAGS"), QStringLiteral("-g0"));
+
+    const auto baseline = wave::computeSimulationBuildFingerprint(input);
+    const auto repeated = wave::computeSimulationBuildFingerprint(input);
+    expect(baseline.valid() && baseline.value == repeated.value
+               && baseline.evidence == repeated.evidence,
+           "simulation build fingerprint is not deterministic");
+
+    const auto expectChanged = [&](auto mutate, const char* message) {
+        auto changed = input;
+        mutate(changed);
+        expect(wave::computeSimulationBuildFingerprint(changed).value
+                   != baseline.value,
+               message);
+    };
+    expectChanged(
+        [](auto& changed) {
+            changed.manifestDocument.replace("data_o", "result_o");
+        },
+        "port contract change did not invalidate the model");
+    expectChanged(
+        [](auto& changed) {
+            changed.manifestDocument.replace("WIDTH\":\"8", "WIDTH\":\"16");
+        },
+        "parameter change did not invalidate the model");
+    expectChanged(
+        [](auto& changed) {
+            changed.manifestDocument.replace("SIM\":\"1", "SIM\":\"0");
+        },
+        "define change did not invalidate the model");
+    expectChanged(
+        [](auto& changed) { changed.sources.front().content.append("// rtl\n"); },
+        "RTL change did not invalidate the model");
+    expectChanged(
+        [](auto& changed) { changed.sources.back().content.append("// header\n"); },
+        "header dependency change did not invalidate the model");
+    expectChanged(
+        [](auto& changed) { changed.harnessDocument.append("-v2"); },
+        "runtime harness change did not invalidate the model");
+    expectChanged(
+        [](auto& changed) { changed.verilatorVersion = QStringLiteral("5.030.0"); },
+        "Verilator identity change did not invalidate the model");
+    expectChanged(
+        [](auto& changed) { changed.cxxArguments.append(QStringLiteral("-g")); },
+        "compiler argument change did not invalidate the model");
+    expectChanged(
+        [](auto& changed) {
+            changed.environment.insert(
+                QStringLiteral("CXXFLAGS"), QStringLiteral("-O3"));
+        },
+        "compile environment change did not invalidate the model");
+
+    wave::SimulationBuildCacheRecord record{
+        baseline,
+        wave::simulationSha256(QByteArrayLiteral("simulator-binary")),
+    };
+    const auto serialized = wave::serializeSimulationBuildCacheRecord(record);
+    const auto parsed = wave::parseSimulationBuildCacheRecord(serialized);
+    expect(parsed.ok() && parsed.record
+               && parsed.record->build.value == baseline.value
+               && parsed.record->executableSha256 == record.executableSha256,
+           "verified build-cache record did not round-trip");
+
+    auto tampered = QJsonDocument::fromJson(serialized).object();
+    auto evidence = tampered.value(QStringLiteral("evidence")).toObject();
+    evidence.insert(QStringLiteral("manifestSha256"),
+                    wave::simulationSha256(QByteArrayLiteral("tampered")));
+    tampered.insert(QStringLiteral("evidence"), evidence);
+    expect(!wave::parseSimulationBuildCacheRecord(
+                QJsonDocument(tampered).toJson(QJsonDocument::Compact)).ok(),
+           "tampered build-cache evidence was accepted");
 }
 
 void testAsynchronousProcessRunner()
@@ -6292,9 +6414,28 @@ void testVerilatorToolchainProbe()
 
 void testFixedFixtureSimulationPipeline()
 {
-    const QDir fixtureRoot(
+    const QDir sourceFixtureRoot(
         QDir(QStringLiteral(WAVE_SOURCE_DIR))
             .filePath(QStringLiteral("tests/fixtures/simulation/fixed-counter")));
+    QTemporaryDir fixtureWorkspace;
+    expect(fixtureWorkspace.isValid()
+               && QDir().mkpath(
+                   QDir(fixtureWorkspace.path()).filePath(QStringLiteral("rtl")))
+               && QFile::copy(
+                   sourceFixtureRoot.filePath(QStringLiteral("manifest.json")),
+                   QDir(fixtureWorkspace.path()).filePath(
+                       QStringLiteral("manifest.json")))
+               && QFile::copy(
+                   sourceFixtureRoot.filePath(QStringLiteral("stimulus.json")),
+                   QDir(fixtureWorkspace.path()).filePath(
+                       QStringLiteral("stimulus.json")))
+               && QFile::copy(
+                   sourceFixtureRoot.filePath(
+                       QStringLiteral("rtl/wave_fixed_counter.sv")),
+                   QDir(fixtureWorkspace.path()).filePath(
+                       QStringLiteral("rtl/wave_fixed_counter.sv"))),
+           "cannot create mutable fixed simulation workspace");
+    const QDir fixtureRoot(fixtureWorkspace.path());
     const auto manifest = fixtureRoot.filePath(QStringLiteral("manifest.json"));
     const auto stimulus = fixtureRoot.filePath(QStringLiteral("stimulus.json"));
     const auto verilator = toolchainFixturePath(
@@ -6310,6 +6451,21 @@ void testFixedFixtureSimulationPipeline()
                && QFileInfo::exists(simulator) && QFileInfo::exists(hangingSimulator),
            "fixed simulation contract or process fixtures are missing");
 
+    QTemporaryDir buildCache;
+    QTemporaryDir buildEvidence;
+    expect(buildCache.isValid() && buildEvidence.isValid(),
+           "cannot create fixed simulation cache evidence directories");
+    const auto buildCountPath = buildEvidence.filePath(
+        QStringLiteral("build-count.txt"));
+    const auto buildCount = [&] {
+        QFile file(buildCountPath);
+        if (!file.exists()) return 0;
+        expect(file.open(QIODevice::ReadOnly),
+               "cannot read fixed simulation build counter");
+        return static_cast<int>(
+            file.readAll().count(QByteArrayLiteral("build\n")));
+    };
+
     const auto requestFor = [&](const QString& artifactDirectory,
                                 const QString& simulatorProgram) {
         wave::SimulationRunRequest request;
@@ -6317,11 +6473,15 @@ void testFixedFixtureSimulationPipeline()
         request.stimulusPath = stimulus;
         request.workspaceRoot = fixtureRoot.absolutePath();
         request.artifactDirectory = artifactDirectory;
+        request.buildCacheDirectory = buildCache.path();
         request.toolchain.verilatorProgram = verilator;
         request.toolchain.cxxProgram = compiler;
         request.toolchain.timeoutMs = 1'000;
         request.toolchain.environment.insert(
             QStringLiteral("WAVE_SIMULATOR_FIXTURE"), simulatorProgram);
+        request.toolchain.environment.insert(
+            QStringLiteral("WAVE_VERILATOR_FIXTURE_COUNT_FILE"),
+            buildCountPath);
         request.buildTimeoutMs = 2'000;
         request.runTimeoutMs = 2'000;
         return request;
@@ -6340,10 +6500,12 @@ void testFixedFixtureSimulationPipeline()
                && completed.stage == wave::SimulationRunStage::Completed
                && completed.toolchain && completed.toolchain->ready()
                && completed.buildProcess && completed.buildProcess->ok()
+               && !completed.buildCache.hit && completed.buildCache.published
                && completed.simulationProcess && completed.simulationProcess->ok()
                && completed.trace->traceSignals.size() == 4
                && completed.trace->transitionCount >= 12
                && QFileInfo(completed.artifacts.harnessPath).isFile()
+               && QFileInfo(completed.artifacts.runtimeStimulusPath).isFile()
                && QFileInfo(completed.artifacts.executablePath).isFile()
                && QFileInfo(completed.artifacts.vcdPath).isFile()
                && QFileInfo(completed.artifacts.resultProjectPath).isFile()
@@ -6352,10 +6514,13 @@ void testFixedFixtureSimulationPipeline()
                && json.value(QStringLiteral("trace")).toObject()
                       .value(QStringLiteral("signalCount")).toInt() == 4,
            "fixed fixture did not complete build, run, VCD, and TraceIndex stages");
+    expect(buildCount() == 1,
+           "initial fixed simulation did not build exactly one model");
     expect(observedStages == std::vector<wave::SimulationRunStage>{
                wave::SimulationRunStage::ValidateInputs,
                wave::SimulationRunStage::ProbeToolchain,
                wave::SimulationRunStage::GenerateHarness,
+               wave::SimulationRunStage::ResolveBuildCache,
                wave::SimulationRunStage::BuildModel,
                wave::SimulationRunStage::RunModel,
                wave::SimulationRunStage::ImportTrace,
@@ -6380,12 +6545,207 @@ void testFixedFixtureSimulationPipeline()
            "materialized result project did not preserve the VCD reference and lane mapping");
     QFile harness(completed.artifacts.harnessPath);
     expect(harness.open(QIODevice::ReadOnly)
-               && harness.readAll().contains("top->clk_i = drive_clk_i(tick)")
+               && harness.readAll().contains(
+                   "top->clk_i = valueAt(plan.inputs[0], tick)")
                && completed.trace->findSignal("TOP.count_o[3:0]") != nullptr,
            "generated harness or imported fixed trace lost semantic signal evidence");
 
+    QFile firstRuntimePlan(completed.artifacts.runtimeStimulusPath);
+    expect(firstRuntimePlan.open(QIODevice::ReadOnly),
+           "cannot read initial runtime stimulus plan");
+    const auto firstRuntimePlanDocument = firstRuntimePlan.readAll();
+    QFile stimulusFile(stimulus);
+    expect(stimulusFile.open(QIODevice::ReadOnly),
+           "cannot read mutable fixed stimulus");
+    const auto parsedStimulus = wave::parseZeroSlackStimulusScenario(
+        stimulusFile.readAll());
+    stimulusFile.close();
+    expect(parsedStimulus.ok() && parsedStimulus.scenario,
+           "cannot parse mutable fixed stimulus");
+    auto changedStimulus = *parsedStimulus.scenario;
+    const auto resetPort = std::find_if(
+        changedStimulus.ports.begin(),
+        changedStimulus.ports.end(),
+        [](const wave::StimulusScenarioPort& port) {
+            return port.binding.name == "rst_i";
+        });
+    expect(resetPort != changedStimulus.ports.end()
+               && !resetPort->segments.empty(),
+           "mutable fixed stimulus has no reset segment");
+    resetPort->segments.front().value = "1";
+    const auto changedStimulusDocument =
+        wave::serializeZeroSlackStimulusScenario(changedStimulus);
+    expect(stimulusFile.open(QIODevice::WriteOnly | QIODevice::Truncate)
+               && stimulusFile.write(changedStimulusDocument)
+                   == changedStimulusDocument.size(),
+           "cannot update fixed stimulus without changing RTL");
+    stimulusFile.close();
+
+    QTemporaryDir rerunArtifacts;
+    expect(rerunArtifacts.isValid(),
+           "cannot create stimulus-only rerun artifacts");
+    auto rerunRequest = requestFor(rerunArtifacts.path(), simulator);
+    rerunRequest.resultProjectPath = rerunArtifacts.filePath(
+        QStringLiteral("counter-rerun.wave.json"));
+    std::vector<wave::SimulationRunStage> rerunStages;
+    const auto rerun = runSimulationFixture(
+        std::move(rerunRequest), std::nullopt, &rerunStages);
+    QFile secondRuntimePlan(rerun.artifacts.runtimeStimulusPath);
+    expect(secondRuntimePlan.open(QIODevice::ReadOnly),
+           "cannot read stimulus-only rerun plan");
+    expect(rerun.ok() && rerun.buildCache.hit
+               && !rerun.buildProcess.has_value()
+               && rerun.buildCache.fingerprint
+                   == completed.buildCache.fingerprint
+               && buildCount() == 1
+               && secondRuntimePlan.readAll() != firstRuntimePlanDocument
+               && std::find(
+                      rerunStages.begin(),
+                      rerunStages.end(),
+                      wave::SimulationRunStage::BuildModel)
+                   == rerunStages.end(),
+           "stimulus-only edit rebuilt or failed to reuse the verified model");
+
+    QFile sourceFile(
+        fixtureRoot.filePath(QStringLiteral("rtl/wave_fixed_counter.sv")));
+    expect(sourceFile.open(QIODevice::WriteOnly | QIODevice::Append)
+               && sourceFile.write("\n// S8 source invalidation\n") > 0,
+           "cannot mutate fixed RTL source");
+    sourceFile.close();
+    QTemporaryDir rtlChangedArtifacts;
+    auto rtlChangedRequest = requestFor(rtlChangedArtifacts.path(), simulator);
+    const auto rtlChanged = runSimulationFixture(std::move(rtlChangedRequest));
+    expect(rtlChanged.ok() && !rtlChanged.buildCache.hit
+               && rtlChanged.buildCache.published
+               && rtlChanged.buildCache.fingerprint
+                   != completed.buildCache.fingerprint
+               && buildCount() == 2,
+           "RTL source edit did not invalidate and rebuild the model");
+
+    QFile corruptExecutable(rtlChanged.artifacts.executablePath);
+    expect(corruptExecutable.open(QIODevice::WriteOnly | QIODevice::Append)
+               && corruptExecutable.write("corrupt") == 7,
+           "cannot corrupt cached executable for integrity test");
+    corruptExecutable.close();
+    QTemporaryDir repairedArtifacts;
+    auto repairedRequest = requestFor(repairedArtifacts.path(), simulator);
+    const auto repaired = runSimulationFixture(std::move(repairedRequest));
+    expect(repaired.ok() && !repaired.buildCache.hit
+               && repaired.buildCache.published
+               && repaired.buildCache.fingerprint
+                   == rtlChanged.buildCache.fingerprint
+               && buildCount() == 3,
+           "corrupt cached executable was reused instead of rebuilt");
+
+    QTemporaryDir cancelledBuildArtifacts;
+    QTemporaryDir cancelledBuildCache;
+    auto cancelledBuildRequest = requestFor(
+        cancelledBuildArtifacts.path(), simulator);
+    cancelledBuildRequest.buildCacheDirectory = cancelledBuildCache.path();
+    cancelledBuildRequest.toolchain.environment.insert(
+        QStringLiteral("WAVE_VERILATOR_FIXTURE_BUILD_DELAY_MS"),
+        QStringLiteral("1000"));
+    cancelledBuildRequest.buildTimeoutMs = 3'000;
+    const auto cancelledBuild = runSimulationFixture(
+        std::move(cancelledBuildRequest), 120);
+    expect(cancelledBuild.status == wave::SimulationRunStatus::Cancelled
+               && cancelledBuild.stage == wave::SimulationRunStage::BuildModel
+               && QDir(cancelledBuildCache.path())
+                      .entryList(QDir::Dirs | QDir::NoDotAndDotDot)
+                      .isEmpty(),
+           "cancelled build published or retained a partial cache entry");
+
+    QTemporaryDir generationArtifacts;
+    expect(generationArtifacts.isValid(),
+           "cannot create generation isolation artifacts");
+    auto olderRequest = requestFor(generationArtifacts.path(), simulator);
+    olderRequest.resultProjectPath = generationArtifacts.filePath(
+        QStringLiteral("generation-result.wave.json"));
+    olderRequest.generation = 10;
+    olderRequest.toolchain.environment.insert(
+        QStringLiteral("WAVE_SIMULATOR_FIXTURE_DELAY_MS"),
+        QStringLiteral("300"));
+    auto newerRequest = olderRequest;
+    newerRequest.generation = 11;
+    newerRequest.toolchain.environment.insert(
+        QStringLiteral("WAVE_SIMULATOR_FIXTURE_DELAY_MS"),
+        QStringLiteral("0"));
+
+    wave::VerilatorSimulationRunner olderRunner;
+    wave::VerilatorSimulationRunner newerRunner;
+    QEventLoop generationLoop;
+    QTimer generationWatchdog;
+    generationWatchdog.setSingleShot(true);
+    QObject::connect(
+        &generationWatchdog,
+        &QTimer::timeout,
+        &generationLoop,
+        &QEventLoop::quit);
+    std::optional<wave::SimulationRunReport> olderReport;
+    std::optional<wave::SimulationRunReport> newerReport;
+    bool newerStarted = false;
+    bool newerStartFailed = false;
+    const auto maybeFinishGenerationTest = [&] {
+        if (olderReport && newerReport) generationLoop.quit();
+    };
+    const auto olderStarted = olderRunner.start(
+        std::move(olderRequest),
+        [&](wave::SimulationRunReport report) {
+            olderReport = std::move(report);
+            maybeFinishGenerationTest();
+        },
+        [&](const quint64 generation, const wave::SimulationRunStage stage) {
+            if (generation != 10
+                || stage != wave::SimulationRunStage::RunModel
+                || newerStarted) {
+                return;
+            }
+            newerStarted = true;
+            QTimer::singleShot(0, &generationLoop, [&] {
+                if (!newerRunner.start(
+                        std::move(newerRequest),
+                        [&](wave::SimulationRunReport report) {
+                            newerReport = std::move(report);
+                            maybeFinishGenerationTest();
+                        })) {
+                    newerStartFailed = true;
+                    generationLoop.quit();
+                }
+            });
+        });
+    expect(olderStarted,
+           "older simulation generation could not be started");
+    generationWatchdog.start(8'000);
+    generationLoop.exec();
+    expect(newerStarted && !newerStartFailed && olderReport && newerReport
+               && olderReport->status == wave::SimulationRunStatus::Superseded
+               && newerReport->ok(),
+           "stale simulation generation was not isolated from the newer result");
+    const auto generationProject = wave::loadProjectFile(
+        generationArtifacts.filePath(
+            QStringLiteral("generation-result.wave.json")));
+    expect(generationProject.ok()
+               && !generationProject.project->importedTraces.empty()
+               && generationProject.project->importedTraces.front()
+                      .extensions.at("waveSimulation.generation") == "11",
+           "older asynchronous result overwrote the newer simulation generation");
+    const auto buildCountBeforeLateGeneration = buildCount();
+    QTemporaryDir lateGenerationArtifacts;
+    auto lateOlderRequest = requestFor(
+        lateGenerationArtifacts.path(), simulator);
+    lateOlderRequest.resultProjectPath = generationArtifacts.filePath(
+        QStringLiteral("generation-result.wave.json"));
+    lateOlderRequest.generation = 9;
+    const auto lateOlder = runSimulationFixture(std::move(lateOlderRequest));
+    expect(lateOlder.status == wave::SimulationRunStatus::Superseded
+               && lateOlder.stage == wave::SimulationRunStage::ValidateInputs
+               && buildCount() == buildCountBeforeLateGeneration,
+           "late-starting older generation reclaimed or rebuilt the newer result");
+
     QTemporaryDir failedArtifacts;
     auto failedRequest = requestFor(failedArtifacts.path(), simulator);
+    failedRequest.buildCacheDirectory = failedArtifacts.filePath(
+        QStringLiteral("build-cache"));
     failedRequest.toolchain.environment.insert(
         QStringLiteral("WAVE_VERILATOR_FIXTURE_BUILD_FAIL"), QStringLiteral("1"));
     const auto failed = runSimulationFixture(std::move(failedRequest));
@@ -18364,6 +18724,7 @@ int main(int argc, char* argv[])
         {"asynchronous process runner", testAsynchronousProcessRunner},
         {"Verilator toolchain probe", testVerilatorToolchainProbe},
         {"simulation session contract and state", testSimulationSessionContractAndState},
+        {"simulation build fingerprint contract", testSimulationBuildFingerprintContract},
         {"fixed fixture simulation pipeline", testFixedFixtureSimulationPipeline},
         {"headless automation JSON contracts", testAutomationContracts},
         {"Relation repair reference contracts", testAutomationRelationRepairReferenceContracts},

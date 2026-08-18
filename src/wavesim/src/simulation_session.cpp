@@ -1,5 +1,6 @@
 #include "wave/simulation_session.h"
 
+#include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -117,6 +118,7 @@ void attachSimulationSession(
         {QStringLiteral("stimulusPath"), request.stimulusPath},
         {QStringLiteral("workspaceRoot"), request.workspaceRoot},
         {QStringLiteral("artifactDirectory"), request.artifactDirectory},
+        {QStringLiteral("buildCacheDirectory"), request.buildCacheDirectory},
         {QStringLiteral("resultProjectPath"), request.resultProjectPath},
         {QStringLiteral("toolchain"), toolchain},
         {QStringLiteral("buildTimeoutMs"), request.buildTimeoutMs},
@@ -151,6 +153,7 @@ SimulationSessionParseResult simulationSessionFromProject(const Project& project
                 QStringLiteral("stimulusPath"),
                 QStringLiteral("workspaceRoot"),
                 QStringLiteral("artifactDirectory"),
+                QStringLiteral("buildCacheDirectory"),
                 QStringLiteral("resultProjectPath"),
                 QStringLiteral("toolchain"),
                 QStringLiteral("buildTimeoutMs"),
@@ -186,6 +189,17 @@ SimulationSessionParseResult simulationSessionFromProject(const Project& project
     request.stimulusPath = *stimulusPath;
     request.workspaceRoot = *workspaceRoot;
     request.artifactDirectory = *artifactDirectory;
+    const auto buildCacheValue = object.value(QStringLiteral("buildCacheDirectory"));
+    if (!buildCacheValue.isUndefined() && !buildCacheValue.isString()) {
+        result.error = QStringLiteral(
+            "Simulation session buildCacheDirectory must be a string.");
+        return result;
+    }
+    request.buildCacheDirectory = buildCacheValue.toString().trimmed();
+    if (request.buildCacheDirectory.isEmpty()) {
+        request.buildCacheDirectory = QDir(request.artifactDirectory)
+                                          .filePath(QStringLiteral("build-cache"));
+    }
     request.resultProjectPath = *resultProjectPath;
 
     const auto toolchainValue = object.value(QStringLiteral("toolchain"));
@@ -313,7 +327,8 @@ void SimulationSessionStateMachine::finish(
         state_ = staleDuringRun_
             ? SimulationSessionState::Stale
             : SimulationSessionState::Current;
-    } else if (status == SimulationRunStatus::Cancelled) {
+    } else if (status == SimulationRunStatus::Cancelled
+               || status == SimulationRunStatus::Superseded) {
         state_ = staleDuringRun_
             ? SimulationSessionState::Stale
             : runOriginState_;

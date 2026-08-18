@@ -379,6 +379,7 @@ private:
     std::unique_ptr<VerilatorSimulationRunner> simulationRunner_;
     QString simulationSessionError_;
     QString simulationStateDetail_;
+    quint64 simulationGeneration_{0};
     bool simulationStopRequested_{false};
     QString pendingRevealLaneId_;
     std::optional<Tick> pendingRevealTick_;
