@@ -14,6 +14,19 @@ stdin、stdout、stderr 和退出码通信，不创建窗口，也不读取桌�
 - 编辑批次：`wave-workbench.operations/v1`
 - 能力发现：`wave-workbench.capabilities/v1`
 
+与三个协议标识对应的 JSON Schema 使用 Draft 2020-12，并随源码保存在
+`src/waveautomation/schemas/automation/v1/`：
+
+- `capabilities.schema.json`：能力发现文档；
+- `report.schema.json`：原生命令成功或失败报告的稳定顶层；
+- `operation-batch.schema.json`：批次顶层及 33 个 operation 的字段定义。
+
+Schema 内的 `$id` 以及 `capabilities.schemaRef`、`reportSchemaRef`、
+`operationBatch.schemaRef` 均使用发布包中的相对路径 `schemas/automation/v1/...`。发布或嵌入时
+应保持该目录结构；源码目录中的附加前缀不属于协议标识。兼容的 v1 实现可以增加报告字段和
+capabilities 元数据，但不会删除或改变既有必填字段的语义。破坏性变更必须使用新的协议与
+Schema 目录版本。
+
 ## 命令
 
 ```text
@@ -43,12 +56,22 @@ wave-cli validate <project.wave.json> [--scenario=SELECTOR] \
 wave-cli apply <project.wave.json> <operations.json|-> \
   (--output=PATH|--in-place|--dry-run) [--scenario=SELECTOR] \
   [--expect-sha256=HEX] [--backup[=PATH]] [--pretty]
+wave-cli generate <wave-generate arguments...>
+wave-cli compare <wave-compare arguments...>
+wave-cli bridge <wave-bridge arguments...>
 ```
 
-成功结果写入 stdout。失败结果以输出 JSON schema 写入 stderr。除 `--help` 和
-`--version` 外，不需要解析自然语言文本；`capabilities` 成功时使用独立的能力发现 schema。
+原生命令的成功结果写入 stdout，失败结果以输出 JSON schema 写入 stderr。除
+`--help` 和 `--version` 外，调用方不需要解析自然语言文本；`capabilities` 成功时使用独立的
+能力发现 schema。该结构化输出约定不适用于下述三个兼容适配命令。
 
-退出码：
+`generate`、`compare` 与 `bridge` 是兼容适配命令。它们从 `wave-cli` 所在目录启动对应的
+`wave-generate`、`wave-compare` 或 `wave-bridge`，原样转发参数、文本输出和退出码；旧可执行文件
+继续可直接调用。能力报告的 `compatibilityCommands` 以 `compatibilityAdapter: true`、`legacyExecutable` 和
+`structuredOutput: false` 明确标识这三个入口，调用方不得把它们的输出误当作
+`wave-workbench.cli/v1`。这三个入口完成迁移后再进行输出协议升级，不在兼容层中静默改变旧契约。
+
+下表为原生命令的退出码。三个兼容适配命令原样返回对应旧工具的退出码：
 
 | 退出码 | 含义 |
 |---:|---|
@@ -106,6 +129,20 @@ Clock Lane 仅在工程恰有一个 ClockDomain 时自动关联，多时钟或�
 `markerRepairReference` 表示可用快照绑定引用恢复无法由稳定 ID 寻址的 Marker，
 `compactRelationQuery` 表示可在不读取内部 Event ID 的情况下定位和审计既有 Relation。
 调用方可据此协商当前二进制能力，不需要从 `--help` 文本或源码猜测。
+
+每个 `operations[]` 项还提供：
+
+- `schemaRef`：指向 `operation-batch.schema.json#/$defs/<op>`；
+- `required`：无条件必填字段，始终包含 `op`；
+- `optional`：该 operation 接受的其余字段；条件必填关系由所引用 Schema 的说明和运行时校验
+  共同约束；
+- `idempotent`：相同目标状态重复提交是否保持同一工程结果；
+- `dangerous`：该操作是否可能删除工程内容或结构；
+- `mutatesProject`：操作成功时是否可能改变工程，`assert-value` 为 `false`。
+
+调用方应使用这些字段生成操作表单、过滤只读调用和在 `dangerous=true` 时要求显式确认，不能
+根据 operation 名称自行推断风险。字段列表用于发现，最终接受条件仍以对应 JSON Schema 和
+原子批次校验结果为准。
 
 未知参数以退出码 2 和结构化 `usage` 错误返回。公共 Qt/C++ API
 `describeAutomationCapabilities()` 返回同一文档，因此嵌入式宿主与独立 CLI 不会维护两份

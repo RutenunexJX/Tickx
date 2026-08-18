@@ -12,6 +12,7 @@
 #include <QFontMetrics>
 #include <QHelpEvent>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -77,7 +78,8 @@ std::string busPresetValue(const std::string_view presetId, const std::uint32_t 
 
 QString busPresetDisplayLabel(const std::string_view presetId)
 {
-    if (presetId == "zero" || presetId == "reserved") return QStringLiteral("0");
+    if (presetId == "zero") return QStringLiteral("0");
+    if (presetId == "reserved") return QStringLiteral("RESERVED");
     if (presetId == "dont-care") return QStringLiteral("DON'T CARE");
     if (presetId == "x") return QStringLiteral("X");
     if (presetId == "z") return QStringLiteral("Z");
@@ -488,17 +490,9 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         "QLineEdit:focus { border-color: #8fc3ff; }"));
     durationEdit_->installEventFilter(this);
     connect(durationEdit_, &QLineEdit::editingFinished, this, [this] {
-        const auto consumeCanvasInput = durationEditMouseFocusOut_;
         durationEditMouseFocusOut_ = false;
         if (!durationEdit_->isModified() || durationEditSubmitting_) return;
-        submitDurationEdit(consumeCanvasInput);
-        if (consumeCanvasInput) durationEditBlurConsumesCanvasInput_ = true;
-    });
-    connect(qApp, &QApplication::focusChanged, this, [this](QWidget*, QWidget* newFocus) {
-        if (!durationEditBlurConsumesCanvasInput_) return;
-        if (newFocus != this && newFocus != viewport()) {
-            durationEditBlurConsumesCanvasInput_ = false;
-        }
+        submitDurationEdit(true);
     });
 
     busPresetPalette_ = new QFrame(viewport());
@@ -526,7 +520,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         "}"
         "QFrame#BusPresetPalette QToolButton {"
         " color: #f3f6fa; background: #46566c;"
-        " border: 1px solid #6f8099; border-radius: 4px; padding: 3px 7px;"
+        " border: 1px solid #6f8099; border-radius: 4px; padding: 3px 5px;"
         "}"
         "QFrame#BusPresetPalette QToolButton:hover {"
         " background: #56708f; border-color: #8dc0ff;"
@@ -568,7 +562,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         button->setAccessibleName(accessibleName);
         button->setToolTip(toolTip);
         button->setAutoRaise(true);
-        button->setFocusPolicy(Qt::NoFocus);
+        button->setFocusPolicy(Qt::StrongFocus);
         button->setCursor(Qt::PointingHandCursor);
         return button;
     };
@@ -676,8 +670,9 @@ WaveCanvas::WaveCanvas(QWidget* parent)
             busValueEdit_->selectAll();
             updateBusEditActionStates(true);
         });
-    const std::array<std::tuple<QString, QString, QString>, 4> presets{{
+    const std::array<std::tuple<QString, QString, QString>, 5> presets{{
         {QStringLiteral("zero"), QStringLiteral("0"), QStringLiteral("BusPresetZeroButton")},
+        {QStringLiteral("reserved"), tr("Reserved"), QStringLiteral("BusPresetReservedButton")},
         {QStringLiteral("x"), QStringLiteral("X"), QStringLiteral("BusPresetXButton")},
         {QStringLiteral("z"), QStringLiteral("Z"), QStringLiteral("BusPresetZButton")},
         {QStringLiteral("dont-care"), tr("Don't care"), QStringLiteral("BusPresetDontCareButton")},
@@ -688,11 +683,13 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         button->setText(label);
         button->setObjectName(objectName);
         button->setAutoRaise(true);
-        button->setFocusPolicy(Qt::NoFocus);
+        button->setFocusPolicy(Qt::StrongFocus);
         button->setCursor(Qt::PointingHandCursor);
         button->installEventFilter(this);
         button->setToolTip(
-            presetId == QStringLiteral("dont-care")
+            presetId == QStringLiteral("reserved")
+                ? tr("Mark this target as reserved while preserving an explicit zero-valued waveform")
+            : presetId == QStringLiteral("dont-care")
                 ? tr("Ignore this target range during Expected/Actual comparison")
                 : presetId == QStringLiteral("x")
                     ? tr("Drive an unknown value; X remains significant unless compare rules ignore it")
@@ -778,11 +775,12 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         " color: #8894a5; background: #374352; border-color: #526074;"
         "}"));
     auto* rangeLayout = new QHBoxLayout(rangeEditPalette_);
-    rangeLayout->setContentsMargins(7, 5, 7, 5);
-    rangeLayout->setSpacing(4);
+    rangeLayout->setContentsMargins(5, 4, 5, 4);
+    rangeLayout->setSpacing(3);
     rangeEditContextLabel_ = new QLabel(tr("Selected range"), rangeEditPalette_);
     rangeEditContextLabel_->setObjectName(QStringLiteral("RangeEditContextLabel"));
-    rangeEditContextLabel_->setMaximumWidth(310);
+    rangeEditContextLabel_->setMinimumWidth(100);
+    rangeEditContextLabel_->setMaximumWidth(130);
     rangeEditContextLabel_->setAccessibleName(
         tr("Selected range; click to edit the active time edge"));
     rangeEditContextLabel_->setCursor(Qt::PointingHandCursor);
@@ -792,21 +790,28 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeCopyButton_->setText(tr("Copy"));
     rangeCopyButton_->setObjectName(QStringLiteral("RangeEditCopyButton"));
     rangeCopyButton_->setAutoRaise(true);
-    rangeCopyButton_->setFocusPolicy(Qt::NoFocus);
+    rangeCopyButton_->setFocusPolicy(Qt::StrongFocus);
     rangeCopyButton_->setCursor(Qt::PointingHandCursor);
     rangeCopyButton_->setToolTip(tr("Copy the selected signals and time range (Ctrl+C)"));
     rangeCopyButton_->setAccessibleName(tr("Copy selected range"));
+    rangeCopyButton_->setIcon(QIcon::fromTheme(
+        QStringLiteral("edit-copy"),
+        style()->standardIcon(QStyle::SP_FileDialogListView)));
+    rangeCopyButton_->setText({});
     rangeLayout->addWidget(rangeCopyButton_);
     connect(rangeCopyButton_, &QToolButton::clicked, this, &WaveCanvas::copySelection);
     rangeRepeatButton_ = new QToolButton(rangeEditPalette_);
     rangeRepeatButton_->setText(tr("Repeat"));
     rangeRepeatButton_->setObjectName(QStringLiteral("RangeEditRepeatButton"));
     rangeRepeatButton_->setAutoRaise(true);
-    rangeRepeatButton_->setFocusPolicy(Qt::NoFocus);
+    rangeRepeatButton_->setFocusPolicy(Qt::StrongFocus);
     rangeRepeatButton_->setCursor(Qt::PointingHandCursor);
     rangeRepeatButton_->setToolTip(
         tr("Repeat the complete selected range immediately after it without changing the clipboard (Ctrl+D)"));
     rangeRepeatButton_->setAccessibleName(tr("Repeat selected range after"));
+    rangeRepeatButton_->setIcon(
+        style()->standardIcon(QStyle::SP_BrowserReload));
+    rangeRepeatButton_->setText({});
     rangeRepeatButton_->installEventFilter(this);
     rangeLayout->addWidget(rangeRepeatButton_);
     connect(
@@ -818,10 +823,14 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangePasteButton_->setText(tr("Paste"));
     rangePasteButton_->setObjectName(QStringLiteral("RangeEditPasteButton"));
     rangePasteButton_->setAutoRaise(true);
-    rangePasteButton_->setFocusPolicy(Qt::NoFocus);
+    rangePasteButton_->setFocusPolicy(Qt::StrongFocus);
     rangePasteButton_->setCursor(Qt::PointingHandCursor);
     rangePasteButton_->setToolTip(tr("Paste a copied range at the selected start (Ctrl+V)"));
     rangePasteButton_->setAccessibleName(tr("Paste copied range into selected signals"));
+    rangePasteButton_->setIcon(QIcon::fromTheme(
+        QStringLiteral("edit-paste"),
+        style()->standardIcon(QStyle::SP_DialogOpenButton)));
+    rangePasteButton_->setText({});
     rangeLayout->addWidget(rangePasteButton_);
     connect(rangePasteButton_, &QToolButton::clicked, this, &WaveCanvas::pasteAtCursor);
     connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [this] {
@@ -832,10 +841,13 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeClearButton_->setText(tr("Clear"));
     rangeClearButton_->setObjectName(QStringLiteral("RangeEditClearButton"));
     rangeClearButton_->setAutoRaise(true);
-    rangeClearButton_->setFocusPolicy(Qt::NoFocus);
+    rangeClearButton_->setFocusPolicy(Qt::StrongFocus);
     rangeClearButton_->setCursor(Qt::PointingHandCursor);
     rangeClearButton_->setToolTip(tr("Clear values in the selected range (Delete)"));
     rangeClearButton_->setAccessibleName(tr("Clear selected range"));
+    rangeClearButton_->setIcon(
+        style()->standardIcon(QStyle::SP_TrashIcon));
+    rangeClearButton_->setText({});
     rangeLayout->addWidget(rangeClearButton_);
     connect(rangeClearButton_, &QToolButton::clicked, this, [this] {
         static_cast<void>(clearExplicitRange());
@@ -844,8 +856,8 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeValueEdit_->setObjectName(QStringLiteral("RangeEditValueEdit"));
     rangeValueEdit_->setPlaceholderText(tr("Value + Enter"));
     rangeValueEdit_->setAccessibleName(tr("Selected bus range value"));
-    rangeValueEdit_->setMinimumWidth(105);
-    rangeValueEdit_->setMaximumWidth(140);
+    rangeValueEdit_->setMinimumWidth(90);
+    rangeValueEdit_->setMaximumWidth(120);
     rangeValueCompletionModel_ = new QStringListModel(this);
     rangeValueCompleter_ = new QCompleter(rangeValueCompletionModel_, this);
     rangeValueCompleter_->setCaseSensitivity(Qt::CaseInsensitive);
@@ -968,7 +980,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         button->setText(text);
         button->setObjectName(objectName);
         button->setAutoRaise(true);
-        button->setFocusPolicy(Qt::NoFocus);
+        button->setFocusPolicy(Qt::StrongFocus);
         button->setCursor(Qt::PointingHandCursor);
         button->setToolTip(tr("Set the whole selected range to %1").arg(text));
         rangeLayout->addWidget(button);
@@ -989,6 +1001,10 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         tr("Don't care"),
         QStringLiteral("RangeEditDontCareButton"),
         "dont-care");
+    rangeReservedButton_ = makeRangeButton(
+        tr("Reserved"),
+        QStringLiteral("RangeEditReservedButton"),
+        "reserved");
     rangeClockGateButton_ = makeRangeButton(
         tr("Gate"),
         QStringLiteral("RangeEditClockGateButton"),
@@ -1004,7 +1020,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeCloseButton_->setToolTip(
         tr("Close the range while keeping the active signal and edit cursor (Esc)"));
     rangeCloseButton_->setAutoRaise(true);
-    rangeCloseButton_->setFocusPolicy(Qt::NoFocus);
+    rangeCloseButton_->setFocusPolicy(Qt::StrongFocus);
     rangeCloseButton_->setCursor(Qt::PointingHandCursor);
     rangeLayout->addWidget(rangeCloseButton_);
     connect(rangeCloseButton_, &QToolButton::clicked, this, [this] {
@@ -1176,6 +1192,38 @@ QWidget* WaveCanvas::rangeEditPaletteWidget() const noexcept
 bool WaveCanvas::asynchronousEditing() const noexcept
 {
     return asynchronousEditing_;
+}
+
+bool WaveCanvas::relationsVisible() const noexcept
+{
+    return relationsVisible_;
+}
+
+void WaveCanvas::setRelationsVisible(const bool visible)
+{
+    if (relationsVisible_ == visible) return;
+    relationsVisible_ = visible;
+    viewport()->update();
+    emit statusMessage(
+        visible
+            ? tr("Relation constraints shown")
+            : tr("Relation constraints hidden; edit-impact warnings remain visible"));
+}
+
+void WaveCanvas::invalidateRangeSequenceHistoryContext()
+{
+    if (rangeValueEdit_) {
+        rangeValueEdit_->clear();
+        rangeValueEdit_->setModified(false);
+        rangeValueEdit_->setProperty("loadedExisting", false);
+        rangeValueEdit_->setStyleSheet({});
+        rangeValueEdit_->setToolTip({});
+    }
+    busRangeSequencePreview_.reset();
+    rangeSequenceTextSpans_.clear();
+    clearRangeSequenceBaseline();
+    clearRangeSequenceAnchor();
+    clearRangeSequenceCaretTarget();
 }
 
 std::optional<Tick> WaveCanvas::explicitRangeAnchorTick() const noexcept
@@ -1370,7 +1418,7 @@ QString WaveCanvas::editTimingSummary() const
     const auto stepText = project_
         ? QString::fromStdString(formatTick(step, project_->timeBase))
         : tr("%1 ticks").arg(step);
-    return tr("Sync · %1/step").arg(stepText);
+    return tr("Grid · %1/step").arg(stepText);
 }
 
 WaveCanvas::HistorySelectionSnapshot
@@ -1406,6 +1454,7 @@ QString WaveCanvas::restoreSelectionForHistoryTransition(
     const std::uint64_t toStateId)
 {
     if (!scenario_ || fromStateId == toStateId) return {};
+    invalidateRangeSequenceHistoryContext();
     segmentActionPreview_.reset();
     const auto transition =
         historySelectionTransitions_.find({fromStateId, toStateId});
@@ -1791,6 +1840,11 @@ void WaveCanvas::showDurationEditError(const QString& message)
     durationEdit_->setModified(true);
     durationEdit_->setFocus(Qt::OtherFocusReason);
     durationEdit_->selectAll();
+    QTimer::singleShot(0, durationEdit_, [this] {
+        if (!durationEdit_ || !durationEdit_->isModified()) return;
+        durationEdit_->setFocus(Qt::OtherFocusReason);
+        durationEdit_->selectAll();
+    });
     emit statusMessage(message);
 }
 
@@ -1804,8 +1858,8 @@ bool WaveCanvas::event(QEvent* event)
             && keyEvent->modifiers() == Qt::ShiftModifier)
             || (keyEvent->key() == Qt::Key_Tab
                 && keyEvent->modifiers() == Qt::ShiftModifier);
-        if (forward || backward) {
-            navigateSelectedBeat(forward);
+        if ((forward || backward)
+            && navigateSelectedBeat(forward)) {
             event->accept();
             return true;
         }
@@ -1823,10 +1877,12 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
     } else if (watched == busPresetButtons_.at(0)) {
         busEditAction = BusEditAction::PresetZero;
     } else if (watched == busPresetButtons_.at(1)) {
-        busEditAction = BusEditAction::PresetX;
+        busEditAction = BusEditAction::PresetReserved;
     } else if (watched == busPresetButtons_.at(2)) {
-        busEditAction = BusEditAction::PresetZ;
+        busEditAction = BusEditAction::PresetX;
     } else if (watched == busPresetButtons_.at(3)) {
+        busEditAction = BusEditAction::PresetZ;
+    } else if (watched == busPresetButtons_.at(4)) {
         busEditAction = BusEditAction::PresetDontCare;
     }
     if (busEditAction
@@ -1857,10 +1913,6 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
             emit exactRangeTimeEditRequested();
             return true;
         }
-    }
-    if (watched == durationEdit_ && event->type() == QEvent::FocusOut) {
-        const auto* focusEvent = static_cast<QFocusEvent*>(event);
-        durationEditMouseFocusOut_ = focusEvent->reason() == Qt::MouseFocusReason;
     }
     if (event->type() == QEvent::KeyPress) {
         auto* keyEvent = static_cast<QKeyEvent*>(event);
@@ -2121,6 +2173,7 @@ void WaveCanvas::submitDurationEdit(const bool preserveMouseFocusTarget)
             durationEditSubmitting_ = false;
             return;
         }
+        durationEdit_->setFocus(Qt::OtherFocusReason);
     }
     const auto value = durationEdit_->text();
     durationEdit_->setModified(false);
@@ -3265,6 +3318,10 @@ void WaveCanvas::refreshModel()
     segmentActionPreview_.reset();
     busEditActionPreview_.reset();
     busEditPreviewAction_.reset();
+    if (rangeSequenceBaseline_
+        && !rangeSequenceBaselineMatchesContext()) {
+        invalidateRangeSequenceHistoryContext();
+    }
     rebuildLaneLayout();
     if (scenario_) {
         std::erase_if(
@@ -4265,7 +4322,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                         lane->kind == LaneKind::Clock
                             ? details
                             : details
-                                + tr("\nEnter edits value · Ctrl+drag copies · press or release Ctrl while dragging to switch Move/Copy"),
+                                + tr("\nDouble-click or Enter edits value · Ctrl+drag copies · press or release Ctrl while dragging to switch Move/Copy"),
                         viewport());
                     return true;
                 }
@@ -4283,7 +4340,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                                   range.second,
                                   project_->timeBase)))
                     : tr("%1 · implicit value %2\n%3–%4 · width %5\n"
-                         "Click edits one beat · double-click edits a complete Segment")
+                         "Click selects one beat · double-click edits that beat")
                           .arg(
                               QString::fromStdString(lane->name),
                               laneValueAt(*lane, tick),
@@ -4331,17 +4388,13 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         QAbstractScrollArea::contextMenuEvent(event);
         return;
     }
-    if (durationEditBlurConsumesCanvasInput_) {
-        durationEditBlurConsumesCanvasInput_ = false;
-        event->accept();
-        return;
-    }
     if (durationEdit_
         && durationEdit_->isVisible()
         && durationEdit_->isModified()) {
-        static_cast<void>(commitPendingInlineEdits());
-        event->accept();
-        return;
+        if (!commitPendingInlineEdits()) {
+            event->accept();
+            return;
+        }
     }
     if (!commitPendingInlineEdits()) {
         event->accept();
@@ -6020,26 +6073,37 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         QAbstractScrollArea::mousePressEvent(event);
         return;
     }
+    auto position = event->position().toPoint();
     if (event->button() == Qt::LeftButton) {
         rangeSequenceTokenPress_ = false;
         rangeSequenceTokenDragRejected_ = false;
         rangeSequenceTokenPressPosition_ = {};
+        durationEditPointerRetargetTick_.reset();
     }
     clearSelectedSegmentActionPreview();
-    if (event->button() == Qt::LeftButton && durationEditBlurConsumesCanvasInput_) {
-        durationEditBlurConsumesCanvasInput_ = false;
-        event->accept();
-        return;
-    }
     if (event->button() == Qt::LeftButton
         && durationEdit_
         && durationEdit_->isVisible()
         && durationEdit_->isModified()) {
-        static_cast<void>(commitPendingInlineEdits());
-        event->accept();
-        return;
+        const auto retargetTick = tool_ == Tool::WaveEdit
+                && position.x() >= headerWidth_
+                && position.y() >= RulerHeight
+            ? std::optional<Tick>{std::clamp<Tick>(
+                  tickAtX(position.x()),
+                  0,
+                  std::max<Tick>(0, scenario_->duration - 1))}
+            : std::nullopt;
+        if (!commitPendingInlineEdits()) {
+            event->accept();
+            return;
+        }
+        if (retargetTick) {
+            durationEditPointerRetargetTick_ = *retargetTick;
+            durationEditPointerRetargetPressPosition_ =
+                event->position().toPoint();
+            position.setX(xAtTick(*retargetTick));
+        }
     }
-    const auto position = event->position().toPoint();
     auto rangeClearedForRetarget = false;
     std::optional<HistorySelectionSnapshot> rulerSelectionBeforeRetarget;
     if (event->button() == Qt::LeftButton && hasLaneRename()) {
@@ -6195,15 +6259,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
     bypassSnap_ = event->modifiers().testFlag(Qt::AltModifier);
     const auto startingExplicitRange = tool_ == Tool::WaveEdit
         && event->modifiers().testFlag(Qt::ShiftModifier);
-    if (tool_ == Tool::WaveEdit
-        && lane
-        && (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum)
-        && position.x() >= headerWidth_
-        && !startingExplicitRange) {
-        showBusPresetPalette(*lane, position);
-    } else {
-        hideBusPresetPalette();
-    }
+    if (!startingExplicitRange) hideBusPresetPalette();
 
     if (position.x() < headerWidth_
         && lane
@@ -7290,7 +7346,11 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
                 ? tr("  |  Auto-scroll up")
                 : tr("  |  Auto-scroll down");
         }
-        emit statusMessage(message);
+        if (drawing_) {
+            emit statusMessage(message);
+        } else {
+            emit pointerStatusMessage(message);
+        }
         return;
     }
 
@@ -7453,9 +7513,19 @@ void WaveCanvas::mouseReleaseEvent(QMouseEvent* event)
 
     if (event->button() == Qt::LeftButton && drawing_) {
         bypassSnap_ = event->modifiers().testFlag(Qt::AltModifier);
+        auto releasePosition = event->position().toPoint();
+        if (durationEditPointerRetargetTick_) {
+            if ((releasePosition - durationEditPointerRetargetPressPosition_)
+                    .manhattanLength()
+                < QApplication::startDragDistance()) {
+                releasePosition.setX(
+                    xAtTick(*durationEditPointerRetargetTick_));
+            }
+            durationEditPointerRetargetTick_.reset();
+        }
         switch (tool_) {
         case Tool::Draw:
-            commitDraw(event->position().toPoint());
+            commitDraw(releasePosition);
             break;
         case Tool::WaveEdit:
             stopWaveEditDragAutoScroll();
@@ -7470,7 +7540,7 @@ void WaveCanvas::mouseReleaseEvent(QMouseEvent* event)
                     && lane
                     && lane->kind != LaneKind::Clock;
             }
-            commitWaveEdit(event->position().toPoint());
+            commitWaveEdit(releasePosition);
             waveEditDragAutoScrolled_ = false;
             break;
         case Tool::Marker:
@@ -8055,6 +8125,8 @@ WaveCanvas::assessBusEditAction(const BusEditAction action) const
             return tr("Apply value");
         case BusEditAction::PresetZero:
             return tr("Set 0");
+        case BusEditAction::PresetReserved:
+            return tr("Set Reserved");
         case BusEditAction::PresetX:
             return tr("Set X");
         case BusEditAction::PresetZ:
@@ -8087,6 +8159,7 @@ WaveCanvas::assessBusEditAction(const BusEditAction action) const
     }
     const auto presetAction =
         action == BusEditAction::PresetZero
+        || action == BusEditAction::PresetReserved
         || action == BusEditAction::PresetX
         || action == BusEditAction::PresetZ
         || action == BusEditAction::PresetDontCare;
@@ -8112,6 +8185,8 @@ WaveCanvas::assessBusEditAction(const BusEditAction action) const
     std::string presetId;
     if (action == BusEditAction::PresetZero) {
         presetId = "zero";
+    } else if (action == BusEditAction::PresetReserved) {
+        presetId = "reserved";
     } else if (action == BusEditAction::PresetX) {
         presetId = "x";
     } else if (action == BusEditAction::PresetZ) {
@@ -8525,14 +8600,16 @@ void WaveCanvas::updateBusEditActionStates(const bool announceDraft)
             widget->style()->polish(widget);
             widget->update();
         };
-    const std::array<BusEditAction, 4> presetActions{{
+    const std::array<BusEditAction, 5> presetActions{{
         BusEditAction::PresetZero,
+        BusEditAction::PresetReserved,
         BusEditAction::PresetX,
         BusEditAction::PresetZ,
         BusEditAction::PresetDontCare,
     }};
-    const std::array<QString, 4> presetLabels{{
+    const std::array<QString, 5> presetLabels{{
         QStringLiteral("0"),
+        tr("Reserved"),
         QStringLiteral("X"),
         QStringLiteral("Z"),
         tr("Don't care"),
@@ -8839,6 +8916,8 @@ void WaveCanvas::clearBusEditTarget()
     const auto laneName = lane->name;
     const auto clearedScope = busEditScope_;
     const auto discardedDraft = busValueEdit_ && busValueEdit_->isModified();
+    const auto historyStateBefore = commandStack_->stateId();
+    const auto historySelectionBefore = historySelectionSnapshot();
     if (busValueEdit_) {
         busValueEdit_->setModified(false);
         busValueEdit_->setStyleSheet({});
@@ -8867,6 +8946,10 @@ void WaveCanvas::clearBusEditTarget()
     selectedSegmentId_.clear();
     cursorTick_ = start;
     if (changed) {
+        rememberHistorySelectionTransition(
+            historyStateBefore,
+            historySelectionBefore,
+            commandStack_->stateId());
         emit modelEdited();
         emit commandAvailabilityChanged();
     }
@@ -9075,7 +9158,10 @@ void WaveCanvas::showBusPresetPalette(
     selectedLaneIds_ = {lane.id};
     laneHeaderSelectionActive_ = false;
     selectionRange_ = *busEditRange_;
-    cursorTick_ = start;
+    cursorTick_ = std::clamp<Tick>(
+        *busPresetAnchorTick_,
+        start,
+        std::max(start, end - 1));
     waveEditHoverLaneId_.clear();
     waveEditHoverRange_.reset();
     if (busEditScope_ == BusEditScope::Beat) {
@@ -9290,10 +9376,15 @@ bool WaveCanvas::editSelectedSegmentValue(const QString& seed)
     selectedLaneId_ = lane->id;
     selectedLaneIds_ = {lane->id};
     laneHeaderSelectionActive_ = false;
+    const auto focusTick = cursorTick_ >= segment->start
+            && cursorTick_ < segment->end
+        ? cursorTick_
+        : segment->start;
+    cursorTick_ = focusTick;
     showBusPresetPalette(
         *lane,
-        QPoint(xAtTick(segment->start), 0),
-        segment->start,
+        QPoint(xAtTick(focusTick), 0),
+        focusTick,
         std::pair{segment->start, segment->end},
         BusEditScope::Segment);
     if (busValueEdit_) {
@@ -9315,10 +9406,10 @@ bool WaveCanvas::editSelectedSegmentValue(const QString& seed)
         });
     }
     ensureLaneVisible(lane->id);
-    ensureCursorVisible(segment->start);
+    ensureCursorVisible(focusTick);
     emit selectionChanged(
         QString::fromStdString(lane->id),
-        segment->start);
+        focusTick);
     emit statusMessage(
         tr("Edit %1 Segment · %2–%3 · current value %4 · Enter applies · Esc cancels")
             .arg(QString::fromStdString(lane->name))
@@ -10557,13 +10648,14 @@ WaveCanvas::assessBusRangeSequenceDraft(
                     false));
         }
         assessment.sequence =
-            !exactScalarForAnyLane
+            rangeSequenceBaselineMatchesContext()
+            || (!exactScalarForAnyLane
             && std::any_of(
                 laneDrafts.begin(),
                 laneDrafts.end(),
                 [](const BusDraftValues& draft) {
                     return draft.sequence;
-                });
+                }));
         if (!assessment.sequence) {
             return assessment;
         }
@@ -10890,12 +10982,20 @@ WaveCanvas::assessBusRangeSequenceDraft(
                 draft.normalizedValues.at(
                     beatIndex
                     % draft.normalizedValues.size());
+            const auto preserveExisting =
+                rangeSequenceBaselineMatchesContext()
+                && laneIndex < rangeSequenceBaseline_->values.size()
+                && beatIndex < rangeSequenceBaseline_->values.at(laneIndex).size()
+                && rangeSequenceBaseline_->values.at(laneIndex).at(beatIndex)
+                    == value;
             assignment.steps.push_back({
                 beat.first,
                 beat.second,
                 value,
                 {},
+                preserveExisting,
             });
+            if (preserveExisting) continue;
             if (projectedRangeAlreadyEquals(
                     projectedLane,
                     beat.first,
@@ -11081,6 +11181,7 @@ WaveCanvas::currentRangeSequenceSeed() const
     }
     constexpr std::size_t MaximumLoadedBeats = 1024;
     constexpr std::size_t MaximumLoadedSignalBeats = 4096;
+    constexpr std::size_t MaximumLoadedCharacters = 8192;
     if (beats.size() > MaximumLoadedBeats
         || (!beats.empty()
             && lanes.size()
@@ -11092,6 +11193,54 @@ WaveCanvas::currentRangeSequenceSeed() const
                     lanes.size()))
                 .arg(static_cast<qulonglong>(
                     beats.size()));
+        return seed;
+    }
+
+    // Loading existing Bus values first materializes one normalized value per
+    // beat. Budget that intermediate representation before constructing a
+    // potentially very wide implicit X literal (or validating an equally wide
+    // stored literal). The estimate deliberately assumes binary-width values;
+    // it is conservative and keeps both the draft and its baseline bounded.
+    std::size_t conservativeCharacterCount = 0;
+    const auto addToCharacterBudget =
+        [&conservativeCharacterCount](const std::size_t amount) {
+            if (amount > MaximumLoadedCharacters
+                    - conservativeCharacterCount) {
+                return false;
+            }
+            conservativeCharacterCount += amount;
+            return true;
+        };
+    for (std::size_t laneIndex = 0;
+         laneIndex < lanes.size();
+         ++laneIndex) {
+        const auto* lane = lanes.at(laneIndex);
+        if (lane->kind != LaneKind::Bus) continue;
+        if (laneIndex > 0
+            && !addToCharacterBudget(3)) {
+            conservativeCharacterCount = MaximumLoadedCharacters + 1;
+            break;
+        }
+        const auto valueCharacters =
+            static_cast<std::size_t>(
+                std::max<std::uint32_t>(1, lane->width))
+            + 2;
+        for (std::size_t beatIndex = 0;
+             beatIndex < beats.size();
+             ++beatIndex) {
+            if ((beatIndex > 0
+                 && !addToCharacterBudget(1))
+                || !addToCharacterBudget(valueCharacters)) {
+                conservativeCharacterCount = MaximumLoadedCharacters + 1;
+                break;
+            }
+        }
+        if (conservativeCharacterCount > MaximumLoadedCharacters) break;
+    }
+    if (conservativeCharacterCount > MaximumLoadedCharacters) {
+        seed.summary =
+            tr("Current values unavailable · the conservative Bus value budget exceeds %1 characters; use a narrower signal or a shorter range")
+                .arg(static_cast<qulonglong>(MaximumLoadedCharacters));
         return seed;
     }
 
@@ -11188,6 +11337,7 @@ WaveCanvas::currentRangeSequenceSeed() const
 
     seed.spans.reserve(
         lanes.size() * beats.size());
+    seed.values.reserve(lanes.size());
     for (std::size_t laneIndex = 0;
          laneIndex < lanes.size();
          ++laneIndex) {
@@ -11198,36 +11348,27 @@ WaveCanvas::currentRangeSequenceSeed() const
             const auto* segment =
                 segmentAtTick(*lane, beat.first);
             if (!segment) {
-                seed.summary =
-                    tr("Current values unavailable · %1 uses implicit X at %2; loading it would turn an implicit value into an explicit segment")
-                        .arg(
-                            QString::fromStdString(
-                                lane->name),
-                            format(beat.first));
-                return seed;
-            }
-            if (!segment->extensions.empty()) {
-                seed.summary =
-                    tr("Current values unavailable · %1 contains preset metadata at %2; use the existing preset buttons to preserve it")
-                        .arg(
-                            QString::fromStdString(
-                                lane->name),
-                            format(beat.first));
-                return seed;
-            }
-            if (!projectedRangeAlreadyEquals(
-                    *lane,
-                    beat.first,
-                    beat.second,
-                    segment->value,
-                    segment->extensions)) {
-                seed.summary =
-                    tr("Current values unavailable · %1 changes inside the beat starting at %2")
-                        .arg(
-                            QString::fromStdString(
-                                lane->name),
-                            format(beat.first));
-                return seed;
+                if (lane->kind != LaneKind::Bus) {
+                    seed.summary =
+                        tr("Current values unavailable · %1 uses an implicit value at %2 that cannot be represented safely")
+                            .arg(
+                                QString::fromStdString(lane->name),
+                                format(beat.first));
+                    return seed;
+                }
+                const auto implicitValue = busPresetValue("x", lane->width);
+                const auto implicitValidation =
+                    validateLaneValue(*lane, implicitValue);
+                if (!implicitValidation.valid) {
+                    seed.summary =
+                        tr("Current values unavailable · %1 uses an invalid implicit X at %2")
+                            .arg(
+                                QString::fromStdString(lane->name),
+                                format(beat.first));
+                    return seed;
+                }
+                values.push_back(implicitValidation.normalizedValue);
+                continue;
             }
             const auto validation =
                 validateLaneValue(
@@ -11245,6 +11386,8 @@ WaveCanvas::currentRangeSequenceSeed() const
             values.push_back(
                 validation.normalizedValue);
         }
+
+        seed.values.push_back(values);
 
         const auto serialized =
             serializeValues(values);
@@ -11301,8 +11444,8 @@ WaveCanvas::currentRangeSequenceSeed() const
         }
     }
 
-    constexpr qsizetype MaximumLoadedCharacters = 8192;
-    if (seed.text.size() > MaximumLoadedCharacters) {
+    if (seed.text.size()
+        > static_cast<qsizetype>(MaximumLoadedCharacters)) {
         const auto characterCount =
             seed.text.size();
         seed.text.clear();
@@ -11310,7 +11453,7 @@ WaveCanvas::currentRangeSequenceSeed() const
         seed.summary =
             tr("Current values unavailable · the editable text would contain %1 characters; the live field limit is %2")
                 .arg(characterCount)
-                .arg(MaximumLoadedCharacters);
+                .arg(static_cast<qulonglong>(MaximumLoadedCharacters));
         return seed;
     }
     seed.available = true;
@@ -11366,6 +11509,7 @@ void WaveCanvas::loadCurrentRangeSequence()
         commandStack_ ? commandStack_->stateId() : 0,
         seed.text,
         seed.spans,
+        seed.values,
     };
     rangeValueEdit_->setModified(false);
     rangeValueEdit_->setProperty(
@@ -13637,6 +13781,9 @@ void WaveCanvas::showRangeEditPalette()
     const auto dontCareAvailability = busRange
         ? rangeValueAvailability({}, "dont-care")
         : RangeValueAvailability{};
+    const auto reservedAvailability = busRange
+        ? rangeValueAvailability({}, "reserved")
+        : RangeValueAvailability{};
     const auto clockGateAvailability = clockRange
         ? rangeValueAvailability("gated")
         : RangeValueAvailability{};
@@ -13723,9 +13870,23 @@ void WaveCanvas::showRangeEditPalette()
     configureValueButton(
         rangeDontCareButton_,
         busRange,
-        tr("Don't care"),
+        QStringLiteral("DC"),
         {},
         dontCareAvailability);
+    configureValueButton(
+        rangeReservedButton_,
+        busRange,
+        QStringLiteral("R"),
+        {},
+        reservedAvailability);
+    if (busRange && rangeDontCareButton_) {
+        rangeDontCareButton_->setAccessibleName(
+            tr("Set selected range to Don't care"));
+    }
+    if (busRange && rangeReservedButton_) {
+        rangeReservedButton_->setAccessibleName(
+            tr("Set selected range to Reserved"));
+    }
     configureValueButton(
         rangeClockGateButton_,
         clockRange,
@@ -13742,9 +13903,9 @@ void WaveCanvas::showRangeEditPalette()
         const auto restoreCanvasFocus = rangeValueEdit_->hasFocus() && !valueRange;
         rangeValueEdit_->setVisible(valueRange);
         rangeValueEdit_->setMinimumWidth(
-            bitPatternRange ? 165 : 105);
+            bitPatternRange ? 140 : 90);
         rangeValueEdit_->setMaximumWidth(
-            bitPatternRange ? 230 : 200);
+            bitPatternRange ? 180 : 120);
         const auto setDraftProperty =
             [this](const char* name, const bool value) {
                 if (!rangeValueEdit_
@@ -15410,6 +15571,8 @@ void WaveCanvas::applyBusPreset(
     auto previewAction = std::optional<BusEditAction>{};
     if (presetId == "zero") {
         previewAction = BusEditAction::PresetZero;
+    } else if (presetId == "reserved") {
+        previewAction = BusEditAction::PresetReserved;
     } else if (presetId == "x") {
         previewAction = BusEditAction::PresetX;
     } else if (presetId == "z") {
@@ -15769,6 +15932,8 @@ bool WaveCanvas::clearSelectedBeatRange()
     const auto laneName = lane->name;
     const auto laneKind = lane->kind;
     const auto relationCountBefore = scenario_->relations.size();
+    const auto historyStateBefore = commandStack_->stateId();
+    const auto historySelectionBefore = historySelectionSnapshot();
     bool changed = false;
     try {
         changed = commandStack_->execute(std::make_unique<ClearLaneRangeCommand>(
@@ -15790,6 +15955,10 @@ bool WaveCanvas::clearSelectedBeatRange()
     waveEditHoverRange_ = selectionRange_;
     cursorTick_ = start;
     if (changed) {
+        rememberHistorySelectionTransition(
+            historyStateBefore,
+            historySelectionBefore,
+            commandStack_->stateId());
         emit modelEdited();
         emit commandAvailabilityChanged();
     }
@@ -18202,27 +18371,24 @@ std::optional<std::pair<Tick, Tick>> WaveCanvas::adjacentEditableBeatRange(
         : std::nullopt;
 }
 
-void WaveCanvas::navigateSelectedBeat(const bool forward)
+bool WaveCanvas::navigateSelectedBeat(const bool forward)
 {
     if (!scenario_ || scenario_->duration <= 0) {
-        emit statusMessage(tr("Timeline has no editable beat"));
-        return;
+        return false;
     }
     if (drawing_ || laneHeaderPressed_ || laneHeaderDragging_) {
         emit statusMessage(
             tr("Finish or cancel the current drag before navigating beats"));
-        return;
+        return true;
     }
     if (explicitRangeSelection_) {
         emit statusMessage(
             tr("Esc clears the selected range before navigating beats"));
-        return;
+        return true;
     }
     const auto* lane = findLane(*scenario_, selectedLaneId_);
     if (!lane || lane->kind == LaneKind::Group) {
-        emit statusMessage(
-            tr("Select a signal before using Tab or Shift+Tab"));
-        return;
+        return false;
     }
     if (hasPendingBusValueEdit()) {
         emit statusMessage(
@@ -18231,7 +18397,7 @@ void WaveCanvas::navigateSelectedBeat(const bool forward)
             busValueEdit_->setFocus(Qt::OtherFocusReason);
             busValueEdit_->selectAll();
         }
-        return;
+        return true;
     }
 
     const auto current = editableBeatRangeAt(
@@ -18244,7 +18410,7 @@ void WaveCanvas::navigateSelectedBeat(const bool forward)
                 .arg(QString::fromStdString(lane->name))
                 .arg(forward ? tr("End") : tr("start"))
                 .arg(forward ? tr("Shift+Tab goes back") : tr("Tab advances")));
-        return;
+        return true;
     }
 
     hideBusPresetPalette();
@@ -18275,6 +18441,7 @@ void WaveCanvas::navigateSelectedBeat(const bool forward)
                      ? tr("Tab advances · Shift+Tab goes back")
                      : tr("Shift+Tab goes back · Tab advances")));
     viewport()->update();
+    return true;
 }
 
 void WaveCanvas::navigateSelectedSegment(const bool forward)
@@ -20424,11 +20591,15 @@ void WaveCanvas::editSegmentAt(const QPoint& position)
     selectedSegmentId_ = segment->id;
     selectionRange_ = std::pair{segment->start, segment->end};
     if (lane->kind == LaneKind::Bus || lane->kind == LaneKind::Enum) {
-        cursorTick_ = segment->start;
+        const auto focusTick = std::clamp<Tick>(
+            tickAtX(position.x()),
+            segment->start,
+            std::max(segment->start, segment->end - 1));
+        cursorTick_ = focusTick;
         showBusPresetPalette(
             *lane,
             position,
-            segment->start,
+            focusTick,
             std::pair{segment->start, segment->end});
         if (busValueEdit_) {
             busValueEdit_->setFocus(Qt::OtherFocusReason);
@@ -22625,6 +22796,14 @@ void WaveCanvas::drawScenarioOverlays(
     painter.setRenderHint(QPainter::Antialiasing, true);
 
     for (const auto& relation : scenario_->relations) {
+        const auto willBeRemoved =
+            relationRemovalIds
+            && std::find(
+                   relationRemovalIds->begin(),
+                   relationRemovalIds->end(),
+                   relation.id)
+                != relationRemovalIds->end();
+        if (!relationsVisible_ && !willBeRemoved) continue;
         const auto* source = findEvent(*scenario_, relation.sourceEventId);
         const auto* target = findEvent(*scenario_, relation.targetEventId);
         if (!source || !target) continue;
@@ -22635,13 +22814,6 @@ void WaveCanvas::drawScenarioOverlays(
         const auto sourcePoint = eventPoint(*source);
         const auto targetPoint = eventPoint(*target);
         if (sourcePoint.isNull() || targetPoint.isNull()) continue;
-        const auto willBeRemoved =
-            relationRemovalIds
-            && std::find(
-                   relationRemovalIds->begin(),
-                   relationRemovalIds->end(),
-                   relation.id)
-                != relationRemovalIds->end();
         const QColor color = willBeRemoved
             ? QColor(255, 183, 77)
             : relation.severity == Severity::Error

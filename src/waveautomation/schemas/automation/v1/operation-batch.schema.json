@@ -1,0 +1,579 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/automation/v1/operation-batch.schema.json",
+  "title": "Wave Workbench automation operation batch v1",
+  "description": "Atomic Wave Workbench edit batch. Operation-specific conditional constraints are enforced by the automation library; each definition publishes the accepted fields and unconditional requirements.",
+  "type": "object",
+  "required": ["schema", "operations"],
+  "properties": {
+    "schema": { "const": "wave-workbench.operations/v1" },
+    "expectedProjectId": { "$ref": "#/$defs/nonEmptyString" },
+    "scenarioId": { "$ref": "#/$defs/nonEmptyString" },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/operation" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "string": { "type": "string" },
+    "integer": { "type": "integer" },
+    "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "positiveInteger": { "type": "integer", "minimum": 1 },
+    "tickOrText": { "oneOf": [{ "type": "integer" }, { "type": "string", "minLength": 1 }] },
+    "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+    "enumMap": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string" }
+    },
+    "nonEmptyStringArray": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/nonEmptyString" }
+    },
+    "selectorArray": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/nonEmptyString" },
+      "uniqueItems": true
+    },
+    "assignment": {
+      "type": "object",
+      "required": ["laneId", "value"],
+      "properties": {
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "value": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "sequence": {
+      "type": "object",
+      "required": ["laneId", "values"],
+      "properties": {
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "values": { "$ref": "#/$defs/nonEmptyStringArray" }
+      },
+      "additionalProperties": false
+    },
+    "mapping": {
+      "type": "object",
+      "required": ["sourceLaneId", "targetLaneId"],
+      "properties": {
+        "sourceLaneId": { "$ref": "#/$defs/nonEmptyString" },
+        "targetLaneId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "operation": {
+      "oneOf": [
+        { "$ref": "#/$defs/add-group" },
+        { "$ref": "#/$defs/update-group" },
+        { "$ref": "#/$defs/move-group" },
+        { "$ref": "#/$defs/delete-group" },
+        { "$ref": "#/$defs/add-signal" },
+        { "$ref": "#/$defs/duplicate-signal" },
+        { "$ref": "#/$defs/rename-lane" },
+        { "$ref": "#/$defs/update-signal" },
+        { "$ref": "#/$defs/move-signal" },
+        { "$ref": "#/$defs/delete-signal" },
+        { "$ref": "#/$defs/update-clock" },
+        { "$ref": "#/$defs/assert-value" },
+        { "$ref": "#/$defs/set-range" },
+        { "$ref": "#/$defs/set-sequence" },
+        { "$ref": "#/$defs/clear-range" },
+        { "$ref": "#/$defs/transfer-range" },
+        { "$ref": "#/$defs/set-duration" },
+        { "$ref": "#/$defs/repair-event-link" },
+        { "$ref": "#/$defs/clear-event-cycle" },
+        { "$ref": "#/$defs/repair-event-clock" },
+        { "$ref": "#/$defs/repair-relation-clock" },
+        { "$ref": "#/$defs/repair-trace-identity" },
+        { "$ref": "#/$defs/repair-trace-reference" },
+        { "$ref": "#/$defs/repair-trace-mapping" },
+        { "$ref": "#/$defs/repair-lane-clock" },
+        { "$ref": "#/$defs/repair-lane-group" },
+        { "$ref": "#/$defs/delete-event" },
+        { "$ref": "#/$defs/add-relation" },
+        { "$ref": "#/$defs/update-relation" },
+        { "$ref": "#/$defs/delete-relation" },
+        { "$ref": "#/$defs/add-marker" },
+        { "$ref": "#/$defs/update-marker" },
+        { "$ref": "#/$defs/delete-marker" }
+      ]
+    },
+    "add-group": {
+      "type": "object",
+      "required": ["op", "name"],
+      "properties": {
+        "op": { "const": "add-group" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "color": { "$ref": "#/$defs/color" },
+        "insertionIndex": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "additionalProperties": false
+    },
+    "update-group": {
+      "type": "object",
+      "required": ["op", "groupId"],
+      "minProperties": 3,
+      "properties": {
+        "op": { "const": "update-group" },
+        "groupId": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "color": { "$ref": "#/$defs/color" },
+        "height": { "$ref": "#/$defs/positiveInteger" },
+        "visible": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "move-group": {
+      "type": "object",
+      "required": ["op", "groupId"],
+      "minProperties": 3,
+      "properties": {
+        "op": { "const": "move-group" },
+        "groupId": { "$ref": "#/$defs/nonEmptyString" },
+        "destinationIndex": { "$ref": "#/$defs/nonNegativeInteger" },
+        "beforeLaneId": { "$ref": "#/$defs/nonEmptyString" },
+        "afterLaneId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "delete-group": {
+      "type": "object",
+      "required": ["op", "groupId"],
+      "properties": {
+        "op": { "const": "delete-group" },
+        "groupId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "add-signal": {
+      "type": "object",
+      "required": ["op", "name", "kind"],
+      "properties": {
+        "op": { "const": "add-signal" },
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "kind": { "enum": ["clock", "bit", "bus", "enum"] },
+        "width": { "$ref": "#/$defs/positiveInteger" },
+        "signed": { "type": "boolean" },
+        "radix": { "type": "string" },
+        "enumMap": { "$ref": "#/$defs/enumMap" },
+        "clockDomainId": { "$ref": "#/$defs/nonEmptyString" },
+        "groupId": { "$ref": "#/$defs/nonEmptyString" },
+        "color": { "$ref": "#/$defs/color" },
+        "insertionIndex": { "$ref": "#/$defs/nonNegativeInteger" },
+        "clockId": { "$ref": "#/$defs/nonEmptyString" },
+        "periodTick": { "$ref": "#/$defs/tickOrText" },
+        "period": { "$ref": "#/$defs/nonEmptyString" },
+        "phaseTick": { "$ref": "#/$defs/tickOrText" },
+        "phase": { "$ref": "#/$defs/nonEmptyString" },
+        "dutyNumerator": { "$ref": "#/$defs/positiveInteger" },
+        "dutyDenominator": { "$ref": "#/$defs/positiveInteger" },
+        "activeEdge": { "enum": ["rising", "falling"] }
+      },
+      "additionalProperties": false
+    },
+    "duplicate-signal": {
+      "type": "object",
+      "required": ["op", "laneId"],
+      "properties": {
+        "op": { "const": "duplicate-signal" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "color": { "$ref": "#/$defs/color" },
+        "groupId": { "type": "string" },
+        "insertionIndex": { "$ref": "#/$defs/nonNegativeInteger" },
+        "beforeLaneId": { "$ref": "#/$defs/nonEmptyString" },
+        "afterLaneId": { "$ref": "#/$defs/nonEmptyString" },
+        "newClockId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "rename-lane": {
+      "type": "object",
+      "required": ["op", "laneId", "name"],
+      "properties": {
+        "op": { "const": "rename-lane" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "update-signal": {
+      "type": "object",
+      "required": ["op", "laneId"],
+      "minProperties": 3,
+      "properties": {
+        "op": { "const": "update-signal" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "width": { "$ref": "#/$defs/positiveInteger" },
+        "signed": { "type": "boolean" },
+        "radix": { "type": "string" },
+        "enumMap": { "$ref": "#/$defs/enumMap" },
+        "clockDomainId": { "type": "string" },
+        "color": { "$ref": "#/$defs/color" },
+        "height": { "$ref": "#/$defs/positiveInteger" },
+        "visible": { "type": "boolean" },
+        "groupId": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "move-signal": {
+      "type": "object",
+      "required": ["op", "laneId"],
+      "minProperties": 3,
+      "properties": {
+        "op": { "const": "move-signal" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "destinationIndex": { "$ref": "#/$defs/nonNegativeInteger" },
+        "beforeLaneId": { "$ref": "#/$defs/nonEmptyString" },
+        "afterLaneId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "delete-signal": {
+      "type": "object",
+      "required": ["op", "laneId"],
+      "properties": {
+        "op": { "const": "delete-signal" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "update-clock": {
+      "type": "object",
+      "required": ["op", "clockId"],
+      "minProperties": 3,
+      "properties": {
+        "op": { "const": "update-clock" },
+        "clockId": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "periodTick": { "$ref": "#/$defs/tickOrText" },
+        "period": { "$ref": "#/$defs/nonEmptyString" },
+        "phaseTick": { "$ref": "#/$defs/tickOrText" },
+        "phase": { "$ref": "#/$defs/nonEmptyString" },
+        "dutyNumerator": { "$ref": "#/$defs/positiveInteger" },
+        "dutyDenominator": { "$ref": "#/$defs/positiveInteger" },
+        "activeEdge": { "enum": ["rising", "falling"] },
+        "resetRelation": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "assert-value": {
+      "type": "object",
+      "required": ["op", "laneId", "value"],
+      "minProperties": 4,
+      "properties": {
+        "op": { "const": "assert-value" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "value": { "$ref": "#/$defs/nonEmptyString" },
+        "atTick": { "$ref": "#/$defs/tickOrText" },
+        "at": { "$ref": "#/$defs/nonEmptyString" },
+        "clockId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "set-range": {
+      "type": "object",
+      "required": ["op"],
+      "minProperties": 4,
+      "properties": {
+        "op": { "const": "set-range" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "value": { "$ref": "#/$defs/nonEmptyString" },
+        "assignments": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/assignment" } },
+        "startTick": { "$ref": "#/$defs/tickOrText" },
+        "start": { "$ref": "#/$defs/nonEmptyString" },
+        "endTick": { "$ref": "#/$defs/tickOrText" },
+        "end": { "$ref": "#/$defs/nonEmptyString" },
+        "clockId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "set-sequence": {
+      "type": "object",
+      "required": ["op"],
+      "minProperties": 4,
+      "properties": {
+        "op": { "const": "set-sequence" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "values": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "sequences": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sequence" } },
+        "startTick": { "$ref": "#/$defs/tickOrText" },
+        "start": { "$ref": "#/$defs/nonEmptyString" },
+        "stepTick": { "$ref": "#/$defs/tickOrText" },
+        "step": { "$ref": "#/$defs/nonEmptyString" },
+        "stepCycles": { "$ref": "#/$defs/positiveInteger" },
+        "clockId": { "$ref": "#/$defs/nonEmptyString" },
+        "repeat": { "$ref": "#/$defs/positiveInteger" }
+      },
+      "additionalProperties": false
+    },
+    "clear-range": {
+      "type": "object",
+      "required": ["op"],
+      "minProperties": 4,
+      "properties": {
+        "op": { "const": "clear-range" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "laneIds": { "$ref": "#/$defs/selectorArray" },
+        "startTick": { "$ref": "#/$defs/tickOrText" },
+        "start": { "$ref": "#/$defs/nonEmptyString" },
+        "endTick": { "$ref": "#/$defs/tickOrText" },
+        "end": { "$ref": "#/$defs/nonEmptyString" },
+        "clockId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "transfer-range": {
+      "type": "object",
+      "required": ["op", "mode"],
+      "minProperties": 6,
+      "properties": {
+        "op": { "const": "transfer-range" },
+        "mode": { "enum": ["copy", "move"] },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" },
+        "laneIds": { "$ref": "#/$defs/selectorArray" },
+        "mappings": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/mapping" } },
+        "sourceStartTick": { "$ref": "#/$defs/tickOrText" },
+        "sourceStart": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceEndTick": { "$ref": "#/$defs/tickOrText" },
+        "sourceEnd": { "$ref": "#/$defs/nonEmptyString" },
+        "destinationTick": { "$ref": "#/$defs/tickOrText" },
+        "destination": { "$ref": "#/$defs/nonEmptyString" },
+        "clockId": { "$ref": "#/$defs/nonEmptyString" },
+        "overwrite": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "set-duration": {
+      "type": "object",
+      "required": ["op"],
+      "minProperties": 2,
+      "properties": {
+        "op": { "const": "set-duration" },
+        "durationTick": { "$ref": "#/$defs/tickOrText" },
+        "duration": { "$ref": "#/$defs/nonEmptyString" },
+        "clockId": { "$ref": "#/$defs/nonEmptyString" },
+        "truncate": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "repair-event-link": {
+      "type": "object",
+      "required": ["op", "eventId"],
+      "properties": { "op": { "const": "repair-event-link" }, "eventId": { "$ref": "#/$defs/nonEmptyString" } },
+      "additionalProperties": false
+    },
+    "clear-event-cycle": {
+      "type": "object",
+      "required": ["op", "eventId"],
+      "properties": { "op": { "const": "clear-event-cycle" }, "eventId": { "$ref": "#/$defs/nonEmptyString" } },
+      "additionalProperties": false
+    },
+    "repair-event-clock": {
+      "type": "object",
+      "required": ["op", "eventId"],
+      "properties": { "op": { "const": "repair-event-clock" }, "eventId": { "$ref": "#/$defs/nonEmptyString" } },
+      "additionalProperties": false
+    },
+    "repair-relation-clock": {
+      "type": "object",
+      "required": ["op", "relationId"],
+      "properties": {
+        "op": { "const": "repair-relation-clock" },
+        "relationId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "repair-trace-identity": {
+      "type": "object",
+      "required": ["op", "traceRef"],
+      "properties": {
+        "op": { "const": "repair-trace-identity" },
+        "traceRef": { "$ref": "#/$defs/nonEmptyString" },
+        "newId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "repair-trace-reference": {
+      "type": "object",
+      "required": ["op", "traceRef"],
+      "minProperties": 3,
+      "properties": {
+        "op": { "const": "repair-trace-reference" },
+        "traceRef": { "$ref": "#/$defs/nonEmptyString" },
+        "path": { "$ref": "#/$defs/nonEmptyString" },
+        "format": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "repair-trace-mapping": {
+      "type": "object",
+      "required": ["op", "laneId"],
+      "minProperties": 3,
+      "properties": {
+        "op": { "const": "repair-trace-mapping" },
+        "traceId": { "$ref": "#/$defs/nonEmptyString" },
+        "traceRef": { "$ref": "#/$defs/nonEmptyString" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "repair-lane-clock": {
+      "type": "object",
+      "required": ["op", "laneId"],
+      "properties": {
+        "op": { "const": "repair-lane-clock" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "repair-lane-group": {
+      "type": "object",
+      "required": ["op", "laneId"],
+      "properties": {
+        "op": { "const": "repair-lane-group" },
+        "laneId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "delete-event": {
+      "type": "object",
+      "required": ["op", "eventId"],
+      "properties": {
+        "op": { "const": "delete-event" },
+        "eventId": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "add-relation": {
+      "type": "object",
+      "required": ["op", "sourceLaneId", "targetLaneId"],
+      "minProperties": 7,
+      "properties": {
+        "op": { "const": "add-relation" },
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceLaneId": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceAtTick": { "$ref": "#/$defs/tickOrText" },
+        "sourceAt": { "$ref": "#/$defs/nonEmptyString" },
+        "targetLaneId": { "$ref": "#/$defs/nonEmptyString" },
+        "targetAtTick": { "$ref": "#/$defs/tickOrText" },
+        "targetAt": { "$ref": "#/$defs/nonEmptyString" },
+        "minimumDelayTick": { "$ref": "#/$defs/tickOrText" },
+        "minimumDelay": { "$ref": "#/$defs/nonEmptyString" },
+        "minimumDelayCycles": { "$ref": "#/$defs/nonNegativeInteger" },
+        "maximumDelayTick": { "$ref": "#/$defs/tickOrText" },
+        "maximumDelay": { "$ref": "#/$defs/nonEmptyString" },
+        "maximumDelayCycles": { "$ref": "#/$defs/nonNegativeInteger" },
+        "clockId": { "$ref": "#/$defs/nonEmptyString" },
+        "condition": { "type": "string" },
+        "severity": { "enum": ["information", "warning", "error"] },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "update-relation": {
+      "type": "object",
+      "required": ["op"],
+      "minProperties": 3,
+      "properties": {
+        "op": { "const": "update-relation" },
+        "relationId": { "$ref": "#/$defs/nonEmptyString" },
+        "relationRef": { "$ref": "#/$defs/nonEmptyString" },
+        "newId": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceLaneId": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceAtTick": { "$ref": "#/$defs/tickOrText" },
+        "sourceAt": { "$ref": "#/$defs/nonEmptyString" },
+        "targetLaneId": { "$ref": "#/$defs/nonEmptyString" },
+        "targetAtTick": { "$ref": "#/$defs/tickOrText" },
+        "targetAt": { "$ref": "#/$defs/nonEmptyString" },
+        "minimumDelayTick": { "$ref": "#/$defs/tickOrText" },
+        "minimumDelay": { "$ref": "#/$defs/nonEmptyString" },
+        "minimumDelayCycles": { "$ref": "#/$defs/nonNegativeInteger" },
+        "maximumDelayTick": { "$ref": "#/$defs/tickOrText" },
+        "maximumDelay": { "$ref": "#/$defs/nonEmptyString" },
+        "maximumDelayCycles": { "$ref": "#/$defs/nonNegativeInteger" },
+        "clockId": { "type": "string" },
+        "condition": { "type": "string" },
+        "severity": { "enum": ["information", "warning", "error"] },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "delete-relation": {
+      "type": "object",
+      "required": ["op"],
+      "minProperties": 2,
+      "maxProperties": 2,
+      "properties": {
+        "op": { "const": "delete-relation" },
+        "relationId": { "$ref": "#/$defs/nonEmptyString" },
+        "relationRef": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "add-marker": {
+      "type": "object",
+      "required": ["op", "name"],
+      "minProperties": 3,
+      "properties": {
+        "op": { "const": "add-marker" },
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "atTick": { "$ref": "#/$defs/tickOrText" },
+        "at": { "$ref": "#/$defs/nonEmptyString" },
+        "startTick": { "$ref": "#/$defs/tickOrText" },
+        "start": { "$ref": "#/$defs/nonEmptyString" },
+        "endTick": { "$ref": "#/$defs/tickOrText" },
+        "end": { "$ref": "#/$defs/nonEmptyString" },
+        "clockId": { "$ref": "#/$defs/nonEmptyString" },
+        "kind": { "enum": ["point", "interval", "phase", "error", "note"] },
+        "note": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "update-marker": {
+      "type": "object",
+      "required": ["op"],
+      "minProperties": 3,
+      "properties": {
+        "op": { "const": "update-marker" },
+        "markerId": { "$ref": "#/$defs/nonEmptyString" },
+        "markerRef": { "$ref": "#/$defs/nonEmptyString" },
+        "newId": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "atTick": { "$ref": "#/$defs/tickOrText" },
+        "at": { "$ref": "#/$defs/nonEmptyString" },
+        "startTick": { "$ref": "#/$defs/tickOrText" },
+        "start": { "$ref": "#/$defs/nonEmptyString" },
+        "endTick": { "$ref": "#/$defs/tickOrText" },
+        "end": { "$ref": "#/$defs/nonEmptyString" },
+        "clockId": { "type": "string" },
+        "kind": { "enum": ["point", "interval", "phase", "error", "note"] },
+        "note": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "delete-marker": {
+      "type": "object",
+      "required": ["op"],
+      "minProperties": 2,
+      "maxProperties": 2,
+      "properties": {
+        "op": { "const": "delete-marker" },
+        "markerId": { "$ref": "#/$defs/nonEmptyString" },
+        "markerRef": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

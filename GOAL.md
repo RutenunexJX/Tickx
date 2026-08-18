@@ -1,6 +1,6 @@
 # Wave Workbench 长期目标
 
-更新时间：2026-07-31
+更新时间：2026-08-13
 
 ## 目标
 
@@ -9,7 +9,8 @@
 Expected/Actual 比较，这些派生与比较能力由独立 CLI 和领域模块提供。
 
 该目标已登记为长期 goal，并在第 1030 轮按用户要求结束为 `complete`；用户随后明确追加的
-第 1031–1040 轮阶段可用版本也已完成。阶段 1 至阶段 6、最终加固、Clock
+第 1031–1040 轮阶段可用版本也已完成。当前工作是 goal 完成后的追加维护收敛，未重新将长期 Goal 改为
+active。阶段 1 至阶段 6、最终加固、Clock
 可编辑性与覆盖语义迭代、Lane/Group 属性编辑迭代以及依赖感知删除迭代均已完成并
 验收；Lane/Group 显示顺序、Relation condition 求值和画布末尾添加信号入口迭代也已
 完成，光标模式增强、Wave Edit 直接波形编辑、画布信号管理、工具收敛、纯波形工作区、
@@ -30,7 +31,7 @@ Expected/Actual 比较，这些派生与比较能力由独立 CLI 和领域模�
 第 851–860 轮的显式范围 Clear/Run 提交前影响预测、风险定位及无效果禁用迭代亦已完成。
 第 861–870 轮的显式范围写值影响预测、文本草稿即时反馈及无效果禁用迭代亦已完成。
 明确保留范围记录于 `README.md` 和 `PLAN.md`。
-当前最新静默回归为默认、Qt Creator Debug、Qt Creator Release 各 73/73 CTest，顺序执行耗时
+本轮修改前的最近完整静默基线为默认、Qt Creator Debug、Qt Creator Release 各 73/73 CTest，顺序执行耗时
 分别为 44.78 s、41.69 s、38.83 s。第 371–650 轮已进一步完成
 CLI Relation 就绪边沿、既有 Relation/Marker 紧凑查询、损坏 Relation 显式端点修复和损坏
 Marker/Relation 快照引用恢复、八类核心结构身份校验、Marker 名称/几何完整性校验及 apply
@@ -2067,3 +2068,46 @@ Shift+Tab 可逐项返回且首尾停止。载入当前值后，文本 Undo/Esc 
 
 第 1040 轮为已验收的阶段可用节点。长期 Goal 仍保持第 1030 轮的 `complete` 状态；本次仅完成
 用户后续明确追加的十轮迭代。本轮未提交、未推送，迭代过程中未打包。
+
+## Goal 完成后的追加可用性收敛
+
+状态：实现与最终三配置静默验收均已完成；长期 Goal 保持 `complete`，未重新开启。
+
+追加维护范围收敛为：
+
+- 桌面 Timing 明确区分关联时钟的 Sync、未关联时钟的 Grid 和 1 tick 的 Async；指针采样与
+  操作结果使用不同状态区域。
+- Tab 焦点链与活动文本 Undo/Redo 边界收紧；Timeline End 有效草稿提交后继续同一次画布操作。
+- Bus 单击收敛为一拍选择，Reserved 同时进入 Beat/Range 预设；范围当前值使用虚拟基线载入
+  隐式 X 和有扩展语义的存量内容，未修改拍不实体化或重写。
+- Clock 轻量参数补齐 phase、duty、active edge 和 reset/disable；Bus 快速新增与完整属性统一
+  1–65536 bit。
+- Relation 常规连线默认隐藏且可从 Edit 菜单显示，但编辑风险连线不随之隐藏；工具栏收敛为
+  `Measure / Markers`。
+- GUI 正式保存增加外部文件 SHA-256 冲突保护，提供 Reload、Save As、Overwrite 和 Cancel。
+- `wave-cli` 增加 generate/compare/bridge 文本兼容适配；自动化 v1 公开 Draft 2020-12 的
+  capabilities/report/operation-batch Schema 和 33 类 operation 安全元数据；CMake Portable install
+  收集五个可执行程序、Schema、CLI 文档、最小 operations 示例和 handshake 工程。
+- 最终收敛修复 Timeline End 失焦后的焦点和同次点击时间漂移；Clock duty 大分数完整往返；Reserved
+  可见标签与超宽 Bus 载入预算；单信号/批量序列一致的 `preserveExisting`、End 与 Event 同步语义。
+
+本轮不声称已交付以下项目：
+
+- 多 Waveform/Scenario 的新建、复制、删除和重排。现有历史命令持有 `Scenario*`，修改
+  `Project::scenarios` 容器前必须先建立稳定身份绑定。
+- 浅色背景/主题切换。
+- 长信号列表的常驻/粘性添加入口。
+
+最终验收记录：
+
+```text
+Default build / offscreen CTest: 76/76 passed, 41.41 sec
+Qt Creator Debug build / offscreen CTest: 76/76 passed, 38.61 sec
+Qt Creator Release build / offscreen CTest: 76/76 passed, 37.16 sec
+Focused desktop and CLI contract tests: 6/6 passed
+Desktop interaction: none
+Packaging: not run
+Commit/push: not run
+```
+
+本次维护已完成三套全量构建与 offscreen CTest；未运行可见 GUI，未打包、未提交、未推送。

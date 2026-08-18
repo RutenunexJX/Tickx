@@ -1,6 +1,6 @@
 # Wave Workbench 实施计划
 
-更新时间：2026-07-31
+更新时间：2026-08-13
 
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
@@ -12351,6 +12351,63 @@ Commit/push: not run
 自动化另外断言每次点击、输入、文本 Undo/Redo、Tab、Esc 及取消拖动均没有提前改变 Scenario。
 
 第 1040 轮为已验收的阶段可用节点。本轮未打包、未提交、未推送。
+
+## 后续可用性收敛与自动化交付
+
+状态：实现与最终三配置静默验收均已完成。本轮 GUI 验收全部使用 offscreen，
+未操作桌面或其他同步开发中的应用。
+
+本轮收敛范围：
+
+- 时序状态不再把未关联 Clock 的信号伪装为 Sync；关联时钟时显示 Sync，未关联时显示
+  Grid 和 10 ns 固定步长，Async 继续以 1 tick 编辑。
+- 指针采样与操作结果分离：被动悬浮使用独立常驻区域，不再覆盖保存、删除、Undo 等结果。
+- Tab/Shift+Tab 仅在存在可导航波形目标时消费；否则回到 Qt 标准焦点链。活动可编辑
+  QLineEdit 即使无本地文本历史，Ctrl+Z/Ctrl+Y 也不穿透到波形 CommandStack。
+- Timeline End 的有效草稿先更新坐标映射，同一次画布点击随后继续；非法草稿仍保留焦点并阻断动作。
+- Bus 单击只选中一拍而不弹出编辑器；Enter/双击进入就地编辑。Beat 和 Range 增加
+  Reserved 预设，使用显式全零波形并保留独立预设语义；相关按钮进入标准键盘焦点链。
+- Bus/Enum 范围当前值载入改为虚拟基线：Bus 隐式 X、预设扩展元数据和拍内已有变化可被载入；
+  未改 token 不实体化或重写，仅被修改的 token 以完整编辑拍写入。`SetLaneSequencesCommand` 按
+  `preserveExisting` 保留未改拍，继续以一步 Undo/Redo 恢复有效修改。
+- Clock 标题右键轻量入口补齐 period/frequency、phase、duty 分子/分母、active edge 和
+  reset/disable condition；Bus 快速新增与完整属性入口统一支持 1–65536 bit。
+- Relation 常规连线默认隐藏，Edit 菜单提供 `Show relation constraints`；会被当前编辑清理的
+  Relation 风险连线即使在隐藏模式下仍显示。工具栏命名收敛为 `Measure / Markers`。
+- GUI 正式保存记录已读取文件的 SHA-256；覆盖前检测外部变更，并提供 Reload、Save As、
+  Overwrite 和 Cancel，避免桌面编辑与 CLI/Codex 同时写入时静默丢失一方结果。
+- `wave-cli` 增加 generate/compare/bridge 兼容适配入口，原样转发参数、文本输出和旧工具退出码；
+  capabilities 显式标记三者为非结构化兼容命令。
+- 自动化 v1 新增 Draft 2020-12 capabilities/report/operation-batch Schema；33 类 operation 能力信息包含
+  Schema 引用、必填/可选字段、幂等性、危险性和是否修改工程。
+- CMake `Portable` install 组件收集桌面程序、主 CLI、三个兼容工具、Schema、CLI 文档、最小
+  operations 示例和 handshake 工程；源码仓库中的 Windows 脚本负责 windeployqt、ZIP 和 SHA-256。
+
+最终收敛同时确认：Timeline End 失焦提交保留用户的新焦点目标，重缩放后同一次点击仍落在
+提交前所指时间；Clock duty 分子/分母使用完整正 `qint64`，不再把合法大分数静默截断；Reserved
+在画布和结果反馈中与普通零值可辨识；单信号与批量序列命令统一遵守 `preserveExisting`，纯保留
+步骤不改波形、不扩 End、不同步 Event，也不创建历史；超宽 Bus 当前值载入在物化前执行文本预算。
+
+最终验收：
+
+```text
+Default build / offscreen CTest: 76/76 passed, 41.41 sec
+Qt Creator Debug build / offscreen CTest: 76/76 passed, 38.61 sec
+Qt Creator Release build / offscreen CTest: 76/76 passed, 37.16 sec
+Focused desktop and CLI contract tests: 6/6 passed
+Desktop interaction: none
+Packaging: not run
+Commit/push: not run
+```
+
+遗留与阻塞：
+
+- 多 Waveform/Scenario 已有项可切换，但新建、复制、删除和重排尚未交付。历史命令仍持有
+  `Scenario*`，直接修改 `Project::scenarios` 容器可使旧历史失效；在改为稳定身份绑定前不冒险开放该操作。
+- 浅色背景/主题切换尚未实现。
+- 长信号列表的常驻/粘性添加入口尚未实现；当前仍使用列表末尾的三个快速添加按钮。
+
+本轮已完成三套全量构建与 offscreen CTest，并通过 `git diff --check`；未打包、未提交、未推送。
 
 ## 横向工作
 

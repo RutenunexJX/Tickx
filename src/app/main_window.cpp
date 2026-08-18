@@ -18,6 +18,7 @@
 #include <QCryptographicHash>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -63,6 +64,7 @@
 #include <QTreeWidgetItemIterator>
 #include <QTimer>
 #include <QUrl>
+#include <QValidator>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -82,6 +84,35 @@ namespace wave {
 namespace {
 
 constexpr int ScenarioLocationMemoryDelayMs = 400;
+
+class PositiveInt64Validator final : public QValidator {
+public:
+    explicit PositiveInt64Validator(
+        const std::int64_t minimum,
+        QObject* parent = nullptr)
+        : QValidator(parent)
+        , minimum_(minimum)
+    {
+    }
+
+    State validate(QString& input, int&) const override
+    {
+        if (input.isEmpty()) return Intermediate;
+        if (std::any_of(
+                input.cbegin(),
+                input.cend(),
+                [](const QChar character) { return !character.isDigit(); })) {
+            return Invalid;
+        }
+        bool valid = false;
+        const auto value = input.toLongLong(&valid);
+        if (!valid) return Invalid;
+        return value >= minimum_ ? Acceptable : Intermediate;
+    }
+
+private:
+    std::int64_t minimum_;
+};
 
 QIcon themedIcon(const QString& name, QStyle* style, const QStyle::StandardPixmap fallback)
 {
@@ -1068,6 +1099,28 @@ void selectLaneItem(QTreeWidget* tree, const QString& laneId)
 
 } // namespace
 
+MainWindow::ProjectFileRevision MainWindow::projectFileRevision(
+    const QString& path)
+{
+    ProjectFileRevision revision;
+    if (path.isEmpty() || !QFileInfo::exists(path)) return revision;
+
+    QFile file(path);
+    if (!QFileInfo(path).isFile() || !file.open(QIODevice::ReadOnly)) {
+        revision.state = ProjectFileRevision::State::Unreadable;
+        return revision;
+    }
+
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if (!hash.addData(&file)) {
+        revision.state = ProjectFileRevision::State::Unreadable;
+        return revision;
+    }
+    revision.state = ProjectFileRevision::State::Present;
+    revision.sha256 = hash.result();
+    return revision;
+}
+
 QString untitledRecoveryPath()
 {
     auto directory = qEnvironmentVariable("WAVEWORKBENCH_RECOVERY_DIR");
@@ -1128,6 +1181,7 @@ MainWindow::MainWindow(
         projectFile_ = projectPathForLoadedFile(projectFile_);
         dirty_ = true;
     }
+    loadedProjectRevision_ = projectFileRevision(projectFile_);
     if (!project_.scenarios.empty()) {
         activeScenarioIndex_ = initialScenarioIndex
             ? std::min(*initialScenarioIndex, project_.scenarios.size() - 1)
@@ -1224,6 +1278,18 @@ MainWindow::MainWindow(
         statusBar()->showMessage(message);
     });
     connect(
+        canvas_,
+        &WaveCanvas::pointerStatusMessage,
+        this,
+        [this](const QString& message) {
+            updateWaveContext();
+            scheduleActiveScenarioLocationMemory();
+            if (pointerStatusLabel_) {
+                pointerStatusLabel_->setText(message);
+                pointerStatusLabel_->setToolTip(message);
+            }
+        });
+    connect(
         compareTraceCanvas_,
         &TraceCanvas::cursorChanged,
         this,
@@ -1284,6 +1350,13 @@ MainWindow::MainWindow(
         &QFutureWatcher<QPair<quint64, QString>>::finished,
         this,
         &MainWindow::finishAutosave);
+    pointerStatusLabel_ = new QLabel(this);
+    pointerStatusLabel_->setObjectName(QStringLiteral("PointerStatusLabel"));
+    pointerStatusLabel_->setMinimumWidth(210);
+    pointerStatusLabel_->setMaximumWidth(520);
+    pointerStatusLabel_->setText(tr("Pointer: move over a signal"));
+    pointerStatusLabel_->setTextInteractionFlags(Qt::NoTextInteraction);
+    statusBar()->addPermanentWidget(pointerStatusLabel_, 1);
     saveStateLabel_ = new QLabel(this);
     saveStateLabel_->setObjectName(QStringLiteral("SaveStateLabel"));
     saveStateLabel_->setMinimumWidth(118);
@@ -2174,9 +2247,8 @@ void MainWindow::undo()
         editor
         && editor->isVisibleTo(this)
         && editor->isEnabled()
-        && !editor->isReadOnly()
-        && editor->isUndoAvailable()) {
-        editor->undo();
+        && !editor->isReadOnly()) {
+        if (editor->isUndoAvailable()) editor->undo();
         updateCommandActions();
         return;
     }
@@ -2215,6 +2287,7 @@ void MainWindow::undo()
         invalidateCompareResult();
         observedCommandStateId_ = commandStack_.stateId();
         const auto cleanupFailure = synchronizeDirtyState();
+        canvas_->invalidateRangeSequenceHistoryContext();
         canvas_->refreshModel();
         const auto restoredSelection =
             canvas_->restoreSelectionForHistoryTransition(
@@ -2246,9 +2319,8 @@ void MainWindow::redo()
         editor
         && editor->isVisibleTo(this)
         && editor->isEnabled()
-        && !editor->isReadOnly()
-        && editor->isRedoAvailable()) {
-        editor->redo();
+        && !editor->isReadOnly()) {
+        if (editor->isRedoAvailable()) editor->redo();
         updateCommandActions();
         return;
     }
@@ -2265,6 +2337,7 @@ void MainWindow::redo()
         const auto changedWaveform =
             selectScenarioForHistoryState(observedCommandStateId_);
         const auto cleanupFailure = synchronizeDirtyState();
+        canvas_->invalidateRangeSequenceHistoryContext();
         canvas_->refreshModel();
         const auto restoredSelection =
             canvas_->restoreSelectionForHistoryTransition(
@@ -2367,31 +2440,41 @@ void MainWindow::updateCommandActions()
         && editor->isEnabled()
         && !editor->isReadOnly()
         && editor->isRedoAvailable();
-    undoAction_->setEnabled(textUndoAvailable || commandStack_.canUndo());
-    redoAction_->setEnabled(textRedoAvailable || commandStack_.canRedo());
+    const auto textSessionActive = editor
+        && editor->isVisibleTo(this)
+        && editor->isEnabled()
+        && !editor->isReadOnly();
+    undoAction_->setEnabled(
+        textSessionActive ? textUndoAvailable : commandStack_.canUndo());
+    redoAction_->setEnabled(
+        textSessionActive ? textRedoAvailable : commandStack_.canRedo());
     undoAction_->setText(
-        textUndoAvailable
-            ? tr("Undo text edit")
+        textSessionActive
+            ? textUndoAvailable ? tr("Undo text edit") : tr("Undo")
             : commandStack_.canUndo()
             ? tr("Undo %1").arg(QString::fromStdString(commandStack_.undoDescription()))
             : tr("Undo"));
     redoAction_->setText(
-        textRedoAvailable
-            ? tr("Redo text edit")
+        textSessionActive
+            ? textRedoAvailable ? tr("Redo text edit") : tr("Redo")
             : commandStack_.canRedo()
             ? tr("Redo %1").arg(QString::fromStdString(commandStack_.redoDescription()))
             : tr("Redo"));
     undoAction_->setToolTip(
-        textUndoAvailable
-            ? tr("Undo the last change in the active text field")
+        textSessionActive
+            ? textUndoAvailable
+                ? tr("Undo the last change in the active text field")
+                : tr("Nothing to undo in the active text field")
             : commandStack_.canUndo()
                 ? tr("Undo %1").arg(
                       QString::fromStdString(
                           commandStack_.undoDescription()))
                 : tr("Nothing to undo"));
     redoAction_->setToolTip(
-        textRedoAvailable
-            ? tr("Redo the last reverted change in the active text field")
+        textSessionActive
+            ? textRedoAvailable
+                ? tr("Redo the last reverted change in the active text field")
+                : tr("Nothing to redo in the active text field")
             : commandStack_.canRedo()
                 ? tr("Redo %1").arg(
                       QString::fromStdString(
@@ -2427,18 +2510,26 @@ void MainWindow::updateWaveContext()
         waveTargetLabel_->setToolTip(canvas_->editTargetToolTip());
     }
     if (asyncTimingAction_) {
+        const auto timing = canvas_->editTimingSummary();
+        const auto clockSynchronized = timing.startsWith(
+            tr("Sync"), Qt::CaseInsensitive);
         asyncTimingAction_->setText(
-            tr("Timing: %1").arg(canvas_->editTimingSummary()));
+            tr("Timing: %1").arg(timing));
         asyncTimingAction_->setToolTip(
             canvas_->asynchronousEditing()
                 ? tr("Current mode: %1. Left/Right and Shift+Left/Right move one tick. Click to return to clock-aligned one-beat editing.")
-                      .arg(canvas_->editTimingSummary())
-                : tr("Current mode: %1. Left/Right and Shift+Left/Right follow this associated-clock beat. Click to allow arbitrary tick offsets with light snapping.")
-                      .arg(canvas_->editTimingSummary()));
+                      .arg(timing)
+                : clockSynchronized
+                    ? tr("Current mode: %1. Left/Right and Shift+Left/Right follow this associated-clock beat. Click to allow arbitrary tick offsets with light snapping.")
+                          .arg(timing)
+                    : tr("Current mode: %1. This signal has no associated clock, so edits use the fixed grid. Click to allow arbitrary tick offsets with light snapping.")
+                          .arg(timing));
         asyncTimingAction_->setStatusTip(
             canvas_->asynchronousEditing()
                 ? tr("Async timing is active; click for clock-aligned Sync editing")
-                : tr("Sync timing is active; click for arbitrary-tick Async editing"));
+                : clockSynchronized
+                    ? tr("Clock-synchronized timing is active; click for arbitrary-tick Async editing")
+                    : tr("Unclocked fixed-grid timing is active; click for arbitrary-tick Async editing"));
     }
 }
 
@@ -2906,8 +2997,9 @@ void MainWindow::completeQuickLaneSetup(
             if (replacement.kind == LaneKind::Bus) {
                 bool validWidth = false;
                 const auto width = parameter.toUInt(&validWidth);
-                if (!validWidth || width == 0 || width > 64) {
-                    canvas_->showQuickLaneSetupError(tr("Bus width must be from 1 to 64."), true);
+                if (!validWidth || width == 0 || width > 65'536) {
+                    canvas_->showQuickLaneSetupError(
+                        tr("Bus width must be from 1 to 65536."), true);
                     return;
                 }
                 replacement.width = width;
@@ -4458,7 +4550,7 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         }
         QDialog dialog(this);
         dialog.setObjectName(QStringLiteral("QuickClockParametersDialog"));
-        dialog.setWindowTitle(tr("Clock frequency / period"));
+        dialog.setWindowTitle(tr("Clock parameters"));
         auto* layout = new QFormLayout(&dialog);
         auto* mode = new QComboBox;
         mode->setObjectName(QStringLiteral("ClockRateMode"));
@@ -4470,8 +4562,33 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         value->setPlaceholderText(tr("For example 2.5 ns"));
         value->setToolTip(
             tr("Period accepts decimal ps, ns, us, or ms values; frequency accepts Hz"));
+        auto* phase = new QLineEdit(
+            QString::fromStdString(formatTick(original->phase, project_.timeBase)));
+        phase->setObjectName(QStringLiteral("ClockPhaseEdit"));
+        phase->setPlaceholderText(tr("For example 0 ns"));
+        auto* numerator = new QLineEdit(
+            QString::number(original->dutyCycle.numerator));
+        numerator->setObjectName(QStringLiteral("ClockDutyNumeratorEdit"));
+        numerator->setValidator(new PositiveInt64Validator(1, numerator));
+        auto* denominator = new QLineEdit(
+            QString::number(original->dutyCycle.denominator));
+        denominator->setObjectName(QStringLiteral("ClockDutyDenominatorEdit"));
+        denominator->setValidator(new PositiveInt64Validator(2, denominator));
+        auto* edge = new QComboBox;
+        edge->setObjectName(QStringLiteral("ClockActiveEdgeCombo"));
+        edge->addItem(tr("Rising"), static_cast<int>(ClockEdge::Rising));
+        edge->addItem(tr("Falling"), static_cast<int>(ClockEdge::Falling));
+        edge->setCurrentIndex(original->activeEdge == ClockEdge::Rising ? 0 : 1);
+        auto* reset = new QLineEdit(QString::fromStdString(original->resetRelation));
+        reset->setObjectName(QStringLiteral("ClockResetConditionEdit"));
+        reset->setPlaceholderText(tr("Optional reset / disable condition"));
         layout->addRow(tr("Edit as"), mode);
         layout->addRow(tr("Value"), value);
+        layout->addRow(tr("Phase"), phase);
+        layout->addRow(tr("Duty numerator"), numerator);
+        layout->addRow(tr("Duty denominator"), denominator);
+        layout->addRow(tr("Active edge"), edge);
+        layout->addRow(tr("Reset / disable condition"), reset);
         auto* error = new QLabel;
         error->setObjectName(QStringLiteral("QuickLaneParameterError"));
         error->setWordWrap(true);
@@ -4485,12 +4602,17 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
             / static_cast<double>(std::max<std::int64_t>(
                 1, project_.timeBase.picosecondsPerTick));
         std::optional<Tick> period;
+        std::optional<Tick> parsedPhase;
+        std::optional<std::int64_t> parsedNumerator;
+        std::optional<std::int64_t> parsedDenominator;
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         connect(
             buttons,
             &QDialogButtonBox::accepted,
             &dialog,
-            [this, mode, value, error, ticksPerSecond, &dialog, &period] {
+            [this, mode, value, phase, numerator, denominator, error,
+             ticksPerSecond, &dialog, &period, &parsedPhase,
+             &parsedNumerator, &parsedDenominator] {
                 QString parseError;
                 std::optional<Tick> candidate;
                 if (mode->currentData().toString() == QStringLiteral("frequency")) {
@@ -4525,11 +4647,65 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
                     value->selectAll();
                     return;
                 }
+                std::optional<std::int64_t> unusedCycle;
+                QString phaseError;
+                const auto phaseCandidate = parseTimeText(
+                    phase->text(),
+                    project_.timeBase,
+                    nullptr,
+                    unusedCycle,
+                    phaseError);
+                if (!phaseCandidate) {
+                    error->setText(
+                        phaseError.isEmpty()
+                            ? tr("Phase must be an exact integer tick.")
+                            : phaseError);
+                    error->show();
+                    phase->setFocus(Qt::OtherFocusReason);
+                    phase->selectAll();
+                    return;
+                }
+                bool numeratorValid = false;
+                const auto numeratorCandidate =
+                    numerator->text().trimmed().toLongLong(&numeratorValid);
+                if (!numeratorValid || numeratorCandidate < 1) {
+                    error->setText(
+                        tr("Duty numerator must be a positive 64-bit integer."));
+                    error->show();
+                    numerator->setFocus(Qt::OtherFocusReason);
+                    numerator->selectAll();
+                    return;
+                }
+                bool denominatorValid = false;
+                const auto denominatorCandidate =
+                    denominator->text().trimmed().toLongLong(&denominatorValid);
+                if (!denominatorValid || denominatorCandidate < 2) {
+                    error->setText(
+                        tr("Duty denominator must be a 64-bit integer of at least 2."));
+                    error->show();
+                    denominator->setFocus(Qt::OtherFocusReason);
+                    denominator->selectAll();
+                    return;
+                }
+                if (numeratorCandidate >= denominatorCandidate) {
+                    error->setText(
+                        tr("Duty numerator must be smaller than its denominator."));
+                    error->show();
+                    numerator->setFocus(Qt::OtherFocusReason);
+                    numerator->selectAll();
+                    return;
+                }
                 period = candidate;
+                parsedPhase = phaseCandidate;
+                parsedNumerator = numeratorCandidate;
+                parsedDenominator = denominatorCandidate;
                 error->hide();
                 dialog.accept();
             });
         connect(value, &QLineEdit::textEdited, error, &QWidget::hide);
+        connect(phase, &QLineEdit::textEdited, error, &QWidget::hide);
+        connect(numerator, &QLineEdit::textEdited, error, &QWidget::hide);
+        connect(denominator, &QLineEdit::textEdited, error, &QWidget::hide);
         connect(
             mode,
             &QComboBox::currentIndexChanged,
@@ -4549,9 +4725,20 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
                         ? tr("For example 100000000")
                         : tr("For example 2.5 ns"));
             });
-        if (dialog.exec() != QDialog::Accepted || !period) return;
+        if (dialog.exec() != QDialog::Accepted
+            || !period
+            || !parsedPhase
+            || !parsedNumerator
+            || !parsedDenominator) {
+            return;
+        }
         auto replacement = *original;
         replacement.period = *period;
+        replacement.phase = *parsedPhase;
+        replacement.dutyCycle = {*parsedNumerator, *parsedDenominator};
+        replacement.dutyCycle.normalize();
+        replacement.activeEdge = static_cast<ClockEdge>(edge->currentData().toInt());
+        replacement.resetRelation = reset->text().trimmed().toStdString();
         const auto periodLabel = QString::fromStdString(
             formatTick(replacement.period, project_.timeBase));
         try {
@@ -4561,7 +4748,15 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
             QMessageBox::warning(this, tr("Cannot change clock"), QString::fromUtf8(exception.what()));
             return;
         }
-        resultSummary = tr("%1 · period %2").arg(laneName, periodLabel);
+        resultSummary = tr("%1 · period %2 · phase %3 · duty %4/%5 · %6 edge")
+                            .arg(laneName, periodLabel)
+                            .arg(QString::fromStdString(
+                                formatTick(replacement.phase, project_.timeBase)))
+                            .arg(replacement.dutyCycle.numerator)
+                            .arg(replacement.dutyCycle.denominator)
+                            .arg(replacement.activeEdge == ClockEdge::Rising
+                                     ? tr("rising")
+                                     : tr("falling"));
     } else {
         QDialog dialog(this);
         dialog.setObjectName(QStringLiteral("QuickLaneParametersDialog"));
@@ -5202,18 +5397,14 @@ void MainWindow::editSelectedClock()
         QString::fromStdString(formatTick(original->period, project_.timeBase)));
     auto* phase = new QLineEdit(
         QString::fromStdString(formatTick(original->phase, project_.timeBase)));
-    auto* numerator = new QSpinBox;
-    numerator->setRange(1, 1'000'000);
-    numerator->setValue(static_cast<int>(std::clamp<std::int64_t>(
-        original->dutyCycle.numerator,
-        1,
-        1'000'000)));
-    auto* denominator = new QSpinBox;
-    denominator->setRange(2, 1'000'000);
-    denominator->setValue(static_cast<int>(std::clamp<std::int64_t>(
-        original->dutyCycle.denominator,
-        2,
-        1'000'000)));
+    auto* numerator = new QLineEdit(
+        QString::number(original->dutyCycle.numerator));
+    numerator->setObjectName(QStringLiteral("ClockDomainDutyNumeratorEdit"));
+    numerator->setValidator(new PositiveInt64Validator(1, numerator));
+    auto* denominator = new QLineEdit(
+        QString::number(original->dutyCycle.denominator));
+    denominator->setObjectName(QStringLiteral("ClockDomainDutyDenominatorEdit"));
+    denominator->setValidator(new PositiveInt64Validator(2, denominator));
     auto* edge = new QComboBox;
     edge->addItem(tr("Rising"), static_cast<int>(ClockEdge::Rising));
     edge->addItem(tr("Falling"), static_cast<int>(ClockEdge::Falling));
@@ -5259,12 +5450,29 @@ void MainWindow::editSelectedClock()
                 : parseError);
         return;
     }
+    bool numeratorValid = false;
+    const auto parsedNumerator =
+        numerator->text().trimmed().toLongLong(&numeratorValid);
+    bool denominatorValid = false;
+    const auto parsedDenominator =
+        denominator->text().trimmed().toLongLong(&denominatorValid);
+    if (!numeratorValid
+        || parsedNumerator < 1
+        || !denominatorValid
+        || parsedDenominator < 2
+        || parsedNumerator >= parsedDenominator) {
+        QMessageBox::warning(
+            this,
+            tr("Invalid clock"),
+            tr("Duty numerator and denominator must be positive 64-bit integers, with the numerator smaller than the denominator."));
+        return;
+    }
 
     auto replacement = *original;
     replacement.name = name->text().trimmed().toStdString();
     replacement.period = *parsedPeriod;
     replacement.phase = *parsedPhase;
-    replacement.dutyCycle = {numerator->value(), denominator->value()};
+    replacement.dutyCycle = {parsedNumerator, parsedDenominator};
     replacement.dutyCycle.normalize();
     replacement.activeEdge = static_cast<ClockEdge>(edge->currentData().toInt());
     replacement.resetRelation = reset->text().trimmed().toStdString();
@@ -6831,6 +7039,19 @@ void MainWindow::createActions()
     showHiddenLanesAction_->setToolTip(
         tr("Restore every hidden signal or group as one undoable edit"));
     showHiddenLanesAction_->setVisible(false);
+    showRelationsAction_ = editMenu_->addAction(
+        tr("Show relation constraints"));
+    showRelationsAction_->setObjectName(
+        QStringLiteral("ShowRelationsAction"));
+    showRelationsAction_->setCheckable(true);
+    showRelationsAction_->setChecked(false);
+    showRelationsAction_->setToolTip(
+        tr("Reveal event-to-event constraints; edit-impact warnings remain visible when hidden"));
+    connect(
+        showRelationsAction_,
+        &QAction::toggled,
+        canvas_,
+        &WaveCanvas::setRelationsVisible);
     moveLaneUpAction_ = editMenu_->addAction(
         themedIcon(QStringLiteral("go-up"), style(), QStyle::SP_ArrowUp),
         tr("Move selected lane &up"),
@@ -7412,7 +7633,7 @@ void MainWindow::createToolBars()
     markerAction_->setCheckable(true);
     markerAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_M));
     markerAction_->setToolTip(
-        tr("Temporarily measure time and signal values; Ctrl+M toggles, Esc exits"));
+        tr("Measure time and values; Ctrl creates a saved marker, Ctrl+M toggles, Esc exits"));
     connect(markerAction_, &QAction::toggled, this, [this](const bool checked) {
         if (checked && !canvas_->commitPendingInlineEdits()) {
             const QSignalBlocker blocker(markerAction_);
@@ -7433,12 +7654,12 @@ void MainWindow::createToolBars()
             5'000);
     });
 
-    asyncTimingAction_ = editBar->addAction(tr("Timing: Sync"));
+    asyncTimingAction_ = editBar->addAction(tr("Timing: Grid"));
     asyncTimingAction_->setObjectName(QStringLiteral("AsyncTimingAction"));
     asyncTimingAction_->setCheckable(true);
     asyncTimingAction_->setChecked(false);
     asyncTimingAction_->setToolTip(
-        tr("Sync: edits and Left/Right range navigation use one associated-clock beat. Click to allow asynchronous tick offsets."));
+        tr("Clock-associated signals use one clock beat; unclocked signals use the visible fixed grid. Click to allow asynchronous tick offsets."));
     connect(asyncTimingAction_, &QAction::toggled, this, [this](const bool enabled) {
         if (!canvas_->commitPendingInlineEdits()) {
             const QSignalBlocker blocker(asyncTimingAction_);
@@ -8490,9 +8711,11 @@ void MainWindow::updateWindowTitle()
             : projectFile_);
 }
 
-bool MainWindow::loadFromPath(const QString& path)
+bool MainWindow::loadFromPath(const QString& path, const bool preferRecovery)
 {
-    const auto selectedPath = preferredProjectLoadPath(path);
+    const auto selectedPath = preferRecovery
+        ? preferredProjectLoadPath(path)
+        : path;
     const auto result = loadProjectFile(selectedPath);
     if (!result.ok()) {
         QMessageBox::critical(this, tr("Open failed"), result.error);
@@ -8518,6 +8741,7 @@ bool MainWindow::loadFromPath(const QString& path)
         Qt::CaseInsensitive);
     recoveryLoaded_ = recoveredSnapshot;
     projectFile_ = projectPathForLoadedFile(selectedPath);
+    loadedProjectRevision_ = projectFileRevision(projectFile_);
     activeScenarioIndex_ = rememberedActiveScenarioIndex().value_or(
         std::size_t{0});
     if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
@@ -8564,6 +8788,50 @@ bool MainWindow::writeToPath(const QString& path)
 {
     const auto beforeName = project_.name;
     const auto previousProjectFile = projectFile_;
+    const auto overwritesLoadedProject = !projectFile_.isEmpty()
+        && sameProjectPath(path, projectFile_);
+    if (overwritesLoadedProject) {
+        const auto diskRevision = projectFileRevision(path);
+        const auto unreadableRevision =
+            loadedProjectRevision_.state == ProjectFileRevision::State::Unreadable
+            || diskRevision.state == ProjectFileRevision::State::Unreadable;
+        const auto stateChanged =
+            loadedProjectRevision_.state != diskRevision.state;
+        const auto contentChanged =
+            loadedProjectRevision_.state == ProjectFileRevision::State::Present
+            && diskRevision.state == ProjectFileRevision::State::Present
+            && loadedProjectRevision_.sha256 != diskRevision.sha256;
+        if (unreadableRevision || stateChanged || contentChanged) {
+            QMessageBox conflict(this);
+            conflict.setIcon(QMessageBox::Warning);
+            conflict.setWindowTitle(tr("Project changed on disk"));
+            conflict.setText(
+                tr("Another application changed this waveform after it was opened."));
+            conflict.setInformativeText(
+                tr("Reload it to preserve those changes, save this version under a new name, or explicitly overwrite the external changes."));
+            auto* reload = conflict.addButton(
+                tr("Reload"), QMessageBox::AcceptRole);
+            auto* saveAs = conflict.addButton(
+                tr("Save As…"), QMessageBox::ActionRole);
+            auto* overwrite = conflict.addButton(
+                tr("Overwrite"), QMessageBox::DestructiveRole);
+            auto* cancel = conflict.addButton(QMessageBox::Cancel);
+            conflict.setDefaultButton(qobject_cast<QPushButton*>(cancel));
+            conflict.setEscapeButton(cancel);
+            conflict.exec();
+            if (conflict.clickedButton() == reload) {
+                if (loadFromPath(path, false)) {
+                    isolateAbandonedRecoverySnapshotsAfterReload();
+                }
+                return false;
+            }
+            if (conflict.clickedButton() == saveAs) {
+                QTimer::singleShot(0, this, [this] { saveProjectAs(); });
+                return false;
+            }
+            if (conflict.clickedButton() != overwrite) return false;
+        }
+    }
     if (project_.name.empty() || project_.name == "Untitled") {
         auto inferred = QFileInfo(path).fileName();
         if (inferred.endsWith(QStringLiteral(".wave.json"), Qt::CaseInsensitive)) {
@@ -8581,6 +8849,7 @@ bool MainWindow::writeToPath(const QString& path)
         return false;
     }
     projectFile_ = path;
+    loadedProjectRevision_ = projectFileRevision(projectFile_);
     rememberProjectPath(projectFile_);
     rememberActiveScenario();
     rememberActiveScenarioLocation();
@@ -8619,6 +8888,34 @@ bool MainWindow::writeToPath(const QString& path)
             10'000);
     }
     return true;
+}
+
+void MainWindow::isolateAbandonedRecoverySnapshotsAfterReload()
+{
+    const auto snapshotPath = autosavePathForProject(projectFile_);
+    if (snapshotPath.isEmpty() || !QFileInfo::exists(snapshotPath)) return;
+
+    const auto timestamp = QDateTime::currentDateTimeUtc().toString(
+        QStringLiteral("yyyyMMdd-HHmmsszzz"));
+    const auto isolatedPath = snapshotPath
+        + QStringLiteral(".discarded-") + timestamp;
+    if (QFile::rename(snapshotPath, isolatedPath)) {
+        statusBar()->showMessage(
+            tr("Reloaded the disk version; abandoned local recovery was preserved as %1")
+                .arg(isolatedPath),
+            10'000);
+        return;
+    }
+    if (QFile::remove(snapshotPath)) {
+        statusBar()->showMessage(
+            tr("Reloaded the disk version; abandoned local recovery was removed"),
+            8'000);
+        return;
+    }
+    statusBar()->showMessage(
+        tr("Reloaded the disk version, but its abandoned recovery snapshot could not be isolated: %1")
+            .arg(snapshotPath),
+        10'000);
 }
 
 bool MainWindow::discardRecoverySnapshots()

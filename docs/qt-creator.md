@@ -87,6 +87,7 @@ CLI 目标需要命令行参数，具体用法见根目录 `README.md`。调试�
 Qt Creator Kit 注入的工具链可用以下命令等价验证：
 
 ```powershell
+$env:PATH='E:\QT6\Tools\mingw1310_64\bin;E:\QT6\Tools\Ninja;' + $env:PATH
 cmake --preset qtcreator-debug `
   -DCMAKE_PREFIX_PATH=E:\QT6\6.10.2\mingw_64 `
   -DCMAKE_CXX_COMPILER=E:\QT6\Tools\mingw1310_64\bin\g++.exe `
@@ -95,4 +96,6 @@ cmake --build --preset qtcreator-debug
 ctest --preset qtcreator-debug
 ```
 
-命令行显式路径仅用于复现本机 Kit；在 Qt Creator 内不需要重复填写。
+每个新的 PowerShell 会话都应先设置上述 PATH。仅给 CMake 传入编译器绝对路径并不足以
+启动 MinGW 的 `cc1plus.exe`，因为它还需要从 PATH 加载同目录中的运行时 DLL。命令行显式
+路径仅用于复现本机 Kit；Qt Creator 的 Desktop Kit 会注入对应构建环境，不需要重复填写。

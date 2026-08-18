@@ -16,6 +16,14 @@ inline constexpr auto AutomationReportSchema = "wave-workbench.cli/v1";
 inline constexpr auto AutomationBatchSchema = "wave-workbench.operations/v1";
 inline constexpr auto AutomationCapabilitiesSchema =
     "wave-workbench.capabilities/v1";
+inline constexpr auto AutomationJsonSchemaDialect =
+    "https://json-schema.org/draft/2020-12/schema";
+inline constexpr auto AutomationCapabilitiesJsonSchemaRef =
+    "schemas/automation/v1/capabilities.schema.json";
+inline constexpr auto AutomationReportJsonSchemaRef =
+    "schemas/automation/v1/report.schema.json";
+inline constexpr auto AutomationBatchJsonSchemaRef =
+    "schemas/automation/v1/operation-batch.schema.json";
 
 struct AutomationDocument {
     QJsonObject json;

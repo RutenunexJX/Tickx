@@ -636,8 +636,15 @@ SetLaneSequenceCommand::SetLaneSequenceCommand(
     if (!sourceLane || !targetLane || sourceLane->kind == LaneKind::Group) {
         throw std::invalid_argument("lane sequence target does not exist");
     }
+    const auto hasNonPreservedStep = std::any_of(
+        steps_.begin(),
+        steps_.end(),
+        [](const LaneSequenceStep& step) {
+            return !step.preserveExisting;
+        });
     if (steps_.front().start < 0
-        || steps_.front().start >= scenario.duration) {
+        || (hasNonPreservedStep
+            && steps_.front().start >= scenario.duration)) {
         throw std::invalid_argument(
             "lane sequence start is outside the scenario");
     }
@@ -657,8 +664,13 @@ SetLaneSequenceCommand::SetLaneSequenceCommand(
         expectedStart = step.end;
     }
 
-    after_.duration = std::max(after_.duration, steps_.back().end);
     for (const auto& step : steps_) {
+        if (!step.preserveExisting) {
+            after_.duration = std::max(after_.duration, step.end);
+        }
+    }
+    for (const auto& step : steps_) {
+        if (step.preserveExisting) continue;
         if (rangeAlreadyEquals(
                 *targetLane,
                 step.start,
@@ -675,9 +687,10 @@ SetLaneSequenceCommand::SetLaneSequenceCommand(
             {},
             step.extensions);
     }
-    if (targetLane->kind == LaneKind::Bit
+    if (hasNonPreservedStep
+        && (targetLane->kind == LaneKind::Bit
         || targetLane->kind == LaneKind::Bus
-        || targetLane->kind == LaneKind::Enum) {
+        || targetLane->kind == LaneKind::Enum)) {
         synchronizeLaneEventsFromSegments(after_, laneId_);
     }
 }
@@ -749,9 +762,16 @@ SetLaneSequencesCommand::SetLaneSequencesCommand(
             throw std::invalid_argument(
                 "lane sequence batch target does not exist");
         }
+        const auto hasNonPreservedStep = std::any_of(
+            assignment.steps.begin(),
+            assignment.steps.end(),
+            [](const LaneSequenceStep& step) {
+                return !step.preserveExisting;
+            });
         if (assignment.steps.front().start < 0
-            || assignment.steps.front().start
-                >= scenario.duration) {
+            || (hasNonPreservedStep
+                && assignment.steps.front().start
+                    >= scenario.duration)) {
             throw std::invalid_argument(
                 "lane sequence batch start is outside the scenario");
         }
@@ -773,10 +793,11 @@ SetLaneSequencesCommand::SetLaneSequencesCommand(
             expectedStart = step.end;
         }
 
-        after_.duration = std::max(
-            after_.duration,
-            assignment.steps.back().end);
         for (const auto& step : assignment.steps) {
+            if (step.preserveExisting) continue;
+            after_.duration = std::max(
+                after_.duration,
+                step.end);
             if (rangeAlreadyEquals(
                     *targetLane,
                     step.start,
@@ -793,9 +814,10 @@ SetLaneSequencesCommand::SetLaneSequencesCommand(
                 {},
                 step.extensions);
         }
-        if (targetLane->kind == LaneKind::Bit
+        if (hasNonPreservedStep
+            && (targetLane->kind == LaneKind::Bit
             || targetLane->kind == LaneKind::Bus
-            || targetLane->kind == LaneKind::Enum) {
+            || targetLane->kind == LaneKind::Enum)) {
             synchronizeLaneEventsFromSegments(
                 after_,
                 assignment.laneId);

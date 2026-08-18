@@ -5,16 +5,19 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QTextStream>
 
 #include <algorithm>
+#include <array>
 #include <optional>
 #include <set>
 #include <string>
@@ -125,8 +128,128 @@ void printUsage()
            "(--output=PATH|--in-place|--dry-run) [--scenario=SELECTOR] "
            "[--expect-sha256=HEX] [--backup[=PATH]] [--pretty]\n"
            "\n"
+           "Compatibility adapters (legacy text output and exit codes):\n"
+           "  wave-cli generate <wave-generate arguments...>\n"
+           "  wave-cli compare <wave-compare arguments...>\n"
+           "  wave-cli bridge <wave-bridge arguments...>\n"
+           "\n"
            "Exit codes: 0 success, 2 usage, 3 input, 4 rejected/invalid, "
            "5 output failure.\n";
+}
+
+struct CompatibilityCommand {
+    QString name;
+    QString executable;
+    QString summary;
+    bool canWriteProject{false};
+};
+
+const std::array<CompatibilityCommand, 3>& compatibilityCommands()
+{
+    static const std::array<CompatibilityCommand, 3> commands{{
+        {
+            QStringLiteral("generate"),
+            QStringLiteral("wave-generate"),
+            QStringLiteral("Generate HDL, verification and documentation artifacts."),
+            false,
+        },
+        {
+            QStringLiteral("compare"),
+            QStringLiteral("wave-compare"),
+            QStringLiteral("Compare expected waveforms with a referenced VCD or CSV trace."),
+            false,
+        },
+        {
+            QStringLiteral("bridge"),
+            QStringLiteral("wave-bridge"),
+            QStringLiteral("Create or consume cross-application integration artifacts."),
+            true,
+        },
+    }};
+    return commands;
+}
+
+const CompatibilityCommand* compatibilityCommand(const QString& name)
+{
+    const auto& commands = compatibilityCommands();
+    const auto found = std::find_if(
+        commands.cbegin(),
+        commands.cend(),
+        [&name](const CompatibilityCommand& candidate) {
+            return candidate.name == name;
+        });
+    return found == commands.cend() ? nullptr : &*found;
+}
+
+void printCompatibilityHelp(const CompatibilityCommand& command)
+{
+    QTextStream(stdout)
+        << "wave-cli " << command.name << " forwards arguments to "
+        << command.executable << ".\n"
+        << command.summary << "\n\n"
+        << "Usage:\n  wave-cli " << command.name
+        << " <" << command.executable << " arguments...>\n\n"
+        << "This compatibility adapter preserves the legacy command's text "
+           "output and exit code. Run the sibling "
+        << command.executable << " executable directly for the same behavior.\n";
+}
+
+int runCompatibilityCommand(
+    const CompatibilityCommand& command,
+    const QStringList& arguments)
+{
+    if (arguments.size() == 1
+        && (arguments.front() == QStringLiteral("--help")
+            || arguments.front() == QStringLiteral("-h"))) {
+        printCompatibilityHelp(command);
+        return Success;
+    }
+
+    auto executableName = command.executable;
+#ifdef Q_OS_WIN
+    executableName += QStringLiteral(".exe");
+#endif
+    const auto executablePath = QDir(
+        QCoreApplication::applicationDirPath()).absoluteFilePath(executableName);
+    if (!QFileInfo::exists(executablePath)) {
+        return fail(
+            command.name,
+            QStringLiteral("compatibility-command-unavailable"),
+            QStringLiteral(
+                "The compatibility executable is not installed beside wave-cli: %1")
+                .arg(executablePath),
+            OutputError,
+            false);
+    }
+
+    QProcess process;
+    process.setProcessChannelMode(QProcess::ForwardedChannels);
+    process.start(executablePath, arguments);
+    if (!process.waitForStarted()) {
+        return fail(
+            command.name,
+            QStringLiteral("compatibility-command-start-failed"),
+            process.errorString(),
+            OutputError,
+            false);
+    }
+    if (!process.waitForFinished(-1)) {
+        return fail(
+            command.name,
+            QStringLiteral("compatibility-command-wait-failed"),
+            process.errorString(),
+            OutputError,
+            false);
+    }
+    if (process.exitStatus() != QProcess::NormalExit) {
+        return fail(
+            command.name,
+            QStringLiteral("compatibility-command-crashed"),
+            QStringLiteral("%1 did not exit normally.").arg(command.executable),
+            OutputError,
+            false);
+    }
+    return process.exitCode();
 }
 
 int runCapabilities(const QStringList& arguments)
@@ -154,8 +277,29 @@ int runCapabilities(const QStringList& arguments)
             Rejected,
             pretty);
     }
+    auto document = capabilities.json;
+    QJsonArray commands;
+    for (const auto& adapter : compatibilityCommands()) {
+        commands.append(QJsonObject{
+            {QStringLiteral("name"), adapter.name},
+            {QStringLiteral("requiresProject"), true},
+            {QStringLiteral("canWriteProject"), adapter.canWriteProject},
+            {QStringLiteral("compatibilityAdapter"), true},
+            {QStringLiteral("legacyExecutable"), adapter.executable},
+            {QStringLiteral("structuredOutput"), false},
+            {QStringLiteral("argumentsForwardedVerbatim"), true},
+        });
+    }
+    document.insert(QStringLiteral("compatibilityCommands"), commands);
+    document.insert(
+        QStringLiteral("compatibilityCommandCount"),
+        commands.size());
+    auto features = document.value(QStringLiteral("features")).toObject();
+    features.insert(QStringLiteral("compatibilityAdapters"), true);
+    document.insert(QStringLiteral("features"), features);
+
     QTextStream stream(stdout);
-    writeJson(stream, capabilities.json, pretty);
+    writeJson(stream, document, pretty);
     return Success;
 }
 
@@ -2721,6 +2865,9 @@ int main(int argc, char* argv[])
     }
 
     const auto command = arguments.takeFirst();
+    if (const auto* adapter = compatibilityCommand(command)) {
+        return runCompatibilityCommand(*adapter, arguments);
+    }
     if (command == QStringLiteral("capabilities")) {
         return runCapabilities(arguments);
     }

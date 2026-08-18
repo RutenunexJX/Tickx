@@ -1,0 +1,39 @@
+Wave Workbench @PROJECT_VERSION@ - Windows x64 portable package
+
+Desktop application
+  wave-workbench.exe
+
+Primary automation entry point
+  wave-cli.exe capabilities --pretty
+  wave-cli.exe --help
+
+Compatibility tools
+  wave-cli.exe generate <wave-generate arguments...>
+  wave-cli.exe compare <wave-compare arguments...>
+  wave-cli.exe bridge <wave-bridge arguments...>
+
+The legacy wave-generate.exe, wave-compare.exe and wave-bridge.exe entry points
+remain installed for existing scripts. The wave-cli compatibility adapters
+forward their arguments, text output and exit codes without translation.
+
+Documentation
+  docs\cli-quick-start.md
+  docs\automation-cli.md
+  docs\integration-contracts.md
+  docs\project-format.md
+
+Minimal operation example
+  docs\examples\quick-start.operations.json
+
+Machine-readable JSON Schemas
+  schemas\automation\v1\capabilities.schema.json
+  schemas\automation\v1\report.schema.json
+  schemas\automation\v1\operation-batch.schema.json
+
+Example project
+  examples\handshake\project.wave.json
+
+Requirements
+  64-bit Windows 10 or Windows 11. Installation is not required.
+  Qt and compiler runtime libraries were collected by windeployqt when this
+  package was generated from the source repository.

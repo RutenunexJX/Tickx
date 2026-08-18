@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/automation/v1/report.schema.json",
+  "title": "Wave Workbench automation report v1",
+  "description": "Stable top-level contract shared by successful and failed automation command reports.",
+  "type": "object",
+  "required": ["schema", "command", "ok"],
+  "properties": {
+    "schema": { "const": "wave-workbench.cli/v1" },
+    "command": { "type": "string", "minLength": 1 },
+    "ok": { "type": "boolean" },
+    "projectId": { "type": "string" },
+    "scenarioId": { "type": "string" },
+    "sourceSha256": { "$ref": "#/$defs/sha256" },
+    "resultSha256": { "$ref": "#/$defs/sha256" },
+    "changed": { "type": "boolean" },
+    "operationCount": { "type": "integer", "minimum": 0 },
+    "operations": { "type": "array", "items": { "type": "object" } },
+    "error": { "$ref": "#/$defs/error" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "ok": { "const": false } }, "required": ["ok"] },
+      "then": { "required": ["error"] }
+    }
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "failedOperation": { "type": "integer", "minimum": 0 },
+        "details": {}
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema": "wave-workbench.operations/v1",
+  "operations": [
+    {
+      "op": "add-signal",
+      "id": "lane-clk",
+      "clockId": "clock-main",
+      "name": "clk",
+      "kind": "clock",
+      "period": "10 ns"
+    },
+    {
+      "op": "add-signal",
+      "id": "lane-request",
+      "name": "request",
+      "kind": "bit"
+    },
+    {
+      "op": "add-signal",
+      "id": "lane-data",
+      "name": "data",
+      "kind": "bus",
+      "width": 8
+    },
+    {
+      "op": "set-sequence",
+      "start": "cycle 0",
+      "stepCycles": 1,
+      "sequences": [
+        {
+          "laneId": "lane-request",
+          "values": ["0", "1", "1", "0"]
+        },
+        {
+          "laneId": "lane-data",
+          "values": ["0x00", "0x12", "0x34", "0x00"]
+        }
+      ]
+    }
+  ]
+}

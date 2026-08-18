@@ -2628,6 +2628,174 @@ void testMultiLaneSequenceCommand()
         "rejected multi-lane sequence changed the scenario");
 }
 
+void testPreservingLaneSequenceCommand()
+{
+    wave::Scenario scenario;
+    scenario.id = "scenario-sequence-preserve";
+    scenario.name = "Preserve sequence beats";
+    scenario.duration = 30;
+    wave::Lane bus;
+    bus.id = "lane-sequence-preserve";
+    bus.name = "preserved_bus";
+    bus.kind = wave::LaneKind::Bus;
+    bus.width = 8;
+    bus.segments = {
+        {"reserved", 0, 10, "0b00000000",
+         wave::JsonExtensions{{
+             "waveWorkbench.busPreset",
+             "\"reserved\"",
+         }}},
+        {"metadata-left", 20, 25, "0b00000001",
+         wave::JsonExtensions{{"future", "\"left\""}}},
+        {"metadata-right", 25, 30, "0b00000010",
+         wave::JsonExtensions{{"future", "\"right\""}}},
+    };
+    scenario.lanes.push_back(bus);
+    const auto before = scenario;
+
+    const std::vector<wave::LaneSequenceStep> allPreserved{
+        {0, 10, "0b00000000", {}, true},
+        {10, 20, "0bxxxxxxxx", {}, true},
+        {20, 30, "0b00000001", {}, true},
+        {30, 40, "0bxxxxxxxx", {}, true},
+    };
+    const std::vector<wave::LaneSequenceStep> outsidePreserved{
+        {30, 40, "0bxxxxxxxx", {}, true},
+    };
+    const auto expectNoEffect = [&before](
+                                    const wave::Scenario& candidate,
+                                    const wave::CommandStack& stack,
+                                    const std::string& scope) {
+        expectEqual(
+            candidate,
+            before,
+            scope
+                + " materialized implicit/metadata beats, extended End, or synchronized Events");
+        expectEqual(
+            stack.size(),
+            std::size_t{0},
+            scope + " polluted history");
+    };
+
+    for (const auto& steps : {allPreserved, outsidePreserved}) {
+        auto singleScenario = before;
+        wave::CommandStack singleStack;
+        expect(
+            !singleStack.execute(
+                std::make_unique<wave::SetLaneSequenceCommand>(
+                    singleScenario,
+                    bus.id,
+                    steps)),
+            "a preserved single-lane sequence reported an effect");
+        expectNoEffect(
+            singleScenario,
+            singleStack,
+            "preserved single-lane sequence");
+
+        auto batchScenario = before;
+        wave::CommandStack batchStack;
+        expect(
+            !batchStack.execute(
+                std::make_unique<wave::SetLaneSequencesCommand>(
+                    batchScenario,
+                    std::vector<wave::LaneSequenceAssignment>{
+                        {bus.id, steps},
+                    })),
+            "a preserved batch sequence reported an effect");
+        expectNoEffect(
+            batchScenario,
+            batchStack,
+            "preserved batch sequence");
+    }
+
+    auto oneChanged = allPreserved;
+    oneChanged.at(1) = {
+        10,
+        20,
+        "0b10100101",
+        {},
+        false,
+    };
+    const auto expectSparseChange = [&bus](
+                                        const wave::Scenario& candidate,
+                                        const std::string& scope) {
+        expectEqual(
+            candidate.duration,
+            wave::Tick{30},
+            scope + " let a preserved out-of-range step extend End");
+        const auto* edited = wave::findLane(candidate, bus.id);
+        expect(
+            edited != nullptr,
+            scope + " removed its target");
+        const auto inserted = std::find_if(
+            edited->segments.begin(),
+            edited->segments.end(),
+            [](const wave::Segment& segment) {
+                return segment.start == 10
+                    && segment.end == 20
+                    && segment.value == "0b10100101";
+            });
+        expect(
+            inserted != edited->segments.end(),
+            scope + " did not materialize the changed implicit beat");
+        expect(
+            edited->segments.size() == 4
+                && edited->segments.at(0) == bus.segments.at(0)
+                && edited->segments.at(2) == bus.segments.at(1)
+                && edited->segments.at(3) == bus.segments.at(2),
+            scope + " rewrote a preserved preset or intra-beat value");
+        expectEqual(
+            candidate.events.size(),
+            edited->segments.size(),
+            scope + " did not synchronize Events for the changed beat");
+    };
+
+    auto singleScenario = before;
+    wave::CommandStack singleStack;
+    expect(
+        singleStack.execute(
+            std::make_unique<wave::SetLaneSequenceCommand>(
+                singleScenario,
+                bus.id,
+                oneChanged)),
+        "a sparse single-lane preserving sequence reported no effect");
+    expectSparseChange(singleScenario, "single-lane preserving sequence");
+    const auto singleAfter = singleScenario;
+    expect(singleStack.undo(), "single-lane preserving sequence undo failed");
+    expectEqual(
+        singleScenario,
+        before,
+        "single-lane preserving sequence undo did not restore sparse state");
+    expect(singleStack.redo(), "single-lane preserving sequence redo failed");
+    expectEqual(
+        singleScenario,
+        singleAfter,
+        "single-lane preserving sequence redo lost sparse state");
+
+    auto batchScenario = before;
+    wave::CommandStack batchStack;
+    expect(
+        batchStack.execute(
+            std::make_unique<wave::SetLaneSequencesCommand>(
+                batchScenario,
+                std::vector<wave::LaneSequenceAssignment>{
+                    {bus.id, oneChanged},
+                })),
+        "a sparse batch preserving sequence reported no effect");
+    expectSparseChange(batchScenario, "batch preserving sequence");
+    const auto batchAfter = batchScenario;
+    expect(batchStack.undo(), "batch preserving sequence undo failed");
+    expectEqual(
+        batchScenario,
+        before,
+        "batch preserving sequence undo did not restore sparse state");
+    expect(batchStack.redo(), "batch preserving sequence redo failed");
+    expectEqual(
+        batchScenario,
+        batchAfter,
+        "batch preserving sequence redo lost sparse state");
+}
+
 void testMultiLaneRangeAssignmentCommand()
 {
     auto project = wave::makeDemonstrationProject();
@@ -5297,6 +5465,50 @@ void testAutomationContracts()
     expect(bit != sourceScenario.lanes.end(), "automation fixture has no Bit lane");
 
     const auto capabilities = wave::describeAutomationCapabilities();
+    const auto loadAutomationSchema = [](const QString& fileName) {
+        QFile file(
+            QDir(QStringLiteral(WAVE_SOURCE_DIR))
+                .filePath(
+                    QStringLiteral(
+                        "src/waveautomation/schemas/automation/v1/")
+                    + fileName));
+        expect(
+            file.open(QIODevice::ReadOnly),
+            QStringLiteral("cannot read automation schema %1")
+                .arg(fileName)
+                .toStdString());
+        QJsonParseError parseError;
+        const auto document =
+            QJsonDocument::fromJson(file.readAll(), &parseError);
+        expect(
+            parseError.error == QJsonParseError::NoError
+                && document.isObject(),
+            QStringLiteral("invalid automation schema %1: %2")
+                .arg(fileName, parseError.errorString())
+                .toStdString());
+        return document.object();
+    };
+    const auto capabilitiesSchema =
+        loadAutomationSchema(QStringLiteral("capabilities.schema.json"));
+    const auto reportSchema =
+        loadAutomationSchema(QStringLiteral("report.schema.json"));
+    const auto batchSchema =
+        loadAutomationSchema(QStringLiteral("operation-batch.schema.json"));
+    expect(
+        capabilitiesSchema.value(QStringLiteral("$schema")).toString()
+                == QString::fromLatin1(
+                    wave::AutomationJsonSchemaDialect)
+            && capabilitiesSchema.value(QStringLiteral("$id")).toString()
+                == QString::fromLatin1(
+                    wave::AutomationCapabilitiesJsonSchemaRef)
+            && reportSchema.value(QStringLiteral("$id")).toString()
+                == QString::fromLatin1(
+                    wave::AutomationReportJsonSchemaRef)
+            && batchSchema.value(QStringLiteral("$id")).toString()
+                == QString::fromLatin1(
+                    wave::AutomationBatchJsonSchemaRef),
+        "automation JSON Schema identifiers are inconsistent");
+
     std::set<std::string> capabilityCommands;
     for (const auto& value :
          capabilities.json.value(QStringLiteral("commands")).toArray()) {
@@ -5307,14 +5519,135 @@ void testAutomationContracts()
                 .toStdString());
     }
     std::set<std::string> capabilityOperations;
+    std::map<std::string, QJsonObject> operationCapabilities;
     for (const auto& value :
          capabilities.json.value(QStringLiteral("operations")).toArray()) {
-        capabilityOperations.insert(
-            value.toObject()
-                .value(QStringLiteral("name"))
-                .toString()
-                .toStdString());
+        const auto operation = value.toObject();
+        const auto name = operation
+            .value(QStringLiteral("name"))
+            .toString()
+            .toStdString();
+        capabilityOperations.insert(name);
+        operationCapabilities.emplace(name, operation);
+
+        const auto required =
+            operation.value(QStringLiteral("required")).toArray();
+        const auto optional =
+            operation.value(QStringLiteral("optional")).toArray();
+        expect(
+            required.contains(QStringLiteral("op")),
+            "operation capability does not require op: " + name);
+        for (const auto& field : required) {
+            expect(
+                !optional.contains(field),
+                "operation capability repeats a required field as optional: "
+                    + name);
+        }
+        expect(
+            operation.value(QStringLiteral("idempotent")).isBool()
+                && operation.value(QStringLiteral("dangerous")).isBool()
+                && operation.value(QStringLiteral("mutatesProject")).isBool(),
+            "operation capability safety metadata is missing: " + name);
+        const auto expectedRef = QStringLiteral("%1#/$defs/%2")
+            .arg(
+                QString::fromLatin1(
+                    wave::AutomationBatchJsonSchemaRef),
+                QString::fromStdString(name));
+        expectEqual(
+            operation.value(QStringLiteral("schemaRef")).toString(),
+            expectedRef,
+            "operation capability schema reference is inconsistent: " + name);
+        const auto operationDefinition = batchSchema
+            .value(QStringLiteral("$defs"))
+            .toObject()
+            .value(QString::fromStdString(name))
+            .toObject();
+        expect(
+            !operationDefinition.isEmpty(),
+            "operation capability has no published schema definition: " + name);
+        std::set<std::string> advertisedFields;
+        for (const auto& field : required) {
+            advertisedFields.insert(field.toString().toStdString());
+        }
+        for (const auto& field : optional) {
+            advertisedFields.insert(field.toString().toStdString());
+        }
+        std::set<std::string> schemaFields;
+        const auto properties = operationDefinition
+            .value(QStringLiteral("properties"))
+            .toObject();
+        for (auto iterator = properties.constBegin();
+             iterator != properties.constEnd();
+             ++iterator) {
+            schemaFields.insert(iterator.key().toStdString());
+        }
+        expectEqual(
+            advertisedFields,
+            schemaFields,
+            "operation capability fields differ from its schema: " + name);
+        std::set<std::string> schemaRequiredFields;
+        for (const auto& field : operationDefinition
+                 .value(QStringLiteral("required"))
+                 .toArray()) {
+            schemaRequiredFields.insert(field.toString().toStdString());
+        }
+        std::set<std::string> advertisedRequiredFields;
+        for (const auto& field : required) {
+            advertisedRequiredFields.insert(field.toString().toStdString());
+        }
+        expectEqual(
+            advertisedRequiredFields,
+            schemaRequiredFields,
+            "operation capability requirements differ from its schema: "
+                + name);
     }
+    const auto schemaCatalog =
+        capabilities.json.value(QStringLiteral("schemaCatalog")).toObject();
+    const auto operationSchemaRefs = batchSchema
+        .value(QStringLiteral("$defs"))
+        .toObject()
+        .value(QStringLiteral("operation"))
+        .toObject()
+        .value(QStringLiteral("oneOf"))
+        .toArray();
+    expect(
+        capabilities.json.value(QStringLiteral("schemaRef")).toString()
+                == QString::fromLatin1(
+                    wave::AutomationCapabilitiesJsonSchemaRef)
+            && capabilities.json
+                   .value(QStringLiteral("reportSchemaRef"))
+                   .toString()
+                == QString::fromLatin1(
+                    wave::AutomationReportJsonSchemaRef)
+            && schemaCatalog.value(QStringLiteral("dialect")).toString()
+                == QString::fromLatin1(
+                    wave::AutomationJsonSchemaDialect)
+            && schemaCatalog.value(QStringLiteral("operationBatch")).toString()
+                == QString::fromLatin1(
+                    wave::AutomationBatchJsonSchemaRef)
+            && capabilities.json
+                   .value(QStringLiteral("operationBatch"))
+                   .toObject()
+                   .value(QStringLiteral("schemaRef"))
+                   .toString()
+                == QString::fromLatin1(
+                    wave::AutomationBatchJsonSchemaRef)
+            && operationSchemaRefs.size() == 33,
+        "automation schema catalog is incomplete or inconsistent");
+    expect(
+        operationCapabilities.at("delete-signal")
+                .value(QStringLiteral("dangerous"))
+                .toBool()
+            && operationCapabilities.at("set-duration")
+                   .value(QStringLiteral("dangerous"))
+                   .toBool()
+            && operationCapabilities.at("set-duration")
+                   .value(QStringLiteral("idempotent"))
+                   .toBool()
+            && !operationCapabilities.at("assert-value")
+                    .value(QStringLiteral("mutatesProject"))
+                    .toBool(),
+        "automation operation safety classification is incorrect");
     const auto durationCapabilities =
         capabilities.json.value(
             QStringLiteral("scenarioDuration")).toObject();
@@ -17042,6 +17375,7 @@ int main(int argc, char* argv[])
         {"undo and redo", testUndoRedo},
         {"single-lane sequence command", testLaneSequenceCommand},
         {"multi-lane sequence command", testMultiLaneSequenceCommand},
+        {"preserving lane sequence command", testPreservingLaneSequenceCommand},
         {"multi-lane range assignment command", testMultiLaneRangeAssignmentCommand},
         {"command replacement, cancel, and duration", testCommandStackReplacementAndDuration},
         {"scenario duration truncation", testScenarioDurationTruncation},

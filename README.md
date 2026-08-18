@@ -103,6 +103,9 @@ workspace manifest 的 Generate/Compare 命令模板会公开该选择器。
 
 ```powershell
 .\build\wave-cli.exe capabilities --pretty
+.\build\wave-cli.exe generate .\examples\handshake\project.wave.json .\generated
+.\build\wave-cli.exe compare .\examples\handshake\project.wave.json .\compare
+.\build\wave-cli.exe bridge describe project.wave.json workspace.json
 .\build\wave-cli.exe new .\stimulus "--name=Handshake stimulus" `
   "--duration=80 ns" --operations=.\tests\fixtures\cli-new-operations.json --pretty
 .\build\wave-cli.exe inspect .\examples\handshake\project.wave.json --summary --pretty
@@ -126,6 +129,11 @@ workspace manifest 的 Generate/Compare 命令模板会公开该选择器。
 ```
 
 `wave-cli capabilities` 无需工程即可让宿主机器读取命令、operation、选择器、时间和值域能力。
+`generate`、`compare` 与 `bridge` 是对同目录旧工具的兼容适配器，旧入口继续有效；兼容适配器保留
+旧工具的文本输出和退出码，并在 capabilities 的 `compatibilityCommands` 中明确标记为非结构化输出。便携包的最小操作示例和
+运行顺序见 [docs/cli-quick-start.md](docs/cli-quick-start.md)。
+能力文档同时公开 Draft 2020-12 JSON Schema 相对引用，以及每个 operation 的必填/可选字段、幂等性、
+危险性和是否修改工程；Portable install 组件会将 Schema、CLI 文档、最小 operations 示例和 handshake 工程一并安装。
 其他命令对 stdout/stderr 使用版本化 JSON，可从零创建工程，也支持 operations 从 stdin 输入、
 显式输出文件、原地原子替换、dry-run、源 SHA-256 并发保护和稳定 ID；可按物理时间或时钟周期
 采样、按名称或 ID 精简定位信号、直接查询可作为 Relation 端点的精确边沿、在不接触内部
@@ -147,7 +155,8 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
 ## 当前交互
 
 - 主窗口中央组件直接为 WaveCanvas；不创建 Project、Inspector、Scenario Dock 或独立 Modes
-  工具栏。波形始终可直接编辑，工具栏常驻只保留临时 `Measure`、缩放和 `Fit scenario`；
+  工具栏。波形始终可直接编辑，工具栏常驻只保留临时 `Measure / Markers`、缩放和
+  `Fit scenario`；`Measure / Markers` 中的 Ctrl 点击/拖动会建立持久 Marker；
   建立持久范围时在同一固定工具栏显示批量赋值栏，不覆盖波形。Export 位于 File 菜单。
 - 工程包含多个 Scenario 时，工具栏最左侧显示紧凑的 `Waveform` 选择器；只有一个 Scenario
   时整组控件（包括分隔线）完全隐藏。切换仅改变当前编辑目标，不重排工程数组、不写入模型、
@@ -175,7 +184,8 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
 - 无命令行工程参数时直接进入 200 ns 空白波形；中央首先显示 `+ CLK`、`+ BIT`、`+ BUS` 和
   简短操作提示。`File > New` / `Ctrl+N` 立即恢复同一空白默认值，不再要求先配置工程。
 - `+ CLK`、`+ BIT`、`+ BUS` 点击后在末行显示就地输入条。用户只需补齐名称以及 Clock
-  period 或 Bus width；按 Enter 提交，或直接点击下一目标并在同一手势继续，Esc 取消。名称自动唯一、颜色随机分配。CLK 自动创建
+  period 或 Bus width（`1–65536`）；按 Enter 提交，或直接点击下一目标并在同一手势继续，Esc 取消。
+  名称自动唯一、颜色随机分配。CLK 自动创建
   clock domain，只有一个时钟时 Bit/Bus 自动关联，多个时钟时就地选择。创建与补齐始终是
   一个撤销项。新 Bit 空白区按 `0` 显示，新 Bus 空白区按居中红色虚线和 `X` 显示。
 - 标尺右上角 `End` 输入框直接修改时间轴终点，例如 `500 ns`。缩短到现有内容之前会在原处
@@ -183,8 +193,9 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   `set-duration` + `truncate` 契约。
 - 保存、另存为、新建、打开、关闭、导出或点击画布其他位置前，会先提交有效的就地创建、重命名、
   Bus/Enum 值和范围值草稿；鼠标左键、双击或右键会在提交后继续完成同一次目标操作，不要求第二次点击。
-  非法草稿保留原值、位置与焦点并阻止后续动作。End 会改变时间轴坐标映射，因此仍安全消费提交它的
-  当前点击，下一次点击再操作新坐标。Bus 与 End 同时待提交时按
+  非法草稿保留原值、位置与焦点并阻止后续动作。合法 End 草稿会在提交前记录用户所指时间；即使
+  时间轴随后重缩放，同一次画布点击仍命中原时间目标，不需要再点一次。失焦提交不会把焦点从用户
+  刚进入的 Bus 或其他编辑器抢回画布。Bus 与 End 同时待提交时按
   不丢位置的顺序处理；若 Undo/Redo 令 Bus 原位置落到 End 之外，不会钳到末拍，用户可延长 End
   后在原位置恢复，或按 Esc 放弃该草稿。
 - 快速新增输入条是一个未结束事务。删除、重排、参数编辑、范围粘贴、End、Segment 双击和 Pulse 等
@@ -197,7 +208,9 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   当前信号及 Delete/F2 提示。右键参数菜单取消后保留同一目标反馈。空名或重名会保留编辑框与焦点并原处说明原因，
   成功重命名是一个可撤销命令。删除确认会先显示将清理的 Event/Relation 准确数量和 `Ctrl+Z`；
   完成后状态栏显示信号名、实际清理数量和恢复方式，Undo 后显示 `Ctrl+Y`。右键轻量入口可修改
-  Clock 周期/频率以及 Bit/Bus 常用参数；无效时间或颜色会在同一对话框中就地说明，保留全部输入并聚焦错误字段；真实
+  Clock 周期/频率、phase、duty 分子/分母、active edge 和 reset/disable condition，以及 Bit/Bus 常用参数；
+  duty 分子/分母支持完整正 `qint64`，不会把合法大分数静默钳到较小范围。
+  无效时间、duty 或颜色会在同一对话框中就地说明，保留全部输入并聚焦错误字段；真实
   修改后状态栏显示当前参数与 `Ctrl+Z`，原值确认显示 `no properties changed`，不新增 Undo、
   不清除 Redo，也不标记未保存。标题拖动期间按 Esc 会立即清除插入反馈并取消重排，随后释放
   鼠标不会提交 `MoveLaneCommand`；成功放下会显示信号名、原位置→新位置和 `Ctrl+Z`，原位放下
@@ -249,8 +262,9 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   `width`，无需依靠刻度估算；释放后仍按一次手势提交一个 Undo。同步模式下，右键命中按真实点击
   位置判断，不会因编辑光标量化到下一拍而丢失 Segment 菜单。
 - 工具栏持续显示当前目标类型（Signal、Beat、Segment、Range 或 Measure）、信号、精确范围和值；
-  Sync 同时显示关联时钟和实际每步周期，Async 明确显示 `1 tick/step`。状态栏只报告本次选择或操作
-  结果，完整操作提示位于目标标签悬浮说明和 Edit > Segment 菜单，不再以长文本挤压状态栏。
+  Sync 同时显示关联时钟和实际每步周期，未关联 Clock 时明确显示 `Grid`及固定步长，Async 显示
+  `1 tick/step`。普通状态消息只报告本次选择或操作结果；鼠标指针下的信号和采样值位于
+  独立常驻区域，不会覆盖上一次操作结果。完整操作提示位于目标标签悬浮说明和 Edit > Segment 菜单。
   `F6` 选择编辑光标处的显式 Segment，`F7` / `F8` 在同一信号上选择上一/下一显式 Segment；
   这些命令也可从仅有信号与光标的状态直接进入相邻段。导航不修改模型。Wave Edit 指针状态使用实际指针位置显示
   `pointer <signal> · value <value>`，不把吸附到下一边界的值误报为指针下结果。
@@ -271,10 +285,11 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   以该光标为锚并保持其屏幕位置，光标离屏时回退到视口中心。缩放过程不修改模型、Undo 或 Saved
   状态，也不增加第二个 Fit 按钮。
 - 单击信号名或使用 `Up` / `Down` 选中信号后，画布获得焦点时，`Left` / `Right` 按工具栏当前
-  `Timing` 移动编辑光标；`Shift+Left` / `Shift+Right` 使用同一步长建立或调整显式范围。Sync
-  严格落到活动信号关联 Clock 的前一/后一有效拍边界，保留 period、phase 和 active edge；光标
-  原先不在网格上时也按方向选择严格相邻边界。Async 每次移动 1 tick，无关联 Clock 的 Sync 信号
-  回退 10 ns；Scenario 首尾始终作为可达边界。已有多 lane 范围继续保留完整 lane 集合，当前活动
+  `Timing` 移动编辑光标；`Shift+Left` / `Shift+Right` 使用同一步长建立或调整显式范围。具有
+  有效关联 Clock 的信号显示 `Sync`，严格落到前一/后一有效拍边界，并保留 period、phase 和
+  active edge；未关联 Clock 的信号显示 `Grid`，使用 10 ns 固定步长，不再伪装为 Sync。光标原先不在
+  对应网格上时也按方向选择严格相邻边界。Async 每次移动 1 tick；Scenario 首尾始终作为可达边界。
+  已有多 lane 范围继续保留完整 lane 集合，当前活动
   信号决定公开步长；折叠后保留信号目标但不武装整条信号 Delete。固定范围栏、Timing 按钮悬浮说明
   和状态栏均显示实际步长；文本框持有焦点时方向键仍只编辑文本。该交互不修改模型、Undo 或 Saved。
 - 同一时间锚点上，`Shift+Home` / `Shift+End` 可将活动端一次移到 0 或 Scenario End，适合长时间轴的整段填值、复制或清除；跨过锚点时范围自然翻向另一侧，回到锚点时折叠但保留信号目标。已选多信号集合、固定范围栏、水平可见位置和边界无效果反馈同步更新。
@@ -286,7 +301,8 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
 - Wave Edit 画布获得焦点且未在拖动时，`Home` / `End`（也接受 `Ctrl+Home` / `Ctrl+End`）直接把编辑光标和水平视图跳到 0 或场景 End；当前缩放、信号目标和显式范围均保留，状态栏显示到达的边界及反向快捷键。内联 End、重命名、Bus/范围值等文本框继续自行处理 Home/End，不会触发时间轴跳转；导航不修改模型、Undo 或 Saved 状态。
 - Wave Edit 中存在已选信号时，画布上的 `Tab` / `Shift+Tab` 只把编辑目标移动到下一拍/上一拍，
   并以拍级高亮确认位置；它不写值、不创建 Undo。`PageDown` / `PageUp` 按当前可见时间跨度向后/
-  向前翻一页，并只滚动到显示新目标所需的位置；到达首尾时原位说明，不改变模型或选择。
+  向前翻一页，并只滚动到显示新目标所需的位置；到达首尾时原位说明，不改变模型或选择。没有可导航的
+  波形目标时，Tab/Shift+Tab 交回给标准焦点链，不会把键盘焦点困在画布中。
 - 已知目标时间时，按 `Ctrl+G` 打开临时 `Go to` 栏，可输入小数 `ps` / `ns` / `us` / `ms`、整数 `tick`，也可输入 `cycle N`；后者使用当前信号的时钟域，或项目中唯一可判定的时钟。Enter 或 `Go` 将编辑光标准确定位，并只滚动到足以看见目标的位置；当前信号、缩放、Scenario、Undo 与 Saved 状态保持不变。小数时间使用字符串有理换算，只接受能被项目 timebase 精确表示的值，不做浮点舍入；结果以最多三位小数的紧凑单位显示，例如 `2500 ps` 显示为 `2.5 ns`。
   非法或越界输入会在原位显示错误和允许范围，不弹模态窗口；Esc 或关闭按钮收起跳转栏并保留结果，再次按 `Ctrl+G` 会预填当前光标。显式时间范围存在时，同一入口改为 `Range edge ▾`：预填活动端点、显示固定锚点，并提供 `Other edge` 切换；也可直接点击固定范围栏的范围摘要进入。点击 `Range edge ▾` 原位切换为 `Range width ▾`，可从固定锚点输入正的小数物理时间、整数 tick 或 `cycle N`；`Other edge` 在宽度模式下反转延伸方向。Enter 或提交按钮精确调整选择端点或宽度，允许端点跨过锚点但拒绝空范围、零宽和越过时间轴的宽度，保留全部目标信号且不修改 Scenario、Undo 或 Saved。关闭后恢复原范围工具栏；若用户转到其他画布目标，过期的精确编辑器自动关闭。未提交的内联草稿继续优先阻止导航。
 - 单击信号名选中当前信号后，状态栏直接提示边沿导航；Wave Edit 画布获得焦点时，`Ctrl+Left` / `Ctrl+Right` 严格跳到当前时间之前/之后的最近真实边沿，不会停在当前位置。Bit、Bus 与 Enum 使用 Segment 起止边界，Clock 同时使用周期上升/下降沿和覆盖区段边界；没有相邻边沿时光标保持原位，并提示使用 Home 或 End。该导航保留缩放和信号目标，不修改模型、Undo 或 Saved 状态。
@@ -297,10 +313,11 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   按 Esc 或关闭按钮收起查找栏并保留找到的信号，再次按 `Ctrl+F` 会保留并全选上次查询。查找保持编辑光标、水平视图、Scenario、Undo 与 Saved 状态；显式时间范围存在时不会静默改变目标，而是提示先按 Esc 清除范围。
 - Wave Edit 中，当前所选非 Group 信号的标题右端显示编辑光标处的采样值，使用与编辑光标一致的青色；Bit 的隐式值显示 `0`，Bus/Enum 的隐式值显示 `X`，Clock 按周期与覆盖状态采样。只为所选信号预留值宽度，名称继续中间省略，未选信号不增加杂讯；拖动预览期间暂时隐藏模型值，避免把未提交预览误认为结果。Up/Down 和 Ctrl+Left/Right 的状态反馈同步携带值；Measure 仍按活动光标显示全部信号值。
 - Wave Edit 选中 Bus 或 Enum 后，状态栏在鼠标选中、Up/Down 切换及 Ctrl+Left/Right 到达边沿时直接提示
-  `Enter edits value`。单击 Bus 以当前拍为编辑目标，双击以完整 Segment 为目标；编辑器浮动显示在
+  `Enter edits value`。单击 Bus/Enum 只选中当前拍，不弹出编辑器；Enter 打开当前拍。双击隐式拍打开 Beat 编辑，
+  双击显式 Segment 才进入完整 Segment 编辑。编辑器浮动显示在
   当前目标附近，以两行分别公开目标范围及操作控件，并提供 Beat/Segment 显式切换、前一项、后一项、
-  Clear、Apply 与关闭按钮，以及 HEX/BIN/DEC/OCT 输入进制、直接值、该信号最近使用值和 `0`、`X`、
-  `Z`、`Don't care`。画布获得焦点后按 Enter 使用当前编辑 tick 打开同一编辑器并预填精确采样值；
+  Clear、Apply 与关闭按钮，以及 HEX/BIN/DEC/OCT 输入进制、直接值、该信号最近使用值和 `0`、
+  `Reserved`、`X`、`Z`、`Don't care`。画布获得焦点后按 Enter 使用当前编辑 tick 打开同一编辑器并预填精确采样值；
   Segment 边沿直接使用整数 tick，不经过像素往返，因此不会误取边沿前的隐式 `X`。Enum 隐藏
   Bus 专用预设，输入框提供已声明
   符号的补全与完整提示；Enum 草稿可用 `Up` / `Down` 直接循环声明符号。非法 Enum 值保留草稿和
@@ -330,7 +347,9 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   Relation 描述和源/目标端点。固定范围栏与范围右键使用同一预检；Edit 和右键中的 Cut 也公开
   相同影响，但即使源范围已是隐式值仍可用于复制，并明确说明不会移除源值。Delete 或 `R` 的
   执行层兜底对无效果范围只反馈原因，不创建 Undo、不清除 Redo，也不改变选择。
-- 同一提交前预检覆盖显式范围的 `0` / `1` / `X` / `Z` / `Don't care`、Clock Gate/Disable 和
+- Relation 约束连线默认隐藏，避免持续遮挡波形；`Edit > Show relation constraints` 可随时显示/隐藏。
+  无论常规连线是否显示，会被当前编辑删除的 Relation 仍以琥珀色连线和端点提醒，不隐藏风险。
+- 同一提交前预检覆盖显式范围的 `0` / `1` / `Reserved` / `X` / `Z` / `Don't care`、Clock Gate/Disable 和
   Bus/Enum 文本写值。预设按钮显示实际会变化的信号数；等值按钮直接禁用，安全按钮明确不删除
   Relation，风险按钮显示琥珀色 `值 ⚠N` 并列出准确关系和端点。Bus/Enum 草稿在 Enter 前即时
   区分有效、越位宽/非法、等值和 Relation 风险；无效果草稿及键盘 `0/1/X/Z/G` 的执行层兜底
@@ -354,7 +373,7 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   上下跳动。范围左右边界显示可拖动手柄；修正端点时保留 lane 集合和工具栏，复用 7 像素轻吸附，
   按住 `Alt` 临时绕过。拖出范围及修改端点期间，画布标签和状态栏实时显示精确起点、终点与
   `width`；端点修正只改变选择，不修改模型或占用 Undo。Bit 可用按钮或 `0`、`1`、
-  `X`、`Z` 键一次写入完整范围；Bus 可直接输入值或选择 `0`、
+  `X`、`Z` 键一次写入完整范围；Bus 可直接输入值或选择 `0`、`Reserved`、
   `X`、`Z`、`Don't care`，每条 lane 按自身位宽生成值。Enum 只显示符号输入框并提供声明符号
   补全；多条 Enum 同选时只列出全部目标共有的符号，非法输入保留选区、草稿和焦点。提交整个
   Enum 范围只形成一个 Undo。混合类型隐藏所有无效赋值控件，但保留 `Copy`、`Repeat`、`Paste` 与 `Clear`，
@@ -386,6 +405,11 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   相同时间把范围复制到不相交的目标信号，普通拖动则原子移动；重叠的多信号映射先读取全部源值，
   再清理源/目标并写入结果，避免 `A → B、B → C` 的链式污染。Esc、失去左键或无效果释放会恢复
   原选择及滚动位置；成功提交后保留目标选区，Undo/Redo 在源块和目标块之间准确往返。
+  Bus/Enum 范围的当前值载入使用虚拟基线：Bus 隐式 `X`、带预设扩展元数据或拍内已有变化的内容
+  可显示为可编辑 token；未修改 token 不实体化隐式值，也不重写原 Segment 或扩展元数据。只有被用户
+  修改的 token 才以当前编辑拍为单位替换完整拍；单信号和批量命令均不会因纯保留步骤扩 End 或同步
+  Event。超宽 Bus 在生成值文本前执行 8192 字符预算，超限时禁用载入并说明原因，避免先分配大量
+  中间字符串。最终虚线预演会在提交前显示实际覆盖结果。
   拖动目标不再只是抽象矩形：Bit 会按实际 0/1/X/Z 形状显示虚线幽灵波形，Bus 会显示数值、
   `X`/`Z` 与 Don’t care 语义外观，Enum 显示将写入的符号轮廓，Clock 只显示真正会被转移的
   gated/disabled 覆盖，不重复伪造基础时钟。预览使用目标信号颜色并保留外围虚线框；精确标签优先
@@ -444,13 +468,15 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   对应配对的具体原因。选择该动作与 `Ctrl+V` 复用同一预检和 Paste 命令。
 - Bit Event 菱形无需切换模式即可直接拖动。预览期间模型不变，虚线只覆盖原/新边沿中较早位置
   到后继 Segment 结束的局部范围；释放后以一个命令同步更新 Segment 与 Event。
-- Bus 快捷预设直接作用于当前目标，不再要求从浮层拖放。`Don't care` 使用灰色纹理显示，并在
+- Bus 快捷预设直接作用于当前目标，不再要求从浮层拖放。`Reserved` 写入显式全零波形并保留独立
+  预设语义，画布和操作结果显示 `RESERVED`，不会与普通 `0` 混淆；`Don't care` 使用灰色纹理显示，并在
   Expected/Actual 比较中忽略对应目标区间；普通 `X` 仍是有意义的未知值，不会被自动当作通配。
   自定义值按 Enter 提交并进入每条信号独立的最近值列表；预设值不挤占最近自定义值。整段改值或
   应用预设只替换 Bus 预设语义，保留 Segment 的其他扩展元数据。
-- 波形修改默认为 `Sync`：Bit 拍、Segment 移动/缩放、范围边界和 Bus/Enum 写值以关联时钟的有效
-  边沿为一拍单位；没有可判定关联时钟时使用 10 ns。点击工具栏 `Sync` 切换为 `Async` 后，可把
-  信号边沿放在任意整数 tick，仍保留 7 像素轻吸附；按住 `Alt` 临时绕过吸附。再次点击恢复 Sync。
+- 波形修改默认使用最小拍单位：具有有效关联时钟的 Bit 拍、Segment 移动/缩放、范围边界和
+  Bus/Enum 写值显示 `Sync`，以关联时钟的有效边沿为一拍；未关联时钟时显示 `Grid`，使用 10 ns 固定拍。
+  点击工具栏 Timing 动作切换为 `Async` 后，可把信号边沿放在任意整数 tick，仍保留 7 像素轻吸附；
+  按住 `Alt` 临时绕过吸附。再次点击恢复当前信号的 Sync 或 Grid。
   切换模式会取消尚未释放的波形拖动，不提交半成品。
 - 在非 Bit、非 Clock Segment 主体上普通拖动为移动；按住 `Ctrl` 拖动为复制。复制预览使用虚线并
   标注 `Copy`，原 Segment 保持可见；释放后作为一个可撤销命令提交。复制到完全相同范围不产生
@@ -467,7 +493,7 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
 - `Ctrl` + 鼠标滚轮以指针所在时间为锚缩放，`Shift` + 滚轮水平滚动；中键拖动或按住空格再左键
   拖动可平移时间轴。工具栏 Zoom 以可见编辑光标为锚，`Ctrl+0` 按当前上下文执行
   `Fit selection` 或 `Fit scenario`。
-- `Measure` 是临时状态：左键创建或移动唯一活动光标；直接拖动以起点作为临时参考、终点作为
+- `Measure / Markers` 是临时状态：左键创建或移动唯一活动光标；直接拖动以起点作为临时参考、终点作为
   活动光标，`Shift` + 左键创建临时参考。单击与方向键显示最终 `Cursor`，Shift 与拖动统一显示
   `Reference`、`Cursor` 和带符号的 `Δ`；释放后保留最终测量结果。
 - `Ctrl` + 左键创建持久锁定光标，`Ctrl` + 拖动创建持久锁定区间。锁定对象使用独立颜色并写入
@@ -475,13 +501,14 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   创建、选择、移动和删除后状态栏显示名称与精确时间/区间；真实修改显示 `Ctrl+Z`，时间轴边界
   明确显示未改变且不新增 Undo。删除后再次创建时会跳过仍在使用的同类编号，持久 Marker 名称
   在当前场景内保持唯一。
-- 活动光标存在时，每个可见信号在左侧名称区域显示该时刻的采样值。再次点击 `Measure` 或按
+- 活动光标存在时，每个可见信号在左侧名称区域显示该时刻的采样值。再次点击 `Measure / Markers` 或按
   Esc 返回直接波形编辑，活动、临时和选中状态清除，持久锁定光标保留。进入 Measure 会关闭
   Bus 直接编辑面板，测量 Bus 时也不会重新弹出；波形右键只提示返回直接编辑，不提供写值命令。
   退出时取消尚未释放的平移、空格手势与吸附提示；左键或右键选择信号标题会取消锁定 Marker 选中，
   并把状态栏切换为当前信号及 Delete/F2 的真实目标；取消右键参数菜单后该反馈仍保留。
 - Undo/Redo 位于 Edit 菜单，并保留 `Ctrl+Z` / `Ctrl+Y`；工具栏不重复显示按钮。执行后状态栏
-  显示 `Undid` / `Redid`、具体命令及相反快捷键，明确本次恢复结果和下一步。
+  显示 `Undid` / `Redid`、具体命令及相反快捷键，明确本次恢复结果和下一步。可见、启用且可编辑的
+  文本框持有焦点时，Ctrl+Z/Ctrl+Y 只查询该文本会话；即使字段已无本地历史，也不会泄漏到波形命令栈。
 - 状态栏常驻显示 `Not saved`、`Unsaved changes`、`Saved` 或 `Recovery loaded · Save required`；
   自动恢复快照不会被误报为正式保存。File 菜单使用原子替换方式保存 `project.wave.json`，首次
   保存 Untitled 工程时从文件名推断项目名。Open/Save As 默认显示 `*.wave.json`；Save As 只输入工程名时
@@ -494,6 +521,8 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   无参数启动时自动恢复有效快照，并明确显示 `Recovery loaded · Save required`；此时 Save 仍打开 Save As，要求选择正式工程文件。
   启动或 Open 正式工程时会自动采用有效且更新的快照，较旧或损坏快照不替代正式文件。正式保存成功后清除已完成的快照，
   保存期间仍在途的过期写入完成后也会再次清除；在未保存提示中选择 Discard 同样等待并清除在途快照，下一次打开不会恢复已明确放弃的修改。
+  打开或正式保存后会记录工程文件 SHA-256。再次覆盖同一路径前若磁盘文件已被其他应用修改，就地提供
+  `Reload`、`Save As…`、`Overwrite` 和 `Cancel`；只有用户明确选择 Overwrite 才覆盖外部变更。
 - File > Export 导出 SystemVerilog/SVA/cocotb 和文档图。VCD/CSV 导入、Expected/Actual 对比、报告和
   跨应用桥接由 `wave-compare`、`wave-bridge` 等 CLI 提供，不占用桌面工作区。
 - 特殊 lane 或 group 仍可从 Edit 菜单创建并编辑完整结构属性；空名称、与现有信号或 group 重复的名称、无效位宽、Enum 映射、时钟/分组引用或颜色，
@@ -959,8 +988,9 @@ exports/
   值字段末尾提供载入动作，一次取得当前逐拍值；多信号按画布从上到下使用 `/` 分组。16 拍以内
   展开为便于定位的逐拍文本，较长同值区间自动使用 `value*N` 压缩；载入只改变编辑字段，不改变
   Scenario、Saved 或历史。用户修改任意一项后仍看到原有最终虚线预演，并以一次 Undo 提交。
-  隐式 X、拍内变化、预设扩展元数据、不同拍网格或不能无损往返的值会禁用载入并说明原因，避免
-  把只读查看意外变成显式写入。首次 Esc 仅隐藏载入文本并保留选区，第二次才关闭范围。
+  该轮对隐式 X、拍内变化和预设扩展元数据采取禁用载入的保守策略；后续可用性收敛已改为
+  虚拟基线，未改 token 不实体化或重写，修改 token 才覆盖完整编辑拍。不同拍网格或不能安全表示的值仍禁用
+  载入并说明原因。首次 Esc 仅隐藏载入文本并保留选区，第二次才关闭范围。
 - 第 1001–1010 轮补齐载入文本与画布拍位的直接对应：在当前值文本中移动光标或选中 token，
   画布会自动露出并以青色虚线强调准确的信号和拍，状态栏同时显示 `beat 2 of 4`、物理范围与值。
   多信号 `/` 映射会定位到对应 Lane，`value*N` 则强调完整连续游程并显示起止拍序号。该定位只
@@ -982,13 +1012,13 @@ exports/
   被点击 Lane/拍仍保持为主目标；主目标改为亮色实线框，其他受同一 token 影响的重复拍或共享
   Lane 使用弱化虚线框，状态栏明确主信号、拍号、物理范围和关联数量。Tab/Shift+Tab 按画布
   Lane 与时间顺序在目标间前后移动且不提交、不循环；游程 token 保持原子。Edit 菜单及
-  Ctrl+Z/Ctrl+Y 在活动值字段具有文本历史时只撤销/重做草稿，没有文本历史才操作波形命令栈。
+  Ctrl+Z/Ctrl+Y 在活动值字段中只撤销/重做草稿；即使当前无文本历史，也不穿透到波形命令栈。
   载入当前值后，文本 Undo 会恢复 `loadedExisting` 安全基线，第一次 Esc 也先恢复基线，下一次
   才隐藏；若波形命令栈随后 Undo/Redo，旧载入文本、映射与锚点会立即失效，不能伪装成新模型的
   当前值。token 单击改为释放且未超过拖动阈值后生效，因此未修改载入态可继续直接拖动整个范围；
   修改中草稿的拖动会原位阻断、不隐式提交或丢失文本，释放后也不会残留禁用指针。仅无修饰
   Tab 和 Shift+Tab 导航，Ctrl+Shift+Tab 保留系统原语义。
-- Waveform 工具栏离屏检查确认常驻动作仅有临时 Measure、缩放和 Fit；持久选择期间的批量赋值栏
+- Waveform 工具栏离屏检查确认常驻动作仅有临时 `Measure / Markers`、缩放和 Fit；持久选择期间的批量赋值栏
   固定在工具栏中，960 像素宽度下无裁切且显隐不移动画布。不存在 Edit、Transition、Export 与
   Undo/Redo 按钮，菜单快捷键仍存在。
 - 独立用户旅程从空白工程完成三类信号创建、信号就地重命名、波形编辑、Bus/End 双草稿纠错、
@@ -1028,9 +1058,10 @@ exports/
   状态立即恢复为 `Saved`、窗口星号消失且不再产生关闭保存提示。Redo 离开保存点后重新显示
   `Unsaved changes`。若 Undo 发生在 autosave 正在写入或已经完成之后，过期恢复快照会在后台结果
   返回后或当场删除；新分支不会因与旧分支栈深度相同而被误判为 Saved。
-最近一次验证结果：默认、Qt Creator Debug、Qt Creator Release 三套构建均成功，三套各
-73/73 CTest 通过，执行耗时分别为 40.46 s、37.98 s、36.24 s；核心入口为 53/53，
-百万 transition 窗口查询指标为 20 ms。
+最近完整静默验收：默认、Qt Creator Debug、Qt Creator Release 三套构建均成功，三套各
+76/76 CTest 通过，offscreen 串行执行耗时分别为 41.41 s、38.61 s、37.16 s。高风险定向集合
+覆盖核心命令、文件冲突、信号管理、Wave Edit、完整用户旅程和 CLI 兼容入口，6/6 通过。
+本轮新增的桌面交互、CLI 兼容适配、JSON Schema 和 Portable install 契约均已进入上述全量验收。
 扩展后的 `wave-wave-edit-smoke` 覆盖多标题目标的标尺单击、拖动、Esc 恢复、动态 Paste 落点与
 逐项映射、鼠标定位后真实右键粘贴、显式范围被标尺临时关闭后取消恢复，以及结果范围转标题目标后
 在 40 ns 与 60 ns 连续 Paste、两步 Undo/Redo；新增覆盖兼容目标预览范围与有序 Lane、标尺拖动
@@ -1119,7 +1150,7 @@ Segment 列表阻断及保留草稿的 Beat 恢复入口。
 与 `build/wave-edit-smoke-bit-pattern-no-effect-preflight.png` 已复核拍数不整除时的红色阻断及
 等值模式零历史路径；`build/wave-edit-smoke-bit-pattern-relation-warning.png` 已复核单值模式
 覆盖四拍前的琥珀色最终波形、准确 Relation 描述、端点强调及一次 Undo 恢复。
-全部 GUI 路径使用 offscreen，迭代期间未操作桌面、未打包、未提交、未推送。完整验收记录见
+上述已完成的 GUI 路径使用 offscreen，迭代期间未操作桌面、未打包、未提交、未推送。完整验收记录见
 [PLAN.md](PLAN.md)。
 
 ## 当前限制
@@ -1128,3 +1159,7 @@ Segment 列表阻断及保留草稿的 Beat 恢复入口。
 - SVA 仅在关系可无损表达为无 condition 的精确 bit 边沿、明确 clock/reset 且为精确
   cycle delay 时生成；带 condition 或其他不可无损转换的关系只产生诊断，不生成近似
   assertion。
+- 桌面端可切换已有 Waveform/Scenario，但尚未提供安全的新建、复制、删除或重排生命周期。
+  当前命令历史仍绑定 Scenario 对象地址，在引入稳定身份绑定前不对 Scenario 容器做可使现有历史失效的结构修改。
+- 画布当前仍使用深色主题，浅色背景/主题切换尚未交付。
+- `+ CLK` / `+ BIT` / `+ BUS` 仍位于信号列表末尾；长列表滚动时常驻或粘性添加入口尚未交付。

@@ -6,6 +6,7 @@
 #include "wave/trace.h"
 
 #include <QFutureWatcher>
+#include <QByteArray>
 #include <QMainWindow>
 #include <QPair>
 
@@ -107,6 +108,19 @@ private slots:
     void finishAutosave();
 
 private:
+    struct ProjectFileRevision {
+        enum class State {
+            Missing,
+            Present,
+            Unreadable,
+        };
+
+        State state{State::Missing};
+        QByteArray sha256;
+    };
+
+    [[nodiscard]] static ProjectFileRevision projectFileRevision(
+        const QString& path);
     void createActions();
     void createToolBars();
     void populateScenarioSelector();
@@ -190,8 +204,9 @@ private:
     void openRecentProject(const QString& path);
     void openProjectPath(const QString& path);
     [[nodiscard]] QString projectDialogDirectory() const;
-    bool loadFromPath(const QString& path);
+    bool loadFromPath(const QString& path, bool preferRecovery = true);
     bool writeToPath(const QString& path);
+    void isolateAbandonedRecoverySnapshotsAfterReload();
     bool discardRecoverySnapshots();
     bool confirmDiscardChanges();
     [[nodiscard]] Scenario* activeScenario() noexcept;
@@ -247,6 +262,7 @@ private:
     QProgressBar* traceProgress_{nullptr};
     QLabel* traceSummary_{nullptr};
     QLabel* saveStateLabel_{nullptr};
+    QLabel* pointerStatusLabel_{nullptr};
     QLabel* scenarioSelectorLabel_{nullptr};
     QComboBox* scenarioSelector_{nullptr};
     QAction* scenarioSelectorLabelAction_{nullptr};
@@ -264,6 +280,7 @@ private:
     QAction* moveLaneUpAction_{nullptr};
     QAction* moveLaneDownAction_{nullptr};
     QAction* showHiddenLanesAction_{nullptr};
+    QAction* showRelationsAction_{nullptr};
     QWidget* signalFindWidget_{nullptr};
     QLineEdit* signalFindEdit_{nullptr};
     QLabel* signalFindResultLabel_{nullptr};
@@ -335,6 +352,7 @@ private:
     bool compareModeRequested_{false};
     QString pendingRevealLaneId_;
     std::optional<Tick> pendingRevealTick_;
+    ProjectFileRevision loadedProjectRevision_;
 };
 
 } // namespace wave

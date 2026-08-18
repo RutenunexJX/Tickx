@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/automation/v1/capabilities.schema.json",
+  "title": "Wave Workbench automation capabilities v1",
+  "description": "Machine-readable feature and operation discovery returned by capabilities.",
+  "type": "object",
+  "required": [
+    "schema",
+    "schemaRef",
+    "command",
+    "ok",
+    "cliVersion",
+    "projectSchemaVersion",
+    "reportSchema",
+    "reportSchemaRef",
+    "schemaCatalog",
+    "operationBatch",
+    "commandCount",
+    "commands",
+    "operationCount",
+    "operations"
+  ],
+  "properties": {
+    "schema": { "const": "wave-workbench.capabilities/v1" },
+    "schemaRef": { "const": "schemas/automation/v1/capabilities.schema.json" },
+    "command": { "const": "capabilities" },
+    "ok": { "const": true },
+    "cliVersion": { "type": "integer", "minimum": 1 },
+    "projectSchemaVersion": { "type": "integer", "minimum": 1 },
+    "reportSchema": { "const": "wave-workbench.cli/v1" },
+    "reportSchemaRef": { "const": "schemas/automation/v1/report.schema.json" },
+    "schemaCatalog": {
+      "type": "object",
+      "required": ["version", "dialect", "capabilities", "report", "operationBatch"],
+      "properties": {
+        "version": { "const": 1 },
+        "dialect": { "const": "https://json-schema.org/draft/2020-12/schema" },
+        "capabilities": { "const": "schemas/automation/v1/capabilities.schema.json" },
+        "report": { "const": "schemas/automation/v1/report.schema.json" },
+        "operationBatch": { "const": "schemas/automation/v1/operation-batch.schema.json" }
+      },
+      "additionalProperties": false
+    },
+    "operationBatch": {
+      "type": "object",
+      "required": ["schema", "schemaRef", "atomic"],
+      "properties": {
+        "schema": { "const": "wave-workbench.operations/v1" },
+        "schemaRef": { "const": "schemas/automation/v1/operation-batch.schema.json" },
+        "atomic": { "type": "boolean" },
+        "supportsExpectedProjectId": { "type": "boolean" },
+        "supportsScenarioSelector": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "commandCount": { "type": "integer", "minimum": 0 },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "requiresProject", "canWriteProject"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "requiresProject": { "type": "boolean" },
+          "canWriteProject": { "type": "boolean" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "operationCount": { "type": "integer", "minimum": 0 },
+    "operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/operationCapability" }
+    },
+    "selectors": { "type": "object" },
+    "time": { "type": "object" },
+    "values": { "type": "object" },
+    "features": { "type": "object" },
+    "scenarioDuration": { "type": "object" },
+    "globalOptions": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "fieldNameArray": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "operationCapability": {
+      "type": "object",
+      "required": [
+        "name",
+        "category",
+        "schemaRef",
+        "required",
+        "optional",
+        "idempotent",
+        "dangerous",
+        "mutatesProject"
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "schemaRef": {
+          "type": "string",
+          "pattern": "^schemas/automation/v1/operation-batch\\.schema\\.json#/$defs/[a-z0-9-]+$"
+        },
+        "required": { "$ref": "#/$defs/fieldNameArray" },
+        "optional": { "$ref": "#/$defs/fieldNameArray" },
+        "idempotent": { "type": "boolean" },
+        "dangerous": { "type": "boolean" },
+        "mutatesProject": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

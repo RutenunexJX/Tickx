@@ -123,6 +123,22 @@ struct LaneSequenceStep {
     Tick end{0};
     std::string value;
     JsonExtensions extensions;
+    bool preserveExisting{false};
+
+    LaneSequenceStep() = default;
+    LaneSequenceStep(
+        Tick startValue,
+        Tick endValue,
+        std::string valueValue,
+        JsonExtensions extensionValues = {},
+        bool preserve = false)
+        : start(startValue)
+        , end(endValue)
+        , value(std::move(valueValue))
+        , extensions(std::move(extensionValues))
+        , preserveExisting(preserve)
+    {
+    }
 };
 
 struct LaneSequenceAssignment {

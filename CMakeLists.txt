@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.24)
 
 project(WaveWorkbench VERSION 0.1.0 LANGUAGES CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -165,6 +167,58 @@ target_link_libraries(wave-cli
     PRIVATE waveautomation waveproject Qt6::Core
 )
 wave_enable_warnings(wave-cli)
+
+set(WAVEWORKBENCH_PORTABLE_TARGETS
+    wave-workbench
+    wave-cli
+    wave-generate
+    wave-compare
+    wave-bridge
+)
+
+configure_file(
+    "${CMAKE_SOURCE_DIR}/docs/PACKAGE-README.txt.in"
+    "${CMAKE_BINARY_DIR}/PACKAGE-README.txt"
+    @ONLY
+)
+
+install(
+    TARGETS ${WAVEWORKBENCH_PORTABLE_TARGETS}
+    RUNTIME DESTINATION .
+    COMPONENT Portable
+)
+install(
+    FILES
+        "${CMAKE_SOURCE_DIR}/README.md"
+        "${CMAKE_BINARY_DIR}/PACKAGE-README.txt"
+    DESTINATION .
+    COMPONENT Portable
+)
+install(
+    FILES
+        "${CMAKE_SOURCE_DIR}/docs/automation-cli.md"
+        "${CMAKE_SOURCE_DIR}/docs/cli-quick-start.md"
+        "${CMAKE_SOURCE_DIR}/docs/integration-contracts.md"
+        "${CMAKE_SOURCE_DIR}/docs/project-format.md"
+    DESTINATION docs
+    COMPONENT Portable
+)
+install(
+    FILES
+        "${CMAKE_SOURCE_DIR}/docs/examples/quick-start.operations.json"
+    DESTINATION docs/examples
+    COMPONENT Portable
+)
+install(
+    DIRECTORY "${CMAKE_SOURCE_DIR}/src/waveautomation/schemas/automation/"
+    DESTINATION schemas/automation
+    COMPONENT Portable
+)
+install(
+    DIRECTORY "${CMAKE_SOURCE_DIR}/examples/handshake/"
+    DESTINATION examples/handshake
+    COMPONENT Portable
+)
 
 if(WIN32)
     set_property(TARGET wave-workbench PROPERTY WIN32_EXECUTABLE FALSE)

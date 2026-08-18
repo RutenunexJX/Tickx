@@ -10654,49 +10654,166 @@ AutomationDocument describeAutomationCapabilities()
     struct OperationCapability {
         const char* name;
         const char* category;
+        const char* required;
+        const char* optional;
+        bool idempotent;
+        bool dangerous;
+        bool mutatesProject;
     };
     constexpr std::array operationCapabilities{
-        OperationCapability{"add-group", "group"},
-        OperationCapability{"update-group", "group"},
-        OperationCapability{"move-group", "group"},
-        OperationCapability{"delete-group", "group"},
-        OperationCapability{"add-signal", "signal"},
-        OperationCapability{"duplicate-signal", "signal"},
-        OperationCapability{"rename-lane", "signal"},
-        OperationCapability{"update-signal", "signal"},
-        OperationCapability{"move-signal", "signal"},
-        OperationCapability{"delete-signal", "signal"},
-        OperationCapability{"update-clock", "clock"},
-        OperationCapability{"assert-value", "waveform"},
-        OperationCapability{"set-range", "waveform"},
-        OperationCapability{"set-sequence", "waveform"},
-        OperationCapability{"clear-range", "waveform"},
-        OperationCapability{"transfer-range", "waveform"},
-        OperationCapability{"set-duration", "scenario"},
-        OperationCapability{"repair-event-link", "intent"},
-        OperationCapability{"clear-event-cycle", "intent"},
-        OperationCapability{"repair-event-clock", "intent"},
-        OperationCapability{"repair-relation-clock", "intent"},
-        OperationCapability{"repair-trace-identity", "trace"},
-        OperationCapability{"repair-trace-reference", "trace"},
-        OperationCapability{"repair-trace-mapping", "trace"},
-        OperationCapability{"repair-lane-clock", "signal"},
-        OperationCapability{"repair-lane-group", "signal"},
-        OperationCapability{"delete-event", "intent"},
-        OperationCapability{"add-relation", "intent"},
-        OperationCapability{"update-relation", "intent"},
-        OperationCapability{"delete-relation", "intent"},
-        OperationCapability{"add-marker", "intent"},
-        OperationCapability{"update-marker", "intent"},
-        OperationCapability{"delete-marker", "intent"},
+        OperationCapability{
+            "add-group", "group", "op,name",
+            "id,color,insertionIndex", false, false, true},
+        OperationCapability{
+            "update-group", "group", "op,groupId",
+            "name,color,height,visible", true, false, true},
+        OperationCapability{
+            "move-group", "group", "op,groupId",
+            "destinationIndex,beforeLaneId,afterLaneId", true, false, true},
+        OperationCapability{
+            "delete-group", "group", "op,groupId", "", false, true, true},
+        OperationCapability{
+            "add-signal", "signal", "op,name,kind",
+            "id,width,signed,radix,enumMap,clockDomainId,groupId,color,"
+            "insertionIndex,clockId,periodTick,period,phaseTick,phase,"
+            "dutyNumerator,dutyDenominator,activeEdge",
+            false, false, true},
+        OperationCapability{
+            "duplicate-signal", "signal", "op,laneId",
+            "id,name,color,groupId,insertionIndex,beforeLaneId,afterLaneId,"
+            "newClockId",
+            false, false, true},
+        OperationCapability{
+            "rename-lane", "signal", "op,laneId,name", "", true, false, true},
+        OperationCapability{
+            "update-signal", "signal", "op,laneId",
+            "name,width,signed,radix,enumMap,clockDomainId,color,height,"
+            "visible,groupId",
+            true, false, true},
+        OperationCapability{
+            "move-signal", "signal", "op,laneId",
+            "destinationIndex,beforeLaneId,afterLaneId", true, false, true},
+        OperationCapability{
+            "delete-signal", "signal", "op,laneId", "", false, true, true},
+        OperationCapability{
+            "update-clock", "clock", "op,clockId",
+            "name,periodTick,period,phaseTick,phase,dutyNumerator,"
+            "dutyDenominator,activeEdge,resetRelation",
+            true, false, true},
+        OperationCapability{
+            "assert-value", "waveform", "op,laneId,value",
+            "atTick,at,clockId", true, false, false},
+        OperationCapability{
+            "set-range", "waveform", "op",
+            "laneId,assignments,startTick,start,endTick,end,clockId,value",
+            true, false, true},
+        OperationCapability{
+            "set-sequence", "waveform", "op",
+            "laneId,values,sequences,startTick,start,stepTick,step,"
+            "stepCycles,clockId,repeat",
+            true, false, true},
+        OperationCapability{
+            "clear-range", "waveform", "op",
+            "laneId,laneIds,startTick,start,endTick,end,clockId",
+            true, true, true},
+        OperationCapability{
+            "transfer-range", "waveform", "op,mode",
+            "laneId,laneIds,mappings,sourceStartTick,sourceStart,sourceEndTick,"
+            "sourceEnd,destinationTick,destination,clockId,overwrite",
+            false, true, true},
+        OperationCapability{
+            "set-duration", "scenario", "op",
+            "durationTick,duration,clockId,truncate", true, true, true},
+        OperationCapability{
+            "repair-event-link", "intent", "op,eventId", "",
+            false, false, true},
+        OperationCapability{
+            "clear-event-cycle", "intent", "op,eventId", "",
+            false, false, true},
+        OperationCapability{
+            "repair-event-clock", "intent", "op,eventId", "",
+            false, false, true},
+        OperationCapability{
+            "repair-relation-clock", "intent", "op,relationId", "",
+            false, false, true},
+        OperationCapability{
+            "repair-trace-identity", "trace", "op,traceRef", "newId",
+            false, false, true},
+        OperationCapability{
+            "repair-trace-reference", "trace", "op,traceRef", "path,format",
+            false, false, true},
+        OperationCapability{
+            "repair-trace-mapping", "trace", "op,laneId", "traceId,traceRef",
+            false, false, true},
+        OperationCapability{
+            "repair-lane-clock", "signal", "op,laneId", "",
+            false, false, true},
+        OperationCapability{
+            "repair-lane-group", "signal", "op,laneId", "",
+            false, false, true},
+        OperationCapability{
+            "delete-event", "intent", "op,eventId", "", false, true, true},
+        OperationCapability{
+            "add-relation", "intent", "op,sourceLaneId,targetLaneId",
+            "id,sourceAtTick,sourceAt,targetAtTick,targetAt,minimumDelayTick,"
+            "minimumDelay,minimumDelayCycles,maximumDelayTick,maximumDelay,"
+            "maximumDelayCycles,clockId,condition,severity,description",
+            true, false, true},
+        OperationCapability{
+            "update-relation", "intent", "op",
+            "relationId,relationRef,newId,sourceLaneId,sourceAtTick,sourceAt,"
+            "targetLaneId,targetAtTick,targetAt,minimumDelayTick,minimumDelay,"
+            "minimumDelayCycles,maximumDelayTick,maximumDelay,"
+            "maximumDelayCycles,clockId,condition,severity,description",
+            true, false, true},
+        OperationCapability{
+            "delete-relation", "intent", "op", "relationId,relationRef",
+            false, true, true},
+        OperationCapability{
+            "add-marker", "intent", "op,name",
+            "id,atTick,at,startTick,start,endTick,end,clockId,kind,note",
+            false, false, true},
+        OperationCapability{
+            "update-marker", "intent", "op",
+            "markerId,markerRef,newId,name,atTick,at,startTick,start,endTick,end,"
+            "clockId,kind,note",
+            true, false, true},
+        OperationCapability{
+            "delete-marker", "intent", "op", "markerId,markerRef",
+            false, true, true},
+    };
+    const auto fieldArray = [](const char* csv) {
+        QJsonArray fields;
+        const auto value = QString::fromLatin1(csv);
+        if (value.isEmpty()) return fields;
+        for (const auto& field : value.split(u',')) {
+            fields.append(field);
+        }
+        return fields;
     };
     QJsonArray operations;
     for (const auto& operation : operationCapabilities) {
+        const auto name = QString::fromLatin1(operation.name);
         operations.append(QJsonObject{
-            {QStringLiteral("name"),
-             QString::fromLatin1(operation.name)},
+            {QStringLiteral("name"), name},
             {QStringLiteral("category"),
              QString::fromLatin1(operation.category)},
+            {QStringLiteral("schemaRef"),
+             QStringLiteral("%1#/$defs/%2")
+                 .arg(
+                     QString::fromLatin1(
+                         AutomationBatchJsonSchemaRef),
+                     name)},
+            {QStringLiteral("required"),
+             fieldArray(operation.required)},
+            {QStringLiteral("optional"),
+             fieldArray(operation.optional)},
+            {QStringLiteral("idempotent"),
+             operation.idempotent},
+            {QStringLiteral("dangerous"),
+             operation.dangerous},
+            {QStringLiteral("mutatesProject"),
+             operation.mutatesProject},
         });
     }
 
@@ -10710,6 +10827,9 @@ AutomationDocument describeAutomationCapabilities()
     result.json = {
         {QStringLiteral("schema"),
          QString::fromLatin1(AutomationCapabilitiesSchema)},
+        {QStringLiteral("schemaRef"),
+         QString::fromLatin1(
+             AutomationCapabilitiesJsonSchemaRef)},
         {QStringLiteral("command"), QStringLiteral("capabilities")},
         {QStringLiteral("ok"), true},
         {QStringLiteral("cliVersion"), 1},
@@ -10717,10 +10837,32 @@ AutomationDocument describeAutomationCapabilities()
          Project::CurrentSchemaVersion},
         {QStringLiteral("reportSchema"),
          QString::fromLatin1(AutomationReportSchema)},
+        {QStringLiteral("reportSchemaRef"),
+         QString::fromLatin1(
+             AutomationReportJsonSchemaRef)},
+        {QStringLiteral("schemaCatalog"),
+         QJsonObject{
+             {QStringLiteral("version"), 1},
+             {QStringLiteral("dialect"),
+              QString::fromLatin1(
+                  AutomationJsonSchemaDialect)},
+             {QStringLiteral("capabilities"),
+              QString::fromLatin1(
+                  AutomationCapabilitiesJsonSchemaRef)},
+             {QStringLiteral("report"),
+              QString::fromLatin1(
+                  AutomationReportJsonSchemaRef)},
+             {QStringLiteral("operationBatch"),
+              QString::fromLatin1(
+                  AutomationBatchJsonSchemaRef)},
+         }},
         {QStringLiteral("operationBatch"),
          QJsonObject{
              {QStringLiteral("schema"),
               QString::fromLatin1(AutomationBatchSchema)},
+             {QStringLiteral("schemaRef"),
+              QString::fromLatin1(
+                  AutomationBatchJsonSchemaRef)},
              {QStringLiteral("atomic"), true},
              {QStringLiteral("supportsExpectedProjectId"), true},
              {QStringLiteral("supportsScenarioSelector"), true},

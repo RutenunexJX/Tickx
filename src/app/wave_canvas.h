@@ -64,6 +64,7 @@ public:
     enum class BusEditAction {
         ApplyDraft,
         PresetZero,
+        PresetReserved,
         PresetX,
         PresetZ,
         PresetDontCare,
@@ -205,6 +206,7 @@ public:
     [[nodiscard]] QString editTargetSummary() const;
     [[nodiscard]] QString editTargetToolTip() const;
     [[nodiscard]] QString editTimingSummary() const;
+    [[nodiscard]] bool relationsVisible() const noexcept;
     [[nodiscard]] QString restoreSelectionForHistoryTransition(
         std::uint64_t fromStateId,
         std::uint64_t toStateId);
@@ -259,6 +261,8 @@ public slots:
     void duplicateSelectionAfter();
     void insertPulse();
     void setAsynchronousEditing(bool enabled);
+    void setRelationsVisible(bool visible);
+    void invalidateRangeSequenceHistoryContext();
     bool setExplicitRangeActiveTick(qint64 tick);
 
 signals:
@@ -275,6 +279,7 @@ signals:
     void modelEdited();
     void commandAvailabilityChanged();
     void statusMessage(const QString& message);
+    void pointerStatusMessage(const QString& message);
     void eventSelected(const QString& eventId);
     void quickLaneSetupAccepted(
         const QString& laneId,
@@ -462,6 +467,7 @@ private:
         std::uint64_t historyStateId{0};
         QString text;
         std::vector<RangeSequenceTextSpan> spans;
+        std::vector<std::vector<std::string>> values;
     };
 
     struct RangeSequenceAnchor {
@@ -487,6 +493,7 @@ private:
         QString text;
         QString summary;
         std::vector<RangeSequenceTextSpan> spans;
+        std::vector<std::vector<std::string>> values;
     };
 
     struct RangeRepeatAvailability {
@@ -911,7 +918,7 @@ private:
         const Lane& lane,
         const std::pair<Tick, Tick>& currentRange,
         bool forward) const;
-    void navigateSelectedBeat(bool forward);
+    [[nodiscard]] bool navigateSelectedBeat(bool forward);
     void navigateSelectedSegment(bool forward);
     void navigateTimelinePage(bool forward);
     void clearWaveEditState();
@@ -1018,6 +1025,8 @@ private:
     bool durationEditSubmitting_{false};
     bool durationEditMouseFocusOut_{false};
     bool durationEditBlurConsumesCanvasInput_{false};
+    std::optional<Tick> durationEditPointerRetargetTick_;
+    QPoint durationEditPointerRetargetPressPosition_;
     QFrame* busPresetPalette_{nullptr};
     QLabel* busPresetContextLabel_{nullptr};
     QLineEdit* busValueEdit_{nullptr};
@@ -1029,7 +1038,7 @@ private:
     QToolButton* busClearButton_{nullptr};
     QToolButton* busApplyButton_{nullptr};
     QToolButton* busCloseButton_{nullptr};
-    std::array<QToolButton*, 4> busPresetButtons_{};
+    std::array<QToolButton*, 5> busPresetButtons_{};
     QCompleter* laneValueCompleter_{nullptr};
     QStringListModel* laneValueCompletionModel_{nullptr};
     std::optional<Tick> busPresetAnchorTick_;
@@ -1055,10 +1064,12 @@ private:
     QToolButton* rangeXButton_{nullptr};
     QToolButton* rangeZButton_{nullptr};
     QToolButton* rangeDontCareButton_{nullptr};
+    QToolButton* rangeReservedButton_{nullptr};
     QToolButton* rangeClockGateButton_{nullptr};
     QToolButton* rangeClockDisableButton_{nullptr};
     QToolButton* rangeCloseButton_{nullptr};
     bool rangeEditPaletteVisible_{false};
+    bool relationsVisible_{false};
     bool rangeRepeatPreviewActive_{false};
     std::optional<BitPatternProjection> bitPatternPreview_;
     std::optional<BusRangeSequenceProjection>
