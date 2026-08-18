@@ -96,6 +96,15 @@ target_include_directories(waveintegration
 target_link_libraries(waveintegration PUBLIC wavecore Qt6::Core)
 wave_enable_warnings(waveintegration)
 
+add_library(wavesim STATIC
+    src/wavesim/src/simulation_runner.cpp
+)
+target_include_directories(wavesim
+    PUBLIC src/wavesim/include
+)
+target_link_libraries(wavesim PUBLIC Qt6::Core)
+wave_enable_warnings(wavesim)
+
 add_library(wavegenerate STATIC
     src/wavegenerate/src/generation.cpp
     src/wavegenerate/src/export.cpp
@@ -161,6 +170,12 @@ target_link_libraries(wave-bridge
 )
 wave_enable_warnings(wave-bridge)
 
+add_executable(wave-sim-runner
+    src/cli/simulation_runner_main.cpp
+)
+target_link_libraries(wave-sim-runner PRIVATE wavesim Qt6::Core)
+wave_enable_warnings(wave-sim-runner)
+
 add_executable(wave-cli
     src/cli/wave_cli_main.cpp
     src/cli/scenario_selection.h
@@ -176,6 +191,7 @@ set(WAVEWORKBENCH_PORTABLE_TARGETS
     wave-generate
     wave-compare
     wave-bridge
+    wave-sim-runner
 )
 
 configure_file(
@@ -201,6 +217,7 @@ install(
         "${CMAKE_SOURCE_DIR}/docs/automation-cli.md"
         "${CMAKE_SOURCE_DIR}/docs/cli-quick-start.md"
         "${CMAKE_SOURCE_DIR}/docs/integration-contracts.md"
+        "${CMAKE_SOURCE_DIR}/docs/simulation-runner.md"
         "${CMAKE_SOURCE_DIR}/docs/project-format.md"
     DESTINATION docs
     COMPONENT Portable

@@ -6,6 +6,7 @@
 #include "wave/integration.h"
 #include "wave/model.h"
 #include "wave/project_io.h"
+#include "wave/simulation_runner.h"
 #include "wave/time.h"
 #include "wave/trace.h"
 #include "wave/validation.h"
@@ -14,12 +15,16 @@
 #include <QColor>
 #include <QFile>
 #include <QFileInfo>
+#include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QImage>
 #include <QGuiApplication>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QUrlQuery>
 
 #include <algorithm>
@@ -5915,6 +5920,246 @@ void testZeroSlackStimulusScenarioContract()
     expect(!wave::parseZeroSlackStimulusScenario(
                 QJsonDocument(inconsistentClockRoot).toJson()).ok(),
            "clock initial value inconsistent with period/phase/duty was accepted");
+}
+
+QString toolchainFixturePath(const QString& name)
+{
+    auto executable = name;
+#ifdef Q_OS_WIN
+    executable += QStringLiteral(".exe");
+#endif
+    return QDir(QCoreApplication::applicationDirPath()).filePath(executable);
+}
+
+wave::ProcessRunResult runProcessFixture(
+    wave::ProcessRunRequest request,
+    const std::optional<int> cancelAfterMs = std::nullopt)
+{
+    wave::ProcessRunner runner;
+    QEventLoop loop;
+    QTimer watchdog;
+    watchdog.setSingleShot(true);
+    std::optional<wave::ProcessRunResult> result;
+    bool eventLoopAdvanced = false;
+    QObject::connect(&watchdog, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QTimer::singleShot(0, &loop, [&] { eventLoopAdvanced = true; });
+    const auto started = runner.start(
+        std::move(request),
+        [&](wave::ProcessRunResult completed) {
+            result = std::move(completed);
+            loop.quit();
+        });
+    expect(started, "process fixture could not be started asynchronously");
+    if (cancelAfterMs) {
+        QTimer::singleShot(*cancelAfterMs, &loop, [&runner] {
+            static_cast<void>(runner.cancel());
+        });
+    }
+    watchdog.start(3'000);
+    loop.exec();
+    expect(eventLoopAdvanced, "process runner blocked the Qt event loop");
+    expect(result.has_value(), "process runner did not complete before watchdog");
+    expect(!runner.running(), "completed process runner remained active");
+    return std::move(*result);
+}
+
+wave::ToolchainProbeReport runToolchainFixture(
+    wave::ToolchainProbeOptions options,
+    const std::optional<int> cancelAfterMs = std::nullopt)
+{
+    wave::ToolchainProbeRunner runner;
+    QEventLoop loop;
+    QTimer watchdog;
+    watchdog.setSingleShot(true);
+    std::optional<wave::ToolchainProbeReport> report;
+    bool eventLoopAdvanced = false;
+    QObject::connect(&watchdog, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QTimer::singleShot(0, &loop, [&] { eventLoopAdvanced = true; });
+    const auto started = runner.start(
+        std::move(options),
+        [&](wave::ToolchainProbeReport completed) {
+            report = std::move(completed);
+            loop.quit();
+        });
+    expect(started, "toolchain probe could not be started asynchronously");
+    if (cancelAfterMs) {
+        QTimer::singleShot(*cancelAfterMs, &loop, [&runner] {
+            static_cast<void>(runner.cancel());
+        });
+    }
+    watchdog.start(3'000);
+    loop.exec();
+    expect(eventLoopAdvanced, "toolchain probe blocked the Qt event loop");
+    expect(report.has_value(), "toolchain probe did not complete before watchdog");
+    expect(!runner.running(), "completed toolchain probe remained active");
+    return std::move(*report);
+}
+
+void testAsynchronousProcessRunner()
+{
+    const auto ready = toolchainFixturePath(
+        QStringLiteral("wave-toolchain-fixture-ready"));
+    const auto failure = toolchainFixturePath(
+        QStringLiteral("wave-toolchain-fixture-failure"));
+    const auto hang = toolchainFixturePath(
+        QStringLiteral("wave-toolchain-fixture-hang"));
+    expect(QFileInfo::exists(ready) && QFileInfo::exists(failure)
+               && QFileInfo::exists(hang),
+           "toolchain process fixtures were not built");
+
+    wave::ProcessRunRequest successRequest;
+    successRequest.program = ready;
+    successRequest.timeoutMs = 1'000;
+    const auto success = runProcessFixture(successRequest);
+    expect(success.ok()
+               && success.standardOutput.contains("Verilator 5.028")
+               && success.standardError.contains("fixture-stderr"),
+           "successful process did not preserve stdout and stderr");
+
+    auto truncatedRequest = successRequest;
+    truncatedRequest.maxOutputBytes = 8;
+    const auto truncated = runProcessFixture(truncatedRequest);
+    expect(truncated.ok() && truncated.standardOutput.size() == 8
+               && truncated.standardError.size() == 8
+               && truncated.standardOutputTruncated
+               && truncated.standardErrorTruncated,
+           "bounded process capture did not report truncation");
+
+    wave::ProcessRunRequest missingRequest;
+    missingRequest.program = QDir::temp().filePath(
+        QStringLiteral("wave-definitely-missing-tool"));
+    const auto missing = runProcessFixture(missingRequest);
+    expect(missing.state == wave::ProcessRunState::ProgramNotFound,
+           "missing executable did not produce ProgramNotFound");
+
+    wave::ProcessRunRequest isolatedPathRequest;
+    isolatedPathRequest.program = QFileInfo(ready).fileName();
+    isolatedPathRequest.environment = QProcessEnvironment{};
+    isolatedPathRequest.environment.insert(QStringLiteral("PATH"), QString{});
+    isolatedPathRequest.inheritCurrentProcessPath = false;
+    const auto isolated = runProcessFixture(isolatedPathRequest);
+    expect(isolated.state == wave::ProcessRunState::ProgramNotFound,
+           "explicitly isolated process environment inherited the host PATH");
+
+    wave::ProcessRunRequest failureRequest;
+    failureRequest.program = failure;
+    const auto failed = runProcessFixture(failureRequest);
+    expect(failed.state == wave::ProcessRunState::NonZeroExit
+               && failed.exitCode == 19
+               && failed.standardError.contains("fixture-error-before-failure"),
+           "nonzero process lost exit or stderr evidence");
+
+    wave::ProcessRunRequest timeoutRequest;
+    timeoutRequest.program = hang;
+    timeoutRequest.timeoutMs = 40;
+    const auto timedOut = runProcessFixture(timeoutRequest);
+    expect(timedOut.state == wave::ProcessRunState::TimedOut
+               && timedOut.durationMs < 1'000,
+           "process timeout did not terminate deterministically");
+
+    auto cancelRequest = timeoutRequest;
+    cancelRequest.timeoutMs = 1'000;
+    const auto cancelled = runProcessFixture(cancelRequest, 40);
+    expect(cancelled.state == wave::ProcessRunState::Cancelled
+               && cancelled.durationMs < 1'000,
+           "process cancellation did not terminate deterministically");
+}
+
+void testVerilatorToolchainProbe()
+{
+    const auto ready = toolchainFixturePath(
+        QStringLiteral("wave-toolchain-fixture-ready"));
+    const auto old = toolchainFixturePath(
+        QStringLiteral("wave-toolchain-fixture-old"));
+    const auto failure = toolchainFixturePath(
+        QStringLiteral("wave-toolchain-fixture-failure"));
+    const auto hang = toolchainFixturePath(
+        QStringLiteral("wave-toolchain-fixture-hang"));
+    const auto optionsFor = [](const QString& program, const int timeout = 1'000) {
+        wave::ToolchainProbeOptions options;
+        options.verilatorProgram = program;
+        options.cxxProgram = program;
+        options.timeoutMs = timeout;
+        return options;
+    };
+
+    const auto available = runToolchainFixture(optionsFor(ready));
+    const auto json = wave::toolchainProbeReportJson(available);
+    expect(available.ready()
+               && available.verilator.version
+               && available.verilator.version->major == 5
+               && available.cxxCompiler.compilerFamily
+                   == wave::CxxCompilerFamily::Gcc
+               && available.cxxCompiler.version
+               && available.cxxCompiler.version->major == 13
+               && json.value(QStringLiteral("schema")).toString()
+                   == QString::fromLatin1(wave::ToolchainProbeReportSchema)
+               && json.value(QStringLiteral("tools")).toObject()
+                      .value(QStringLiteral("cxx")).toObject()
+                      .value(QStringLiteral("process")).toObject()
+                      .value(QStringLiteral("stderr")).toString()
+                      .contains(QStringLiteral("fixture-stderr")),
+           "ready toolchain probe lost versions or structured process evidence");
+
+    QTemporaryDir discoveryDirectory;
+    expect(discoveryDirectory.isValid(),
+           "cannot create automatic tool discovery directory");
+#ifdef Q_OS_WIN
+    const auto verilatorAlias = discoveryDirectory.filePath(
+        QStringLiteral("verilator.exe"));
+    const auto compilerAlias = discoveryDirectory.filePath(
+        QStringLiteral("g++.exe"));
+#else
+    const auto verilatorAlias = discoveryDirectory.filePath(
+        QStringLiteral("verilator"));
+    const auto compilerAlias = discoveryDirectory.filePath(
+        QStringLiteral("g++"));
+#endif
+    expect(QFile::copy(ready, verilatorAlias)
+               && QFile::copy(ready, compilerAlias),
+           "cannot create automatic tool discovery aliases");
+    wave::ToolchainProbeOptions discoveryOptions;
+    discoveryOptions.environment.remove(QStringLiteral("VERILATOR"));
+    discoveryOptions.environment.remove(QStringLiteral("VERILATOR_ROOT"));
+    discoveryOptions.environment.remove(QStringLiteral("CXX"));
+    discoveryOptions.environment.insert(
+        QStringLiteral("PATH"),
+        discoveryDirectory.path() + QDir::listSeparator()
+            + discoveryOptions.environment.value(QStringLiteral("PATH")));
+    const auto discovered = runToolchainFixture(discoveryOptions);
+    expect(discovered.ready()
+               && QFileInfo(discovered.verilator.process.resolvedProgram)
+                      .absoluteFilePath() == QFileInfo(verilatorAlias).absoluteFilePath()
+               && QFileInfo(discovered.cxxCompiler.process.resolvedProgram)
+                      .absoluteFilePath() == QFileInfo(compilerAlias).absoluteFilePath(),
+           "PATH discovery did not resolve deterministic tool executables");
+
+    const auto incompatible = runToolchainFixture(optionsFor(old));
+    expect(incompatible.status == wave::ToolchainProbeStatus::Incompatible
+               && incompatible.verilator.status
+                   == wave::ToolProbeStatus::IncompatibleVersion
+               && incompatible.cxxCompiler.status
+                   == wave::ToolProbeStatus::IncompatibleVersion,
+           "old toolchain did not produce incompatible status");
+
+    const auto failed = runToolchainFixture(optionsFor(failure));
+    expect(failed.status == wave::ToolchainProbeStatus::Failed
+               && failed.verilator.process.exitCode == 19,
+           "failed tool invocation did not produce structured failure");
+
+    const auto missing = QDir::temp().filePath(
+        QStringLiteral("wave-definitely-missing-toolchain"));
+    const auto unavailable = runToolchainFixture(optionsFor(missing));
+    expect(unavailable.status == wave::ToolchainProbeStatus::Unavailable
+               && unavailable.verilator.status == wave::ToolProbeStatus::NotFound,
+           "missing toolchain did not produce unavailable status");
+
+    const auto timedOut = runToolchainFixture(optionsFor(hang, 40));
+    expect(timedOut.status == wave::ToolchainProbeStatus::TimedOut,
+           "hanging toolchain did not produce timed-out status");
+    const auto cancelled = runToolchainFixture(optionsFor(hang), 40);
+    expect(cancelled.status == wave::ToolchainProbeStatus::Cancelled,
+           "cancelled toolchain did not produce cancelled status");
 }
 
 void testAutomationContracts()
@@ -17867,6 +18112,8 @@ int main(int argc, char* argv[])
         {"cross-application file and URI contracts", testCrossApplicationContracts},
         {"ZeroSlack Module Manifest import", testZeroSlackModuleManifestImport},
         {"ZeroSlack Stimulus Scenario contract", testZeroSlackStimulusScenarioContract},
+        {"asynchronous process runner", testAsynchronousProcessRunner},
+        {"Verilator toolchain probe", testVerilatorToolchainProbe},
         {"headless automation JSON contracts", testAutomationContracts},
         {"Relation repair reference contracts", testAutomationRelationRepairReferenceContracts},
         {"structural identity validation contracts", testAutomationStructuralIdentityValidationContracts},

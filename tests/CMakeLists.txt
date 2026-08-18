@@ -1,10 +1,28 @@
+function(wave_add_toolchain_fixture target mode)
+    add_executable(${target} process_fixture_main.cpp)
+    target_link_libraries(${target} PRIVATE Qt6::Core)
+    target_compile_definitions(${target}
+        PRIVATE WAVE_TOOLCHAIN_FIXTURE_MODE=${mode})
+    wave_enable_warnings(${target})
+endfunction()
+
+wave_add_toolchain_fixture(wave-toolchain-fixture-ready 1)
+wave_add_toolchain_fixture(wave-toolchain-fixture-old 2)
+wave_add_toolchain_fixture(wave-toolchain-fixture-failure 3)
+wave_add_toolchain_fixture(wave-toolchain-fixture-hang 4)
+
 add_executable(wave-tests
     test_main.cpp
 )
 target_link_libraries(wave-tests
-    PRIVATE wavetime wavecore waveedit waveproject wavevalidate wavegenerate waveimport wavecompare waveintegration waveautomation
+    PRIVATE wavetime wavecore waveedit waveproject wavevalidate wavegenerate waveimport wavecompare waveintegration wavesim waveautomation
             Qt6::Core Qt6::Gui Qt6::Svg
 )
+add_dependencies(wave-tests
+    wave-toolchain-fixture-ready
+    wave-toolchain-fixture-old
+    wave-toolchain-fixture-failure
+    wave-toolchain-fixture-hang)
 wave_enable_warnings(wave-tests)
 target_compile_definitions(wave-tests
     PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
@@ -587,6 +605,17 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/cli_compatibility_dispatch_smoke.cmake"
 )
 add_test(
+    NAME wave-toolchain-probe-contract-smoke
+    COMMAND "${CMAKE_COMMAND}"
+            "-DWAVE_SIM_RUNNER=$<TARGET_FILE:wave-sim-runner>"
+            "-DREADY_FIXTURE=$<TARGET_FILE:wave-toolchain-fixture-ready>"
+            "-DOLD_FIXTURE=$<TARGET_FILE:wave-toolchain-fixture-old>"
+            "-DFAILURE_FIXTURE=$<TARGET_FILE:wave-toolchain-fixture-failure>"
+            "-DHANG_FIXTURE=$<TARGET_FILE:wave-toolchain-fixture-hang>"
+            "-DOUTPUT=${CMAKE_BINARY_DIR}/toolchain-probe-contract"
+            -P "${CMAKE_SOURCE_DIR}/tests/toolchain_probe_cli_smoke.cmake"
+)
+add_test(
     NAME wave-portable-install-contract-smoke
     COMMAND "${CMAKE_COMMAND}"
             "-DBUILD_DIRECTORY=${CMAKE_BINARY_DIR}"
@@ -652,6 +681,7 @@ set_tests_properties(
     wave-cli-trace-reference-repair-contract-smoke
     wave-cli-scenario-selection-contract-smoke
     wave-cli-compatibility-dispatch-smoke
+    wave-toolchain-probe-contract-smoke
     wave-portable-install-contract-smoke
     PROPERTIES
     ENVIRONMENT_MODIFICATION
@@ -696,6 +726,7 @@ set_tests_properties(
     wave-cli-trace-reference-repair-contract-smoke
     wave-cli-scenario-selection-contract-smoke
     wave-cli-compatibility-dispatch-smoke
+    wave-toolchain-probe-contract-smoke
     wave-portable-install-contract-smoke
     PROPERTIES
     ENVIRONMENT "${_wave_test_environment}"

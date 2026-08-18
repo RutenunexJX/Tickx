@@ -12,6 +12,10 @@ Compatibility tools
   wave-cli.exe compare <wave-compare arguments...>
   wave-cli.exe bridge <wave-bridge arguments...>
 
+Experimental simulation toolchain probe
+  wave-sim-runner.exe probe --pretty
+  This command does not compile or elaborate a DUT.
+
 The legacy wave-generate.exe, wave-compare.exe and wave-bridge.exe entry points
 remain installed for existing scripts. The wave-cli compatibility adapters
 forward their arguments, text output and exit codes without translation.
@@ -20,6 +24,7 @@ Documentation
   docs\cli-quick-start.md
   docs\automation-cli.md
   docs\integration-contracts.md
+  docs\simulation-runner.md
   docs\project-format.md
 
 Minimal operation example
