@@ -10,6 +10,8 @@ wave_add_toolchain_fixture(wave-toolchain-fixture-ready 1)
 wave_add_toolchain_fixture(wave-toolchain-fixture-old 2)
 wave_add_toolchain_fixture(wave-toolchain-fixture-failure 3)
 wave_add_toolchain_fixture(wave-toolchain-fixture-hang 4)
+wave_add_toolchain_fixture(wave-verilator-fixture 5)
+wave_add_toolchain_fixture(wave-simulator-fixture 6)
 
 add_executable(wave-tests
     test_main.cpp
@@ -22,11 +24,31 @@ add_dependencies(wave-tests
     wave-toolchain-fixture-ready
     wave-toolchain-fixture-old
     wave-toolchain-fixture-failure
-    wave-toolchain-fixture-hang)
+    wave-toolchain-fixture-hang
+    wave-verilator-fixture
+    wave-simulator-fixture)
 wave_enable_warnings(wave-tests)
 target_compile_definitions(wave-tests
     PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+
+add_executable(wave-fixed-fixture-ui-smoke
+    fixed_fixture_ui_smoke.cpp
+    "${CMAKE_SOURCE_DIR}/src/app/trace_canvas.cpp"
+    "${CMAKE_SOURCE_DIR}/src/app/trace_canvas.h"
+)
+target_include_directories(wave-fixed-fixture-ui-smoke
+    PRIVATE "${CMAKE_SOURCE_DIR}/src/app")
+target_link_libraries(wave-fixed-fixture-ui-smoke
+    PRIVATE wavesim waveintegration waveimport wavecore
+            Qt6::Core Qt6::Gui Qt6::Widgets)
+target_compile_definitions(wave-fixed-fixture-ui-smoke
+    PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_dependencies(wave-fixed-fixture-ui-smoke
+    wave-toolchain-fixture-ready
+    wave-verilator-fixture
+    wave-simulator-fixture)
+wave_enable_warnings(wave-fixed-fixture-ui-smoke)
 
 add_test(NAME wave-core-tests COMMAND wave-tests)
 add_test(NAME wave-app-smoke COMMAND wave-workbench --smoke-test)
@@ -615,6 +637,39 @@ add_test(
             "-DOUTPUT=${CMAKE_BINARY_DIR}/toolchain-probe-contract"
             -P "${CMAKE_SOURCE_DIR}/tests/toolchain_probe_cli_smoke.cmake"
 )
+set(_wave_fixed_fixture_root
+    "${CMAKE_SOURCE_DIR}/tests/fixtures/simulation/fixed-counter")
+add_test(
+    NAME wave-fixed-fixture-cli-smoke
+    COMMAND "${CMAKE_COMMAND}"
+            "-DWAVE_SIM_RUNNER=$<TARGET_FILE:wave-sim-runner>"
+            "-DVERILATOR_FIXTURE=$<TARGET_FILE:wave-verilator-fixture>"
+            "-DCXX_FIXTURE=$<TARGET_FILE:wave-toolchain-fixture-ready>"
+            "-DSIMULATOR_FIXTURE=$<TARGET_FILE:wave-simulator-fixture>"
+            "-DFIXTURE_ROOT=${_wave_fixed_fixture_root}"
+            "-DOUTPUT=${CMAKE_BINARY_DIR}/fixed-fixture-cli"
+            -P "${CMAKE_SOURCE_DIR}/tests/simulation_fixture_cli_smoke.cmake"
+)
+add_test(
+    NAME wave-fixed-fixture-ui-smoke
+    COMMAND wave-fixed-fixture-ui-smoke
+            "${CMAKE_BINARY_DIR}/fixed-fixture-ui.png"
+)
+find_program(WAVE_TEST_VERILATOR_EXECUTABLE NAMES verilator verilator_bin)
+if(WAVE_TEST_VERILATOR_EXECUTABLE)
+    add_test(
+        NAME wave-fixed-fixture-real-verilator
+        COMMAND "${CMAKE_COMMAND}"
+                "-DWAVE_SIM_RUNNER=$<TARGET_FILE:wave-sim-runner>"
+                "-DVERILATOR=${WAVE_TEST_VERILATOR_EXECUTABLE}"
+                "-DCXX=${CMAKE_CXX_COMPILER}"
+                "-DFIXTURE_ROOT=${_wave_fixed_fixture_root}"
+                "-DOUTPUT=${CMAKE_BINARY_DIR}/fixed-fixture-real"
+                -P "${CMAKE_SOURCE_DIR}/tests/simulation_fixture_real_smoke.cmake"
+    )
+else()
+    message(STATUS "Verilator not found; real fixed-fixture CTest is not registered")
+endif()
 add_test(
     NAME wave-portable-install-contract-smoke
     COMMAND "${CMAKE_COMMAND}"
@@ -645,7 +700,7 @@ endif()
 set_tests_properties(
     wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
-    wave-bridge-module-manifest-smoke wave-bridge-pinloom-smoke wave-cli-inspect-smoke wave-cli-validate-smoke
+    wave-bridge-module-manifest-smoke wave-bridge-module-manifest-load-smoke wave-bridge-pinloom-smoke wave-cli-inspect-smoke wave-cli-validate-smoke
     wave-bridge-stimulus-export-smoke wave-bridge-stimulus-import-smoke
     wave-bridge-stimulus-load-smoke wave-bridge-stimulus-validate-smoke
     wave-cli-summary-smoke wave-cli-sample-smoke wave-cli-window-smoke
@@ -690,7 +745,7 @@ set_tests_properties(
 set_tests_properties(
     wave-core-tests wave-app-smoke wave-example-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke
-    wave-bridge-module-manifest-smoke wave-bridge-pinloom-smoke wave-cli-inspect-smoke wave-cli-validate-smoke
+    wave-bridge-module-manifest-smoke wave-bridge-module-manifest-load-smoke wave-bridge-pinloom-smoke wave-cli-inspect-smoke wave-cli-validate-smoke
     wave-bridge-stimulus-export-smoke wave-bridge-stimulus-import-smoke
     wave-bridge-stimulus-load-smoke wave-bridge-stimulus-validate-smoke
     wave-cli-summary-smoke wave-cli-sample-smoke wave-cli-window-smoke
@@ -744,6 +799,18 @@ foreach(_wave_gui_test IN ITEMS
 endforeach()
 set_tests_properties(wave-app-smoke wave-example-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke PROPERTIES
     TIMEOUT 20
+)
+set(_wave_fixed_fixture_tests
+    wave-fixed-fixture-cli-smoke
+    wave-fixed-fixture-ui-smoke)
+if(TEST wave-fixed-fixture-real-verilator)
+    list(APPEND _wave_fixed_fixture_tests wave-fixed-fixture-real-verilator)
+endif()
+set_tests_properties(${_wave_fixed_fixture_tests} PROPERTIES
+    ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+    ENVIRONMENT "${_wave_test_environment}"
+    TIMEOUT 180
 )
 if(WIN32)
     set_tests_properties(

@@ -6,6 +6,7 @@
 #include "wave/integration.h"
 #include "wave/model.h"
 #include "wave/project_io.h"
+#include "wave/simulation_pipeline.h"
 #include "wave/simulation_runner.h"
 #include "wave/time.h"
 #include "wave/trace.h"
@@ -5995,6 +5996,38 @@ wave::ToolchainProbeReport runToolchainFixture(
     return std::move(*report);
 }
 
+wave::SimulationRunReport runSimulationFixture(
+    wave::SimulationRunRequest request,
+    const std::optional<int> cancelAfterMs = std::nullopt)
+{
+    wave::VerilatorSimulationRunner runner;
+    QEventLoop loop;
+    QTimer watchdog;
+    watchdog.setSingleShot(true);
+    std::optional<wave::SimulationRunReport> report;
+    bool eventLoopAdvanced = false;
+    QObject::connect(&watchdog, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QTimer::singleShot(0, &loop, [&] { eventLoopAdvanced = true; });
+    const auto started = runner.start(
+        std::move(request),
+        [&](wave::SimulationRunReport completed) {
+            report = std::move(completed);
+            loop.quit();
+        });
+    expect(started, "fixture simulation could not be started asynchronously");
+    if (cancelAfterMs) {
+        QTimer::singleShot(*cancelAfterMs, &loop, [&runner] {
+            static_cast<void>(runner.cancel());
+        });
+    }
+    watchdog.start(8'000);
+    loop.exec();
+    expect(eventLoopAdvanced, "fixture simulation blocked the Qt event loop");
+    expect(report.has_value(), "fixture simulation did not complete before watchdog");
+    expect(!runner.running(), "completed fixture simulation remained active");
+    return std::move(*report);
+}
+
 void testAsynchronousProcessRunner()
 {
     const auto ready = toolchainFixturePath(
@@ -6160,6 +6193,96 @@ void testVerilatorToolchainProbe()
     const auto cancelled = runToolchainFixture(optionsFor(hang), 40);
     expect(cancelled.status == wave::ToolchainProbeStatus::Cancelled,
            "cancelled toolchain did not produce cancelled status");
+}
+
+void testFixedFixtureSimulationPipeline()
+{
+    const QDir fixtureRoot(
+        QDir(QStringLiteral(WAVE_SOURCE_DIR))
+            .filePath(QStringLiteral("tests/fixtures/simulation/fixed-counter")));
+    const auto manifest = fixtureRoot.filePath(QStringLiteral("manifest.json"));
+    const auto stimulus = fixtureRoot.filePath(QStringLiteral("stimulus.json"));
+    const auto verilator = toolchainFixturePath(
+        QStringLiteral("wave-verilator-fixture"));
+    const auto compiler = toolchainFixturePath(
+        QStringLiteral("wave-toolchain-fixture-ready"));
+    const auto simulator = toolchainFixturePath(
+        QStringLiteral("wave-simulator-fixture"));
+    const auto hangingSimulator = toolchainFixturePath(
+        QStringLiteral("wave-toolchain-fixture-hang"));
+    expect(QFileInfo::exists(manifest) && QFileInfo::exists(stimulus)
+               && QFileInfo::exists(verilator) && QFileInfo::exists(compiler)
+               && QFileInfo::exists(simulator) && QFileInfo::exists(hangingSimulator),
+           "fixed simulation contract or process fixtures are missing");
+
+    const auto requestFor = [&](const QString& artifactDirectory,
+                                const QString& simulatorProgram) {
+        wave::SimulationRunRequest request;
+        request.manifestPath = manifest;
+        request.stimulusPath = stimulus;
+        request.workspaceRoot = fixtureRoot.absolutePath();
+        request.artifactDirectory = artifactDirectory;
+        request.toolchain.verilatorProgram = verilator;
+        request.toolchain.cxxProgram = compiler;
+        request.toolchain.timeoutMs = 1'000;
+        request.toolchain.environment.insert(
+            QStringLiteral("WAVE_SIMULATOR_FIXTURE"), simulatorProgram);
+        request.buildTimeoutMs = 2'000;
+        request.runTimeoutMs = 2'000;
+        return request;
+    };
+
+    QTemporaryDir artifacts;
+    expect(artifacts.isValid(), "cannot create fixed simulation artifact directory");
+    const auto completed = runSimulationFixture(
+        requestFor(artifacts.path(), simulator));
+    const auto json = wave::simulationRunReportJson(completed);
+    expect(completed.ok() && completed.trace
+               && completed.stage == wave::SimulationRunStage::Completed
+               && completed.toolchain && completed.toolchain->ready()
+               && completed.buildProcess && completed.buildProcess->ok()
+               && completed.simulationProcess && completed.simulationProcess->ok()
+               && completed.trace->traceSignals.size() == 4
+               && completed.trace->transitionCount >= 12
+               && QFileInfo(completed.artifacts.harnessPath).isFile()
+               && QFileInfo(completed.artifacts.executablePath).isFile()
+               && QFileInfo(completed.artifacts.vcdPath).isFile()
+               && json.value(QStringLiteral("schema")).toString()
+                   == QString::fromLatin1(wave::SimulationRunReportSchema)
+               && json.value(QStringLiteral("trace")).toObject()
+                      .value(QStringLiteral("signalCount")).toInt() == 4,
+           "fixed fixture did not complete build, run, VCD, and TraceIndex stages");
+    QFile harness(completed.artifacts.harnessPath);
+    expect(harness.open(QIODevice::ReadOnly)
+               && harness.readAll().contains("top->clk_i = drive_clk_i(tick)")
+               && completed.trace->findSignal("TOP.count_o[3:0]") != nullptr,
+           "generated harness or imported fixed trace lost semantic signal evidence");
+
+    QTemporaryDir failedArtifacts;
+    auto failedRequest = requestFor(failedArtifacts.path(), simulator);
+    failedRequest.toolchain.environment.insert(
+        QStringLiteral("WAVE_VERILATOR_FIXTURE_BUILD_FAIL"), QStringLiteral("1"));
+    const auto failed = runSimulationFixture(std::move(failedRequest));
+    expect(failed.status == wave::SimulationRunStatus::BuildFailed
+               && failed.stage == wave::SimulationRunStage::BuildModel
+               && failed.buildProcess
+               && failed.buildProcess->state == wave::ProcessRunState::NonZeroExit,
+           "fixed simulation build failure lost stage or process evidence");
+
+    QTemporaryDir timedOutArtifacts;
+    auto timedOutRequest = requestFor(timedOutArtifacts.path(), hangingSimulator);
+    timedOutRequest.runTimeoutMs = 60;
+    const auto timedOut = runSimulationFixture(std::move(timedOutRequest));
+    expect(timedOut.status == wave::SimulationRunStatus::TimedOut
+               && timedOut.stage == wave::SimulationRunStage::RunModel,
+           "fixed simulation timeout did not terminate at the run stage");
+
+    QTemporaryDir cancelledArtifacts;
+    auto cancelledRequest = requestFor(cancelledArtifacts.path(), hangingSimulator);
+    cancelledRequest.runTimeoutMs = 2'000;
+    const auto cancelled = runSimulationFixture(std::move(cancelledRequest), 120);
+    expect(cancelled.status == wave::SimulationRunStatus::Cancelled,
+           "fixed simulation cancellation did not terminate deterministically");
 }
 
 void testAutomationContracts()
@@ -18114,6 +18237,7 @@ int main(int argc, char* argv[])
         {"ZeroSlack Stimulus Scenario contract", testZeroSlackStimulusScenarioContract},
         {"asynchronous process runner", testAsynchronousProcessRunner},
         {"Verilator toolchain probe", testVerilatorToolchainProbe},
+        {"fixed fixture simulation pipeline", testFixedFixtureSimulationPipeline},
         {"headless automation JSON contracts", testAutomationContracts},
         {"Relation repair reference contracts", testAutomationRelationRepairReferenceContracts},
         {"structural identity validation contracts", testAutomationStructuralIdentityValidationContracts},

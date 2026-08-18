@@ -1,3 +1,4 @@
+#include "wave/simulation_pipeline.h"
 #include "wave/simulation_runner.h"
 
 #include <QCoreApplication>
@@ -15,9 +16,13 @@ void usage(QTextStream& stream)
         << "Wave Workbench simulation runner (experimental)\n"
            "Usage:\n"
            "  wave-sim-runner probe [--verilator=PATH] [--cxx=PATH] "
-           "[--timeout-ms=N] [--cancel-after-ms=N] [--pretty]\n\n"
-           "The probe is asynchronous and does not compile or elaborate a DUT.\n"
-           "Exit codes: 0 ready, 2 usage, 3 unavailable, 4 incompatible, "
+           "[--timeout-ms=N] [--cancel-after-ms=N] [--pretty]\n"
+           "  wave-sim-runner run-fixture --manifest=FILE --stimulus=FILE "
+           "--workspace=DIR --artifacts=DIR [--verilator=PATH] [--cxx=PATH] "
+           "[--probe-timeout-ms=N] [--build-timeout-ms=N] "
+           "[--run-timeout-ms=N] [--cancel-after-ms=N] [--pretty]\n\n"
+           "run-fixture is an experimental fixed-contract path; it is not a GUI entry.\n"
+           "Exit codes: 0 success, 2 usage, 3 unavailable, 4 invalid contract, "
            "5 failed, 6 timed out, 7 cancelled.\n";
 }
 
@@ -29,6 +34,15 @@ std::optional<int> positiveInteger(
     bool valid = false;
     const auto value = argument.mid(prefix.size()).toInt(&valid);
     return valid && value > 0 ? std::optional<int>{value} : std::nullopt;
+}
+
+std::optional<QString> nonEmptyValue(
+    const QString& argument,
+    const QString& prefix)
+{
+    if (!argument.startsWith(prefix)) return std::nullopt;
+    const auto value = argument.mid(prefix.size());
+    return value.isEmpty() ? std::nullopt : std::optional<QString>{value};
 }
 
 int exitCode(const wave::ToolchainProbeStatus status)
@@ -44,25 +58,30 @@ int exitCode(const wave::ToolchainProbeStatus status)
     return 5;
 }
 
-} // namespace
-
-int main(int argc, char* argv[])
+int exitCode(const wave::SimulationRunStatus status)
 {
-    QCoreApplication application(argc, argv);
-    const auto arguments = application.arguments();
-    if (arguments.size() == 2
-        && (arguments[1] == QStringLiteral("--help")
-            || arguments[1] == QStringLiteral("-h"))) {
-        QTextStream output(stdout);
-        usage(output);
-        return 0;
+    switch (status) {
+    case wave::SimulationRunStatus::Succeeded: return 0;
+    case wave::SimulationRunStatus::InvalidRequest:
+    case wave::SimulationRunStatus::InvalidManifest:
+    case wave::SimulationRunStatus::InvalidStimulus:
+    case wave::SimulationRunStatus::ContractMismatch:
+    case wave::SimulationRunStatus::UnsupportedFixture:
+        return 4;
+    case wave::SimulationRunStatus::ToolchainUnavailable: return 3;
+    case wave::SimulationRunStatus::TimedOut: return 6;
+    case wave::SimulationRunStatus::Cancelled: return 7;
+    case wave::SimulationRunStatus::HarnessGenerationFailed:
+    case wave::SimulationRunStatus::BuildFailed:
+    case wave::SimulationRunStatus::RunFailed:
+    case wave::SimulationRunStatus::TraceImportFailed:
+        return 5;
     }
-    if (arguments.size() < 2 || arguments[1] != QStringLiteral("probe")) {
-        QTextStream error(stderr);
-        usage(error);
-        return 2;
-    }
+    return 5;
+}
 
+int runProbe(QCoreApplication& application, const QStringList& arguments)
+{
     wave::ToolchainProbeOptions options;
     bool pretty = false;
     std::optional<int> cancelAfterMs;
@@ -72,30 +91,22 @@ int main(int argc, char* argv[])
             pretty = true;
             continue;
         }
-        if (argument.startsWith(QStringLiteral("--verilator="))) {
-            options.verilatorProgram = argument.mid(
-                QStringLiteral("--verilator=").size());
-            if (!options.verilatorProgram.isEmpty()) continue;
+        if (const auto value = nonEmptyValue(argument, QStringLiteral("--verilator="))) {
+            options.verilatorProgram = *value;
+            continue;
         }
-        if (argument.startsWith(QStringLiteral("--cxx="))) {
-            options.cxxProgram = argument.mid(QStringLiteral("--cxx=").size());
-            if (!options.cxxProgram.isEmpty()) continue;
+        if (const auto value = nonEmptyValue(argument, QStringLiteral("--cxx="))) {
+            options.cxxProgram = *value;
+            continue;
         }
-        if (argument.startsWith(QStringLiteral("--timeout-ms="))) {
-            const auto parsed = positiveInteger(
-                argument, QStringLiteral("--timeout-ms="));
-            if (parsed) {
-                options.timeoutMs = *parsed;
-                continue;
-            }
+        if (const auto value = positiveInteger(argument, QStringLiteral("--timeout-ms="))) {
+            options.timeoutMs = *value;
+            continue;
         }
-        if (argument.startsWith(QStringLiteral("--cancel-after-ms="))) {
-            const auto parsed = positiveInteger(
-                argument, QStringLiteral("--cancel-after-ms="));
-            if (parsed) {
-                cancelAfterMs = *parsed;
-                continue;
-            }
+        if (const auto value = positiveInteger(
+                argument, QStringLiteral("--cancel-after-ms="))) {
+            cancelAfterMs = *value;
+            continue;
         }
         QTextStream error(stderr);
         error << "Invalid probe option: " << argument << '\n';
@@ -109,15 +120,13 @@ int main(int argc, char* argv[])
         [&](wave::ToolchainProbeReport report) {
             QTextStream output(stdout);
             output << QJsonDocument(wave::toolchainProbeReportJson(report))
-                          .toJson(
-                              pretty ? QJsonDocument::Indented
-                                     : QJsonDocument::Compact);
+                          .toJson(pretty ? QJsonDocument::Indented
+                                         : QJsonDocument::Compact);
             output.flush();
             application.exit(exitCode(report.status));
         });
     if (!started) {
-        QTextStream error(stderr);
-        error << "The toolchain probe could not be started.\n";
+        QTextStream(stderr) << "The toolchain probe could not be started.\n";
         return 5;
     }
     if (cancelAfterMs) {
@@ -126,4 +135,124 @@ int main(int argc, char* argv[])
         });
     }
     return application.exec();
+}
+
+int runFixture(QCoreApplication& application, const QStringList& arguments)
+{
+    wave::SimulationRunRequest request;
+    bool pretty = false;
+    std::optional<int> cancelAfterMs;
+    for (qsizetype index = 2; index < arguments.size(); ++index) {
+        const auto& argument = arguments[index];
+        if (argument == QStringLiteral("--pretty")) {
+            pretty = true;
+            continue;
+        }
+        if (const auto value = nonEmptyValue(argument, QStringLiteral("--manifest="))) {
+            request.manifestPath = *value;
+            continue;
+        }
+        if (const auto value = nonEmptyValue(argument, QStringLiteral("--stimulus="))) {
+            request.stimulusPath = *value;
+            continue;
+        }
+        if (const auto value = nonEmptyValue(argument, QStringLiteral("--workspace="))) {
+            request.workspaceRoot = *value;
+            continue;
+        }
+        if (const auto value = nonEmptyValue(argument, QStringLiteral("--artifacts="))) {
+            request.artifactDirectory = *value;
+            continue;
+        }
+        if (const auto value = nonEmptyValue(argument, QStringLiteral("--verilator="))) {
+            request.toolchain.verilatorProgram = *value;
+            continue;
+        }
+        if (const auto value = nonEmptyValue(argument, QStringLiteral("--cxx="))) {
+            request.toolchain.cxxProgram = *value;
+            continue;
+        }
+        if (const auto value = positiveInteger(
+                argument, QStringLiteral("--probe-timeout-ms="))) {
+            request.toolchain.timeoutMs = *value;
+            continue;
+        }
+        if (const auto value = positiveInteger(
+                argument, QStringLiteral("--build-timeout-ms="))) {
+            request.buildTimeoutMs = *value;
+            continue;
+        }
+        if (const auto value = positiveInteger(
+                argument, QStringLiteral("--run-timeout-ms="))) {
+            request.runTimeoutMs = *value;
+            continue;
+        }
+        if (const auto value = positiveInteger(
+                argument, QStringLiteral("--cancel-after-ms="))) {
+            cancelAfterMs = *value;
+            continue;
+        }
+        QTextStream error(stderr);
+        error << "Invalid run-fixture option: " << argument << '\n';
+        usage(error);
+        return 2;
+    }
+    if (request.manifestPath.isEmpty() || request.stimulusPath.isEmpty()
+        || request.workspaceRoot.isEmpty() || request.artifactDirectory.isEmpty()) {
+        QTextStream error(stderr);
+        error << "run-fixture requires manifest, stimulus, workspace, and artifacts.\n";
+        usage(error);
+        return 2;
+    }
+
+    wave::VerilatorSimulationRunner runner;
+    const auto started = runner.start(
+        std::move(request),
+        [&](wave::SimulationRunReport report) {
+            QTextStream output(stdout);
+            output << QJsonDocument(wave::simulationRunReportJson(report))
+                          .toJson(pretty ? QJsonDocument::Indented
+                                         : QJsonDocument::Compact);
+            output.flush();
+            application.exit(exitCode(report.status));
+        });
+    if (!started) {
+        QTextStream(stderr) << "The fixture simulation could not be started.\n";
+        return 5;
+    }
+    if (cancelAfterMs) {
+        QTimer::singleShot(*cancelAfterMs, &application, [&runner] {
+            static_cast<void>(runner.cancel());
+        });
+    }
+    return application.exec();
+}
+
+} // namespace
+
+int main(int argc, char* argv[])
+{
+    QCoreApplication application(argc, argv);
+    const auto arguments = application.arguments();
+    if (arguments.size() == 2
+        && (arguments[1] == QStringLiteral("--help")
+            || arguments[1] == QStringLiteral("-h"))) {
+        QTextStream output(stdout);
+        usage(output);
+        return 0;
+    }
+    if (arguments.size() < 2) {
+        QTextStream error(stderr);
+        usage(error);
+        return 2;
+    }
+    if (arguments[1] == QStringLiteral("probe")) {
+        return runProbe(application, arguments);
+    }
+    if (arguments[1] == QStringLiteral("run-fixture")) {
+        return runFixture(application, arguments);
+    }
+    QTextStream error(stderr);
+    usage(error);
+    return 2;
 }

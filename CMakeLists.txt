@@ -98,11 +98,12 @@ wave_enable_warnings(waveintegration)
 
 add_library(wavesim STATIC
     src/wavesim/src/simulation_runner.cpp
+    src/wavesim/src/simulation_pipeline.cpp
 )
 target_include_directories(wavesim
     PUBLIC src/wavesim/include
 )
-target_link_libraries(wavesim PUBLIC Qt6::Core)
+target_link_libraries(wavesim PUBLIC waveintegration waveimport Qt6::Core)
 wave_enable_warnings(wavesim)
 
 add_library(wavegenerate STATIC

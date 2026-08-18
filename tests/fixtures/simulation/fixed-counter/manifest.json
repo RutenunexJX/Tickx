@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "workspaceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "target": {
+    "mode": "module-definition",
+    "module": "wave_fixed_counter",
+    "instancePath": "",
+    "sourceFile": "rtl/wave_fixed_counter.sv",
+    "sourceLine": 3
+  },
+  "sources": [
+    {"path": "rtl/wave_fixed_counter.sv", "role": "design"}
+  ],
+  "includeDirs": [],
+  "defines": {},
+  "parameters": {},
+  "ports": [
+    {
+      "name": "clk_i",
+      "direction": "input",
+      "declarationText": "input logic clk_i",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic", "canonicalTypeId": "logic:1",
+        "declarationShapeId": "logic", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 1,
+        "packedDimensions": "", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/wave_fixed_counter.sv",
+      "sourceLine": 4
+    },
+    {
+      "name": "rst_i",
+      "direction": "input",
+      "declarationText": "input logic rst_i",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic", "canonicalTypeId": "logic:1",
+        "declarationShapeId": "logic", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 1,
+        "packedDimensions": "", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/wave_fixed_counter.sv",
+      "sourceLine": 5
+    },
+    {
+      "name": "count_o",
+      "direction": "output",
+      "declarationText": "output logic [3:0] count_o",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic [3:0]", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic [3:0]", "canonicalTypeId": "logic:4",
+        "declarationShapeId": "logic[3:0]", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 4,
+        "packedDimensions": "[3:0]", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/wave_fixed_counter.sv",
+      "sourceLine": 6
+    },
+    {
+      "name": "pulse_o",
+      "direction": "output",
+      "declarationText": "output logic pulse_o",
+      "type": {
+        "semanticAvailable": true, "rawTypeText": "logic", "resolvedTypeName": "logic",
+        "semanticKind": "integral", "resolvedTypeText": "logic", "canonicalTypeId": "logic:1",
+        "declarationShapeId": "logic", "fixedSize": true, "integral": true, "signed": false,
+        "unpackedArray": false, "interfaceType": false, "bitWidth": 1,
+        "packedDimensions": "", "unpackedDimensions": "", "unpackedElementCount": "",
+        "interfaceName": "", "modportName": "", "typedefChain": [], "failureReason": "",
+        "enumValues": [], "structMembers": []
+      },
+      "sourceFile": "rtl/wave_fixed_counter.sv",
+      "sourceLine": 7
+    }
+  ],
+  "clockCandidates": ["clk_i"],
+  "resetCandidates": ["rst_i"]
+}

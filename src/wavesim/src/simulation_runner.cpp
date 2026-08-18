@@ -86,6 +86,40 @@ QString resolvedExecutable(
     return {};
 }
 
+QProcessEnvironment effectiveProcessEnvironment(
+    QProcessEnvironment environment,
+    const bool inheritCurrentProcessPath)
+{
+    if (!inheritCurrentProcessPath) return environment;
+    QStringList pathValues;
+    const auto keys = environment.keys();
+    for (const auto& key : keys) {
+        if (key.compare(QStringLiteral("PATH"), Qt::CaseInsensitive) != 0) {
+            continue;
+        }
+        const auto value = environment.value(key);
+        if (!value.isEmpty() && !pathValues.contains(value)) {
+            pathValues.append(value);
+        }
+        environment.remove(key);
+    }
+    const auto livePath = qEnvironmentVariable("PATH");
+    if (!livePath.isEmpty() && !pathValues.contains(livePath)) {
+        pathValues.append(livePath);
+    }
+    QStringList entries;
+    for (const auto& value : pathValues) {
+        entries.append(value.split(QDir::listSeparator(), Qt::SkipEmptyParts));
+    }
+    entries.removeDuplicates();
+    if (!entries.isEmpty()) {
+        environment.insert(
+            QStringLiteral("PATH"),
+            entries.join(QDir::listSeparator()));
+    }
+    return environment;
+}
+
 void appendOutput(
     QByteArray& target,
     const QByteArray& chunk,
@@ -552,11 +586,14 @@ struct ProcessRunner::Impl {
         terminalOverride.reset();
         active = true;
         elapsed.start();
+        const auto environment = effectiveProcessEnvironment(
+            request.environment,
+            request.inheritCurrentProcessPath);
         result.resolvedProgram = resolvedExecutable(
             request.program,
             request.workingDirectory,
-            request.environment,
-            request.inheritCurrentProcessPath);
+            environment,
+            false);
         if (result.resolvedProgram.isEmpty()) {
             QTimer::singleShot(0, &process, [&] {
                 if (!active) return;
@@ -575,7 +612,7 @@ struct ProcessRunner::Impl {
         process.setProgram(result.resolvedProgram);
         process.setArguments(request.arguments);
         process.setWorkingDirectory(request.workingDirectory);
-        process.setProcessEnvironment(request.environment);
+        process.setProcessEnvironment(environment);
         process.setProcessChannelMode(QProcess::SeparateChannels);
         timeout.start(request.timeoutMs);
         process.start();

@@ -1,0 +1,133 @@
+{
+    "identity": "sha256:4d8a796a5aa1f8259fae479d427cbb08a409b6290ab1fc0be5e8475feb0786f4",
+    "manifestIdentity": "sha256:fea7f1a07bf903105f317ef38f93ef1d959c8a84ccb0295b0a72b4d96f6816c4",
+    "manifestSchemaVersion": 1,
+    "scenario": {
+        "durationTicks": "200000",
+        "groups": [
+        ],
+        "id": "zs-scenario-6bc16202700c604d8641d549",
+        "name": "wave_fixed_counter",
+        "ports": [
+            {
+                "binding": {
+                    "canonicalTypeId": "logic:1",
+                    "declarationShapeId": "logic",
+                    "direction": "input",
+                    "name": "clk_i",
+                    "signed": false,
+                    "sourceOrder": 0,
+                    "width": 1
+                },
+                "clock": {
+                    "activeEdge": "rising",
+                    "dutyDenominator": "2",
+                    "dutyNumerator": "1",
+                    "initialValue": "1",
+                    "periodTicks": "10000",
+                    "phaseTicks": "0"
+                },
+                "displayOrder": 0,
+                "enumMap": {
+                },
+                "groupId": "",
+                "kind": "clock",
+                "laneId": "zs-port-b7d8b15d9fc65a967867c75f",
+                "radix": "hexadecimal",
+                "reset": null,
+                "role": "stimulus",
+                "segments": [
+                ],
+                "visible": true
+            },
+            {
+                "binding": {
+                    "canonicalTypeId": "logic:1",
+                    "declarationShapeId": "logic",
+                    "direction": "input",
+                    "name": "rst_i",
+                    "signed": false,
+                    "sourceOrder": 1,
+                    "width": 1
+                },
+                "clock": null,
+                "displayOrder": 1,
+                "enumMap": {
+                },
+                "groupId": "",
+                "kind": "bit",
+                "laneId": "zs-port-244cb8d14af1fc1ca6ec78e0",
+                "radix": "hexadecimal",
+                "reset": {
+                    "activeLevel": "unspecified",
+                    "synchronization": "unspecified"
+                },
+                "role": "stimulus",
+                "segments": [
+                    {
+                        "endTick": "200000",
+                        "startTick": "0",
+                        "value": "0"
+                    }
+                ],
+                "visible": true
+            },
+            {
+                "binding": {
+                    "canonicalTypeId": "logic:4",
+                    "declarationShapeId": "logic[3:0]",
+                    "direction": "output",
+                    "name": "count_o",
+                    "signed": false,
+                    "sourceOrder": 2,
+                    "width": 4
+                },
+                "clock": null,
+                "displayOrder": 2,
+                "enumMap": {
+                },
+                "groupId": "",
+                "kind": "bus",
+                "laneId": "zs-port-1994c7548e7915c6f9f82a4e",
+                "radix": "hexadecimal",
+                "reset": null,
+                "role": "watch",
+                "segments": [
+                ],
+                "visible": true
+            },
+            {
+                "binding": {
+                    "canonicalTypeId": "logic:1",
+                    "declarationShapeId": "logic",
+                    "direction": "output",
+                    "name": "pulse_o",
+                    "signed": false,
+                    "sourceOrder": 3,
+                    "width": 1
+                },
+                "clock": null,
+                "displayOrder": 3,
+                "enumMap": {
+                },
+                "groupId": "",
+                "kind": "bit",
+                "laneId": "zs-port-7f1d3ed7875b4d164634596a",
+                "radix": "hexadecimal",
+                "reset": null,
+                "role": "watch",
+                "segments": [
+                ],
+                "visible": true
+            }
+        ],
+        "timeBasePicosecondsPerTick": "1"
+    },
+    "schemaVersion": 1,
+    "target": {
+        "instancePath": "",
+        "mode": "module-definition",
+        "module": "wave_fixed_counter"
+    },
+    "workspaceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+}

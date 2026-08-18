@@ -12,9 +12,11 @@ Compatibility tools
   wave-cli.exe compare <wave-compare arguments...>
   wave-cli.exe bridge <wave-bridge arguments...>
 
-Experimental simulation toolchain probe
+Experimental simulation runner
+  wave-sim-runner.exe --help
   wave-sim-runner.exe probe --pretty
-  This command does not compile or elaborate a DUT.
+  The fixed-fixture path consumes Module Manifest and Stimulus Scenario
+  contracts. It is not connected to the desktop UI yet.
 
 The legacy wave-generate.exe, wave-compare.exe and wave-bridge.exe entry points
 remain installed for existing scripts. The wave-cli compatibility adapters

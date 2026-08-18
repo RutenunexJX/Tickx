@@ -1,4 +1,8 @@
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
 #include <QTextStream>
 #include <QTimer>
 
@@ -36,6 +40,89 @@ int main(int argc, char* argv[])
     error.flush();
     QTimer::singleShot(60'000, &application, &QCoreApplication::quit);
     return application.exec();
+#elif WAVE_TOOLCHAIN_FIXTURE_MODE == 5
+    const auto arguments = application.arguments();
+    if (arguments.contains(QStringLiteral("--version"))) {
+        output << "Verilator 5.028 2024-08-21 rev simulation-fixture\n";
+        output.flush();
+        return 0;
+    }
+    if (qEnvironmentVariable("WAVE_VERILATOR_FIXTURE_BUILD_FAIL") == QStringLiteral("1")) {
+        error << "fixture Verilator build failure\n";
+        error.flush();
+        return 23;
+    }
+    QString objectDirectory;
+    QString executableName;
+    for (qsizetype index = 0; index + 1 < arguments.size(); ++index) {
+        if (arguments[index] == QStringLiteral("--Mdir")) {
+            objectDirectory = arguments[index + 1];
+        } else if (arguments[index] == QStringLiteral("-o")) {
+            executableName = arguments[index + 1];
+        }
+    }
+    const auto simulatorFixture = qEnvironmentVariable("WAVE_SIMULATOR_FIXTURE");
+    if (objectDirectory.isEmpty() || executableName.isEmpty()
+        || !QFileInfo(simulatorFixture).isFile()
+        || !QDir().mkpath(objectDirectory)) {
+        error << "fixture Verilator received an invalid build contract\n";
+        error.flush();
+        return 24;
+    }
+    const auto destination = QDir(objectDirectory).filePath(executableName);
+    QFile::remove(destination);
+    if (!QFile::copy(simulatorFixture, destination)) {
+        error << "fixture Verilator could not create simulator executable\n";
+        error.flush();
+        return 25;
+    }
+    QFile destinationFile(destination);
+    destinationFile.setPermissions(
+        QFileInfo(simulatorFixture).permissions()
+        | QFileDevice::ExeOwner | QFileDevice::ExeGroup | QFileDevice::ExeOther);
+    output << "fixture Verilator built " << destination << '\n';
+    output.flush();
+    return 0;
+#elif WAVE_TOOLCHAIN_FIXTURE_MODE == 6
+    QString vcdPath;
+    for (const auto& argument : application.arguments()) {
+        if (argument.startsWith(QStringLiteral("--vcd="))) {
+            vcdPath = argument.mid(QStringLiteral("--vcd=").size());
+        }
+    }
+    QSaveFile vcd(vcdPath);
+    if (vcdPath.isEmpty() || !vcd.open(QIODevice::WriteOnly)) {
+        error << "fixture simulator did not receive a writable VCD path\n";
+        error.flush();
+        return 26;
+    }
+    static constexpr char document[] =
+        "$date fixed fixture $end\n"
+        "$version Wave Workbench fixture $end\n"
+        "$timescale 1ps $end\n"
+        "$scope module TOP $end\n"
+        "$var wire 1 ! clk_i $end\n"
+        "$var wire 1 \" rst_i $end\n"
+        "$var wire 4 # count_o [3:0] $end\n"
+        "$var wire 1 $ pulse_o $end\n"
+        "$upscope $end\n"
+        "$enddefinitions $end\n"
+        "#0\n1!\n0\"\nb0001 #\n1$\n"
+        "#5000\n0!\n"
+        "#10000\n1!\nb0010 #\n0$\n"
+        "#15000\n0!\n"
+        "#20000\n1!\nb0011 #\n1$\n"
+        "#25000\n0!\n"
+        "#30000\n1!\nb0100 #\n0$\n";
+    if (vcd.write(document) != static_cast<qint64>(sizeof(document) - 1)
+        || !vcd.commit()) {
+        error << "fixture simulator could not commit VCD\n";
+        error.flush();
+        return 27;
+    }
+    output << "fixture simulator wrote " << vcdPath << '\n';
+    output.flush();
+    return 0;
 #else
 #error Unsupported WAVE_TOOLCHAIN_FIXTURE_MODE
 #endif
