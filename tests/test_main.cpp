@@ -14,6 +14,7 @@
 #include "wave/simulation_runner.h"
 #include "wave/simulation_scenario_store.h"
 #include "wave/simulation_session.h"
+#include "wave/simulation_source_navigation.h"
 #include "wave/time.h"
 #include "wave/trace.h"
 #include "wave/trace_hierarchy.h"
@@ -6277,6 +6278,120 @@ void testZeroSlackStructuredModuleManifestImport()
                       .instances.front().portAssociations.at(1).name
                    == "data_i",
            "Module Manifest v4 unresolved dependency facts were not preserved");
+
+    auto sourceNavigationRoot = root;
+    sourceNavigationRoot.insert(QStringLiteral("schemaVersion"), 5);
+    auto sourceNavigationPorts =
+        sourceNavigationRoot.value(QStringLiteral("ports")).toArray();
+    for (qsizetype index = 0; index < sourceNavigationPorts.size(); ++index) {
+        auto port = sourceNavigationPorts.at(index).toObject();
+        const auto name = port.value(QStringLiteral("name")).toString();
+        const auto sourceFile = port.value(QStringLiteral("sourceFile")).toString();
+        const int sourceLine = port.value(QStringLiteral("sourceLine")).toInt();
+        const auto semanticId = QStringLiteral("sha256:")
+            + QString(64, QChar::fromLatin1(
+                static_cast<char>('a' + (index % 6))));
+        port.insert(QStringLiteral("semanticId"), semanticId);
+        port.insert(QStringLiteral("sourceColumn"), 5);
+        QJsonArray links{
+            QJsonObject{
+                {QStringLiteral("kind"), QStringLiteral("declaration")},
+                {QStringLiteral("sourceFile"), sourceFile},
+                {QStringLiteral("sourceLine"), sourceLine},
+                {QStringLiteral("sourceColumn"), 5},
+                {QStringLiteral("label"), QStringLiteral("Declaration")},
+            },
+        };
+        if (name == QStringLiteral("data_o")) {
+            links.append(QJsonObject{
+                {QStringLiteral("kind"), QStringLiteral("driver")},
+                {QStringLiteral("sourceFile"), sourceFile},
+                {QStringLiteral("sourceLine"), 30},
+                {QStringLiteral("sourceColumn"), 9},
+                {QStringLiteral("label"), QStringLiteral("data_o assignment")},
+            });
+        }
+        port.insert(QStringLiteral("sourceLinks"), links);
+        sourceNavigationPorts[index] = port;
+    }
+    sourceNavigationRoot.insert(
+        QStringLiteral("ports"), sourceNavigationPorts);
+    const auto parsedV5 = wave::parseZeroSlackModuleManifest(
+        QJsonDocument(sourceNavigationRoot).toJson());
+    expect(parsedV5.ok(), parsedV5.error.toStdString());
+    auto mismatchedSourceRoot = sourceNavigationRoot;
+    auto mismatchedPorts = mismatchedSourceRoot
+        .value(QStringLiteral("ports"))
+        .toArray();
+    auto mismatchedPort = mismatchedPorts.first().toObject();
+    auto mismatchedLinks = mismatchedPort
+        .value(QStringLiteral("sourceLinks"))
+        .toArray();
+    auto mismatchedDeclaration = mismatchedLinks.first().toObject();
+    mismatchedDeclaration.insert(
+        QStringLiteral("sourceLine"),
+        mismatchedDeclaration.value(QStringLiteral("sourceLine")).toInt() + 1);
+    mismatchedLinks[0] = mismatchedDeclaration;
+    mismatchedPort.insert(QStringLiteral("sourceLinks"), mismatchedLinks);
+    mismatchedPorts[0] = mismatchedPort;
+    mismatchedSourceRoot.insert(QStringLiteral("ports"), mismatchedPorts);
+    expect(!wave::parseZeroSlackModuleManifest(
+                QJsonDocument(mismatchedSourceRoot).toJson()).ok(),
+           "v5 accepted a declaration link that disagrees with its port source location");
+    const auto importedV5 = wave::importZeroSlackModuleManifest(
+        *parsedV5.manifest);
+    expect(importedV5.ok(), importedV5.error.toStdString());
+    const auto& sourceScenario = importedV5.project->scenarios.front();
+    const auto sourceLane = [&sourceScenario](const std::string_view name)
+        -> const wave::Lane* {
+        const auto iterator = std::find_if(
+            sourceScenario.lanes.cbegin(), sourceScenario.lanes.cend(),
+            [name](const wave::Lane& lane) { return lane.name == name; });
+        return iterator == sourceScenario.lanes.cend() ? nullptr : &*iterator;
+    };
+    const auto* sourceOutput = sourceLane("data_o");
+    expect(sourceOutput != nullptr,
+           "v5 output lane was not imported for source navigation");
+    wave::ImportedTrace sourceTrace;
+    wave::TraceIndex sourceIndex;
+    if (sourceOutput) {
+        sourceTrace.signalMapping.emplace(sourceOutput->id, "dut.data_o");
+        wave::TraceSignal signal;
+        signal.id = "dut.data_o";
+        signal.fullName = "dut.data_o";
+        signal.reference = "data_o";
+        sourceIndex.traceSignals.push_back(std::move(signal));
+        const auto binding = wave::simulationSourceBindingForTraceSignal(
+            sourceScenario, sourceTrace, sourceIndex, "dut.data_o");
+        expect(binding.available()
+                   && binding.declaration()
+                   && binding.declaration()->sourceLine > 0,
+               "trace signal did not resolve to its declaration");
+        expect(binding.drivers().size() == 1
+                   && binding.drivers().front().sourceLine == 30,
+               "trace signal did not retain its authoritative driver link");
+
+        wave::SimulationSourceQuery semanticQuery;
+        semanticQuery.semanticId = binding.semanticId;
+        semanticQuery.accessPath = "data_o";
+        const auto semanticMatch = wave::resolveSimulationSourceObject(
+            sourceScenario, sourceTrace, sourceIndex, semanticQuery);
+        expect(semanticMatch && semanticMatch->traceSignalId == "dut.data_o",
+               "semantic source identity did not resolve to the mapped trace signal");
+
+        wave::SimulationSourceQuery locationQuery;
+        locationQuery.sourceFile = binding.declaration()->sourceFile;
+        locationQuery.sourceLine = binding.declaration()->sourceLine;
+        locationQuery.symbolName = "data_o";
+        const auto locationMatch = wave::resolveSimulationSourceObject(
+            sourceScenario, sourceTrace, sourceIndex, locationQuery);
+        expect(locationMatch && locationMatch->traceSignalId == "dut.data_o",
+               "portable source location did not resolve to the mapped trace signal");
+        expect(!wave::simulationSourceBindingForTraceSignal(
+                    sourceScenario, sourceTrace, sourceIndex, "dut.unmapped")
+                    .available(),
+               "unmapped trace signal guessed a source object");
+    }
     const auto passiveStubs = wave::generatePassiveSimulationStubs(
         *parsed.manifest,
         {QStringLiteral("missing_vendor_core")});

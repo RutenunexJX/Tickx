@@ -99,6 +99,20 @@ add_dependencies(wave-multi-scenario-batch-ui-smoke
     wave-simulator-fixture)
 wave_enable_warnings(wave-multi-scenario-batch-ui-smoke)
 
+add_executable(wave-source-navigation-ui-smoke
+    source_navigation_ui_smoke.cpp
+)
+target_link_libraries(wave-source-navigation-ui-smoke
+    PRIVATE wavewidgets wavesim waveintegration waveproject wavecore
+            Qt6::Core Qt6::Gui Qt6::Widgets)
+target_compile_definitions(wave-source-navigation-ui-smoke
+    PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_dependencies(wave-source-navigation-ui-smoke
+    wave-toolchain-fixture-ready
+    wave-verilator-fixture
+    wave-simulator-fixture)
+wave_enable_warnings(wave-source-navigation-ui-smoke)
+
 if(WAVEWORKBENCH_ENABLE_WELLEN)
     add_executable(wave-fst-on-demand-ui-smoke
         fst_on_demand_ui_smoke.cpp
@@ -154,6 +168,11 @@ add_test(
     NAME wave-multi-scenario-batch-ui-smoke
     COMMAND wave-multi-scenario-batch-ui-smoke
             "${CMAKE_BINARY_DIR}/multi-scenario-batch-ui-smoke.png"
+)
+add_test(
+    NAME wave-source-navigation-ui-smoke
+    COMMAND wave-source-navigation-ui-smoke
+            "${CMAKE_BINARY_DIR}/source-navigation-ui-smoke.png"
 )
 add_test(NAME wave-timeline-viewport-test COMMAND wave-timeline-viewport-test)
 add_test(NAME wavewidgets-abi-test COMMAND wavewidgets-abi-test)
@@ -965,6 +984,7 @@ set(_wave_fixed_fixture_tests
     wave-structured-input-ui-smoke
     wave-stub-selection-ui-smoke)
 list(APPEND _wave_fixed_fixture_tests wave-multi-scenario-batch-ui-smoke)
+list(APPEND _wave_fixed_fixture_tests wave-source-navigation-ui-smoke)
 if(TEST wave-fixed-fixture-real-verilator)
     list(APPEND _wave_fixed_fixture_tests wave-fixed-fixture-real-verilator)
 endif()
@@ -977,6 +997,9 @@ set_tests_properties(${_wave_fixed_fixture_tests} PROPERTIES
 set_property(TEST wave-multi-scenario-batch-ui-smoke APPEND PROPERTY ENVIRONMENT
     "WAVEWORKBENCH_RECOVERY_DIR=${CMAKE_BINARY_DIR}/test-recovery/wave-multi-scenario-batch-ui-smoke"
     "WAVEWORKBENCH_SETTINGS_DIR=${CMAKE_BINARY_DIR}/test-settings/wave-multi-scenario-batch-ui-smoke")
+set_property(TEST wave-source-navigation-ui-smoke APPEND PROPERTY ENVIRONMENT
+    "WAVEWORKBENCH_RECOVERY_DIR=${CMAKE_BINARY_DIR}/test-recovery/wave-source-navigation-ui-smoke"
+    "WAVEWORKBENCH_SETTINGS_DIR=${CMAKE_BINARY_DIR}/test-settings/wave-source-navigation-ui-smoke")
 if(WIN32)
     set_tests_properties(
         wave-cli-powershell-stdin-smoke

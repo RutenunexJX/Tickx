@@ -1,5 +1,7 @@
 # Wave Workbench
 
+当前版本：`v0.11.0`
+
 Wave Workbench 是用于 FPGA 数字时序设计与验证场景编排的独立桌面应用。工程中的
 `Project`、`Scenario`、`Lane`、`Segment`、`Event`、`Relation` 是唯一事实源；画布、
 步骤表和后续生成文件均为该模型的视图或派生产物。
@@ -48,6 +50,13 @@ Simulation Result 工具栏的 `Run all (N)` 会按存储顺序串行运行当�
 点击成功行可切换到该场景的 Actual 波形。批量结果是运行期派生状态，场景编辑或单独重跑后
 立即失效，不进入 Stimulus Scenario 或 simulation session schema。
 
+Module Manifest v5 为端口和内部 observation 携带稳定语义身份、声明位置及 Slang 关系
+提供的 driver 位置。Actual 波形或层级树中的映射信号可直接返回 ZeroSlack 的声明或具体
+driver；ZeroSlack 中的信号也可定位到已打开结果中的对应 Actual 行。匹配优先使用语义身份，
+仅在身份缺失时使用便携源码位置，未映射或歧义信号不会按名称猜测。共享工作区以
+`result-source-navigation/v1` 声明该能力，`wavewidgets` C ABI 与 workspace contract
+仍保持 v1。
+
 Module Manifest 中的多个语义时钟候选会分别导入为独立 ClockDomain，不再因候选数大于一而
 全部放弃。Simulation Result 工具栏直接显示 `Clocks (N)`，可逐个编辑周期、相位、占空比和
 有效边沿；`Timing` 可在关联时钟网格与 1 tick 异步编辑之间切换。运行计划分别驱动每个时钟，
@@ -61,9 +70,9 @@ runner 生成 wrapper 重建原始端口，Stimulus Scenario v5 可在结构化�
 
 ZeroSlack 的正式 Wave Simulation 工作流通过版本化 `wavewidgets` C ABI 将完整工作区
 嵌入编辑区 Wave Tab，无需用户手工传递文件。独立应用链接同一共享控件实现并继续作为
-可单独运行的工具。当前兼容 Module Manifest v1/v2/v3；v2 可携带选中 `always` 的观察范围
-和内部信号 access path，v3 增加结构化输入 leaf 契约，并将构建或运行错误以源码文件、行、列
-回传 ZeroSlack。
+可单独运行的工具。当前兼容 Module Manifest v1-v5；v2 可携带选中 `always` 的观察范围
+和内部信号 access path，v3 增加结构化输入 leaf 契约，v4 增加 unresolved dependency，
+v5 增加结果与源码导航元数据，并将构建或运行错误以源码文件、行、列回传 ZeroSlack。
 
 ## 构建
 

@@ -80,6 +80,10 @@ int main(int argc, char** argv)
               "embedded workspace advertises lightweight trace checks");
         check(workspace->property("wavewidgets.capabilities")
                   .toStringList()
+                  .contains(QStringLiteral("result-source-navigation/v1")),
+              "embedded workspace advertises result/source navigation");
+        check(workspace->property("wavewidgets.capabilities")
+                  .toStringList()
                   .contains(QStringLiteral(
                       "explicit-unresolved-module-stubs/v1")),
               "embedded workspace advertises explicit unresolved-module stubs");
@@ -121,9 +125,20 @@ int main(int argc, char** argv)
                       QStringLiteral("RunAllSimulationScenariosAction"))
                   && workspace->findChild<QTableWidget*>(
                       QStringLiteral("SimulationBatchResultTable"))
+                  && workspace->findChild<QAction*>(
+                      QStringLiteral("SimulationSourceNavigationAction"))
+                  && workspace->findChild<QToolButton*>(
+                      QStringLiteral("SimulationDriverNavigationButton"))
                   && workspace->findChild<QWidget*>(
                       QStringLiteral("SimulationComparisonPanel")),
               "embedded workspace exposes comparison controls and results");
+        check(workspace->metaObject()->indexOfMethod(
+                  "canRevealSourceObject(QString,QString,int,int,QString,QString)") >= 0
+                  && workspace->metaObject()->indexOfMethod(
+                      "revealSourceObject(QString,QString,int,int,QString,QString)") >= 0
+                  && workspace->metaObject()->indexOfSignal(
+                      "sourceNavigationRequested(QString,int,int,QString,QString)") >= 0,
+              "embedded workspace exposes the bidirectional source navigation API");
         auto* stimulusCanvas = workspace->findChild<wave::WaveCanvas*>(
             QStringLiteral("StimulusCanvas"));
         auto* asyncTiming = workspace->findChild<QAction*>(

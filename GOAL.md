@@ -4,13 +4,12 @@
 
 ## 目标
 
-ZeroSlack Wave Simulation S12.7“unresolved module 显式 stub”已完成。Module Manifest v4
-保存目标依赖闭包中的 unresolved 实例事实；runner 默认拒绝运行，只有用户在 `Stubs`
-菜单明确选择且契约标记可支持的 module 才生成 input-only 被动 stub。stub 不模拟依赖行为，
-并进入 session、构建指纹和运行报告。`wavewidgets` C ABI 与 workspace contract 继续为 v1，
-新增 `explicit-unresolved-module-stubs/v1` 能力声明；v1-v3 Manifest 继续兼容读取。
-当前配置的完整测试集通过 `94/94`；本机未安装真实 Verilator，外部编译与运行仍由
-确定性 process fixture 验证。
+ZeroSlack Wave Simulation S12.9“结果与 driver/source 双向导航”已完成。Module Manifest
+v5 保存 workspace-relative 声明/driver 链接与稳定语义身份；Actual 结果可返回 ZeroSlack
+源码，ZeroSlack 信号可定位到已打开结果中的映射 trace。匹配不创建第二套语义事实源，
+未映射、歧义或跨工作区请求明确拒绝。`wavewidgets` C ABI 与 workspace contract 继续为
+v1，并新增 `result-source-navigation/v1` 能力声明；v1-v4 Manifest 继续兼容读取。
+本机未安装真实 Verilator，外部编译与运行仍由确定性 process fixture 验证。
 
 交付一个可独立运行的 Qt 6/C++20 波形桌面应用，使用户能够人工定义与直接编辑 FPGA
 预期数字波形；同一场景模型继续支撑 SystemVerilog/SVA/cocotb、文档图、trace 导入及

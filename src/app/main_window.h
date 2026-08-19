@@ -10,6 +10,7 @@
 #include "wave/simulation_session.h"
 #include "wave/simulation_batch.h"
 #include "wave/simulation_check.h"
+#include "wave/simulation_source_navigation.h"
 #include "wave/stimulus_scenario.h"
 #include "wave/trace.h"
 
@@ -75,11 +76,31 @@ public:
     void revealLocation(const QString& laneId, Tick tick);
     void openLanePropertiesPreview(const QString& laneId);
     void openEditMenuPreview();
+    Q_INVOKABLE bool canRevealSourceObject(
+        const QString& semanticId,
+        const QString& sourceFile,
+        int sourceLine,
+        int sourceColumn,
+        const QString& symbolName,
+        const QString& accessPath) const;
+    Q_INVOKABLE bool revealSourceObject(
+        const QString& semanticId,
+        const QString& sourceFile,
+        int sourceLine,
+        int sourceColumn,
+        const QString& symbolName,
+        const QString& accessPath);
 
 signals:
     void initialTraceReferenceLoaded(bool success, const QString& message);
     void simulationSessionStateChanged(const QString& state);
     void simulationBatchFinished(int succeeded, int failed, int cancelled);
+    void sourceNavigationRequested(
+        const QString& sourceFile,
+        int sourceLine,
+        int sourceColumn,
+        const QString& semanticId,
+        const QString& kind);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -284,6 +305,12 @@ private:
     void updateSimulationStubButton();
     void editClockById(const std::string& clockId);
     void updateSimulationControls(const QString& detail = {});
+    void updateActiveActualSignal(const QString& signalId);
+    void updateSourceNavigationControls();
+    void navigateActiveActualSignalToDeclaration();
+    void rebuildDriverNavigationMenu();
+    [[nodiscard]] SimulationSourceBinding activeSourceBinding() const;
+    void requestSourceNavigation(const SimulationSourceLink& link);
     [[nodiscard]] bool exportSimulationStimulus(QString& error);
     [[nodiscard]] bool exportSimulationStimulus(
         const Scenario& scenario,
@@ -414,6 +441,7 @@ private:
     QAction* rerunSimulationAction_{nullptr};
     QAction* runSimulationCompareAction_{nullptr};
     QAction* runSimulationChecksAction_{nullptr};
+    QAction* simulationSourceAction_{nullptr};
     QAction* createSimulationScenarioAction_{nullptr};
     QAction* renameSimulationScenarioAction_{nullptr};
     QAction* deleteSimulationScenarioAction_{nullptr};
@@ -421,6 +449,7 @@ private:
     QTableWidget* simulationBatchTable_{nullptr};
     QToolButton* simulationStubButton_{nullptr};
     QToolButton* simulationClockButton_{nullptr};
+    QToolButton* simulationDriversButton_{nullptr};
     QAction* compareModeAction_{nullptr};
     QMenu* editMenu_{nullptr};
     QMenu* segmentMenu_{nullptr};
@@ -437,6 +466,7 @@ private:
     std::set<std::string> traceVisibleSignalIds_;
     bool traceVisibilityCustomized_{false};
     std::string activeTraceId_;
+    std::string activeActualSignalId_;
     QString pendingTracePath_;
     std::string pendingTraceId_;
     TraceFormat pendingTraceFormat_{TraceFormat::Vcd};

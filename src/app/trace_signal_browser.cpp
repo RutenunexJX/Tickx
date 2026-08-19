@@ -231,6 +231,21 @@ std::set<std::string> TraceSignalBrowser::visibleSignalIds() const
     return visibleSignalIds_;
 }
 
+void TraceSignalBrowser::revealSignal(const QString& signalId)
+{
+    if (signalId.isEmpty()) return;
+    for (QTreeWidgetItemIterator iterator(tree_); *iterator; ++iterator) {
+        auto* item = *iterator;
+        if (item->data(0, ItemKindRole).toInt() != SignalItem
+            || item->data(0, SignalIdRole).toString() != signalId) {
+            continue;
+        }
+        tree_->setCurrentItem(item);
+        tree_->scrollToItem(item, QAbstractItemView::PositionAtCenter);
+        return;
+    }
+}
+
 void TraceSignalBrowser::rebuild()
 {
     updating_ = true;

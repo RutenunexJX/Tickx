@@ -29,6 +29,7 @@ public:
     void refreshTrace();
     void revealTick(Tick tick);
     void revealSignal(const QString& signalId);
+    void setActiveSignal(const QString& signalId);
 
 public slots:
     void fitTrace();
@@ -37,11 +38,13 @@ public slots:
 
 signals:
     void cursorChanged(qint64 tick, const QString& signalId, const QString& value);
+    void signalActivated(const QString& signalId);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
 
 private:
@@ -62,6 +65,7 @@ private:
     std::vector<std::pair<Tick, Tick>> differenceRanges_;
     TimelineViewport timeline_{0, 0, 0.01, 230.0, 0.0};
     bool fitPending_{false};
+    std::string activeSignalId_;
 };
 
 } // namespace wave

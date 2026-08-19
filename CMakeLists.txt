@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(WaveWorkbench VERSION 0.10.0 LANGUAGES CXX)
+project(WaveWorkbench VERSION 0.11.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -144,13 +144,15 @@ wave_enable_warnings(wavecompare)
 add_library(waveintegration STATIC
     src/waveintegration/src/integration.cpp
     src/waveintegration/src/module_manifest.cpp
+    src/waveintegration/src/simulation_source_navigation.cpp
     src/waveintegration/src/simulation_scenario_store.cpp
     src/waveintegration/src/stimulus_scenario.cpp
 )
 target_include_directories(waveintegration
     PUBLIC src/waveintegration/include
 )
-target_link_libraries(waveintegration PUBLIC wavecore wavevalidate Qt6::Core)
+target_link_libraries(
+    waveintegration PUBLIC wavecore waveimport wavevalidate Qt6::Core)
 wave_enable_warnings(waveintegration)
 
 add_library(wavesim STATIC

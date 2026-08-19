@@ -162,6 +162,13 @@ void TraceCanvas::revealSignal(const QString& signalId)
     viewport()->update();
 }
 
+void TraceCanvas::setActiveSignal(const QString& signalId)
+{
+    activeSignalId_ = signalId.toStdString();
+    revealSignal(signalId);
+    viewport()->update();
+}
+
 void TraceCanvas::fitTrace()
 {
     if (!trace_) return;
@@ -377,7 +384,11 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
         const auto top = kRulerHeight + row * kRowHeight - verticalOffset;
         const auto bottom = top + kRowHeight;
         if (bottom < kRulerHeight || top > viewport()->height()) continue;
-        if ((row & 1) != 0) {
+        if (signal.id == activeSignalId_) {
+            painter.fillRect(
+                QRect(0, top, viewport()->width(), kRowHeight),
+                QColor(226, 238, 255));
+        } else if ((row & 1) != 0) {
             painter.fillRect(QRect(0, top, viewport()->width(), kRowHeight), QColor(247, 249, 252));
         }
         painter.setPen(QColor(222, 228, 236));
@@ -495,6 +506,26 @@ void TraceCanvas::wheelEvent(QWheelEvent* event)
         return;
     }
     QAbstractScrollArea::wheelEvent(event);
+}
+
+void TraceCanvas::mousePressEvent(QMouseEvent* event)
+{
+    if (trace_ && event->button() == Qt::LeftButton
+        && event->position().y() >= kRulerHeight) {
+        const auto row = (static_cast<int>(event->position().y()) - kRulerHeight
+                          + verticalScrollBar()->value())
+            / kRowHeight;
+        if (row >= 0
+            && row < static_cast<int>(visibleSignalIndices_.size())) {
+            const auto& signal = trace_->traceSignals[
+                visibleSignalIndices_[static_cast<std::size_t>(row)]];
+            setActiveSignal(QString::fromStdString(signal.id));
+            emit signalActivated(QString::fromStdString(signal.id));
+            event->accept();
+            return;
+        }
+    }
+    QAbstractScrollArea::mousePressEvent(event);
 }
 
 void TraceCanvas::mouseMoveEvent(QMouseEvent* event)

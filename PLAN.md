@@ -5,6 +5,23 @@
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
 
+## ZeroSlack Wave Simulation S12.9：结果与 driver/source 双向导航
+
+状态：完成
+
+- Module Manifest v5 为端口和 observation 提供 workspace-relative 声明/driver 链接及
+  稳定语义身份；WaveWorkbench 保持 v1-v4 兼容读取。
+- `waveintegration` 的纯数据 resolver 只在现有 lane-to-trace mapping 中匹配，优先使用
+  语义身份，回退到便携源码位置；歧义和未映射信号明确拒绝，不按名称猜测。
+- Actual 波形与内部信号树可选定活动信号，结果工具栏提供 Declaration 和 Drivers 导航；
+  ZeroSlack 右键 Action 可将源码信号定位到同一工作区的已打开结果。
+- 共享接口新增 `result-source-navigation/v1` 能力和双向 Qt meta-object 契约，
+  `wavewidgets` C ABI 与 workspace contract 继续保持 v1。
+- 核心测试覆盖 v5 严格解析、旧版兼容、声明/driver 映射、歧义与未映射拒绝；GUI 冒烟
+  实际运行 fixture 后往返触发两种导航。视觉证据位于
+  `artifacts/ui/wave/s12-result-source-navigation.png`。
+- 本机未安装真实 Verilator，外部编译与运行继续由确定性 process fixture 验证。
+
 ## ZeroSlack Wave Simulation S12.7：unresolved module 显式 stub
 
 状态：完成

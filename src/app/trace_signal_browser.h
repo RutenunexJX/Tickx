@@ -27,6 +27,7 @@ public:
         const TraceIndex* trace,
         const std::set<std::string>& visibleSignalIds);
     void setVisibleSignalIds(const std::set<std::string>& signalIds);
+    void revealSignal(const QString& signalId);
     [[nodiscard]] std::set<std::string> visibleSignalIds() const;
 
 signals:

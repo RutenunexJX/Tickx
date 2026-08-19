@@ -1609,6 +1609,7 @@ MainWindow::MainWindow(
         &TraceCanvas::cursorChanged,
         this,
         [this](const qint64 tick, const QString& signalId, const QString& value) {
+            updateActiveActualSignal(signalId);
             statusBar()->showMessage(
                 tr("Actual %1  %2 = %3")
                     .arg(QString::fromStdString(formatTick(tick, project_.timeBase)))
@@ -1636,9 +1637,17 @@ MainWindow::MainWindow(
         connect(
             traceSignalBrowser_,
             &TraceSignalBrowser::signalActivated,
-            compareTraceCanvas_,
-            &TraceCanvas::revealSignal);
+            this,
+            [this](const QString& signalId) {
+                compareTraceCanvas_->revealSignal(signalId);
+                updateActiveActualSignal(signalId);
+            });
     }
+    connect(
+        compareTraceCanvas_,
+        &TraceCanvas::signalActivated,
+        this,
+        &MainWindow::updateActiveActualSignal);
 
     createActions();
     if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
@@ -1716,6 +1725,27 @@ MainWindow::MainWindow(
         runSimulationChecksAction_->setObjectName(
             QStringLiteral("RunSimulationChecksAction"));
         resultToolbar->addSeparator();
+        simulationSourceAction_ = resultToolbar->addAction(
+            themedIcon(
+                QStringLiteral("go-jump-definition"),
+                style(),
+                QStyle::SP_ArrowForward),
+            tr("Source"),
+            this,
+            &MainWindow::navigateActiveActualSignalToDeclaration);
+        simulationSourceAction_->setObjectName(
+            QStringLiteral("SimulationSourceNavigationAction"));
+        simulationDriversButton_ = new QToolButton(resultToolbar);
+        simulationDriversButton_->setObjectName(
+            QStringLiteral("SimulationDriverNavigationButton"));
+        simulationDriversButton_->setText(tr("Drivers"));
+        simulationDriversButton_->setPopupMode(QToolButton::InstantPopup);
+        simulationDriversButton_->setToolButtonStyle(
+            Qt::ToolButtonTextBesideIcon);
+        simulationDriversButton_->setMenu(
+            new QMenu(simulationDriversButton_));
+        resultToolbar->addWidget(simulationDriversButton_);
+        resultToolbar->addSeparator();
         createSimulationScenarioAction_ = resultToolbar->addAction(
             themedIcon(QStringLiteral("document-new"), style(), QStyle::SP_FileIcon),
             tr("New scenario"),
@@ -1787,6 +1817,7 @@ MainWindow::MainWindow(
         updateSimulationStubButton();
         updateSimulationClockButton();
         updateSimulationBatchView();
+        updateSourceNavigationControls();
         updateSimulationControls(simulationSessionError_);
     }
     rememberActiveScenario();
@@ -3082,6 +3113,157 @@ void MainWindow::refreshTraceViews()
     if (traceSignalBrowser_) {
         traceSignalBrowser_->setTrace(trace, traceVisibleSignalIds_);
     }
+    if (!trace || !trace->findSignal(activeActualSignalId_))
+        activeActualSignalId_.clear();
+    updateSourceNavigationControls();
+}
+
+SimulationSourceBinding MainWindow::activeSourceBinding() const
+{
+    const auto* scenario = activeScenario();
+    const auto* reference = activeTraceReference();
+    if (!scenario || !reference || !traceIndex_
+        || activeActualSignalId_.empty()) {
+        return {};
+    }
+    return simulationSourceBindingForTraceSignal(
+        *scenario, *reference, *traceIndex_, activeActualSignalId_);
+}
+
+void MainWindow::updateActiveActualSignal(const QString& signalId)
+{
+    if (signalId.isEmpty() || !traceIndex_
+        || !traceIndex_->findSignal(signalId.toStdString())) {
+        activeActualSignalId_.clear();
+    } else {
+        activeActualSignalId_ = signalId.toStdString();
+    }
+    if (compareTraceCanvas_)
+        compareTraceCanvas_->setActiveSignal(signalId);
+    if (traceSignalBrowser_)
+        traceSignalBrowser_->revealSignal(signalId);
+    updateSourceNavigationControls();
+}
+
+void MainWindow::updateSourceNavigationControls()
+{
+    const auto binding = activeSourceBinding();
+    const auto* declaration = binding.declaration();
+    if (simulationSourceAction_) {
+        simulationSourceAction_->setEnabled(declaration != nullptr);
+        simulationSourceAction_->setToolTip(
+            declaration
+                ? tr("Open %1:%2 in ZeroSlack")
+                      .arg(QString::fromStdString(declaration->sourceFile))
+                      .arg(declaration->sourceLine)
+                : tr("Select a mapped Actual signal with source metadata"));
+    }
+    rebuildDriverNavigationMenu();
+}
+
+void MainWindow::rebuildDriverNavigationMenu()
+{
+    if (!simulationDriversButton_ || !simulationDriversButton_->menu()) return;
+    auto* menu = simulationDriversButton_->menu();
+    menu->clear();
+    const auto binding = activeSourceBinding();
+    const auto drivers = binding.drivers();
+    simulationDriversButton_->setEnabled(!drivers.empty());
+    simulationDriversButton_->setText(
+        drivers.empty() ? tr("Drivers") : tr("Drivers (%1)").arg(drivers.size()));
+    for (const auto& driver : drivers) {
+        const auto location = tr("%1:%2")
+            .arg(QFileInfo(QString::fromStdString(driver.sourceFile)).fileName())
+            .arg(driver.sourceLine);
+        const auto label = driver.label.empty()
+            ? location
+            : tr("%1  ·  %2")
+                  .arg(QString::fromStdString(driver.label), location);
+        menu->addAction(label, this, [this, driver] {
+            requestSourceNavigation(driver);
+        });
+    }
+}
+
+void MainWindow::navigateActiveActualSignalToDeclaration()
+{
+    const auto binding = activeSourceBinding();
+    if (const auto* declaration = binding.declaration()) {
+        requestSourceNavigation(*declaration);
+    }
+}
+
+void MainWindow::requestSourceNavigation(const SimulationSourceLink& link)
+{
+    const auto binding = activeSourceBinding();
+    if (!binding.available() || link.sourceFile.empty()
+        || link.sourceLine <= 0 || link.sourceColumn <= 0) {
+        return;
+    }
+    emit sourceNavigationRequested(
+        QString::fromStdString(link.sourceFile),
+        link.sourceLine,
+        link.sourceColumn,
+        QString::fromStdString(binding.semanticId),
+        link.kind == SimulationSourceLinkKind::Driver
+            ? QStringLiteral("driver")
+            : QStringLiteral("declaration"));
+}
+
+bool MainWindow::canRevealSourceObject(
+    const QString& semanticId,
+    const QString& sourceFile,
+    const int sourceLine,
+    const int sourceColumn,
+    const QString& symbolName,
+    const QString& accessPath) const
+{
+    const auto* scenario = activeScenario();
+    const auto* reference = activeTraceReference();
+    if (!scenario || !reference || !traceIndex_) return false;
+    SimulationSourceQuery query;
+    query.semanticId = semanticId.toStdString();
+    query.sourceFile = sourceFile.toStdString();
+    query.sourceLine = sourceLine;
+    query.sourceColumn = sourceColumn;
+    query.symbolName = symbolName.toStdString();
+    query.accessPath = accessPath.toStdString();
+    return resolveSimulationSourceObject(
+        *scenario, *reference, *traceIndex_, query).has_value();
+}
+
+bool MainWindow::revealSourceObject(
+    const QString& semanticId,
+    const QString& sourceFile,
+    const int sourceLine,
+    const int sourceColumn,
+    const QString& symbolName,
+    const QString& accessPath)
+{
+    const auto* scenario = activeScenario();
+    const auto* reference = activeTraceReference();
+    if (!scenario || !reference || !traceIndex_) return false;
+    SimulationSourceQuery query;
+    query.semanticId = semanticId.toStdString();
+    query.sourceFile = sourceFile.toStdString();
+    query.sourceLine = sourceLine;
+    query.sourceColumn = sourceColumn;
+    query.symbolName = symbolName.toStdString();
+    query.accessPath = accessPath.toStdString();
+    const auto binding = resolveSimulationSourceObject(
+        *scenario, *reference, *traceIndex_, query);
+    if (!binding) return false;
+
+    traceVisibleSignalIds_.insert(binding->traceSignalId);
+    traceVisibilityCustomized_ = true;
+    if (traceSignalBrowser_)
+        traceSignalBrowser_->setVisibleSignalIds(traceVisibleSignalIds_);
+    if (compareTraceCanvas_)
+        compareTraceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    fstSignalLoadPaused_ = false;
+    startPendingFstSignalLoad();
+    updateActiveActualSignal(QString::fromStdString(binding->traceSignalId));
+    return true;
 }
 
 std::set<std::string> MainWindow::requiredFstSignalIds() const

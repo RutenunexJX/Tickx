@@ -44,6 +44,22 @@ std::string jsonStringArrayValue(const std::vector<std::string>& values)
     return QJsonDocument(array).toJson(QJsonDocument::Compact).toStdString();
 }
 
+std::string jsonSourceLinksValue(
+    const std::vector<ModuleManifestSourceLink>& links)
+{
+    QJsonArray array;
+    for (const auto& link : links) {
+        array.append(QJsonObject{
+            {QStringLiteral("kind"), qString(link.kind)},
+            {QStringLiteral("sourceFile"), qString(link.sourceFile)},
+            {QStringLiteral("sourceLine"), link.sourceLine},
+            {QStringLiteral("sourceColumn"), link.sourceColumn},
+            {QStringLiteral("label"), qString(link.label)},
+        });
+    }
+    return QJsonDocument(array).toJson(QJsonDocument::Compact).toStdString();
+}
+
 bool exactKeys(
     const QJsonObject& object,
     const std::initializer_list<QString> required,
@@ -238,6 +254,86 @@ bool readRelativePath(
         return false;
     }
     return true;
+}
+
+bool parseSourceLinks(
+    const QJsonValue& value,
+    const QString& context,
+    std::vector<ModuleManifestSourceLink>& output,
+    QString& error)
+{
+    if (!value.isArray() || value.toArray().isEmpty()) {
+        error = context + QStringLiteral(" must be a non-empty array");
+        return false;
+    }
+    int declarationCount = 0;
+    QSet<QString> identities;
+    for (qsizetype index = 0; index < value.toArray().size(); ++index) {
+        const auto itemContext = QStringLiteral("%1[%2]").arg(context).arg(index);
+        if (!value.toArray().at(index).isObject()) {
+            error = itemContext + QStringLiteral(" must be an object");
+            return false;
+        }
+        const auto object = value.toArray().at(index).toObject();
+        if (!exactKeys(
+                object,
+                {QStringLiteral("kind"), QStringLiteral("sourceFile"),
+                 QStringLiteral("sourceLine"), QStringLiteral("sourceColumn"),
+                 QStringLiteral("label")},
+                itemContext,
+                error)) {
+            return false;
+        }
+        ModuleManifestSourceLink link;
+        if (!readString(object, QStringLiteral("kind"), itemContext,
+                        link.kind, error, false)
+            || !readRelativePath(object, QStringLiteral("sourceFile"), itemContext,
+                                 link.sourceFile, error)
+            || !readPositiveInt(object, QStringLiteral("sourceLine"), itemContext,
+                                link.sourceLine, error)
+            || !readPositiveInt(object, QStringLiteral("sourceColumn"), itemContext,
+                                link.sourceColumn, error)
+            || !readString(object, QStringLiteral("label"), itemContext,
+                           link.label, error, false)) {
+            return false;
+        }
+        if (link.kind != "declaration" && link.kind != "driver") {
+            error = itemContext + QStringLiteral(".kind is unsupported");
+            return false;
+        }
+        declarationCount += link.kind == "declaration" ? 1 : 0;
+        const auto identity = qString(link.kind) + QLatin1Char(':')
+            + qString(link.sourceFile) + QLatin1Char(':')
+            + QString::number(link.sourceLine) + QLatin1Char(':')
+            + QString::number(link.sourceColumn);
+        if (identities.contains(identity)) {
+            error = itemContext + QStringLiteral(" duplicates a source link");
+            return false;
+        }
+        identities.insert(identity);
+        output.push_back(std::move(link));
+    }
+    if (declarationCount != 1) {
+        error = context + QStringLiteral(" must contain exactly one declaration link");
+        return false;
+    }
+    return true;
+}
+
+bool sourceDeclarationMatches(
+    const std::vector<ModuleManifestSourceLink>& links,
+    const std::string& sourceFile,
+    const int sourceLine,
+    const int sourceColumn)
+{
+    const auto declaration = std::find_if(
+        links.cbegin(), links.cend(), [](const ModuleManifestSourceLink& link) {
+            return link.kind == "declaration";
+        });
+    return declaration != links.cend()
+        && declaration->sourceFile == sourceFile
+        && declaration->sourceLine == sourceLine
+        && declaration->sourceColumn == sourceColumn;
 }
 
 bool readStringArray(
@@ -1067,6 +1163,7 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
     const int schemaVersion = version.toInt();
     const bool hasObservationContract = schemaVersion >= 2;
     const bool hasUnresolvedDependencyContract = schemaVersion >= 4;
+    const bool hasSourceNavigationContract = schemaVersion >= 5;
     const bool keysValid = hasUnresolvedDependencyContract
         ? exactKeys(
               root,
@@ -1237,14 +1334,25 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
                 return result;
             }
             const auto object = value.toObject();
-            if (!exactKeys(
-                    object,
-                    {QStringLiteral("name"), QStringLiteral("accessPath"),
-                     QStringLiteral("semanticId"), QStringLiteral("declarationText"),
-                     QStringLiteral("type"), QStringLiteral("sourceFile"),
-                     QStringLiteral("sourceLine"), QStringLiteral("port")},
-                    context,
-                    error)) {
+            const bool observationKeysValid = hasSourceNavigationContract
+                ? exactKeys(
+                      object,
+                      {QStringLiteral("name"), QStringLiteral("accessPath"),
+                       QStringLiteral("semanticId"), QStringLiteral("declarationText"),
+                       QStringLiteral("type"), QStringLiteral("sourceFile"),
+                       QStringLiteral("sourceLine"), QStringLiteral("sourceColumn"),
+                       QStringLiteral("sourceLinks"), QStringLiteral("port")},
+                      context,
+                      error)
+                : exactKeys(
+                      object,
+                      {QStringLiteral("name"), QStringLiteral("accessPath"),
+                       QStringLiteral("semanticId"), QStringLiteral("declarationText"),
+                       QStringLiteral("type"), QStringLiteral("sourceFile"),
+                       QStringLiteral("sourceLine"), QStringLiteral("port")},
+                      context,
+                      error);
+            if (!observationKeysValid) {
                 result.error = error;
                 return result;
             }
@@ -1265,6 +1373,32 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
                              observation.port, error)) {
                 result.error = error;
                 return result;
+            }
+            if (hasSourceNavigationContract) {
+                if (!readPositiveInt(object, QStringLiteral("sourceColumn"), context,
+                                     observation.sourceColumn, error)
+                    || !parseSourceLinks(
+                        object.value(QStringLiteral("sourceLinks")),
+                        context + QStringLiteral(".sourceLinks"),
+                        observation.sourceLinks,
+                        error)) {
+                    result.error = error;
+                    return result;
+                }
+                if (!sourceDeclarationMatches(
+                        observation.sourceLinks,
+                        observation.sourceFile,
+                        observation.sourceLine,
+                        observation.sourceColumn)) {
+                    result.error = context
+                        + QStringLiteral(
+                            ".sourceLinks declaration must match the observation source location");
+                    return result;
+                }
+            } else {
+                observation.sourceLinks.push_back({
+                    "declaration", observation.sourceFile,
+                    observation.sourceLine, 1, "Declaration"});
             }
             if (!object.value(QStringLiteral("type")).isObject()
                 || !parseType(object.value(QStringLiteral("type")).toObject(),
@@ -1351,6 +1485,13 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
             result.error = QStringLiteral(
                 "manifest observation sourceFile is absent from sources");
             return result;
+        }
+        for (const auto& link : observation.sourceLinks) {
+            if (!sourcePaths.contains(qString(link.sourceFile))) {
+                result.error = QStringLiteral(
+                    "manifest observation source link is absent from sources");
+                return result;
+            }
         }
     }
     if (hasUnresolvedDependencyContract
@@ -1460,7 +1601,19 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
             return result;
         }
         const auto port = value.toObject();
-        const bool portKeysValid = schemaVersion >= 3
+        const bool portKeysValid = hasSourceNavigationContract
+            ? exactKeys(
+                  port,
+                  {QStringLiteral("name"), QStringLiteral("semanticId"),
+                   QStringLiteral("direction"), QStringLiteral("declarationText"),
+                   QStringLiteral("type"), QStringLiteral("structuredLeavesAvailable"),
+                   QStringLiteral("editableLeaves"),
+                   QStringLiteral("structuredFailureReason"),
+                   QStringLiteral("sourceFile"), QStringLiteral("sourceLine"),
+                   QStringLiteral("sourceColumn"), QStringLiteral("sourceLinks")},
+                  context,
+                  error)
+            : schemaVersion >= 3
             ? exactKeys(
                   port,
                   {QStringLiteral("name"), QStringLiteral("direction"),
@@ -1486,6 +1639,9 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
         std::string direction;
         if (!readString(port, QStringLiteral("name"), context,
                         parsedPort.name, error, false)
+            || (hasSourceNavigationContract
+                && !readString(port, QStringLiteral("semanticId"), context,
+                               parsedPort.semanticId, error, false))
             || !readString(port, QStringLiteral("direction"), context,
                            direction, error, false)
             || !readString(port, QStringLiteral("declarationText"), context,
@@ -1496,6 +1652,39 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
                                parsedPort.sourceLine, error)) {
             result.error = error;
             return result;
+        }
+        if (hasSourceNavigationContract) {
+            if (!QRegularExpression(QStringLiteral("^sha256:[0-9a-f]{64}$"))
+                     .match(qString(parsedPort.semanticId))
+                     .hasMatch()) {
+                result.error = context
+                    + QStringLiteral(".semanticId must be a lowercase SHA-256 identity");
+                return result;
+            }
+            if (!readPositiveInt(port, QStringLiteral("sourceColumn"), context,
+                                 parsedPort.sourceColumn, error)
+                || !parseSourceLinks(
+                    port.value(QStringLiteral("sourceLinks")),
+                    context + QStringLiteral(".sourceLinks"),
+                    parsedPort.sourceLinks,
+                    error)) {
+                result.error = error;
+                return result;
+            }
+            if (!sourceDeclarationMatches(
+                    parsedPort.sourceLinks,
+                    parsedPort.sourceFile,
+                    parsedPort.sourceLine,
+                    parsedPort.sourceColumn)) {
+                result.error = context
+                    + QStringLiteral(
+                        ".sourceLinks declaration must match the port source location");
+                return result;
+            }
+        } else {
+            parsedPort.sourceLinks.push_back({
+                "declaration", parsedPort.sourceFile,
+                parsedPort.sourceLine, 1, "Declaration"});
         }
         const auto parsedDirection = portDirection(qString(direction));
         if (!parsedDirection) {
@@ -1551,6 +1740,17 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
             result.error = QStringLiteral("manifest.ports contains duplicate name %1")
                                .arg(qString(parsedPort.name));
             return result;
+        }
+        if (!sourcePaths.contains(qString(parsedPort.sourceFile))) {
+            result.error = context + QStringLiteral(".sourceFile is absent from sources");
+            return result;
+        }
+        for (const auto& link : parsedPort.sourceLinks) {
+            if (!sourcePaths.contains(qString(link.sourceFile))) {
+                result.error = context
+                    + QStringLiteral(".sourceLinks sourceFile is absent from sources");
+                return result;
+            }
         }
         portNames.insert(qString(parsedPort.name));
         manifest.ports.push_back(std::move(parsedPort));
@@ -1780,6 +1980,14 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
                 lane.extensions.emplace(
                     "waveSimulation.sourceLine", std::to_string(port.sourceLine));
                 lane.extensions.emplace(
+                    "waveSimulation.sourceColumn", std::to_string(port.sourceColumn));
+                lane.extensions.emplace(
+                    "waveSimulation.semanticId", jsonStringValue(port.semanticId));
+                lane.extensions.emplace(
+                    "waveSimulation.accessPath", jsonStringValue(leafName));
+                lane.extensions.emplace(
+                    "waveSimulation.sourceLinks", jsonSourceLinksValue(port.sourceLinks));
+                lane.extensions.emplace(
                     "waveSimulation.canonicalTypeId",
                     jsonStringValue(leaf.type.canonicalTypeId));
                 lane.extensions.emplace(
@@ -1950,6 +2158,18 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
             "waveSimulation.sourceLine",
             std::to_string(port.sourceLine));
         lane.extensions.emplace(
+            "waveSimulation.sourceColumn",
+            std::to_string(port.sourceColumn));
+        lane.extensions.emplace(
+            "waveSimulation.semanticId",
+            jsonStringValue(port.semanticId));
+        lane.extensions.emplace(
+            "waveSimulation.accessPath",
+            jsonStringValue(port.name));
+        lane.extensions.emplace(
+            "waveSimulation.sourceLinks",
+            jsonSourceLinksValue(port.sourceLinks));
+        lane.extensions.emplace(
             "waveSimulation.canonicalTypeId",
             jsonStringValue(shape.canonicalTypeId));
         lane.extensions.emplace(
@@ -2087,6 +2307,12 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
         lane.extensions.emplace(
             "waveSimulation.sourceLine",
             std::to_string(observation.sourceLine));
+        lane.extensions.emplace(
+            "waveSimulation.sourceColumn",
+            std::to_string(observation.sourceColumn));
+        lane.extensions.emplace(
+            "waveSimulation.sourceLinks",
+            jsonSourceLinksValue(observation.sourceLinks));
         lane.extensions.emplace(
             "waveSimulation.canonicalTypeId",
             jsonStringValue(shape.canonicalTypeId));

@@ -153,8 +153,17 @@ struct ModuleManifestParameter {
     int sourceLine{0};
 };
 
+struct ModuleManifestSourceLink {
+    std::string kind;
+    std::string sourceFile;
+    int sourceLine{0};
+    int sourceColumn{0};
+    std::string label;
+};
+
 struct ModuleManifestPort {
     std::string name;
+    std::string semanticId;
     ModulePortDirection direction{ModulePortDirection::Unknown};
     std::string declarationText;
     ModuleManifestType type;
@@ -163,6 +172,8 @@ struct ModuleManifestPort {
     std::string structuredFailureReason;
     std::string sourceFile;
     int sourceLine{0};
+    int sourceColumn{1};
+    std::vector<ModuleManifestSourceLink> sourceLinks;
 };
 
 struct ModuleManifestTarget {
@@ -190,12 +201,14 @@ struct ModuleManifestObservation {
     ModuleManifestType type;
     std::string sourceFile;
     int sourceLine{0};
+    int sourceColumn{1};
+    std::vector<ModuleManifestSourceLink> sourceLinks;
     bool port{false};
 };
 
 struct ZeroSlackModuleManifest {
     static constexpr int MinimumSupportedSchemaVersion = 1;
-    static constexpr int CurrentSchemaVersion = 4;
+    static constexpr int CurrentSchemaVersion = 5;
 
     int schemaVersion{CurrentSchemaVersion};
     std::string identity;
