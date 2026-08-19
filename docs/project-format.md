@@ -163,7 +163,7 @@ Clock segment 数组保持原有语义，因此该能力不要求提升 schema �
 
 ## ImportedTrace
 
-完整 VCD/CSV 内容及 transition 索引不写入 JSON。工程只保存可解析引用：
+完整 VCD/FST/CSV 内容及 transition 索引不写入 JSON。工程只保存可解析引用：
 
 ```json
 {
@@ -184,12 +184,12 @@ Clock segment 数组保持原有语义，因此该能力不要求提升 schema �
 不同的快照引用，修复只更改该项 ID，不改变其他字段。桌面端不会加载重复/空 ID 的首项，
 `wave-compare` 在存在多条引用时要求调用方显式提供唯一 `--trace-id`，避免数组顺序被误当作
 用户选择。
-`path` 去除首尾空白后必须非空；`format` 必须大小写不敏感地为 `vcd` 或 `csv`。结构校验按
+`path` 去除首尾空白后必须非空；`format` 必须大小写不敏感地为 `vcd`、`fst` 或 `csv`。结构校验按
 Trace 聚合报告这两项约束，但不检查文件是否存在，也不根据扩展名推断格式。引用修复必须使用
 校验返回的快照引用，显式提供待替换的路径或格式，并保证修复后两项同时有效；只更新路径/格式，
 保留 ID、偏移、映射与扩展载荷。实际文件是否可读取仍由 `wave-compare` 在解析前检查。
 映射键必须指向工程任一 Scenario 中存在的非 Group Lane，映射值不得为空；结构化校验可定位并
-删除违反这两项约束的陈旧映射。Actual signal 是否仍存在于外部 VCD/CSV 只能在加载该文件后
+删除违反这两项约束的陈旧映射。Actual signal 是否仍存在于外部 VCD/FST/CSV 只能在加载该文件后
 确认，因此工程校验不会根据文件系统状态猜测或改写映射。加载外部文件后的 Compare 将未配置
 映射报告为 `unmapped-signal`，将已配置但目标不存在报告为 `missing-signal`，并在后者保留
 原 Actual signal ID。
@@ -272,7 +272,7 @@ comparison  := "==" | "!=" | "===" | "!=="
 桌面端在修改后 1.5 秒启动后台快照，目标为工程文件同目录的
 `<project-file>.autosave`。同目录布局保证 snapshot 中的相对 trace 和 linked resource
 路径保持原工程语义。快照仍使用完整 schema 和 `QSaveFile`，但只复制 `Project` 模型；
-外部 VCD/CSV 数据不进入 JSON。
+外部 VCD/FST/CSV 数据不进入 JSON。
 
 每次调度递增 generation。后台任务完成时，只有 generation 与当前文档一致的结果才显示
 为最新状态；若编辑期间已有任务运行，则任务完成后立即调度最新快照。File > Open 可载入

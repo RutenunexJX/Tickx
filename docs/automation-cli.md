@@ -117,7 +117,7 @@ Clock Lane 仅在工程恰有一个 ClockDomain 时自动关联，多时钟或�
 唯一证明共同有效时钟，或两端均无时钟时自动恢复，冲突与歧义不会被猜测，
 `traceIdentityValidation` 与 `traceIdentityRepair` 表示 Imported Trace 的空/重复稳定 ID
 可通过快照引用精确诊断和修复，`traceReferenceValidation` 与 `traceReferenceRepair` 表示
-空源路径或非 VCD/CSV 格式可在读取外部文件前显式诊断和修复，`traceMappingValidation` 与
+空源路径或非 VCD/FST/CSV 格式可在读取外部文件前显式诊断和修复，`traceMappingValidation` 与
 `traceMappingRepair` 表示本地
 可证明的无效 Lane 映射可被诊断并精确删除，
 `nonRegressiveApplyValidation` 表示 `apply` 会比较编辑前后的 error 指纹，只接受有效结果或
@@ -413,7 +413,7 @@ Imported Trace 的 `signalMapping` 键必须指向工程任一 Scenario 中存�
 是非空 Actual signal ID。违反时返回 `trace-mapping-invalid`、精确映射路径、
 `traceContext` 和 `traceMappingContext`；上下文公开 Lane 匹配数、Actual ID 是否存在、问题码、
 修复动作，以及外部信号尚未校验这一边界。`repair-trace-mapping` 只删除已证明无效的映射项，
-不读取或改写 VCD/CSV，也不猜测替代信号。可用唯一 `traceId` 寻址；Trace ID 重复时使用
+不读取或改写 VCD/FST/CSV，也不猜测替代信号。可用唯一 `traceId` 寻址；Trace ID 重复时使用
 `validate` 返回的快照绑定 `traceRef`。快照变化后旧引用原子失效，同一 Trace 的多项修复应在
 首项后使用唯一 `traceId`，或重新 `validate` 获取新引用。
 

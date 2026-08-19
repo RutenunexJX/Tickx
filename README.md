@@ -11,7 +11,7 @@ Project、Inspector、Scenario Dock 或模式切换栏。它提供整数 tick
 事件重定时、Lane/Group 创建、属性编辑、显示重排与事务化删除、复制/粘贴、撤销/重做、
 Event/Segment 双向同步、Marker、Relation、版本化 JSON 工程安全保存与迁移、包含未命名工程的后台恢复快照，
 以及由共享行为语义生成的 SystemVerilog、SVA、cocotb、SVG、PNG、PDF 和 WaveDrom
-JSON。VCD/CSV 导入、报告生成及跨应用桥接能力保留在独立 CLI 和领域模块中；嵌入式
+JSON。VCD/FST/CSV 导入、报告生成及跨应用桥接能力保留在独立 CLI 和领域模块中；嵌入式
 Simulation Result 工作区直接复用同一比较领域模块。验收证据见
 [PLAN.md](PLAN.md)。
 
@@ -20,6 +20,12 @@ VCD scope 按原始组件构建实例树，支持搜索、scope 级复选和单�
 Actual 波形可见集合。初次打开优先显示场景已映射的端口与 observation，其他内部信号由用户
 按需加入。Verilator harness 追踪 99 层层级，并启用 struct 与下划线信号追踪；这不改变
 Stimulus Scenario、Module Manifest 或 `wavewidgets` v1 C ABI。
+
+FST 通过随应用分发的 Wellen 0.25.6 辅助程序读取。打开文件时只建立 scope、信号、位宽与
+时间范围元数据；transition 优先为映射信号加载，无映射时使用最多 32 个信号的有界初始集，
+其后仅在用户勾选时按最多 64 个一批加载。取消、文件
+身份和 generation 检查会阻止旧批次覆盖当前 trace；`wavewidgets` 仅在辅助程序与共享库
+相邻时声明 `on-demand-fst-trace/v1`，VCD/CSV 路径不依赖该辅助程序。
 
 输出 watch lane 可直接绘制期望区间。Simulation Result 的 Compare 动作只比较具有期望区间
 的输出，按完整 lane 身份过滤实际 trace，并在期望画布、实际波形和差异表中
@@ -55,6 +61,8 @@ ZeroSlack 的正式 Wave Simulation 工作流通过版本化 `wavewidgets` C ABI
 - CMake 3.24 或更高版本。
 - 支持 C++20 的编译器。
 - Ninja。
+- Rust stable 与 Cargo（默认启用 Wellen FST reader；不需要 FST 时可配置
+  `-DWAVEWORKBENCH_ENABLE_WELLEN=OFF`）。
 
 当前验证环境为 Qt Creator 18.0.2、Qt 6.10.2、G++ 13.1.0、GDB 11.2、
 CMake 3.30.5、Ninja 1.12.1。
@@ -555,7 +563,7 @@ Marker 可完整增删改。Scenario、Lane、Clock、Group 与 Marker 选择器
   保存期间仍在途的过期写入完成后也会再次清除；在未保存提示中选择 Discard 同样等待并清除在途快照，下一次打开不会恢复已明确放弃的修改。
   打开或正式保存后会记录工程文件 SHA-256。再次覆盖同一路径前若磁盘文件已被其他应用修改，就地提供
   `Reload`、`Save As…`、`Overwrite` 和 `Cancel`；只有用户明确选择 Overwrite 才覆盖外部变更。
-- File > Export 导出 SystemVerilog/SVA/cocotb 和文档图。VCD/CSV 导入、Expected/Actual 对比、报告和
+- File > Export 导出 SystemVerilog/SVA/cocotb 和文档图。VCD/FST/CSV 导入、Expected/Actual 对比、报告和
   跨应用桥接由 `wave-compare`、`wave-bridge` 等 CLI 提供，不占用桌面工作区。
 - 特殊 lane 或 group 仍可从 Edit 菜单创建并编辑完整结构属性；空名称、与现有信号或 group 重复的名称、无效位宽、Enum 映射、时钟/分组引用或颜色，
   以及会使现有 Segment/Event 失效的类型或位宽变更，均会在窗口内原位提示并保留全部草稿与焦点；
@@ -589,6 +597,7 @@ src/
   wavevalidate/  场景与关系验证、可定位诊断
   wavegenerate/  共享生成计划、HDL/Python 生成和图形导出
   waveimport/    标准 VCD/CSV 解析、只读 trace 索引、映射和时间对齐
+  wavefst/       Wellen FST 元数据与按信号 transition 加载边界
   wavecompare/   区间比较规则、first mismatch、关系比较和报告生成
   waveintegration/  ZeroSlack、Private Frame、Pinloom 文件与 URI 契约
   waveautomation/  可嵌入的机器可读 inspect、validate 与原子编辑 API
@@ -833,14 +842,14 @@ exports/
 - 第 561–570 轮消除 Imported Trace 映射损坏延迟到 Compare 才暴露的问题：映射键必须指向
   工程中存在的非 Group Lane，Actual signal ID 不得为空。`validate` 返回具体 Trace、映射键、
   问题码和快照绑定 `traceRef`；`repair-trace-mapping` 只删除已证明无效的单条映射，不读取、
-  改写或猜测外部 VCD/CSV 信号。完整 `inspect` 公开映射表，`--summary` 仍只返回计数。
+  改写或猜测外部 VCD/FST/CSV 信号。完整 `inspect` 公开映射表，`--summary` 仍只返回计数。
 - 第 571–580 轮消除 Imported Trace 身份与 Compare 选择歧义：空或重复 Trace ID 现作为
   工程级结构错误返回具体数组路径和不同的 `traceRef`；`repair-trace-identity` 只修改所选
   快照的 ID，可采用显式唯一 ID 或确定性生成值，并保留路径、格式、偏移、映射和扩展载荷。
   `wave-compare` 在多 Trace 时要求显式 `--trace-id`，重复 ID 不再静默取第一项；报告区分
   `unmapped-signal` 与 `missing-signal`，后者保留已失效的 Actual signal ID。
 - 第 581–590 轮消除 Imported Trace 源引用错误延迟到解析阶段才暴露的问题：`path` 必须非空，
-  `format` 必须为大小写不敏感的 VCD 或 CSV；`validate` 按 Trace 聚合返回精确字段路径、
+  `format` 必须为大小写不敏感的 VCD、FST 或 CSV；`validate` 按 Trace 聚合返回精确字段路径、
   `empty-path`/`unsupported-format`、支持格式和快照绑定 `traceRef`，并明确不检查文件系统。
   `repair-trace-reference` 要求显式提供缺失属性，只有修复后的引用整体有效时才原子更新路径/
   格式；`wave-compare` 在解析前分别说明空路径、未知格式和目标不是文件。
@@ -1075,7 +1084,8 @@ exports/
   JSON 契约与 Windows PowerShell 管道。
 - 生成的 cocotb 文件通过 Python 语法编译，SystemVerilog testbench 通过 Vivado `xvlog`。
 - PNG 和由最终 PDF 栅格化所得页面完成视觉复核。
-- VCD timescale、多值信号、`$dumpvars`、层级/总线名称、CSV 显式单位及取消。
+- VCD timescale、多值信号、`$dumpvars`、层级/总线名称、CSV 显式单位及取消；Wellen FST
+  元数据与按信号加载、配对 VCD 等价性、规模门禁、取消和旧 generation 拒绝。
 - 外部 VCD 示例磁盘解析、名称映射、偏移安全移动和二分可见范围查询。
 - 1000 个 signal、1,000,000 个 transition 的 100,000 次窗口查询基准。
 - exact、ignore X、expected X wildcard、edge tolerance、time window、bus mask、
@@ -1187,7 +1197,9 @@ Segment 列表阻断及保留草稿的 Beat 恢复入口。
 
 ## 当前限制
 
-- FST 尚未接入；当前未捆绑兼容 FST 解析库，未实现自定义方言。
+- FST 当前只加载数字 bit-vector 信号；analog/string 等 Wellen 值类型会被跳过并给出诊断。
+  读取器必须与应用或 `wavewidgets` 位于同一目录，详细规模门禁与归属见
+  [docs/fst-reader.md](docs/fst-reader.md)。
 - SVA 仅在关系可无损表达为无 condition 的精确 bit 边沿、明确 clock/reset 且为精确
   cycle delay 时生成；带 condition 或其他不可无损转换的关系只产生诊断，不生成近似
   assertion。

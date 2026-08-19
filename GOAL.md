@@ -4,12 +4,11 @@
 
 ## 目标
 
-ZeroSlack Wave Simulation S12.5“轻量 trace 检查”已完成。Stimulus Scenario v5 持久化
-指定时刻取值、区间稳定性与边沿响应窗口三类检查定义；结果只由当前 Actual TraceIndex
-派生，不持久化。嵌入式 Simulation Result 的 Review/Checks 页可维护、运行并定位检查结果。
-`wavewidgets` C ABI 继续为 v1，并声明 `lightweight-trace-checks/v1`；全量 offscreen CTest
-为 `92/92`。本机未安装真实 Verilator，外部编译/运行只能由确定性 fixture 验证，不表述为
-真实 RTL 仿真。
+ZeroSlack Wave Simulation S12.6“FST/Wellen 按需读取”已完成。标准 FST 由随包分发的
+Wellen 0.25.6 辅助程序读取：先建立元数据，再仅为映射或用户勾选的信号解码 transition。
+取消、文件身份、generation、批量和响应规模均有明确门禁；Compare/Checks 会等待所需信号。
+`wavewidgets` C ABI 继续为 v1，并在安装闭包完整时声明 `on-demand-fst-trace/v1`。VCD/CSV
+路径不依赖该辅助程序，关闭 Wellen 构建选项后仍可构建。
 
 交付一个可独立运行的 Qt 6/C++20 波形桌面应用，使用户能够人工定义与直接编辑 FPGA
 预期数字波形；同一场景模型继续支撑 SystemVerilog/SVA/cocotb、文档图、trace 导入及
@@ -903,7 +902,7 @@ Event、Relation、Segment 与波形均保持不变。dry-run 不写文件且结
 valid=true、0 error，示例源 SHA 保持
 d13f64028f7879b9ea15119318d51e7e22428edf47368d472ee1f8804047f3b4，损坏夹具 SHA 保持
 493dd28ddc30ab43f1487483d3439b9d5fc195527ba392cc3c1f2991abee9337。健康映射修复不产生输出；
-重复 Trace ID 可由快照引用精确区分，工程变化后的旧引用不会留下部分删除。外部 VCD/CSV
+重复 Trace ID 可由快照引用精确区分，工程变化后的旧引用不会留下部分删除。外部 VCD/FST/CSV
 信号未加载时不猜测替代映射。
 
 长期 Goal 保持 active；第 570 轮为已验收的阶段可用节点。
@@ -935,7 +934,7 @@ d13f64028f7879b9ea15119318d51e7e22428edf47368d472ee1f8804047f3b4。健康身份�
 第 581–590 轮开发视角默认、Qt Creator Debug、Qt Creator Release 三套构建均通过，三套各
 68/68 CTest 全部通过，耗时分别为 8.19 s、10.43 s、7.02 s（`--parallel 4`）；核心入口为
 45/45，全部 GUI 路径使用 offscreen。Imported Trace 的路径现必须非空，格式必须大小写不敏感
-地为 VCD/CSV；`validate` 按 Trace 聚合返回 `trace-reference-invalid`、全部无效字段路径、
+地为 VCD/FST/CSV；`validate` 按 Trace 聚合返回 `trace-reference-invalid`、全部无效字段路径、
 `empty-path`/`unsupported-format`、支持格式、文件系统未校验边界和快照绑定 `traceRef`。
 `repair-trace-reference` 必须显式补充路径/格式至少一项，且最终引用整体有效才提交；修复只更新
 路径/格式，保留 ID、偏移、映射、扩展载荷与工程波形。健康引用、部分修复和过期快照均原子拒绝。

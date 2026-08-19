@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(WaveWorkbench VERSION 0.7.0 LANGUAGES CXX)
+project(WaveWorkbench VERSION 0.8.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -11,8 +11,43 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 option(WAVEWORKBENCH_BUILD_TESTS "Build automated tests" ON)
+option(WAVEWORKBENCH_ENABLE_WELLEN "Build the Wellen FST reader" ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent)
+
+if(WAVEWORKBENCH_ENABLE_WELLEN)
+    find_program(CARGO_EXECUTABLE
+        NAMES cargo
+        HINTS "$ENV{USERPROFILE}/.cargo/bin"
+    )
+    if(NOT CARGO_EXECUTABLE)
+        message(FATAL_ERROR
+            "WAVEWORKBENCH_ENABLE_WELLEN=ON requires the Rust cargo executable")
+    endif()
+    set(WAVE_WELLEN_READER_CARGO_OUTPUT
+        "${CMAKE_BINARY_DIR}/cargo-target/release/wave-wellen-reader${CMAKE_EXECUTABLE_SUFFIX}")
+    set(WAVE_WELLEN_READER_OUTPUT
+        "${CMAKE_BINARY_DIR}/wave-wellen-reader${CMAKE_EXECUTABLE_SUFFIX}")
+    add_custom_command(
+        OUTPUT "${WAVE_WELLEN_READER_OUTPUT}"
+        COMMAND "${CMAKE_COMMAND}" -E env
+            "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/cargo-target"
+            "${CARGO_EXECUTABLE}" build --release --locked
+            --manifest-path "${CMAKE_SOURCE_DIR}/tools/wellen_reader/Cargo.toml"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${WAVE_WELLEN_READER_CARGO_OUTPUT}"
+            "${WAVE_WELLEN_READER_OUTPUT}"
+        DEPENDS
+            tools/wellen_reader/Cargo.toml
+            tools/wellen_reader/Cargo.lock
+            tools/wellen_reader/src/main.rs
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Building the Wellen on-demand FST reader"
+        VERBATIM
+    )
+    add_custom_target(wave-wellen-reader ALL
+        DEPENDS "${WAVE_WELLEN_READER_OUTPUT}")
+endif()
 
 function(wave_enable_warnings target)
     if(MSVC)
@@ -82,6 +117,18 @@ wave_enable_warnings(wavetrace)
 # dedicated ownership boundary without forcing downstream source changes.
 add_library(waveimport INTERFACE)
 target_link_libraries(waveimport INTERFACE wavetrace)
+
+add_library(wavefst STATIC
+    src/waveimport/src/fst_trace.cpp
+)
+target_include_directories(wavefst
+    PUBLIC src/waveimport/include
+)
+target_link_libraries(wavefst PUBLIC wavetrace Qt6::Core)
+wave_enable_warnings(wavefst)
+if(WAVEWORKBENCH_ENABLE_WELLEN)
+    add_dependencies(wavefst wave-wellen-reader)
+endif()
 
 add_library(wavecompare STATIC
     src/wavecompare/src/compare.cpp
@@ -160,9 +207,12 @@ target_include_directories(wavewidgets
         src/wavewidgets/include
 )
 target_link_libraries(wavewidgets
-    PUBLIC wavecore wavetime waveedit waveproject wavevalidate wavegenerate wavetrace wavecompare waveintegration wavesim
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent
+    PUBLIC wavecore wavetime waveedit waveproject wavevalidate wavegenerate wavetrace wavefst wavecompare waveintegration wavesim
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent ${CMAKE_DL_LIBS}
 )
+if(WAVEWORKBENCH_ENABLE_WELLEN)
+    add_dependencies(wavewidgets wave-wellen-reader)
+endif()
 set_target_properties(wavewidgets PROPERTIES
     PREFIX ""
     OUTPUT_NAME "wavewidgets"
@@ -192,8 +242,11 @@ add_executable(wave-compare
     src/cli/scenario_selection.h
 )
 target_link_libraries(wave-compare
-    PRIVATE waveproject waveimport wavecompare Qt6::Core
+    PRIVATE waveproject waveimport wavefst wavecompare Qt6::Core
 )
+if(WAVEWORKBENCH_ENABLE_WELLEN)
+    add_dependencies(wave-compare wave-wellen-reader)
+endif()
 wave_enable_warnings(wave-compare)
 
 add_executable(wave-bridge
@@ -249,6 +302,11 @@ install(
     DESTINATION .
     COMPONENT Portable
 )
+if(WAVEWORKBENCH_ENABLE_WELLEN)
+    install(PROGRAMS "${WAVE_WELLEN_READER_OUTPUT}"
+        DESTINATION .
+        COMPONENT Portable)
+endif()
 install(
     FILES
         "${CMAKE_SOURCE_DIR}/docs/automation-cli.md"
@@ -256,6 +314,7 @@ install(
         "${CMAKE_SOURCE_DIR}/docs/integration-contracts.md"
         "${CMAKE_SOURCE_DIR}/docs/simulation-runner.md"
         "${CMAKE_SOURCE_DIR}/docs/project-format.md"
+        "${CMAKE_SOURCE_DIR}/docs/fst-reader.md"
     DESTINATION docs
     COMPONENT Portable
 )

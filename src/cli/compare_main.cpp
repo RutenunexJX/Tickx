@@ -1,4 +1,5 @@
 #include "wave/compare.h"
+#include "wave/fst_trace.h"
 #include "wave/project_io.h"
 #include "wave/trace.h"
 
@@ -13,7 +14,9 @@
 #include <algorithm>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -211,11 +214,12 @@ int main(int argc, char* argv[])
             .trimmed()
             .toLower();
     if (format != QStringLiteral("vcd")
-        && format != QStringLiteral("csv")) {
+        && format != QStringLiteral("csv")
+        && format != QStringLiteral("fst")) {
         QTextStream(stderr)
             << "Selected imported trace format '"
             << QString::fromStdString(reference.format)
-            << "' is unsupported; expected VCD or CSV.\n";
+            << "' is unsupported; expected VCD, FST, or CSV.\n";
         return 2;
     }
     auto tracePath = storedTracePath;
@@ -232,10 +236,58 @@ int main(int argc, char* argv[])
     parseOptions.projectTimeBase = project.timeBase;
     parseOptions.identity = {project.id, reference.id, 1};
     parseOptions.offset = reference.offset;
-    auto parsed = format == QStringLiteral("vcd")
-        ? wave::parseVcdFile(nativePath(tracePath), parseOptions)
-        : wave::parseCsvFile(
-              nativePath(tracePath), parseOptions);
+    wave::TraceParseResult parsed;
+    if (format == QStringLiteral("vcd")) {
+        parsed = wave::parseVcdFile(nativePath(tracePath), parseOptions);
+    } else if (format == QStringLiteral("csv")) {
+        parsed = wave::parseCsvFile(nativePath(tracePath), parseOptions);
+    } else {
+#ifdef Q_OS_WIN
+        constexpr auto readerName = "wave-wellen-reader.exe";
+#else
+        constexpr auto readerName = "wave-wellen-reader";
+#endif
+        const auto reader = QDir(QCoreApplication::applicationDirPath())
+                                .filePath(QString::fromLatin1(readerName));
+        parsed = wave::readFstMetadataFile(
+            tracePath, parseOptions, reader);
+        if (parsed.ok()) {
+            std::set<std::string> required;
+            for (const auto& [laneId, signalId] : reference.signalMapping) {
+                static_cast<void>(laneId);
+                if (parsed.index->findSignal(signalId)) required.insert(signalId);
+            }
+            while (!required.empty()) {
+                std::vector<std::string> batch;
+                const auto count = std::min<std::size_t>(64, required.size());
+                batch.reserve(count);
+                for (auto iterator = required.begin();
+                     iterator != required.end() && batch.size() < count;) {
+                    batch.push_back(*iterator);
+                    iterator = required.erase(iterator);
+                }
+                auto loaded = wave::loadFstSignalsFile(
+                    tracePath, parseOptions, reader, batch);
+                std::string mergeError;
+                if (!loaded.ok()
+                    || !wave::mergeLoadedTraceSignals(
+                        *parsed.index, loaded, &mergeError)) {
+                    parsed.diagnostics.insert(
+                        parsed.diagnostics.end(),
+                        loaded.diagnostics.begin(),
+                        loaded.diagnostics.end());
+                    if (!mergeError.empty()) {
+                        parsed.diagnostics.push_back({
+                            wave::TraceDiagnosticSeverity::Error,
+                            0,
+                            std::move(mergeError)});
+                    }
+                    parsed.index.reset();
+                    break;
+                }
+            }
+        }
+    }
     if (!parsed.ok()) {
         const auto message = parsed.errorSummary();
         QTextStream(stderr)

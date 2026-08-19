@@ -27,7 +27,8 @@ else()
     set(executable_suffix "")
 endif()
 foreach(executable IN ITEMS
-    wave-workbench wave-cli wave-generate wave-compare wave-bridge wave-sim-runner)
+    wave-workbench wave-cli wave-generate wave-compare wave-bridge wave-sim-runner
+    wave-wellen-reader)
     if(NOT EXISTS "${OUTPUT}/${executable}${executable_suffix}")
         message(FATAL_ERROR
             "Portable install omitted ${executable}${executable_suffix}")
@@ -53,6 +54,7 @@ foreach(document IN ITEMS
     docs/integration-contracts.md
     docs/simulation-runner.md
     docs/project-format.md
+    docs/fst-reader.md
     docs/examples/quick-start.operations.json
     schemas/automation/v1/capabilities.schema.json
     schemas/automation/v1/report.schema.json

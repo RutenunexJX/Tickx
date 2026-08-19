@@ -4,6 +4,8 @@
 #include "wave/project_io.h"
 
 #include <QByteArray>
+#include <QCoreApplication>
+#include <QDir>
 #include <QFileInfo>
 #include <QString>
 #include <QStringList>
@@ -13,7 +15,47 @@
 #include <algorithm>
 #include <cstring>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
+
 namespace {
+
+int ModuleAnchor = 0;
+
+QString adjacentWellenReader()
+{
+    auto directory = QCoreApplication::applicationDirPath();
+#ifdef Q_OS_WIN
+    HMODULE module = nullptr;
+    if (GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&ModuleAnchor),
+            &module)) {
+        std::wstring path(32'768, L'\0');
+        const auto length = GetModuleFileNameW(
+            module, path.data(), static_cast<DWORD>(path.size()));
+        if (length > 0 && length < path.size()) {
+            path.resize(length);
+            directory = QFileInfo(QString::fromStdWString(path))
+                            .absolutePath();
+        }
+    }
+    constexpr auto executable = "wave-wellen-reader.exe";
+#else
+    Dl_info moduleInfo{};
+    if (dladdr(static_cast<const void*>(&ModuleAnchor), &moduleInfo) != 0
+        && moduleInfo.dli_fname) {
+        directory = QFileInfo(QString::fromLocal8Bit(moduleInfo.dli_fname))
+                        .absolutePath();
+    }
+    constexpr auto executable = "wave-wellen-reader";
+#endif
+    return QDir(directory).filePath(QString::fromLatin1(executable));
+}
 
 void writeError(
     const QString& message,
@@ -58,8 +100,14 @@ int wavewidgets_create_simulation_workspace_v1(
 
         const QString projectId = QString::fromStdString(loaded.project->id);
         const int scenarioCount = static_cast<int>(loaded.project->scenarios.size());
+        const auto wellenReader = adjacentWellenReader();
         auto* window = new wave::MainWindow(
-            *loaded.project, projectPath, parent, std::nullopt, true);
+            *loaded.project,
+            projectPath,
+            parent,
+            std::nullopt,
+            true,
+            wellenReader);
         window->setWindowFlag(Qt::Window, false);
         window->setAttribute(Qt::WA_DeleteOnClose, false);
         window->setProperty(
@@ -70,13 +118,15 @@ int wavewidgets_create_simulation_workspace_v1(
             "wavewidgets.projectPath", QFileInfo(projectPath).absoluteFilePath());
         window->setProperty("wavewidgets.projectId", projectId);
         window->setProperty("wavewidgets.scenarioCount", scenarioCount);
-        window->setProperty(
-            "wavewidgets.capabilities",
-            QStringList{
-                QStringLiteral("internal-signal-hierarchy/v1"),
-                QStringLiteral("multi-clock-async-events/v1"),
-                QStringLiteral("expected-actual-compare/v1"),
-                QStringLiteral("lightweight-trace-checks/v1")});
+        QStringList capabilities{
+            QStringLiteral("internal-signal-hierarchy/v1"),
+            QStringLiteral("multi-clock-async-events/v1"),
+            QStringLiteral("expected-actual-compare/v1"),
+            QStringLiteral("lightweight-trace-checks/v1")};
+        if (QFileInfo(wellenReader).isFile()) {
+            capabilities.append(QStringLiteral("on-demand-fst-trace/v1"));
+        }
+        window->setProperty("wavewidgets.capabilities", capabilities);
         *workspace = window;
         writeError(QString(), errorUtf8, errorCapacity);
         return 0;

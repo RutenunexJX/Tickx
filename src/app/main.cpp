@@ -34334,7 +34334,7 @@ int main(int argc, char* argv[])
             });
     } else if (waveformOnlySmoke) {
         QTimer::singleShot(
-            0,
+            50,
             &application,
             [&application, &window, waveformOnlyScreenshotPath] {
                 auto* canvas = window.findChild<wave::WaveCanvas*>();

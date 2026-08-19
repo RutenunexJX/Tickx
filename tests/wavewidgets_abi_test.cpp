@@ -78,6 +78,18 @@ int main(int argc, char** argv)
                   .toStringList()
                   .contains(QStringLiteral("lightweight-trace-checks/v1")),
               "embedded workspace advertises lightweight trace checks");
+#if defined(WAVE_WELLEN_READER)
+        check(QFileInfo(QStringLiteral(WAVE_WELLEN_READER)).isFile()
+                  && workspace->property("wavewidgets.capabilities")
+                         .toStringList()
+                         .contains(QStringLiteral("on-demand-fst-trace/v1")),
+              "embedded workspace advertises an installed on-demand FST reader");
+#else
+        check(!workspace->property("wavewidgets.capabilities")
+                   .toStringList()
+                   .contains(QStringLiteral("on-demand-fst-trace/v1")),
+              "embedded workspace does not advertise an unavailable FST reader");
+#endif
         check(workspace->findChild<wave::WaveCanvas*>(
                   QStringLiteral("StimulusCanvas")),
               "embedded workspace exposes the shared stimulus canvas");

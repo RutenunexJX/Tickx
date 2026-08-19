@@ -58,7 +58,7 @@ string(JSON broken_json
        "\"\"")
 string(JSON broken_json
        SET "${broken_json}" importedTraces 0 format
-       "\"fst\"")
+       "\"wlf\"")
 file(WRITE "${broken_project}" "${broken_json}")
 file(SHA256 "${broken_project}" broken_sha_before)
 
@@ -67,7 +67,7 @@ string(JSON bad_format_json
        "\"${trace_path}\"")
 string(JSON bad_format_json
        SET "${bad_format_json}" importedTraces 0 format
-       "\"fst\"")
+       "\"wlf\"")
 file(WRITE
     "${bad_format_project}" "${bad_format_json}")
 
@@ -242,7 +242,7 @@ execute_process(
 )
 if(NOT format_compare_code EQUAL 2
    OR NOT format_compare_error MATCHES
-          "unsupported; expected VCD or CSV")
+          "unsupported; expected VCD, FST, or CSV")
     message(FATAL_ERROR
         "wave-compare did not explain an unsupported Trace format")
 endif()

@@ -156,7 +156,7 @@ const std::array<CompatibilityCommand, 3>& compatibilityCommands()
         {
             QStringLiteral("compare"),
             QStringLiteral("wave-compare"),
-            QStringLiteral("Compare expected waveforms with a referenced VCD or CSV trace."),
+            QStringLiteral("Compare expected waveforms with a referenced VCD, FST, or CSV trace."),
             false,
         },
         {

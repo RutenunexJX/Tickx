@@ -328,7 +328,7 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
         painter.drawText(
             QRect(kNameWidth, kRulerHeight, viewport()->width() - kNameWidth, viewport()->height() - kRulerHeight),
             Qt::AlignCenter,
-            tr("Import a standard VCD or CSV trace."));
+            tr("Import a VCD, FST, or CSV trace."));
         return;
     }
 
@@ -391,6 +391,15 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
             QRect(8, top, kNameWidth - 16, kRowHeight),
             Qt::AlignLeft | Qt::AlignVCenter,
             painter.fontMetrics().elidedText(name, Qt::ElideMiddle, kNameWidth - 18));
+
+        if (!signal.transitionsLoaded) {
+            painter.setPen(QColor(112, 124, 140));
+            painter.drawText(
+                QRect(kNameWidth + 12, top, 180, kRowHeight),
+                Qt::AlignLeft | Qt::AlignVCenter,
+                tr("Loading selected signal…"));
+            continue;
+        }
 
         const auto transitions = signal.visibleTransitions(start, end, true);
         if (transitions.empty()) continue;

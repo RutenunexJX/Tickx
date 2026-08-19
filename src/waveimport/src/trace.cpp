@@ -945,6 +945,8 @@ std::string_view toString(const TraceFormat format) noexcept
         return "vcd";
     case TraceFormat::Csv:
         return "csv";
+    case TraceFormat::Fst:
+        return "fst";
     }
     return "unknown";
 }

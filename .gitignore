@@ -10,3 +10,4 @@ __pycache__/
 CMakeUserPresets.json
 *.autosave
 .wave-workbench/
+/tools/wellen_reader/target/

@@ -17,7 +17,7 @@ add_executable(wave-tests
     test_main.cpp
 )
 target_link_libraries(wave-tests
-    PRIVATE wavetime wavecore waveedit waveproject wavevalidate wavegenerate waveimport wavecompare waveintegration wavesim waveautomation
+    PRIVATE wavetime wavecore waveedit waveproject wavevalidate wavegenerate waveimport wavefst wavecompare waveintegration wavesim waveautomation
             Qt6::Core Qt6::Gui Qt6::Svg
 )
 add_dependencies(wave-tests
@@ -31,6 +31,11 @@ wave_enable_warnings(wave-tests)
 target_compile_definitions(wave-tests
     PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+if(WAVEWORKBENCH_ENABLE_WELLEN)
+    add_dependencies(wave-tests wave-wellen-reader)
+    target_compile_definitions(wave-tests
+        PRIVATE WAVE_WELLEN_READER="${WAVE_WELLEN_READER_OUTPUT}")
+endif()
 
 add_executable(wave-fixed-fixture-ui-smoke
     fixed_fixture_ui_smoke.cpp
@@ -70,6 +75,26 @@ target_compile_definitions(wave-structured-input-ui-smoke
     PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 wave_enable_warnings(wave-structured-input-ui-smoke)
 
+if(WAVEWORKBENCH_ENABLE_WELLEN)
+    add_executable(wave-fst-on-demand-ui-smoke
+        fst_on_demand_ui_smoke.cpp
+    )
+    target_link_libraries(wave-fst-on-demand-ui-smoke
+        PRIVATE wavewidgets wavefst wavecore
+                Qt6::Core Qt6::Gui Qt6::Widgets)
+    target_compile_definitions(wave-fst-on-demand-ui-smoke
+        PRIVATE
+            WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+            WAVE_WELLEN_READER="${WAVE_WELLEN_READER_OUTPUT}")
+    add_dependencies(wave-fst-on-demand-ui-smoke wave-wellen-reader)
+    wave_enable_warnings(wave-fst-on-demand-ui-smoke)
+    add_test(
+        NAME wave-fst-on-demand-ui-smoke
+        COMMAND wave-fst-on-demand-ui-smoke
+                "${CMAKE_BINARY_DIR}/fst-on-demand-ui-smoke.png"
+    )
+endif()
+
 add_executable(wave-timeline-viewport-test timeline_viewport_test.cpp)
 target_link_libraries(wave-timeline-viewport-test PRIVATE wavetime)
 wave_enable_warnings(wave-timeline-viewport-test)
@@ -79,6 +104,10 @@ target_link_libraries(wavewidgets-abi-test
     PRIVATE wavewidgets waveproject Qt6::Core Qt6::Gui Qt6::Widgets)
 target_compile_definitions(wavewidgets-abi-test
     PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+if(WAVEWORKBENCH_ENABLE_WELLEN)
+    target_compile_definitions(wavewidgets-abi-test
+        PRIVATE WAVE_WELLEN_READER="${WAVE_WELLEN_READER_OUTPUT}")
+endif()
 wave_enable_warnings(wavewidgets-abi-test)
 
 add_test(NAME wave-core-tests COMMAND wave-tests)
@@ -881,6 +910,16 @@ endforeach()
 set_tests_properties(wave-app-smoke wave-example-smoke wave-simulation-result-window-smoke wave-simulation-controls-smoke wave-simulation-stop-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke PROPERTIES
     TIMEOUT 20
 )
+if(TEST wave-fst-on-demand-ui-smoke)
+    set_tests_properties(wave-fst-on-demand-ui-smoke PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+        ENVIRONMENT "${_wave_test_environment}"
+        TIMEOUT 20)
+    set_property(TEST wave-fst-on-demand-ui-smoke APPEND PROPERTY ENVIRONMENT
+        "WAVEWORKBENCH_RECOVERY_DIR=${CMAKE_BINARY_DIR}/test-recovery/wave-fst-on-demand-ui-smoke"
+        "WAVEWORKBENCH_SETTINGS_DIR=${CMAKE_BINARY_DIR}/test-settings/wave-fst-on-demand-ui-smoke")
+endif()
 set_property(TEST wave-simulation-controls-smoke APPEND PROPERTY ENVIRONMENT
     "WAVE_SIMULATOR_FIXTURE=$<TARGET_FILE:wave-simulator-fixture>")
 set_property(TEST wave-simulation-stop-smoke APPEND PROPERTY ENVIRONMENT

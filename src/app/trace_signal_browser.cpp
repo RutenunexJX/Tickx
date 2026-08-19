@@ -265,10 +265,15 @@ void TraceSignalBrowser::updateSummary()
         summaryLabel_->setText(tr("No simulation result"));
         return;
     }
+    const auto loaded = std::count_if(
+        trace_->traceSignals.begin(),
+        trace_->traceSignals.end(),
+        [](const TraceSignal& signal) { return signal.transitionsLoaded; });
     summaryLabel_->setText(
-        tr("%1 of %2 signals visible")
+        tr("%1 of %2 visible · %3 loaded")
             .arg(static_cast<qulonglong>(visibleSignalIds_.size()))
-            .arg(static_cast<qulonglong>(trace_->traceSignals.size())));
+            .arg(static_cast<qulonglong>(trace_->traceSignals.size()))
+            .arg(static_cast<qulonglong>(loaded)));
 }
 
 void TraceSignalBrowser::handleItemChanged(QTreeWidgetItem* item)

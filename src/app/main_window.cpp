@@ -89,6 +89,18 @@ namespace wave {
 namespace {
 
 constexpr int ScenarioLocationMemoryDelayMs = 400;
+constexpr std::size_t DefaultFstVisibleSignals = 32;
+
+QString defaultWellenReaderPath()
+{
+#ifdef Q_OS_WIN
+    constexpr auto executable = "wave-wellen-reader.exe";
+#else
+    constexpr auto executable = "wave-wellen-reader";
+#endif
+    return QDir(QCoreApplication::applicationDirPath()).filePath(
+        QString::fromLatin1(executable));
+}
 
 class PositiveInt64Validator final : public QValidator {
 public:
@@ -1174,10 +1186,15 @@ MainWindow::MainWindow(
     QString projectFile,
     QWidget* parent,
     const std::optional<std::size_t> initialScenarioIndex,
-    const bool loadFirstTrace)
+    const bool loadFirstTrace,
+    QString wellenReaderExecutable)
     : QMainWindow(parent)
     , project_(std::move(project))
     , projectFile_(std::move(projectFile))
+    , wellenReaderExecutable_(
+          wellenReaderExecutable.isEmpty()
+              ? defaultWellenReaderPath()
+              : QFileInfo(std::move(wellenReaderExecutable)).absoluteFilePath())
     , simulationResultMode_(loadFirstTrace)
 {
     const auto recoveredSnapshot = projectFile_.endsWith(
@@ -1534,6 +1551,8 @@ MainWindow::MainWindow(
                 }
                 compareTraceCanvas_->setVisibleSignalIds(
                     traceVisibleSignalIds_);
+                fstSignalLoadPaused_ = false;
+                startPendingFstSignalLoad();
             });
         connect(
             traceSignalBrowser_,
@@ -1713,6 +1732,13 @@ MainWindow::MainWindow(
         &QFutureWatcher<std::shared_ptr<TraceParseResult>>::finished,
         this,
         &MainWindow::finishTraceImport);
+    fstSignalLoadWatcher_ =
+        new QFutureWatcher<std::shared_ptr<TraceSignalLoadResult>>(this);
+    connect(
+        fstSignalLoadWatcher_,
+        &QFutureWatcher<std::shared_ptr<TraceSignalLoadResult>>::finished,
+        this,
+        &MainWindow::finishFstSignalLoad);
     autosaveTimer_ = new QTimer(this);
     autosaveTimer_->setSingleShot(true);
     autosaveTimer_->setInterval(1'500);
@@ -1764,7 +1790,11 @@ MainWindow::MainWindow(
     }
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow()
+{
+    if (traceCancelFlag_) traceCancelFlag_->store(true);
+    if (fstSignalLoadCancelFlag_) fstSignalLoadCancelFlag_->store(true);
+}
 
 void MainWindow::configureSimulationSession()
 {
@@ -2420,7 +2450,16 @@ void MainWindow::initializeTraceVisibility(
         }
     }
     if (traceVisibleSignalIds_.empty()) {
-        traceVisibleSignalIds_ = std::move(available);
+        if (traceIndex_->format == TraceFormat::Fst) {
+            for (const auto& signal : traceIndex_->traceSignals) {
+                traceVisibleSignalIds_.insert(signal.id);
+                if (traceVisibleSignalIds_.size() >= DefaultFstVisibleSignals) {
+                    break;
+                }
+            }
+        } else {
+            traceVisibleSignalIds_ = std::move(available);
+        }
     }
 }
 
@@ -2440,6 +2479,174 @@ void MainWindow::refreshTraceViews()
     if (traceSignalBrowser_) {
         traceSignalBrowser_->setTrace(trace, traceVisibleSignalIds_);
     }
+}
+
+std::set<std::string> MainWindow::requiredFstSignalIds() const
+{
+    std::set<std::string> required = traceVisibleSignalIds_;
+    if (const auto* reference = activeTraceReference()) {
+        for (const auto& [laneId, signalId] : reference->signalMapping) {
+            static_cast<void>(laneId);
+            required.insert(signalId);
+        }
+    }
+    return required;
+}
+
+bool MainWindow::requiredFstSignalsLoaded() const
+{
+    if (!traceIndex_ || traceIndex_->format != TraceFormat::Fst) return true;
+    for (const auto& id : requiredFstSignalIds()) {
+        const auto* signal = traceIndex_->findSignal(id);
+        if (signal && !signal->transitionsLoaded) return false;
+    }
+    return true;
+}
+
+void MainWindow::updateFstLoadStatus()
+{
+    if (!traceIndex_ || traceIndex_->format != TraceFormat::Fst) return;
+    const auto loaded = std::count_if(
+        traceIndex_->traceSignals.begin(),
+        traceIndex_->traceSignals.end(),
+        [](const TraceSignal& signal) { return signal.transitionsLoaded; });
+    const auto required = requiredFstSignalIds();
+    const auto pending = std::count_if(
+        required.begin(),
+        required.end(),
+        [this](const std::string& id) {
+            const auto* signal = traceIndex_->findSignal(id);
+            return signal && !signal->transitionsLoaded;
+        });
+    setProperty("wavewidgets.fstLoadedSignalCount", loaded);
+    setProperty("wavewidgets.fstSignalCount", traceIndex_->traceSignals.size());
+    setProperty("wavewidgets.fstRequiredSignalsLoaded", pending == 0);
+    if (traceSummary_) {
+        traceSummary_->setText(
+            pending > 0
+                ? tr("FST: %1/%2 loaded · loading %3 selected")
+                      .arg(loaded)
+                      .arg(traceIndex_->traceSignals.size())
+                      .arg(pending)
+                : tr("FST: %1/%2 signals loaded")
+                      .arg(loaded)
+                      .arg(traceIndex_->traceSignals.size()));
+    }
+}
+
+void MainWindow::cancelActiveFstSignalLoad(const bool pause)
+{
+    fstSignalLoadPaused_ = pause;
+    if (fstSignalLoadCancelFlag_) fstSignalLoadCancelFlag_->store(true);
+}
+
+void MainWindow::startPendingFstSignalLoad()
+{
+    if (fstSignalLoadPaused_ || !traceIndex_
+        || traceIndex_->format != TraceFormat::Fst
+        || !fstSignalLoadWatcher_ || fstSignalLoadWatcher_->isRunning()) {
+        return;
+    }
+    std::vector<std::string> batch;
+    batch.reserve(FstTraceReaderLimits{}.maxSignalsPerRequest);
+    for (const auto& id : requiredFstSignalIds()) {
+        const auto* signal = traceIndex_->findSignal(id);
+        if (!signal || signal->transitionsLoaded) continue;
+        batch.push_back(id);
+        if (batch.size() >= FstTraceReaderLimits{}.maxSignalsPerRequest) break;
+    }
+    if (batch.empty()) {
+        if (traceProgress_ && (!traceWatcher_ || !traceWatcher_->isRunning())) {
+            traceProgress_->setVisible(false);
+        }
+        if (cancelTraceAction_ && (!traceWatcher_ || !traceWatcher_->isRunning())) {
+            cancelTraceAction_->setEnabled(false);
+        }
+        updateFstLoadStatus();
+        statusBar()->showMessage(
+            tr("Loaded %1 of %2 FST signals")
+                .arg(property("wavewidgets.fstLoadedSignalCount").toULongLong())
+                .arg(property("wavewidgets.fstSignalCount").toULongLong()),
+            3'000);
+        if (std::exchange(fstComparePending_, false)) {
+            QTimer::singleShot(0, this, &MainWindow::runCompare);
+        }
+        if (std::exchange(fstChecksPending_, false)) {
+            QTimer::singleShot(0, this, &MainWindow::runSimulationChecks);
+        }
+        return;
+    }
+
+    const auto* reference = activeTraceReference();
+    const auto path = reference ? resolvedTracePath(*reference) : pendingTracePath_;
+    const auto offset = reference ? reference->offset : pendingTraceOffset_;
+    const auto identity = traceIndex_->identity;
+    fstSignalLoadCancelFlag_ = std::make_shared<std::atomic_bool>(false);
+    const auto cancelFlag = fstSignalLoadCancelFlag_;
+    TraceParseOptions options;
+    options.projectTimeBase = traceIndex_->projectTimeBase;
+    options.identity = identity;
+    options.offset = offset;
+    options.isCancelled = [cancelFlag] { return cancelFlag->load(); };
+    if (traceProgress_) traceProgress_->setVisible(true);
+    if (cancelTraceAction_) cancelTraceAction_->setEnabled(true);
+    updateFstLoadStatus();
+    statusBar()->showMessage(
+        tr("Loading %1 selected FST signals…").arg(batch.size()));
+    const auto executable = wellenReaderExecutable_;
+    const auto future = QtConcurrent::run(
+        [path, options, executable, batch = std::move(batch)]() mutable {
+            auto result = loadFstSignalsFile(
+                path, options, executable, std::span<const std::string>(batch));
+            return std::make_shared<TraceSignalLoadResult>(std::move(result));
+        });
+    fstSignalLoadWatcher_->setFuture(future);
+}
+
+void MainWindow::finishFstSignalLoad()
+{
+    const auto loaded = fstSignalLoadWatcher_->result();
+    if (!loaded) {
+        if (traceSummary_) traceSummary_->setText(tr("FST signal load returned no result"));
+        return;
+    }
+    if (loaded->cancelled) {
+        if (fstSignalLoadPaused_) {
+            if (traceSummary_) traceSummary_->setText(tr("FST signal loading paused"));
+            if (traceProgress_) traceProgress_->setVisible(false);
+            if (cancelTraceAction_) cancelTraceAction_->setEnabled(false);
+        } else {
+            startPendingFstSignalLoad();
+        }
+        return;
+    }
+    if (!traceIndex_ || traceIndex_->format != TraceFormat::Fst
+        || traceIndex_->identity != loaded->identity) {
+        startPendingFstSignalLoad();
+        return;
+    }
+    if (!loaded->ok()) {
+        const auto message = tr("FST signal load failed: %1")
+            .arg(QString::fromStdString(loaded->errorSummary()));
+        if (traceSummary_) traceSummary_->setText(message);
+        statusBar()->showMessage(message, 10'000);
+        if (traceProgress_) traceProgress_->setVisible(false);
+        if (cancelTraceAction_) cancelTraceAction_->setEnabled(false);
+        fstComparePending_ = false;
+        fstChecksPending_ = false;
+        return;
+    }
+    std::string error;
+    if (!mergeLoadedTraceSignals(*traceIndex_, *loaded, &error)) {
+        const auto message = tr("FST signal load was rejected: %1")
+            .arg(QString::fromStdString(error));
+        if (traceSummary_) traceSummary_->setText(message);
+        statusBar()->showMessage(message, 10'000);
+        return;
+    }
+    refreshTraceViews();
+    updateFstLoadStatus();
+    startPendingFstSignalLoad();
 }
 
 bool MainWindow::applySimulationResult(
@@ -7052,23 +7259,30 @@ void MainWindow::importTrace()
     const auto initialDirectory = projectFile_.isEmpty()
         ? QDir::currentPath()
         : QFileInfo(projectFile_).absolutePath();
+    const auto fstAvailable = QFileInfo(wellenReaderExecutable_).isFile();
+    const auto filter = fstAvailable
+        ? tr("Supported traces (*.vcd *.fst *.csv);;Value Change Dump (*.vcd);;Fast Signal Trace (*.fst);;Timestamped CSV (*.csv)")
+        : tr("Supported traces (*.vcd *.csv);;Value Change Dump (*.vcd);;Timestamped CSV (*.csv)");
     const auto path = QFileDialog::getOpenFileName(
         this,
         tr("Import simulation trace"),
         initialDirectory,
-        tr("Supported traces (*.vcd *.csv);;Value Change Dump (*.vcd);;Timestamped CSV (*.csv)"));
+        filter);
     if (path.isEmpty()) return;
     const auto suffix = QFileInfo(path).suffix().toLower();
     const auto format = suffix == QStringLiteral("vcd")
         ? TraceFormat::Vcd
         : suffix == QStringLiteral("csv")
             ? TraceFormat::Csv
-            : TraceFormat::Vcd;
-    if (suffix != QStringLiteral("vcd") && suffix != QStringLiteral("csv")) {
+            : suffix == QStringLiteral("fst")
+                ? TraceFormat::Fst
+                : TraceFormat::Vcd;
+    if (suffix != QStringLiteral("vcd") && suffix != QStringLiteral("csv")
+        && suffix != QStringLiteral("fst")) {
         QMessageBox::warning(
             this,
             tr("Unsupported trace"),
-            tr("Only standard VCD and timestamped CSV files are supported."));
+            tr("Only VCD, FST, and timestamped CSV files are supported."));
         return;
     }
     startTraceImport(path, format, makeStableId("trace"), 0, true);
@@ -7076,10 +7290,14 @@ void MainWindow::importTrace()
 
 void MainWindow::cancelTraceImport()
 {
-    if (!traceWatcher_ || !traceWatcher_->isRunning() || !traceCancelFlag_) return;
-    traceCancelFlag_->store(true);
+    const auto metadataRunning = traceWatcher_ && traceWatcher_->isRunning();
+    const auto signalsRunning = fstSignalLoadWatcher_
+        && fstSignalLoadWatcher_->isRunning();
+    if (!metadataRunning && !signalsRunning) return;
+    if (metadataRunning && traceCancelFlag_) traceCancelFlag_->store(true);
+    if (signalsRunning) cancelActiveFstSignalLoad(true);
     cancelTraceAction_->setEnabled(false);
-    traceSummary_->setText(tr("Cancelling import…"));
+    traceSummary_->setText(tr("Cancelling trace work…"));
 }
 
 void MainWindow::alignImportedTrace()
@@ -7356,6 +7574,10 @@ void MainWindow::finishTraceImport()
     activeTraceId_ = pendingTraceId_;
     initializeTraceVisibility(preferredSignals);
     refreshTraceViews();
+    fstSignalLoadPaused_ = false;
+    if (traceIndex_->format == TraceFormat::Fst) {
+        startPendingFstSignalLoad();
+    }
     if (pendingRevealTick_) {
         if (traceCanvas_) traceCanvas_->revealTick(*pendingRevealTick_);
         compareTraceCanvas_->revealTick(*pendingRevealTick_);
@@ -7383,10 +7605,14 @@ void MainWindow::finishTraceImport()
     invalidateCompareResult();
     populateTraceMappingTable();
     bottomTabs_->setCurrentWidget(tracePanel_);
-    traceSummary_->setText(
-        tr("%1 signals, %2 transitions")
-            .arg(traceIndex_->traceSignals.size())
-            .arg(traceIndex_->transitionCount));
+    if (traceIndex_->format == TraceFormat::Fst) {
+        updateFstLoadStatus();
+    } else {
+        traceSummary_->setText(
+            tr("%1 signals, %2 transitions")
+                .arg(traceIndex_->traceSignals.size())
+                .arg(traceIndex_->transitionCount));
+    }
 
     statusBar()->showMessage(successMessage, 10'000);
     if (compareModeRequested_) runCompare();
@@ -7401,6 +7627,7 @@ void MainWindow::startTraceImport(
     const bool addReference)
 {
     if (!traceWatcher_ || traceWatcher_->isRunning()) return;
+    cancelActiveFstSignalLoad(false);
     pendingTracePath_ = QFileInfo(path).absoluteFilePath();
     pendingTraceId_ = std::move(traceId);
     pendingTraceFormat_ = format;
@@ -7417,6 +7644,8 @@ void MainWindow::startTraceImport(
         return cancelFlag->load();
     };
     const auto pathValue = nativePath(pendingTracePath_);
+    const auto pathText = pendingTracePath_;
+    const auto readerExecutable = wellenReaderExecutable_;
     if (importTraceAction_) importTraceAction_->setEnabled(false);
     if (cancelTraceAction_) cancelTraceAction_->setEnabled(true);
     if (traceProgress_) traceProgress_->setVisible(true);
@@ -7425,10 +7654,13 @@ void MainWindow::startTraceImport(
     }
     statusBar()->showMessage(tr("Parsing %1…").arg(QFileInfo(path).fileName()));
     const auto future = QtConcurrent::run(
-        [pathValue, format, options]() mutable {
+        [pathValue, pathText, readerExecutable, format, options]() mutable {
             auto result = format == TraceFormat::Vcd
                 ? parseVcdFile(pathValue, options)
-                : parseCsvFile(pathValue, options);
+                : format == TraceFormat::Csv
+                    ? parseCsvFile(pathValue, options)
+                    : readFstMetadataFile(
+                          pathText, options, readerExecutable);
             return std::make_shared<TraceParseResult>(std::move(result));
         });
     traceWatcher_->setFuture(future);
@@ -7485,9 +7717,10 @@ void MainWindow::loadFirstTraceReference()
         QString::fromStdString(reference.format)
             .trimmed()
             .toLower();
-    if (formatText != QStringLiteral("vcd") && formatText != QStringLiteral("csv")) {
+    if (formatText != QStringLiteral("vcd") && formatText != QStringLiteral("csv")
+        && formatText != QStringLiteral("fst")) {
         reportFailure(
-            tr("Unsupported trace format '%1'; expected VCD or CSV")
+            tr("Unsupported trace format '%1'; expected VCD, FST, or CSV")
                 .arg(
                     QString::fromStdString(
                         reference.format)));
@@ -7503,7 +7736,11 @@ void MainWindow::loadFirstTraceReference()
     activeTraceId_ = reference.id;
     startTraceImport(
         path,
-        formatText == QStringLiteral("vcd") ? TraceFormat::Vcd : TraceFormat::Csv,
+        formatText == QStringLiteral("vcd")
+            ? TraceFormat::Vcd
+            : formatText == QStringLiteral("fst")
+                ? TraceFormat::Fst
+                : TraceFormat::Csv,
         reference.id,
         reference.offset,
         false);
@@ -7539,9 +7776,20 @@ void MainWindow::runCompare()
     const auto* reference = activeTraceReference();
     if (!scenario || !reference || !traceIndex_) {
         reportUnavailable(
-            tr("Import and map an actual VCD or CSV trace before comparing."));
+            tr("Import and map an actual VCD, FST, or CSV trace before comparing."));
         return;
     }
+    if (traceIndex_->format == TraceFormat::Fst
+        && !requiredFstSignalsLoaded()) {
+        fstComparePending_ = true;
+        fstSignalLoadPaused_ = false;
+        startPendingFstSignalLoad();
+        statusBar()->showMessage(
+            tr("Compare will run after the required FST signals finish loading"),
+            10'000);
+        return;
+    }
+    fstComparePending_ = false;
     QString parseError;
     std::optional<std::int64_t> cycle;
     const auto tolerance = parseTimeText(
@@ -8039,6 +8287,16 @@ void MainWindow::runSimulationChecks()
         reportUnavailable(tr("No current mapped simulation trace is available"));
         return;
     }
+    if (traceIndex_->format == TraceFormat::Fst
+        && !requiredFstSignalsLoaded()) {
+        fstChecksPending_ = true;
+        fstSignalLoadPaused_ = false;
+        startPendingFstSignalLoad();
+        reportUnavailable(
+            tr("Checks will run after the required FST signals finish loading"));
+        return;
+    }
+    fstChecksPending_ = false;
     const auto loaded = loadSimulationChecks(*scenario);
     if (!loaded.ok()) {
         reportUnavailable(loaded.error);
@@ -9930,10 +10188,12 @@ void MainWindow::createDocks()
         if (traceCanvas_) traceCanvas_->fitTrace();
     });
     traceSummary_ = new QLabel(tr("No imported trace"));
+    traceSummary_->setObjectName(QStringLiteral("TraceSummary"));
     traceSummary_->setMinimumWidth(220);
     traceBar->addSeparator();
     traceBar->addWidget(traceSummary_);
     traceProgress_ = new QProgressBar;
+    traceProgress_->setObjectName(QStringLiteral("TraceProgress"));
     traceProgress_->setRange(0, 0);
     traceProgress_->setMaximumWidth(130);
     traceProgress_->setTextVisible(false);

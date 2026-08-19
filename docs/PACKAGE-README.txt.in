@@ -44,3 +44,8 @@ Requirements
   64-bit Windows 10 or Windows 11. Installation is not required.
   Qt and compiler runtime libraries were collected by windeployqt when this
   package was generated from the source repository.
+
+On-demand FST reader
+  wave-wellen-reader.exe
+  FST metadata is indexed first; transition data is decoded only for selected
+  or mapped signals. See docs\fst-reader.md for limits and attribution.

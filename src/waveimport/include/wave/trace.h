@@ -20,6 +20,7 @@ namespace wave {
 enum class TraceFormat {
     Vcd,
     Csv,
+    Fst,
 };
 
 enum class CsvTimeUnit {
@@ -68,6 +69,7 @@ struct TraceSignal {
     std::string fullName;
     std::uint32_t width{1};
     std::vector<TraceTransition> transitions;
+    bool transitionsLoaded{true};
 
     [[nodiscard]] std::pair<std::size_t, std::size_t> visibleRange(
         Tick start,
@@ -90,6 +92,7 @@ struct TraceIndex {
     Tick endTick{0};
     std::vector<TraceSignal> traceSignals;
     std::uint64_t transitionCount{0};
+    std::string sourceFingerprint;
 
     [[nodiscard]] const TraceSignal* findSignal(std::string_view signalId) const noexcept;
     [[nodiscard]] TraceSignal* findSignal(std::string_view signalId) noexcept;

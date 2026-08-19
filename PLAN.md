@@ -5,6 +5,27 @@
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
 
+## ZeroSlack Wave Simulation S12.6：FST/Wellen 按需读取
+
+状态：完成
+
+- 新增独立 Rust 辅助程序，固定使用 Wellen 0.25.6 读取标准 FST；C++ 未实现第二套 FST
+  解析器。元数据请求不解码 transition，信号请求每批最多 64 个稳定 ID。
+- `wavefst` 提供纯数据元数据、按信号加载和身份校验合并接口。时间换算使用精确整数，
+  不可精确换算、超限响应、未知信号、文件变化、取消或旧 generation 均明确拒绝。
+- Actual 层级树先显示全部 FST scope/信号；初始优先加载映射信号，无映射时最多加载首 32
+  个信号，用户复选后再加载对应 transition。Compare 与 Checks 在所需信号完成前延后执行，
+  不使用不完整数据。
+- `wavewidgets` C ABI 保持 v1，仅在辅助程序与共享库相邻时声明
+  `on-demand-fst-trace/v1`。portable install 同时包含辅助程序与归属文档；关闭 Wellen
+  构建选项后 VCD/CSV、CLI 和共享库仍可构建。
+- 官方 Wellen counter 配对 VCD/FST fixture 验证值序列完全一致；GUI 冒烟验证从 8 个
+  元数据 signal 中先加载 1 个映射 signal，再勾选并仅新增第 2 个。界面证据位于
+  `artifacts/ui/wave/s12-fst-on-demand.png`。
+- 大型官方 fixture `picorv32.vcd.fst` 实测元数据 495 个 signal、0 transition、31 ms；
+  单信号请求仅返回 1 个 signal，耗时 9 ms。Wellen 可关闭构建与真实 portable 安装闭包
+  均单独验证。
+
 ## ZeroSlack Wave Simulation S12.5：轻量 trace 检查
 
 状态：完成
@@ -236,7 +257,7 @@ Total Test time: 0.94 sec
 Native UI visual QA: 6 signals / 59 transitions, mapping and rendering passed
 ```
 
-FST 需要兼容格式的第三方解析库；当前工具链未捆绑该库，因此不实现自定义或不兼容方言。
+FST 已通过 Wellen 辅助程序按需读取；不实现自定义或不兼容方言。
 
 ## 阶段 5：Expected/Actual Compare
 
@@ -343,7 +364,7 @@ Native Windows Compare UI visual QA: passed
 
 明确保留范围：
 
-- FST 等待兼容第三方库；WDB 仍为非目标。
+- FST 只支持 Wellen 可解析的标准数字 bit-vector 信号；WDB 仍为非目标。
 - SVA 对不可无损转换的关系只给出诊断。
 
 ## 持续迭代 1：Clock 可编辑性与覆盖语义
@@ -8788,7 +8809,7 @@ unmapped-signal 且目标 ID 为空。用户无需再同时反查工程映射表
 
 1. 第 581 轮：复现工程加载器接受空 `path` 和任意 `format`、空路径可能先解析为工程目录、
    未知格式仅返回笼统解析失败的问题。
-2. 第 582 轮：定义本地引用约束：路径去除首尾空白后非空，格式大小写不敏感地为 VCD/CSV；
+2. 第 582 轮：定义本地引用约束：路径去除首尾空白后非空；当前格式集合已扩展为大小写不敏感的 VCD/FST/CSV；
    工程校验不检查文件存在性，也不从文件扩展名推断格式。
 3. 第 583 轮：新增按 Trace 聚合的 `trace-reference-invalid`；同时返回精确 `paths`、
    `empty-path`/`unsupported-format` 和独立计数，避免同一对象要求两轮校验。

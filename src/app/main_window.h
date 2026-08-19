@@ -4,6 +4,7 @@
 
 #include "wave/commands.h"
 #include "wave/compare.h"
+#include "wave/fst_trace.h"
 #include "wave/model.h"
 #include "wave/simulation_session.h"
 #include "wave/simulation_check.h"
@@ -63,7 +64,8 @@ public:
         QString projectFile = {},
         QWidget* parent = nullptr,
         std::optional<std::size_t> initialScenarioIndex = std::nullopt,
-        bool loadFirstTrace = false);
+        bool loadFirstTrace = false,
+        QString wellenReaderExecutable = {});
     ~MainWindow() override;
 
     [[nodiscard]] const Project& project() const noexcept;
@@ -114,6 +116,7 @@ private slots:
     void autoMapImportedTrace();
     void traceMappingCellChanged(int row, int column);
     void finishTraceImport();
+    void finishFstSignalLoad();
     void runSimulation();
     void rerunSimulation();
     void stopSimulation();
@@ -257,6 +260,11 @@ private:
     void initializeTraceVisibility(
         const std::optional<std::set<std::string>>& preferred = std::nullopt);
     void refreshTraceViews();
+    void startPendingFstSignalLoad();
+    void cancelActiveFstSignalLoad(bool pause);
+    [[nodiscard]] std::set<std::string> requiredFstSignalIds() const;
+    [[nodiscard]] bool requiredFstSignalsLoaded() const;
+    void updateFstLoadStatus();
     void loadFirstTraceReference();
     void configureSimulationSession();
     void loadStoredSimulationScenarios();
@@ -413,6 +421,12 @@ private:
     std::uint64_t traceGeneration_{0};
     std::shared_ptr<std::atomic_bool> traceCancelFlag_;
     QFutureWatcher<std::shared_ptr<TraceParseResult>>* traceWatcher_{nullptr};
+    QString wellenReaderExecutable_;
+    std::shared_ptr<std::atomic_bool> fstSignalLoadCancelFlag_;
+    QFutureWatcher<std::shared_ptr<TraceSignalLoadResult>>* fstSignalLoadWatcher_{nullptr};
+    bool fstSignalLoadPaused_{false};
+    bool fstComparePending_{false};
+    bool fstChecksPending_{false};
     QTimer* scenarioLocationMemoryTimer_{nullptr};
     QTimer* autosaveTimer_{nullptr};
     QFutureWatcher<QPair<quint64, QString>>* autosaveWatcher_{nullptr};

@@ -5122,7 +5122,8 @@ std::vector<QString> traceReferenceProblems(
     const auto format =
         normalizedTraceFormat(trace.format);
     if (format != QStringLiteral("vcd")
-        && format != QStringLiteral("csv")) {
+        && format != QStringLiteral("csv")
+        && format != QStringLiteral("fst")) {
         problems.push_back(
             QStringLiteral("unsupported-format"));
     }
@@ -5145,7 +5146,8 @@ QJsonObject traceReferenceValidationObject(
         normalizedTraceFormat(trace.format);
     const auto formatSupported =
         normalizedFormat == QStringLiteral("vcd")
-        || normalizedFormat == QStringLiteral("csv");
+        || normalizedFormat == QStringLiteral("csv")
+        || normalizedFormat == QStringLiteral("fst");
     QJsonArray problemValues;
     for (const auto& problem : problems) {
         problemValues.append(problem);
@@ -5165,6 +5167,7 @@ QJsonObject traceReferenceValidationObject(
          QJsonArray{
              QStringLiteral("vcd"),
              QStringLiteral("csv"),
+             QStringLiteral("fst"),
          }},
         {QStringLiteral("filesystemVerification"),
          QStringLiteral("not-performed")},
@@ -5230,7 +5233,7 @@ TraceReferenceAudit auditTraceReferences(
                                 traceIndex)));
                 descriptions.append(
                     QStringLiteral(
-                        "the format is not VCD or CSV"));
+                        "the format is not VCD, FST, or CSV"));
             }
         }
         audit.issues.append(QJsonObject{
@@ -10042,7 +10045,7 @@ bool applyRepairTraceReference(
                     ? QStringLiteral(
                           "path must be non-empty")
                     : QStringLiteral(
-                          "format must be VCD or CSV"));
+                          "format must be VCD, FST, or CSV"));
         }
         error = QStringLiteral(
             "Repaired imported trace reference remains invalid: %1.")

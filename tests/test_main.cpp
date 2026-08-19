@@ -2,6 +2,7 @@
 #include "wave/compare.h"
 #include "wave/automation.h"
 #include "wave/export.h"
+#include "wave/fst_trace.h"
 #include "wave/generation.h"
 #include "wave/integration.h"
 #include "wave/model.h"
@@ -4933,6 +4934,135 @@ void testCsvImportAndCancellation()
     const auto cancelled = wave::parseCsv(cancellable, options);
     expect(cancelled.cancelled, "CSV parser did not honor cancellation");
     expect(!cancelled.index.has_value(), "cancelled parse returned a partial index");
+}
+
+void testFstMetadataAndOnDemandSignals()
+{
+#if defined(WAVE_WELLEN_READER)
+    const auto fixtureRoot = QDir(QStringLiteral(WAVE_SOURCE_DIR))
+                                 .filePath(QStringLiteral("tests/fixtures/traces"));
+    const auto fstPath = QDir(fixtureRoot).filePath(
+        QStringLiteral("wellen-counter.fst"));
+    const auto vcdPath = std::filesystem::path(WAVE_SOURCE_DIR)
+        / "tests" / "fixtures" / "traces" / "wellen-counter.vcd";
+    wave::TraceParseOptions options;
+    options.projectTimeBase = {1'000'000'000'000};
+    options.identity = {"project", "fst-trace", 17};
+
+    const auto metadata = wave::readFstMetadataFile(
+        fstPath,
+        options,
+        QStringLiteral(WAVE_WELLEN_READER));
+    expect(metadata.ok(), metadata.errorSummary());
+    expectEqual(metadata.index->format, wave::TraceFormat::Fst,
+                "FST metadata lost its format");
+    expectEqual(metadata.index->identity, options.identity,
+                "FST metadata lost its generation identity");
+    expectEqual(metadata.index->traceSignals.size(), std::size_t{8},
+                "FST metadata signal count is incorrect");
+    expectEqual(metadata.index->transitionCount, std::uint64_t{0},
+                "FST metadata operation eagerly decoded transitions");
+    expect(!metadata.index->sourceFingerprint.empty(),
+           "FST metadata omitted the source fingerprint");
+    expect(
+        std::all_of(
+            metadata.index->traceSignals.begin(),
+            metadata.index->traceSignals.end(),
+            [](const wave::TraceSignal& signal) {
+                return !signal.transitionsLoaded && signal.transitions.empty();
+            }),
+        "FST metadata marked unloaded signals as loaded");
+
+    const auto counter = std::find_if(
+        metadata.index->traceSignals.begin(),
+        metadata.index->traceSignals.end(),
+        [](const wave::TraceSignal& signal) {
+            return signal.scopePath == std::vector<std::string>{"tb", "dut"}
+                && signal.reference == "counter";
+        });
+    expect(counter != metadata.index->traceSignals.end(),
+           "FST metadata lost the nested counter signal");
+    expectEqual(counter->width, std::uint32_t{4},
+                "FST metadata lost the signal width");
+    const std::vector<std::string> requested{counter->id};
+    const auto loaded = wave::loadFstSignalsFile(
+        fstPath,
+        options,
+        QStringLiteral(WAVE_WELLEN_READER),
+        requested);
+    expect(loaded.ok(), loaded.errorSummary());
+    expectEqual(loaded.loadedSignals.size(), std::size_t{1},
+                "FST reader returned signals outside the requested batch");
+    expect(loaded.loadedSignals.front().transitionsLoaded,
+           "FST reader did not mark the requested signal as loaded");
+    expectEqual(loaded.sourceFingerprint, metadata.index->sourceFingerprint,
+                "FST metadata and signal batches used different source snapshots");
+
+    auto merged = *metadata.index;
+    std::string mergeError;
+    expect(wave::mergeLoadedTraceSignals(merged, loaded, &mergeError), mergeError);
+    const auto loadedCount = std::count_if(
+        merged.traceSignals.begin(),
+        merged.traceSignals.end(),
+        [](const wave::TraceSignal& signal) { return signal.transitionsLoaded; });
+    expectEqual(loadedCount, std::ptrdiff_t{1},
+                "merging one FST batch loaded unrelated signals");
+
+    auto vcdOptions = options;
+    vcdOptions.identity.traceId = "vcd-trace";
+    const auto vcd = wave::parseVcdFile(vcdPath, vcdOptions);
+    expect(vcd.ok(), vcd.errorSummary());
+    const auto vcdCounter = std::find_if(
+        vcd.index->traceSignals.begin(),
+        vcd.index->traceSignals.end(),
+        [](const wave::TraceSignal& signal) {
+            return signal.scopePath == std::vector<std::string>{"tb", "dut"}
+                && signal.reference.starts_with("counter");
+        });
+    expect(vcdCounter != vcd.index->traceSignals.end(),
+           "paired VCD fixture lost the counter signal");
+    expectEqual(
+        loaded.loadedSignals.front().transitions,
+        vcdCounter->transitions,
+        "Wellen FST transitions differ from the paired VCD waveform");
+
+    auto stale = loaded;
+    stale.identity.generation++;
+    expect(!wave::mergeLoadedTraceSignals(merged, stale, &mergeError),
+           "stale FST generation was merged into the active trace");
+    auto changedSource = loaded;
+    changedSource.sourceFingerprint += ":changed";
+    expect(!wave::mergeLoadedTraceSignals(merged, changedSource, &mergeError),
+           "FST batch from a changed source file was merged into metadata");
+
+    wave::FstTraceReaderLimits batchLimit;
+    batchLimit.maxSignalsPerRequest = 0;
+    const auto rejectedBatch = wave::loadFstSignalsFile(
+        fstPath,
+        options,
+        QStringLiteral(WAVE_WELLEN_READER),
+        requested,
+        batchLimit);
+    expect(!rejectedBatch.ok(), "FST signal batch limit was not enforced");
+
+    wave::FstTraceReaderLimits metadataLimit;
+    metadataLimit.maxMetadataSignals = 7;
+    const auto rejectedMetadata = wave::readFstMetadataFile(
+        fstPath,
+        options,
+        QStringLiteral(WAVE_WELLEN_READER),
+        metadataLimit);
+    expect(!rejectedMetadata.ok(), "FST metadata signal limit was not enforced");
+
+    auto cancelledOptions = options;
+    cancelledOptions.isCancelled = [] { return true; };
+    const auto cancelled = wave::readFstMetadataFile(
+        fstPath,
+        cancelledOptions,
+        QStringLiteral(WAVE_WELLEN_READER));
+    expect(cancelled.cancelled && !cancelled.index,
+           "FST metadata operation did not honor cancellation");
+#endif
 }
 
 void testTraceExampleAndLargeIndex()
@@ -18847,7 +18977,7 @@ void testAutomationTraceReferenceRepairContracts()
     wave::ImportedTrace trace;
     trace.id = "trace-source";
     trace.path = "   ";
-    trace.format = "fst";
+    trace.format = "wlf";
     trace.offset = 23'000;
     trace.signalMapping = {
         {"lane-request", "tb.req"},
@@ -18956,7 +19086,7 @@ void testAutomationTraceReferenceRepairContracts()
             && context.value(
                    QStringLiteral(
                        "normalizedFormat")).toString()
-                == QStringLiteral("fst")
+                == QStringLiteral("wlf")
             && context.value(
                    QStringLiteral(
                        "supportedFormats"))
@@ -18964,6 +19094,7 @@ void testAutomationTraceReferenceRepairContracts()
                 == QJsonArray{
                        QStringLiteral("vcd"),
                        QStringLiteral("csv"),
+                       QStringLiteral("fst"),
                    }
             && context.value(
                    QStringLiteral(
@@ -19169,7 +19300,7 @@ void testAutomationTraceReferenceRepairContracts()
         unsupportedOperations.at(0).toObject();
     unsupportedOperation.insert(
         QStringLiteral("format"),
-        QStringLiteral("fst"));
+        QStringLiteral("wlf"));
     unsupportedOperations.replace(
         0, unsupportedOperation);
     unsupportedBatch.insert(
@@ -19182,7 +19313,7 @@ void testAutomationTraceReferenceRepairContracts()
         !rejectedUnsupported.ok()
             && !rejectedUnsupported.project
             && rejectedUnsupported.error.contains(
-                QStringLiteral("VCD or CSV"))
+                QStringLiteral("VCD, FST, or CSV"))
             && broken == brokenBefore,
         "repair-trace-reference accepted an unsupported format");
 
@@ -19638,6 +19769,7 @@ int main(int argc, char* argv[])
         {"VCD import and indexed lookup", testVcdImportAndIndex},
         {"VCD internal signal hierarchy", testTraceHierarchy},
         {"CSV import and cancellation", testCsvImportAndCancellation},
+        {"FST metadata and on-demand signals", testFstMetadataAndOnDemandSignals},
         {"trace example and million-transition index", testTraceExampleAndLargeIndex},
         {"relation condition parsing and evaluation", testRelationConditions},
         {"Expected/Actual compare rules", testExpectedActualCompareRules},

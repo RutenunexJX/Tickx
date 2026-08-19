@@ -48,7 +48,8 @@ bool isSupportedTraceFormat(
                 std::tolower(character));
         });
     return normalized == "vcd"
-        || normalized == "csv";
+        || normalized == "csv"
+        || normalized == "fst";
 }
 
 bool actionControlsWaveform(const EventAction action)
