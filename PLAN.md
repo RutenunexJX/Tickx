@@ -5,6 +5,23 @@
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
 
+## ZeroSlack Wave Simulation S12.7：unresolved module 显式 stub
+
+状态：完成
+
+- Module Manifest v4 严格读取目标依赖闭包中的 unresolved module、实例、参数关联、
+  端口关联和源码位置，同时兼容 v1-v3。
+- runner 默认拒绝任何 unresolved module；只有 session 明确选择且 Manifest 标记安全的
+  module 才生成 input-only 被动 stub。stub 不产生输出，也不模拟依赖行为。
+- stub 文档进入 Verilator 输入、构建缓存指纹、运行报告与 simulation session v2；未知、
+  重复或不支持的选择在工具链启动前失败。
+- 结果工具栏提供 `Stubs (selected/total)` 菜单。支持项默认未选，不支持项禁用并显示原因；
+  选择变化使既有结果 stale。
+- `wavewidgets` C ABI 与 workspace contract 保持 v1，新增
+  `explicit-unresolved-module-stubs/v1` 能力声明和 UI 冒烟证据。
+- 配置的完整测试集通过 `94/94`；本机未发现真实 Verilator，因此外部编译与运行
+  继续由确定性 process fixture 验证。
+
 ## ZeroSlack Wave Simulation S12.6：FST/Wellen 按需读取
 
 状态：完成

@@ -11,6 +11,8 @@
 namespace wave {
 
 inline constexpr auto SimulationSessionSchema =
+    "wave-workbench.simulation-session/v2";
+inline constexpr auto LegacySimulationSessionSchema =
     "wave-workbench.simulation-session/v1";
 inline constexpr auto SimulationSessionExtension =
     "waveSimulation.session";

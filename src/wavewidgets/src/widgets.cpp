@@ -122,7 +122,8 @@ int wavewidgets_create_simulation_workspace_v1(
             QStringLiteral("internal-signal-hierarchy/v1"),
             QStringLiteral("multi-clock-async-events/v1"),
             QStringLiteral("expected-actual-compare/v1"),
-            QStringLiteral("lightweight-trace-checks/v1")};
+            QStringLiteral("lightweight-trace-checks/v1"),
+            QStringLiteral("explicit-unresolved-module-stubs/v1")};
         if (QFileInfo(wellenReader).isFile()) {
             capabilities.append(QStringLiteral("on-demand-fst-trace/v1"));
         }

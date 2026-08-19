@@ -1648,6 +1648,15 @@ MainWindow::MainWindow(
         deleteSimulationScenarioAction_->setObjectName(
             QStringLiteral("DeleteSimulationScenarioAction"));
         resultToolbar->addSeparator();
+        simulationStubButton_ = new QToolButton(resultToolbar);
+        simulationStubButton_->setObjectName(
+            QStringLiteral("SimulationStubDependenciesButton"));
+        simulationStubButton_->setPopupMode(QToolButton::InstantPopup);
+        simulationStubButton_->setToolButtonStyle(
+            Qt::ToolButtonTextBesideIcon);
+        simulationStubButton_->setMenu(
+            new QMenu(simulationStubButton_));
+        resultToolbar->addWidget(simulationStubButton_);
         simulationClockButton_ = new QToolButton(resultToolbar);
         simulationClockButton_->setObjectName(
             QStringLiteral("SimulationClockDomainsButton"));
@@ -1686,6 +1695,7 @@ MainWindow::MainWindow(
         simulationStateLabel_->setAlignment(Qt::AlignCenter);
         simulationStateLabel_->setContentsMargins(10, 3, 10, 3);
         resultToolbar->addWidget(simulationStateLabel_);
+        updateSimulationStubButton();
         updateSimulationClockButton();
         updateSimulationControls(simulationSessionError_);
     }
@@ -1798,10 +1808,25 @@ MainWindow::~MainWindow()
 
 void MainWindow::configureSimulationSession()
 {
+    simulationManifest_.reset();
     const auto parsed = simulationSessionFromProject(project_);
     if (parsed.ok()) {
         simulationRequest_ = *parsed.request;
         simulationScenarioDirectory_ = simulationRequest_->scenarioDirectory;
+        QFile manifestFile(simulationRequest_->manifestPath);
+        if (manifestFile.open(QIODevice::ReadOnly)) {
+            const auto manifest = parseZeroSlackModuleManifest(
+                manifestFile.readAll());
+            if (manifest.ok()) {
+                simulationManifest_ = *manifest.manifest;
+            } else {
+                simulationStateDetail_ = manifest.error;
+            }
+        } else {
+            simulationStateDetail_ = tr(
+                "Cannot read the module manifest: %1")
+                                         .arg(manifestFile.errorString());
+        }
         loadStoredSimulationScenarios();
         simulationRunner_ = std::make_unique<VerilatorSimulationRunner>();
         simulationStateMachine_.configure(true, false);
@@ -1823,18 +1848,8 @@ void MainWindow::configureSimulationSession()
 
 void MainWindow::loadStoredSimulationScenarios()
 {
-    if (!simulationRequest_ || simulationScenarioDirectory_.trimmed().isEmpty()) {
-        return;
-    }
-    QFile manifestFile(simulationRequest_->manifestPath);
-    if (!manifestFile.open(QIODevice::ReadOnly)) {
-        simulationStateDetail_ = tr("Cannot read the module manifest for saved scenarios: %1")
-                                     .arg(manifestFile.errorString());
-        return;
-    }
-    const auto manifest = parseZeroSlackModuleManifest(manifestFile.readAll());
-    if (!manifest.ok()) {
-        simulationStateDetail_ = manifest.error;
+    if (!simulationRequest_ || !simulationManifest_
+        || simulationScenarioDirectory_.trimmed().isEmpty()) {
         return;
     }
     const auto stored = loadSimulationScenarioStore(simulationScenarioDirectory_);
@@ -1848,7 +1863,7 @@ void MainWindow::loadStoredSimulationScenarios()
     QStringList diagnostics = stored.diagnostics;
     for (const auto& entry : stored.scenarios) {
         const auto restored = restoreZeroSlackStimulusScenario(
-            *manifest.manifest, entry.scenario);
+            *simulationManifest_, entry.scenario);
         diagnostics.append(restored.diagnostics);
         if (!restored.ok() || restored.project->scenarios.empty()) {
             diagnostics.append(
@@ -2112,6 +2127,7 @@ void MainWindow::updateSimulationScenarioActions()
             named && project_.scenarios.size() > 1);
     }
     updateSimulationClockButton();
+    updateSimulationStubButton();
 }
 
 void MainWindow::updateSimulationClockButton()
@@ -2156,6 +2172,109 @@ void MainWindow::updateSimulationClockButton()
         count == 0
             ? tr("No semantic clock candidate was found for this scenario")
             : tr("Edit each independent simulation clock domain"));
+}
+
+void MainWindow::updateSimulationStubButton()
+{
+    if (!simulationStubButton_ || !simulationStubButton_->menu()) return;
+
+    auto* menu = simulationStubButton_->menu();
+    menu->clear();
+    const auto dependencyCount = simulationManifest_
+        ? simulationManifest_->unresolvedDependencies.size()
+        : std::size_t{0};
+    const std::set<std::string> selected = [&] {
+        std::set<std::string> modules;
+        if (!simulationRequest_) return modules;
+        for (const QString& module : simulationRequest_->stubbedModules) {
+            modules.insert(module.toUtf8().toStdString());
+        }
+        return modules;
+    }();
+
+    std::size_t selectedCount = 0;
+    if (simulationManifest_) {
+        for (const auto& dependency :
+             simulationManifest_->unresolvedDependencies) {
+            if (selected.contains(dependency.moduleName)) ++selectedCount;
+            auto* action = menu->addAction(
+                tr("%1 (%2 instance(s))")
+                    .arg(QString::fromStdString(dependency.moduleName))
+                    .arg(static_cast<qulonglong>(dependency.instances.size())));
+            action->setObjectName(
+                QStringLiteral("SimulationStubDependencyAction"));
+            action->setProperty(
+                "moduleName", QString::fromStdString(dependency.moduleName));
+            action->setCheckable(dependency.stubSupported);
+            action->setChecked(
+                dependency.stubSupported
+                && selected.contains(dependency.moduleName));
+            action->setEnabled(dependency.stubSupported);
+            const QString explanation = dependency.stubSupported
+                ? tr("Generate a passive input-only stub for this unresolved module. Dependency behavior is not modeled.")
+                : tr("Stub unavailable: %1")
+                      .arg(QString::fromStdString(
+                          dependency.stubUnsupportedReason));
+            action->setToolTip(explanation);
+            action->setStatusTip(explanation);
+            if (!dependency.stubSupported) {
+                action->setText(
+                    tr("%1 (unavailable)")
+                        .arg(QString::fromStdString(dependency.moduleName)));
+                continue;
+            }
+            const std::string moduleName = dependency.moduleName;
+            connect(action, &QAction::triggered, this,
+                    [this, moduleName](const bool checked) {
+                if (!simulationRequest_ || !simulationManifest_) return;
+                std::set<std::string> next;
+                for (const QString& module : simulationRequest_->stubbedModules)
+                    next.insert(module.toUtf8().toStdString());
+                if (checked) next.insert(moduleName);
+                else next.erase(moduleName);
+
+                simulationRequest_->stubbedModules.clear();
+                for (const auto& dependency :
+                     simulationManifest_->unresolvedDependencies) {
+                    if (dependency.stubSupported
+                        && next.contains(dependency.moduleName)) {
+                        simulationRequest_->stubbedModules.append(
+                            QString::fromStdString(dependency.moduleName));
+                    }
+                }
+                attachSimulationSession(project_, *simulationRequest_);
+                markEdited();
+                simulationStubButton_->setText(
+                    tr("Stubs (%1/%2)")
+                        .arg(simulationRequest_->stubbedModules.size())
+                        .arg(static_cast<qulonglong>(
+                            simulationManifest_->unresolvedDependencies.size())));
+                updateSimulationControls(
+                    tr("Stub selection changed. Selected stubs are passive inputs only; dependency behavior is not modeled."));
+                QTimer::singleShot(
+                    0, this, &MainWindow::updateSimulationStubButton);
+            });
+        }
+    }
+    if (dependencyCount == 0) {
+        auto* unavailable = menu->addAction(
+            tr("No unresolved module dependencies"));
+        unavailable->setEnabled(false);
+    }
+    simulationStubButton_->setText(
+        tr("Stubs (%1/%2)")
+            .arg(static_cast<qulonglong>(selectedCount))
+            .arg(static_cast<qulonglong>(dependencyCount)));
+    simulationStubButton_->setEnabled(
+        dependencyCount > 0
+        && simulationStateMachine_.state()
+            != SimulationSessionState::Compiling
+        && simulationStateMachine_.state()
+            != SimulationSessionState::Running);
+    simulationStubButton_->setToolTip(
+        dependencyCount == 0
+            ? tr("The selected design has no unresolved module dependencies")
+            : tr("Explicitly select passive input-only stubs. They do not model dependency behavior."));
 }
 
 void MainWindow::updateSimulationControls(const QString& detail)
@@ -2257,6 +2376,13 @@ void MainWindow::updateSimulationControls(const QString& detail)
     if (canvas_) {
         canvas_->setEnabled(
             state != SimulationSessionState::Compiling
+            && state != SimulationSessionState::Running);
+    }
+    if (simulationStubButton_) {
+        simulationStubButton_->setEnabled(
+            simulationManifest_
+            && !simulationManifest_->unresolvedDependencies.empty()
+            && state != SimulationSessionState::Compiling
             && state != SimulationSessionState::Running);
     }
     if (previous != key) emit simulationSessionStateChanged(key);

@@ -6226,10 +6226,74 @@ void testZeroSlackStructuredModuleManifestImport()
     array.insert(QStringLiteral("sourceLine"), 16);
     ports.append(array);
     root.insert(QStringLiteral("ports"), ports);
+    root.insert(QStringLiteral("schemaVersion"), 4);
+    const auto association = [](const QString& name, const int position) {
+        return QJsonObject{
+            {QStringLiteral("name"), name},
+            {QStringLiteral("position"), position},
+        };
+    };
+    root.insert(
+        QStringLiteral("unresolvedDependencies"),
+        QJsonArray{
+            QJsonObject{
+                {QStringLiteral("moduleName"),
+                 QStringLiteral("missing_vendor_core")},
+                {QStringLiteral("instances"),
+                 QJsonArray{
+                     QJsonObject{
+                         {QStringLiteral("instanceName"),
+                          QStringLiteral("u_vendor")},
+                         {QStringLiteral("constructKind"),
+                          QStringLiteral("module")},
+                         {QStringLiteral("sourceFile"),
+                          QStringLiteral("rtl/handshake_dut.sv")},
+                         {QStringLiteral("sourceLine"), 24},
+                         {QStringLiteral("sourceColumn"), 5},
+                         {QStringLiteral("parameterAssociations"),
+                          QJsonArray{association(QStringLiteral("WIDTH"), 0)}},
+                         {QStringLiteral("portAssociations"),
+                          QJsonArray{
+                              association(QStringLiteral("clk_i"), 0),
+                              association(QStringLiteral("data_i"), 1),
+                          }},
+                         {QStringLiteral("syntaxComplete"), true},
+                         {QStringLiteral("failureReason"), QString{}},
+                     },
+                 }},
+                {QStringLiteral("stubSupported"), true},
+                {QStringLiteral("stubUnsupportedReason"), QString{}},
+            },
+        });
 
     const auto parsed = wave::parseZeroSlackModuleManifest(
         QJsonDocument(root).toJson());
     expect(parsed.ok(), parsed.error.toStdString());
+    expect(parsed.manifest->schemaVersion == 4
+               && parsed.manifest->unresolvedDependencies.size() == 1
+               && parsed.manifest->unresolvedDependencies.front().stubSupported
+               && parsed.manifest->unresolvedDependencies.front()
+                      .instances.front().portAssociations.at(1).name
+                   == "data_i",
+           "Module Manifest v4 unresolved dependency facts were not preserved");
+    const auto passiveStubs = wave::generatePassiveSimulationStubs(
+        *parsed.manifest,
+        {QStringLiteral("missing_vendor_core")});
+    expect(passiveStubs.ok()
+               && passiveStubs.document.contains("module missing_vendor_core #(")
+               && passiveStubs.document.contains("parameter WIDTH = 0")
+               && passiveStubs.document.contains("input wire clk_i")
+               && passiveStubs.document.contains("input wire data_i")
+               && !passiveStubs.document.contains("output wire")
+               && passiveStubs.document.contains("non-functional stub")
+               && passiveStubs.document.contains("not behavioral models"),
+           passiveStubs.error.isEmpty()
+               ? "explicit passive stub was not conservative or deterministic"
+               : passiveStubs.error.toStdString());
+    expect(!wave::generatePassiveSimulationStubs(
+                *parsed.manifest,
+                {QStringLiteral("unknown_dependency")}).ok(),
+           "stub generation accepted a dependency absent from the manifest");
     const auto wrapper = wave::generateStructuredSimulationWrapper(
         *parsed.manifest);
     expect(
@@ -7026,6 +7090,10 @@ void testSimulationSessionContractAndState()
     request.buildCacheDirectory = QStringLiteral("C:/cache/builds");
     request.scenarioDirectory = QStringLiteral("C:/workspace/.zs/simulation/dut");
     request.resultProjectPath = QStringLiteral("C:/cache/run/result.wave.json");
+    request.stubbedModules = {
+        QStringLiteral("missing_vendor_core"),
+        QStringLiteral("missing_pll"),
+    };
     request.toolchain.verilatorProgram = QStringLiteral("C:/tools/verilator.exe");
     request.toolchain.verilatorArguments = {QStringLiteral("--quiet")};
     request.toolchain.cxxProgram = QStringLiteral("C:/tools/g++.exe");
@@ -7052,6 +7120,7 @@ void testSimulationSessionContractAndState()
                && restored.request->scenarioDirectory
                    == request.scenarioDirectory
                && restored.request->resultProjectPath == request.resultProjectPath
+               && restored.request->stubbedModules == request.stubbedModules
                && restored.request->toolchain.verilatorProgram
                    == request.toolchain.verilatorProgram
                && restored.request->toolchain.verilatorArguments
@@ -7068,6 +7137,24 @@ void testSimulationSessionContractAndState()
                && !restored.request->toolchain.environment.contains(
                    QStringLiteral("WAVE_PRIVATE_TEST_VALUE")),
            "simulation session did not round-trip its rerun contract safely");
+
+    auto versionOne = project;
+    auto versionOneSession = QJsonDocument::fromJson(
+        QByteArray::fromStdString(
+            versionOne.extensions.at(wave::SimulationSessionExtension)))
+                                 .object();
+    versionOneSession.insert(
+        QStringLiteral("schema"),
+        QString::fromLatin1(wave::LegacySimulationSessionSchema));
+    versionOneSession.remove(QStringLiteral("stubbedModules"));
+    versionOne.extensions[wave::SimulationSessionExtension] =
+        QJsonDocument(versionOneSession)
+            .toJson(QJsonDocument::Compact).toStdString();
+    const auto restoredVersionOne =
+        wave::simulationSessionFromProject(versionOne);
+    expect(restoredVersionOne.ok()
+               && restoredVersionOne.request->stubbedModules.isEmpty(),
+           "simulation session v1 did not receive an empty explicit-stub selection");
 
     auto legacy = project;
     auto legacySession = QJsonDocument::fromJson(
@@ -7397,6 +7484,219 @@ void testVerilatorToolchainProbe()
     const auto cancelled = runToolchainFixture(optionsFor(hang), 40);
     expect(cancelled.status == wave::ToolchainProbeStatus::Cancelled,
            "cancelled toolchain did not produce cancelled status");
+}
+
+void testExplicitUnresolvedModuleStubs()
+{
+    const QDir sourceFixtureRoot(
+        QDir(QStringLiteral(WAVE_SOURCE_DIR))
+            .filePath(QStringLiteral("tests/fixtures/simulation/fixed-counter")));
+    QTemporaryDir workspace;
+    QTemporaryDir artifacts;
+    QTemporaryDir buildCache;
+    expect(workspace.isValid() && artifacts.isValid() && buildCache.isValid()
+               && QDir().mkpath(
+                   QDir(workspace.path()).filePath(QStringLiteral("rtl"))),
+           "cannot create explicit-stub integration workspace");
+
+    const QString sourcePath = QDir(workspace.path()).filePath(
+        QStringLiteral("rtl/wave_fixed_counter.sv"));
+    QFile sourceInput(sourceFixtureRoot.filePath(
+        QStringLiteral("rtl/wave_fixed_counter.sv")));
+    expect(sourceInput.open(QIODevice::ReadOnly),
+           "cannot read explicit-stub RTL fixture");
+    QByteArray sourceDocument = sourceInput.readAll();
+    sourceDocument.replace(
+        "endmodule",
+        "    missing_vendor_core u_vendor (\n"
+        "        .clk_i  (clk_i),\n"
+        "        .data_i (enable_i),\n"
+        "        .data_o ()\n"
+        "    );\n"
+        "endmodule");
+    QFile sourceOutput(sourcePath);
+    expect(sourceOutput.open(QIODevice::WriteOnly)
+               && sourceOutput.write(sourceDocument) == sourceDocument.size(),
+           "cannot write explicit-stub RTL fixture");
+    sourceOutput.close();
+
+    QFile manifestInput(sourceFixtureRoot.filePath(QStringLiteral("manifest.json")));
+    expect(manifestInput.open(QIODevice::ReadOnly),
+           "cannot read explicit-stub manifest fixture");
+    QJsonObject manifest = QJsonDocument::fromJson(
+        manifestInput.readAll()).object();
+    manifest.insert(QStringLiteral("schemaVersion"), 4);
+    const QJsonObject target = manifest.value(QStringLiteral("target")).toObject();
+    manifest.insert(
+        QStringLiteral("observationScope"),
+        QJsonObject{
+            {QStringLiteral("mode"), QStringLiteral("module")},
+            {QStringLiteral("label"), QStringLiteral("wave_fixed_counter")},
+            {QStringLiteral("sourceFile"), target.value(QStringLiteral("sourceFile"))},
+            {QStringLiteral("startLine"), target.value(QStringLiteral("sourceLine"))},
+            {QStringLiteral("endLine"), target.value(QStringLiteral("sourceLine"))},
+        });
+    manifest.insert(QStringLiteral("observations"), QJsonArray{});
+    QJsonArray ports = manifest.value(QStringLiteral("ports")).toArray();
+    for (qsizetype index = 0; index < ports.size(); ++index) {
+        QJsonObject port = ports.at(index).toObject();
+        port.insert(QStringLiteral("structuredLeavesAvailable"), false);
+        port.insert(QStringLiteral("editableLeaves"), QJsonArray{});
+        port.insert(QStringLiteral("structuredFailureReason"), QString{});
+        ports[index] = port;
+    }
+    manifest.insert(QStringLiteral("ports"), ports);
+    const auto association = [](const QString& name, const int position) {
+        return QJsonObject{
+            {QStringLiteral("name"), name},
+            {QStringLiteral("position"), position},
+        };
+    };
+    manifest.insert(
+        QStringLiteral("unresolvedDependencies"),
+        QJsonArray{
+            QJsonObject{
+                {QStringLiteral("moduleName"),
+                 QStringLiteral("missing_vendor_core")},
+                {QStringLiteral("instances"),
+                 QJsonArray{
+                     QJsonObject{
+                         {QStringLiteral("instanceName"),
+                          QStringLiteral("u_vendor")},
+                         {QStringLiteral("constructKind"),
+                          QStringLiteral("module")},
+                         {QStringLiteral("sourceFile"),
+                          QStringLiteral("rtl/wave_fixed_counter.sv")},
+                         {QStringLiteral("sourceLine"), 18},
+                         {QStringLiteral("sourceColumn"), 5},
+                         {QStringLiteral("parameterAssociations"), QJsonArray{}},
+                         {QStringLiteral("portAssociations"),
+                          QJsonArray{
+                              association(QStringLiteral("clk_i"), 0),
+                              association(QStringLiteral("data_i"), 1),
+                              association(QStringLiteral("data_o"), 2),
+                          }},
+                         {QStringLiteral("syntaxComplete"), true},
+                         {QStringLiteral("failureReason"), QString{}},
+                     },
+                 }},
+                {QStringLiteral("stubSupported"), true},
+                {QStringLiteral("stubUnsupportedReason"), QString{}},
+            },
+        });
+    const QString manifestPath = QDir(workspace.path()).filePath(
+        QStringLiteral("manifest.json"));
+    QFile manifestOutput(manifestPath);
+    const QByteArray manifestDocument = QJsonDocument(manifest).toJson();
+    expect(manifestOutput.open(QIODevice::WriteOnly)
+               && manifestOutput.write(manifestDocument)
+                   == manifestDocument.size(),
+           "cannot write explicit-stub manifest fixture");
+    manifestOutput.close();
+    const QString stimulusPath = QDir(workspace.path()).filePath(
+        QStringLiteral("stimulus.json"));
+    const auto parsedManifest = wave::parseZeroSlackModuleManifest(
+        manifestDocument);
+    expect(parsedManifest.ok(), parsedManifest.error.toStdString());
+    const auto imported = wave::importZeroSlackModuleManifest(
+        *parsedManifest.manifest);
+    expect(imported.ok() && imported.project
+               && !imported.project->scenarios.empty(),
+           imported.error.toStdString());
+    auto stimulusProject = *imported.project;
+    auto& stimulusScenario = stimulusProject.scenarios.front();
+    const auto exported = wave::exportZeroSlackStimulusScenario(
+        stimulusProject, stimulusScenario);
+    expect(exported.ok(), exported.error.toStdString());
+    QFile stimulusOutput(stimulusPath);
+    const QByteArray stimulusDocument =
+        wave::serializeZeroSlackStimulusScenario(*exported.scenario);
+    expect(stimulusOutput.open(QIODevice::WriteOnly)
+               && stimulusOutput.write(stimulusDocument)
+                   == stimulusDocument.size(),
+           "cannot write explicit-stub stimulus fixture");
+    stimulusOutput.close();
+
+    const auto request = [&] {
+        wave::SimulationRunRequest value;
+        value.manifestPath = manifestPath;
+        value.stimulusPath = stimulusPath;
+        value.workspaceRoot = workspace.path();
+        value.artifactDirectory = artifacts.path();
+        value.buildCacheDirectory = buildCache.path();
+        value.toolchain.verilatorProgram = toolchainFixturePath(
+            QStringLiteral("wave-verilator-fixture"));
+        value.toolchain.cxxProgram = toolchainFixturePath(
+            QStringLiteral("wave-toolchain-fixture-ready"));
+        value.toolchain.timeoutMs = 1'000;
+        value.toolchain.environment.insert(
+            QStringLiteral("WAVE_SIMULATOR_FIXTURE"),
+            toolchainFixturePath(QStringLiteral("wave-simulator-fixture")));
+        value.buildTimeoutMs = 2'000;
+        value.runTimeoutMs = 2'000;
+        return value;
+    };
+
+    const auto rejected = runSimulationFixture(request());
+    expect(rejected.status == wave::SimulationRunStatus::UnsupportedFixture
+               && rejected.stage == wave::SimulationRunStage::ValidateInputs
+               && rejected.diagnostic.contains(QStringLiteral("Stubs menu"))
+               && !rejected.toolchain.has_value(),
+           QStringLiteral(
+               "unresolved module rejection mismatch: status=%1 stage=%2 diagnostic=%3")
+               .arg(static_cast<int>(rejected.status))
+               .arg(static_cast<int>(rejected.stage))
+               .arg(rejected.diagnostic)
+               .toStdString());
+
+    auto selectedRequest = request();
+    selectedRequest.stubbedModules = {
+        QStringLiteral("missing_vendor_core")};
+    const auto completed = runSimulationFixture(std::move(selectedRequest));
+    const QJsonObject completedReport = simulationRunReportJson(completed);
+    const QString reportedStub = completedReport
+        .value(QStringLiteral("artifacts")).toObject()
+        .value(QStringLiteral("stubs")).toString();
+    const bool buildHasStub = completed.buildProcess
+        && std::any_of(
+            completed.buildProcess->arguments.cbegin(),
+            completed.buildProcess->arguments.cend(),
+            [](const QString& argument) {
+                return QFileInfo(argument).fileName()
+                    == QStringLiteral("wave_fixture_stubs.sv");
+            });
+    const bool buildHasPinMissing = completed.buildProcess
+        && completed.buildProcess->arguments.contains(
+            QStringLiteral("-Wno-PINMISSING"));
+    const bool buildHasWidth = completed.buildProcess
+        && completed.buildProcess->arguments.contains(
+            QStringLiteral("-Wno-WIDTH"));
+    expect(completed.ok() && completed.buildProcess
+               && QFileInfo(completed.artifacts.stubPath).isFile()
+               && buildHasStub && buildHasPinMissing && buildHasWidth
+               && reportedStub == completed.artifacts.stubPath,
+           QStringLiteral(
+               "explicit stub run mismatch: status=%1 stage=%2 diagnostic=%3 stubFile=%4 build=%5 pathArg=%6 pinMissing=%7 width=%8 reportStub=%9")
+               .arg(static_cast<int>(completed.status))
+               .arg(static_cast<int>(completed.stage))
+               .arg(completed.diagnostic, completed.artifacts.stubPath)
+               .arg(completed.buildProcess.has_value())
+               .arg(buildHasStub)
+               .arg(buildHasPinMissing)
+               .arg(buildHasWidth)
+               .arg(reportedStub)
+               .toStdString());
+    QFile generatedStub(completed.artifacts.stubPath);
+    expect(generatedStub.open(QIODevice::ReadOnly)
+               && [&generatedStub] {
+                      const QByteArray text = generatedStub.readAll();
+                      return text.contains("module missing_vendor_core")
+                          && text.contains("input wire clk_i")
+                          && text.contains("input wire data_i")
+                          && text.contains("input wire data_o")
+                          && !text.contains("output wire");
+                  }(),
+           "generated dependency stub is not passive input-only RTL");
 }
 
 void testFixedFixtureSimulationPipeline()
@@ -19784,6 +20084,7 @@ int main(int argc, char* argv[])
         {"Verilator toolchain probe", testVerilatorToolchainProbe},
         {"simulation session contract and state", testSimulationSessionContractAndState},
         {"simulation build fingerprint contract", testSimulationBuildFingerprintContract},
+        {"explicit unresolved module stubs", testExplicitUnresolvedModuleStubs},
         {"fixed fixture simulation pipeline", testFixedFixtureSimulationPipeline},
         {"headless automation JSON contracts", testAutomationContracts},
         {"Relation repair reference contracts", testAutomationRelationRepairReferenceContracts},

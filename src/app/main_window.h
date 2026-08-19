@@ -6,6 +6,7 @@
 #include "wave/compare.h"
 #include "wave/fst_trace.h"
 #include "wave/model.h"
+#include "wave/module_manifest.h"
 #include "wave/simulation_session.h"
 #include "wave/simulation_check.h"
 #include "wave/stimulus_scenario.h"
@@ -275,6 +276,7 @@ private:
     void deleteSimulationScenario();
     void updateSimulationScenarioActions();
     void updateSimulationClockButton();
+    void updateSimulationStubButton();
     void editClockById(const std::string& clockId);
     void updateSimulationControls(const QString& detail = {});
     [[nodiscard]] bool exportSimulationStimulus(QString& error);
@@ -396,6 +398,7 @@ private:
     QAction* createSimulationScenarioAction_{nullptr};
     QAction* renameSimulationScenarioAction_{nullptr};
     QAction* deleteSimulationScenarioAction_{nullptr};
+    QToolButton* simulationStubButton_{nullptr};
     QToolButton* simulationClockButton_{nullptr};
     QAction* compareModeAction_{nullptr};
     QMenu* editMenu_{nullptr};
@@ -439,6 +442,7 @@ private:
     bool simulationResultMode_{false};
     QLabel* simulationStateLabel_{nullptr};
     std::optional<SimulationRunRequest> simulationRequest_;
+    std::optional<ZeroSlackModuleManifest> simulationManifest_;
     SimulationSessionStateMachine simulationStateMachine_;
     std::unique_ptr<VerilatorSimulationRunner> simulationRunner_;
     QString simulationSessionError_;

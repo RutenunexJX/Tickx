@@ -4,11 +4,13 @@
 
 ## 目标
 
-ZeroSlack Wave Simulation S12.6“FST/Wellen 按需读取”已完成。标准 FST 由随包分发的
-Wellen 0.25.6 辅助程序读取：先建立元数据，再仅为映射或用户勾选的信号解码 transition。
-取消、文件身份、generation、批量和响应规模均有明确门禁；Compare/Checks 会等待所需信号。
-`wavewidgets` C ABI 继续为 v1，并在安装闭包完整时声明 `on-demand-fst-trace/v1`。VCD/CSV
-路径不依赖该辅助程序，关闭 Wellen 构建选项后仍可构建。
+ZeroSlack Wave Simulation S12.7“unresolved module 显式 stub”已完成。Module Manifest v4
+保存目标依赖闭包中的 unresolved 实例事实；runner 默认拒绝运行，只有用户在 `Stubs`
+菜单明确选择且契约标记可支持的 module 才生成 input-only 被动 stub。stub 不模拟依赖行为，
+并进入 session、构建指纹和运行报告。`wavewidgets` C ABI 与 workspace contract 继续为 v1，
+新增 `explicit-unresolved-module-stubs/v1` 能力声明；v1-v3 Manifest 继续兼容读取。
+当前配置的完整测试集通过 `94/94`；本机未安装真实 Verilator，外部编译与运行仍由
+确定性 process fixture 验证。
 
 交付一个可独立运行的 Qt 6/C++20 波形桌面应用，使用户能够人工定义与直接编辑 FPGA
 预期数字波形；同一场景模型继续支撑 SystemVerilog/SVA/cocotb、文档图、trace 导入及

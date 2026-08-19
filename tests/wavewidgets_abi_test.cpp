@@ -78,6 +78,11 @@ int main(int argc, char** argv)
                   .toStringList()
                   .contains(QStringLiteral("lightweight-trace-checks/v1")),
               "embedded workspace advertises lightweight trace checks");
+        check(workspace->property("wavewidgets.capabilities")
+                  .toStringList()
+                  .contains(QStringLiteral(
+                      "explicit-unresolved-module-stubs/v1")),
+              "embedded workspace advertises explicit unresolved-module stubs");
 #if defined(WAVE_WELLEN_READER)
         check(QFileInfo(QStringLiteral(WAVE_WELLEN_READER)).isFile()
                   && workspace->property("wavewidgets.capabilities")
@@ -116,6 +121,8 @@ int main(int argc, char** argv)
             QStringLiteral("AsyncTimingAction"));
         auto* clockDomains = workspace->findChild<QToolButton*>(
             QStringLiteral("SimulationClockDomainsButton"));
+        auto* stubDependencies = workspace->findChild<QToolButton*>(
+            QStringLiteral("SimulationStubDependenciesButton"));
         check(asyncTiming && stimulusCanvas,
               "embedded workspace exposes asynchronous event timing");
         if (asyncTiming && stimulusCanvas) {
@@ -126,6 +133,10 @@ int main(int argc, char** argv)
         check(clockDomains && clockDomains->menu()
                   && !clockDomains->menu()->actions().isEmpty(),
               "embedded workspace exposes independent clock-domain editing");
+        check(stubDependencies && stubDependencies->menu()
+                  && stubDependencies->text() == QStringLiteral("Stubs (0/0)")
+                  && !stubDependencies->isEnabled(),
+              "embedded workspace exposes an inert stub selector when all modules resolve");
         workspace->close();
         delete workspace;
     }

@@ -804,6 +804,234 @@ bool watchDirection(const ModulePortDirection direction)
         || direction == ModulePortDirection::Ref;
 }
 
+bool parseManifestAssociations(
+    const QJsonValue& value,
+    const QString& context,
+    std::vector<ModuleManifestAssociation>& output,
+    QString& error)
+{
+    if (!value.isArray()) {
+        error = context + QStringLiteral(" must be an array");
+        return false;
+    }
+    QSet<QString> namedAssociations;
+    for (qsizetype index = 0; index < value.toArray().size(); ++index) {
+        const auto itemContext = QStringLiteral("%1[%2]").arg(context).arg(index);
+        const auto item = value.toArray().at(index);
+        if (!item.isObject()
+            || !exactKeys(
+                item.toObject(),
+                {QStringLiteral("name"), QStringLiteral("position")},
+                itemContext,
+                error)) {
+            if (error.isEmpty())
+                error = itemContext + QStringLiteral(" must be an object");
+            return false;
+        }
+        ModuleManifestAssociation association;
+        int position = -1;
+        if (!readString(item.toObject(), QStringLiteral("name"), itemContext,
+                        association.name, error)
+            || !readSignedInteger(item.toObject(), QStringLiteral("position"),
+                                  itemContext, position, error)
+            || position != index) {
+            if (error.isEmpty()) {
+                error = itemContext
+                    + QStringLiteral(".position must match source order");
+            }
+            return false;
+        }
+        association.position = position;
+        if (!association.name.empty()
+            && namedAssociations.contains(qString(association.name))) {
+            error = itemContext + QStringLiteral(" duplicates a formal name");
+            return false;
+        }
+        if (!association.name.empty())
+            namedAssociations.insert(qString(association.name));
+        output.push_back(std::move(association));
+    }
+    return true;
+}
+
+int associationStyle(const std::vector<ModuleManifestAssociation>& associations)
+{
+    if (associations.empty()) return -1;
+    const bool named = std::any_of(
+        associations.cbegin(), associations.cend(),
+        [](const ModuleManifestAssociation& association) {
+            return !association.name.empty();
+        });
+    const bool positional = std::any_of(
+        associations.cbegin(), associations.cend(),
+        [](const ModuleManifestAssociation& association) {
+            return association.name.empty();
+        });
+    return named && positional ? 2 : named ? 1 : 0;
+}
+
+bool parseUnresolvedDependencies(
+    const QJsonValue& value,
+    const QSet<QString>& sourcePaths,
+    std::vector<ModuleManifestUnresolvedDependency>& output,
+    QString& error)
+{
+    if (!value.isArray()) {
+        error = QStringLiteral("manifest.unresolvedDependencies must be an array");
+        return false;
+    }
+    QSet<QString> moduleNames;
+    for (qsizetype dependencyIndex = 0;
+         dependencyIndex < value.toArray().size(); ++dependencyIndex) {
+        const QString context = QStringLiteral(
+            "manifest.unresolvedDependencies[%1]").arg(dependencyIndex);
+        const QJsonValue dependencyValue = value.toArray().at(dependencyIndex);
+        if (!dependencyValue.isObject()
+            || !exactKeys(
+                dependencyValue.toObject(),
+                {QStringLiteral("moduleName"), QStringLiteral("instances"),
+                 QStringLiteral("stubSupported"),
+                 QStringLiteral("stubUnsupportedReason")},
+                context,
+                error)) {
+            if (error.isEmpty())
+                error = context + QStringLiteral(" must be an object");
+            return false;
+        }
+        const QJsonObject dependencyObject = dependencyValue.toObject();
+        ModuleManifestUnresolvedDependency dependency;
+        if (!readString(dependencyObject, QStringLiteral("moduleName"), context,
+                        dependency.moduleName, error, false)
+            || !readBool(dependencyObject, QStringLiteral("stubSupported"),
+                         context, dependency.stubSupported, error)
+            || !readString(dependencyObject,
+                           QStringLiteral("stubUnsupportedReason"), context,
+                           dependency.stubUnsupportedReason, error)) {
+            return false;
+        }
+        if (moduleNames.contains(qString(dependency.moduleName))) {
+            error = context + QStringLiteral(" duplicates moduleName");
+            return false;
+        }
+        moduleNames.insert(qString(dependency.moduleName));
+
+        const QJsonValue instancesValue =
+            dependencyObject.value(QStringLiteral("instances"));
+        if (!instancesValue.isArray() || instancesValue.toArray().isEmpty()) {
+            error = context + QStringLiteral(".instances must be a non-empty array");
+            return false;
+        }
+        int parameterStyle = -1;
+        int portStyle = -1;
+        for (qsizetype instanceIndex = 0;
+             instanceIndex < instancesValue.toArray().size(); ++instanceIndex) {
+            const QString instanceContext = QStringLiteral("%1.instances[%2]")
+                                                .arg(context)
+                                                .arg(instanceIndex);
+            const QJsonValue instanceValue =
+                instancesValue.toArray().at(instanceIndex);
+            if (!instanceValue.isObject()
+                || !exactKeys(
+                    instanceValue.toObject(),
+                    {QStringLiteral("instanceName"),
+                     QStringLiteral("constructKind"),
+                     QStringLiteral("sourceFile"),
+                     QStringLiteral("sourceLine"),
+                     QStringLiteral("sourceColumn"),
+                     QStringLiteral("parameterAssociations"),
+                     QStringLiteral("portAssociations"),
+                     QStringLiteral("syntaxComplete"),
+                     QStringLiteral("failureReason")},
+                    instanceContext,
+                    error)) {
+                if (error.isEmpty())
+                    error = instanceContext + QStringLiteral(" must be an object");
+                return false;
+            }
+            const QJsonObject instanceObject = instanceValue.toObject();
+            ModuleManifestUnresolvedInstance instance;
+            if (!readString(instanceObject, QStringLiteral("instanceName"),
+                            instanceContext, instance.instanceName, error)
+                || !readString(instanceObject, QStringLiteral("constructKind"),
+                               instanceContext, instance.constructKind, error,
+                               false)
+                || !readRelativePath(instanceObject,
+                                     QStringLiteral("sourceFile"),
+                                     instanceContext, instance.sourceFile,
+                                     error)
+                || !readPositiveInt(instanceObject,
+                                    QStringLiteral("sourceLine"),
+                                    instanceContext, instance.sourceLine, error)
+                || !readPositiveInt(instanceObject,
+                                    QStringLiteral("sourceColumn"),
+                                    instanceContext, instance.sourceColumn,
+                                    error)
+                || !readBool(instanceObject,
+                             QStringLiteral("syntaxComplete"), instanceContext,
+                             instance.syntaxComplete, error)
+                || !readString(instanceObject,
+                               QStringLiteral("failureReason"), instanceContext,
+                               instance.failureReason, error)
+                || !parseManifestAssociations(
+                    instanceObject.value(
+                        QStringLiteral("parameterAssociations")),
+                    instanceContext
+                        + QStringLiteral(".parameterAssociations"),
+                    instance.parameterAssociations, error)
+                || !parseManifestAssociations(
+                    instanceObject.value(QStringLiteral("portAssociations")),
+                    instanceContext + QStringLiteral(".portAssociations"),
+                    instance.portAssociations, error)) {
+                return false;
+            }
+            if (instance.constructKind != "module"
+                && instance.constructKind != "interface"
+                && instance.constructKind != "program") {
+                error = instanceContext
+                    + QStringLiteral(".constructKind is unsupported");
+                return false;
+            }
+            if (!sourcePaths.contains(qString(instance.sourceFile))) {
+                error = instanceContext
+                    + QStringLiteral(".sourceFile is absent from sources");
+                return false;
+            }
+            const int instanceParameterStyle =
+                associationStyle(instance.parameterAssociations);
+            const int instancePortStyle =
+                associationStyle(instance.portAssociations);
+            const auto mergeStyle = [](const int candidate, int& merged) {
+                if (candidate < 0) return true;
+                if (candidate == 2) return false;
+                if (merged < 0) {
+                    merged = candidate;
+                    return true;
+                }
+                return merged == candidate;
+            };
+            if (dependency.stubSupported
+                && (instance.constructKind != "module"
+                    || !instance.syntaxComplete
+                    || !mergeStyle(instanceParameterStyle, parameterStyle)
+                    || !mergeStyle(instancePortStyle, portStyle))) {
+                error = context
+                    + QStringLiteral(" claims an unsafe dependency is stub-capable");
+                return false;
+            }
+            dependency.instances.push_back(std::move(instance));
+        }
+        if (dependency.stubSupported
+                ? !dependency.stubUnsupportedReason.empty()
+                : dependency.stubUnsupportedReason.empty()) {
+            error = context
+                + QStringLiteral(" has an inconsistent stub support reason");
+            return false;
+        }
+        output.push_back(std::move(dependency));
+    }
+    return true;
+}
+
 } // namespace
 
 std::string moduleManifestStructuredGroupId(
@@ -838,7 +1066,20 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
     }
     const int schemaVersion = version.toInt();
     const bool hasObservationContract = schemaVersion >= 2;
-    const bool keysValid = hasObservationContract
+    const bool hasUnresolvedDependencyContract = schemaVersion >= 4;
+    const bool keysValid = hasUnresolvedDependencyContract
+        ? exactKeys(
+              root,
+              {QStringLiteral("schemaVersion"), QStringLiteral("workspaceId"),
+               QStringLiteral("target"), QStringLiteral("observationScope"),
+               QStringLiteral("observations"), QStringLiteral("sources"),
+               QStringLiteral("unresolvedDependencies"),
+               QStringLiteral("includeDirs"), QStringLiteral("defines"),
+               QStringLiteral("parameters"), QStringLiteral("ports"),
+               QStringLiteral("clockCandidates"), QStringLiteral("resetCandidates")},
+              QStringLiteral("manifest"),
+              error)
+        : hasObservationContract
         ? exactKeys(
               root,
               {QStringLiteral("schemaVersion"), QStringLiteral("workspaceId"),
@@ -1111,6 +1352,15 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
                 "manifest observation sourceFile is absent from sources");
             return result;
         }
+    }
+    if (hasUnresolvedDependencyContract
+        && !parseUnresolvedDependencies(
+            root.value(QStringLiteral("unresolvedDependencies")),
+            sourcePaths,
+            manifest.unresolvedDependencies,
+            error)) {
+        result.error = error;
+        return result;
     }
     if (!readStringArray(root.value(QStringLiteral("includeDirs")),
                          QStringLiteral("manifest.includeDirs"),

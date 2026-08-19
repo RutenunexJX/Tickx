@@ -121,6 +121,7 @@ void attachSimulationSession(
         {QStringLiteral("buildCacheDirectory"), request.buildCacheDirectory},
         {QStringLiteral("scenarioDirectory"), request.scenarioDirectory},
         {QStringLiteral("resultProjectPath"), request.resultProjectPath},
+        {QStringLiteral("stubbedModules"), strings(request.stubbedModules)},
         {QStringLiteral("toolchain"), toolchain},
         {QStringLiteral("buildTimeoutMs"), request.buildTimeoutMs},
         {QStringLiteral("runTimeoutMs"), request.runTimeoutMs},
@@ -157,6 +158,7 @@ SimulationSessionParseResult simulationSessionFromProject(const Project& project
                 QStringLiteral("buildCacheDirectory"),
                 QStringLiteral("scenarioDirectory"),
                 QStringLiteral("resultProjectPath"),
+                QStringLiteral("stubbedModules"),
                 QStringLiteral("toolchain"),
                 QStringLiteral("buildTimeoutMs"),
                 QStringLiteral("runTimeoutMs"),
@@ -166,8 +168,11 @@ SimulationSessionParseResult simulationSessionFromProject(const Project& project
             QStringLiteral("simulation session"))) {
         return result;
     }
-    if (object.value(QStringLiteral("schema")).toString()
-        != QString::fromLatin1(SimulationSessionSchema)) {
+    const QString schema = object.value(QStringLiteral("schema")).toString();
+    const bool currentSchema =
+        schema == QString::fromLatin1(SimulationSessionSchema);
+    if (!currentSchema
+        && schema != QString::fromLatin1(LegacySimulationSessionSchema)) {
         result.error = QStringLiteral("Unsupported simulation session schema.");
         return result;
     }
@@ -212,6 +217,25 @@ SimulationSessionParseResult simulationSessionFromProject(const Project& project
     }
     request.scenarioDirectory = scenarioDirectoryValue.toString().trimmed();
     request.resultProjectPath = *resultProjectPath;
+    if (currentSchema) {
+        const auto stubbedModules = stringArray(
+            object, QStringLiteral("stubbedModules"), result.error);
+        if (!stubbedModules) return result;
+        QSet<QString> uniqueModules;
+        for (const QString& module : *stubbedModules) {
+            if (module.trimmed().isEmpty() || uniqueModules.contains(module)) {
+                result.error = QStringLiteral(
+                    "Simulation session stubbedModules must contain unique non-empty names.");
+                return result;
+            }
+            uniqueModules.insert(module);
+        }
+        request.stubbedModules = *stubbedModules;
+    } else if (object.contains(QStringLiteral("stubbedModules"))) {
+        result.error = QStringLiteral(
+            "Legacy simulation sessions cannot contain stub selections.");
+        return result;
+    }
 
     const auto toolchainValue = object.value(QStringLiteral("toolchain"));
     if (!toolchainValue.isObject()) {

@@ -402,7 +402,7 @@ std::optional<QByteArray> makeStructuredWrapper(
 
     QString document;
     QTextStream stream(&document);
-    stream << "// Generated solely from ZeroSlack Module Manifest v3 facts.\n"
+    stream << "// Generated solely from ZeroSlack Module Manifest facts.\n"
            << "module wave_fixture(\n"
            << declarations.join(QStringLiteral(",\n")) << "\n);\n";
     if (!internals.isEmpty()) stream << internals.join(QStringLiteral("\n")) << "\n";
@@ -410,6 +410,187 @@ std::optional<QByteArray> makeStructuredWrapper(
     stream << "    " << qString(manifest.target.module) << parameterBlock
            << " dut (\n" << connections.join(QStringLiteral(",\n"))
            << "\n    );\nendmodule\n";
+    return document.toUtf8();
+}
+
+enum class StubAssociationStyle {
+    None,
+    Named,
+    Positional,
+    Mixed,
+};
+
+StubAssociationStyle stubAssociationStyle(
+    const std::vector<ModuleManifestAssociation>& associations)
+{
+    if (associations.empty()) return StubAssociationStyle::None;
+    const bool named = std::any_of(
+        associations.cbegin(), associations.cend(),
+        [](const ModuleManifestAssociation& association) {
+            return !association.name.empty();
+        });
+    const bool positional = std::any_of(
+        associations.cbegin(), associations.cend(),
+        [](const ModuleManifestAssociation& association) {
+            return association.name.empty();
+        });
+    return named && positional
+        ? StubAssociationStyle::Mixed
+        : named ? StubAssociationStyle::Named
+                : StubAssociationStyle::Positional;
+}
+
+bool mergeStubStyle(
+    const StubAssociationStyle candidate,
+    StubAssociationStyle& merged)
+{
+    if (candidate == StubAssociationStyle::Mixed) return false;
+    if (candidate == StubAssociationStyle::None) return true;
+    if (merged == StubAssociationStyle::None) {
+        merged = candidate;
+        return true;
+    }
+    return merged == candidate;
+}
+
+std::optional<QByteArray> makePassiveStubs(
+    const ZeroSlackModuleManifest& manifest,
+    const QStringList& selectedModules,
+    QString& error)
+{
+    std::set<std::string> selected;
+    for (const QString& module : selectedModules) {
+        const std::string name = module.trimmed().toUtf8().toStdString();
+        if (name.empty() || !selected.insert(name).second) {
+            error = QStringLiteral(
+                "Explicit stub selection contains an empty or duplicate module name.");
+            return std::nullopt;
+        }
+    }
+    if (selected.empty()) {
+        error = QStringLiteral("No unresolved module was selected for stubbing.");
+        return std::nullopt;
+    }
+
+    std::set<std::string> emitted;
+    QStringList declarations;
+    for (const ModuleManifestUnresolvedDependency& dependency :
+         manifest.unresolvedDependencies) {
+        if (!selected.contains(dependency.moduleName)) continue;
+        emitted.insert(dependency.moduleName);
+        const QString moduleName = qString(dependency.moduleName);
+        if (!dependency.stubSupported
+            || dependency.instances.empty()
+            || !cppIdentifier(moduleName)) {
+            error = QStringLiteral("Unresolved dependency %1 cannot be represented by a passive stub: %2")
+                        .arg(
+                            moduleName,
+                            qString(dependency.stubUnsupportedReason.empty()
+                                        ? std::string("unsupported module identity or contract")
+                                        : dependency.stubUnsupportedReason));
+            return std::nullopt;
+        }
+
+        StubAssociationStyle parameterStyle = StubAssociationStyle::None;
+        StubAssociationStyle portStyle = StubAssociationStyle::None;
+        QStringList namedParameters;
+        QStringList namedPorts;
+        std::size_t positionalParameterCount = 0;
+        std::size_t positionalPortCount = 0;
+        for (const ModuleManifestUnresolvedInstance& instance :
+             dependency.instances) {
+            if (instance.constructKind != "module"
+                || !instance.syntaxComplete
+                || !mergeStubStyle(
+                    stubAssociationStyle(instance.parameterAssociations),
+                    parameterStyle)
+                || !mergeStubStyle(
+                    stubAssociationStyle(instance.portAssociations),
+                    portStyle)) {
+                error = QStringLiteral("Unresolved dependency %1 contains incompatible instance facts.")
+                            .arg(moduleName);
+                return std::nullopt;
+            }
+            positionalParameterCount = std::max(
+                positionalParameterCount,
+                instance.parameterAssociations.size());
+            positionalPortCount = std::max(
+                positionalPortCount,
+                instance.portAssociations.size());
+            for (const ModuleManifestAssociation& association :
+                 instance.parameterAssociations) {
+                if (association.name.empty()) continue;
+                const QString name = qString(association.name);
+                if (!cppIdentifier(name)) {
+                    error = QStringLiteral("Stub parameter %1.%2 is not a supported identifier.")
+                                .arg(moduleName, name);
+                    return std::nullopt;
+                }
+                if (!namedParameters.contains(name))
+                    namedParameters.append(name);
+            }
+            for (const ModuleManifestAssociation& association :
+                 instance.portAssociations) {
+                if (association.name.empty()) continue;
+                const QString name = qString(association.name);
+                if (!cppIdentifier(name)) {
+                    error = QStringLiteral("Stub port %1.%2 is not a supported identifier.")
+                                .arg(moduleName, name);
+                    return std::nullopt;
+                }
+                if (!namedPorts.contains(name)) namedPorts.append(name);
+            }
+        }
+
+        QStringList parameters;
+        if (parameterStyle == StubAssociationStyle::Named) {
+            for (const QString& name : std::as_const(namedParameters))
+                parameters.append(QStringLiteral("    parameter %1 = 0").arg(name));
+        } else if (parameterStyle == StubAssociationStyle::Positional) {
+            for (std::size_t index = 0; index < positionalParameterCount; ++index) {
+                parameters.append(
+                    QStringLiteral("    parameter __zs_parameter_%1 = 0")
+                        .arg(index));
+            }
+        }
+
+        QStringList ports;
+        if (portStyle == StubAssociationStyle::Named) {
+            for (const QString& name : std::as_const(namedPorts))
+                ports.append(QStringLiteral("    input wire %1").arg(name));
+        } else if (portStyle == StubAssociationStyle::Positional) {
+            for (std::size_t index = 0; index < positionalPortCount; ++index) {
+                ports.append(
+                    QStringLiteral("    input wire __zs_port_%1").arg(index));
+            }
+        }
+
+        QString declaration = QStringLiteral(
+            "// Explicit non-functional stub. All ports are passive inputs;\n"
+            "// simulation results do not model this dependency's behavior.\n"
+            "module %1").arg(moduleName);
+        if (!parameters.isEmpty()) {
+            declaration += QStringLiteral(" #(\n%1\n)")
+                               .arg(parameters.join(QStringLiteral(",\n")));
+        }
+        if (!ports.isEmpty()) {
+            declaration += QStringLiteral(" (\n%1\n)")
+                               .arg(ports.join(QStringLiteral(",\n")));
+        }
+        declaration += QStringLiteral(";\nendmodule");
+        declarations.append(std::move(declaration));
+    }
+    if (emitted != selected) {
+        error = QStringLiteral(
+            "Explicit stub selection references a module absent from the manifest.");
+        return std::nullopt;
+    }
+
+    QString document = QStringLiteral(
+        "// Generated from explicit user selections in ZeroSlack Module Manifest v4.\n"
+        "// These passive stubs only unblock incomplete designs; they are not behavioral models.\n\n");
+    document += declarations.join(QStringLiteral("\n\n"));
+    document += QLatin1Char('\n');
     return document.toUtf8();
 }
 
@@ -423,6 +604,7 @@ struct PreparedSimulation {
     QStringList includeDirectories;
     QString simulationTopModule;
     QByteArray wrapperDocument;
+    QByteArray stubDocument;
 };
 
 std::optional<PreparedSimulation> prepareSimulation(
@@ -521,6 +703,58 @@ std::optional<PreparedSimulation> prepareSimulation(
             return std::nullopt;
         }
         prepared.includeDirectories.append(path);
+    }
+
+    std::set<std::string> selectedStubs;
+    for (const QString& selected : request.stubbedModules) {
+        const std::string module = selected.trimmed().toUtf8().toStdString();
+        if (module.empty() || !selectedStubs.insert(module).second) {
+            status = SimulationRunStatus::InvalidRequest;
+            error = QStringLiteral(
+                "Explicit stub selection contains an empty or duplicate module name.");
+            return std::nullopt;
+        }
+    }
+    std::set<std::string> manifestDependencies;
+    for (const ModuleManifestUnresolvedDependency& dependency :
+         prepared.manifest.unresolvedDependencies) {
+        manifestDependencies.insert(dependency.moduleName);
+        if (!selectedStubs.contains(dependency.moduleName)) {
+            status = SimulationRunStatus::UnsupportedFixture;
+            error = QStringLiteral(
+                "Unresolved module %1 requires explicit selection in the Stubs menu before simulation. No dependency behavior will be modeled.")
+                        .arg(qString(dependency.moduleName));
+            return std::nullopt;
+        }
+        if (!dependency.stubSupported) {
+            status = SimulationRunStatus::UnsupportedFixture;
+            error = QStringLiteral("Unresolved module %1 cannot be stubbed: %2")
+                        .arg(qString(dependency.moduleName),
+                             qString(dependency.stubUnsupportedReason));
+            return std::nullopt;
+        }
+    }
+    if (!std::includes(
+            manifestDependencies.cbegin(), manifestDependencies.cend(),
+            selectedStubs.cbegin(), selectedStubs.cend())) {
+        status = SimulationRunStatus::InvalidRequest;
+        error = QStringLiteral(
+            "Explicit stub selection references a module absent from the manifest.");
+        return std::nullopt;
+    }
+    if (!selectedStubs.empty()) {
+        const auto stubs = makePassiveStubs(
+            prepared.manifest, request.stubbedModules, error);
+        if (!stubs) {
+            status = SimulationRunStatus::UnsupportedFixture;
+            return std::nullopt;
+        }
+        prepared.stubDocument = *stubs;
+        prepared.buildSources.push_back({
+            QStringLiteral("wave_fixture_stubs.sv"),
+            QStringLiteral("generated-stub"),
+            prepared.stubDocument,
+        });
     }
 
     if (!cppIdentifier(qString(prepared.manifest.target.module))) {
@@ -1222,6 +1456,17 @@ StructuredSimulationWrapperResult generateStructuredSimulationWrapper(
     return result;
 }
 
+PassiveSimulationStubResult generatePassiveSimulationStubs(
+    const ZeroSlackModuleManifest& manifest,
+    const QStringList& selectedModules)
+{
+    PassiveSimulationStubResult result;
+    const auto document = makePassiveStubs(
+        manifest, selectedModules, result.error);
+    if (document) result.document = *document;
+    return result;
+}
+
 quint64 nextSimulationGeneration() noexcept
 {
     static std::atomic<quint64> next{
@@ -1262,6 +1507,9 @@ struct VerilatorSimulationRunner::Impl {
         report.artifacts.executablePath = cacheExecutablePath(directory);
         wrapperPath = QDir(directory).filePath(
             QStringLiteral("wave_fixture_wrapper.sv"));
+        report.artifacts.stubPath = prepared && !prepared->stubDocument.isEmpty()
+            ? QDir(directory).filePath(QStringLiteral("wave_fixture_stubs.sv"))
+            : QString{};
     }
 
     void cleanupBuildStaging()
@@ -1543,7 +1791,13 @@ struct VerilatorSimulationRunner::Impl {
                 }
             }
         }
+        if (!prepared->stubDocument.isEmpty()) {
+            arguments.append(QStringLiteral("-Wno-PINMISSING"));
+            arguments.append(QStringLiteral("-Wno-WIDTH"));
+        }
         arguments.append(prepared->sourceFiles);
+        if (!prepared->stubDocument.isEmpty())
+            arguments.append(report.artifacts.stubPath);
         if (!prepared->wrapperDocument.isEmpty()) arguments.append(wrapperPath);
         arguments.append(report.artifacts.harnessPath);
 
@@ -1645,6 +1899,12 @@ struct VerilatorSimulationRunner::Impl {
         }
         if (!prepared->wrapperDocument.isEmpty()
             && !writeDocument(wrapperPath, prepared->wrapperDocument, error)) {
+            finish(SimulationRunStatus::HarnessGenerationFailed, error);
+            return;
+        }
+        if (!prepared->stubDocument.isEmpty()
+            && !writeDocument(
+                report.artifacts.stubPath, prepared->stubDocument, error)) {
             finish(SimulationRunStatus::HarnessGenerationFailed, error);
             return;
         }
@@ -1891,6 +2151,7 @@ QJsonObject simulationRunReportJson(const SimulationRunReport& report)
          QJsonObject{
              {QStringLiteral("runDirectory"), report.artifacts.runDirectory},
              {QStringLiteral("harness"), report.artifacts.harnessPath},
+             {QStringLiteral("stubs"), report.artifacts.stubPath},
              {QStringLiteral("runtimeStimulus"),
               report.artifacts.runtimeStimulusPath},
              {QStringLiteral("objectDirectory"), report.artifacts.objectDirectory},

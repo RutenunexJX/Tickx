@@ -15,6 +15,12 @@ JSON。VCD/FST/CSV 导入、报告生成及跨应用桥接能力保留在独立 
 Simulation Result 工作区直接复用同一比较领域模块。验收证据见
 [PLAN.md](PLAN.md)。
 
+Module Manifest v4 可携带目标模块依赖闭包中的 unresolved module 实例及其参数、
+端口关联。结果工具栏通过 `Stubs (selected/total)` 显式选择可支持项；默认不选择时，
+runner 在调用工具链前拒绝运行。选择后只生成无行为的 input-only 被动 stub，并将选择、
+生成文件和构建指纹纳入 session 与运行证据。interface、program、语法不完整及关联方式
+不兼容的依赖不会被静默处理。
+
 ZeroSlack 的嵌入式 Simulation Result 工作区在 Actual 区域提供内部信号层级浏览器。
 VCD scope 按原始组件构建实例树，支持搜索、scope 级复选和单信号复选；复选结果直接控制
 Actual 波形可见集合。初次打开优先显示场景已映射的端口与 observation，其他内部信号由用户

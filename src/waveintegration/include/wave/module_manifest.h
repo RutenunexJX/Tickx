@@ -52,6 +52,30 @@ struct ModuleManifestSource {
     std::string role;
 };
 
+struct ModuleManifestAssociation {
+    std::string name;
+    int position{0};
+};
+
+struct ModuleManifestUnresolvedInstance {
+    std::string instanceName;
+    std::string constructKind;
+    std::string sourceFile;
+    int sourceLine{0};
+    int sourceColumn{0};
+    std::vector<ModuleManifestAssociation> parameterAssociations;
+    std::vector<ModuleManifestAssociation> portAssociations;
+    bool syntaxComplete{false};
+    std::string failureReason;
+};
+
+struct ModuleManifestUnresolvedDependency {
+    std::string moduleName;
+    std::vector<ModuleManifestUnresolvedInstance> instances;
+    bool stubSupported{false};
+    std::string stubUnsupportedReason;
+};
+
 struct ModuleManifestTypeShape {
     bool semanticAvailable{false};
     std::string rawTypeText;
@@ -171,7 +195,7 @@ struct ModuleManifestObservation {
 
 struct ZeroSlackModuleManifest {
     static constexpr int MinimumSupportedSchemaVersion = 1;
-    static constexpr int CurrentSchemaVersion = 3;
+    static constexpr int CurrentSchemaVersion = 4;
 
     int schemaVersion{CurrentSchemaVersion};
     std::string identity;
@@ -180,6 +204,7 @@ struct ZeroSlackModuleManifest {
     ModuleManifestObservationScope observationScope;
     std::vector<ModuleManifestObservation> observations;
     std::vector<ModuleManifestSource> sources;
+    std::vector<ModuleManifestUnresolvedDependency> unresolvedDependencies;
     std::vector<std::string> includeDirs;
     std::map<std::string, std::string> defines;
     std::vector<ModuleManifestParameter> parameters;

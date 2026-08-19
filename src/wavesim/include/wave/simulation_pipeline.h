@@ -7,6 +7,7 @@
 #include <QByteArray>
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 #include <memory>
@@ -52,6 +53,7 @@ enum class SimulationRunStatus {
 struct SimulationArtifacts {
     QString runDirectory;
     QString harnessPath;
+    QString stubPath;
     QString runtimeStimulusPath;
     QString objectDirectory;
     QString executablePath;
@@ -75,6 +77,7 @@ struct SimulationRunRequest {
     QString buildCacheDirectory;
     QString scenarioDirectory;
     QString resultProjectPath;
+    QStringList stubbedModules;
     ToolchainProbeOptions toolchain;
     int buildTimeoutMs{120'000};
     int runTimeoutMs{30'000};
@@ -122,6 +125,16 @@ struct StructuredSimulationWrapperResult {
     }
 };
 
+struct PassiveSimulationStubResult {
+    QByteArray document;
+    QString error;
+
+    [[nodiscard]] bool ok() const noexcept
+    {
+        return !document.isEmpty() && error.isEmpty();
+    }
+};
+
 class VerilatorSimulationRunner final {
 public:
     using Completion = std::function<void(SimulationRunReport)>;
@@ -155,6 +168,10 @@ private:
 [[nodiscard]] StructuredSimulationWrapperResult
 generateStructuredSimulationWrapper(
     const ZeroSlackModuleManifest& manifest);
+
+[[nodiscard]] PassiveSimulationStubResult generatePassiveSimulationStubs(
+    const ZeroSlackModuleManifest& manifest,
+    const QStringList& selectedModules);
 
 [[nodiscard]] std::string_view toString(SimulationRunStage stage) noexcept;
 [[nodiscard]] std::string_view toString(SimulationRunStatus status) noexcept;
