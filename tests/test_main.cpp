@@ -13,6 +13,7 @@
 #include "wave/simulation_session.h"
 #include "wave/time.h"
 #include "wave/trace.h"
+#include "wave/trace_hierarchy.h"
 #include "wave/validation.h"
 
 #include <QDir>
@@ -4848,6 +4849,58 @@ $enddefinitions $end
         "inexact timestamp diagnostic is missing");
 }
 
+void testTraceHierarchy()
+{
+    std::istringstream input(R"VCD(
+$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! ready $end
+$scope module \child.with.dot $end
+$var wire 8 " payload [7:0] $end
+$upscope $end
+$scope module sibling $end
+$var wire 1 # busy $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+1!
+b00110101 "
+0#
+$end
+)VCD");
+    wave::TraceParseOptions options;
+    options.projectTimeBase = {1};
+    options.identity = {"project", "hierarchy", 1};
+    const auto parsed = wave::parseVcd(input, options);
+    expect(parsed.ok(), parsed.errorSummary());
+    const auto* payload = parsed.index->findSignal(
+        "top.\\child.with.dot.payload[7:0]");
+    expect(payload != nullptr, "nested hierarchy signal is missing");
+    expectEqual(
+        payload->scopePath,
+        std::vector<std::string>{"top", "\\child.with.dot"},
+        "VCD parser lost exact scope components");
+
+    const auto hierarchy = wave::buildTraceHierarchy(*parsed.index);
+    expectEqual(hierarchy.signalCount, std::size_t{3},
+                "hierarchy signal count changed");
+    expectEqual(hierarchy.scopes.size(), std::size_t{1},
+                "top-level scope was not grouped");
+    const auto& top = hierarchy.scopes.front();
+    expectEqual(top.name, std::string{"top"}, "top scope name changed");
+    expectEqual(top.leaves.size(), std::size_t{1},
+                "top-level signal was not retained");
+    expectEqual(top.scopes.size(), std::size_t{2},
+                "sibling scopes were not grouped independently");
+    expectEqual(top.scopes.front().name, std::string{"\\child.with.dot"},
+                "scope containing a dot was split heuristically");
+    expectEqual(top.scopes.front().leaves.front().id, payload->id,
+                "hierarchy leaf lost stable trace identity");
+    expectEqual(top.scopes.front().leaves.front().width, std::uint32_t{8},
+                "hierarchy leaf lost signal width");
+}
+
 void testCsvImportAndCancellation()
 {
     std::istringstream input(
@@ -6720,10 +6773,20 @@ void testFixedFixtureSimulationPipeline()
            "materialized result project did not preserve the VCD reference and lane mapping");
     QFile harness(completed.artifacts.harnessPath);
     expect(harness.open(QIODevice::ReadOnly)
-               && harness.readAll().contains(
-                   "top->clk_i = valueAt(plan.inputs[0], tick)")
+               && [&harness] {
+                      const auto text = harness.readAll();
+                      return text.contains(
+                                 "top->clk_i = valueAt(plan.inputs[0], tick)")
+                          && text.contains("top->trace(trace.get(), 99)");
+                  }()
+               && completed.buildProcess->arguments.contains(
+                   QStringLiteral("--trace-vcd"))
+               && completed.buildProcess->arguments.contains(
+                   QStringLiteral("--trace-structs"))
+               && completed.buildProcess->arguments.contains(
+                   QStringLiteral("--trace-underscore"))
                && completed.trace->findSignal("TOP.count_o[3:0]") != nullptr,
-           "generated harness or imported fixed trace lost semantic signal evidence");
+           "generated harness did not retain full hierarchy tracing or imported trace evidence");
 
     QFile firstRuntimePlan(completed.artifacts.runtimeStimulusPath);
     expect(firstRuntimePlan.open(QIODevice::ReadOnly),
@@ -18898,6 +18961,7 @@ int main(int argc, char* argv[])
         {"schema migration", testSchemaMigration},
         {"project directory move", testProjectDirectoryMove},
         {"VCD import and indexed lookup", testVcdImportAndIndex},
+        {"VCD internal signal hierarchy", testTraceHierarchy},
         {"CSV import and cancellation", testCsvImportAndCancellation},
         {"trace example and million-transition index", testTraceExampleAndLargeIndex},
         {"relation condition parsing and evaluation", testRelationConditions},

@@ -5,6 +5,23 @@
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
 
+## ZeroSlack Wave Simulation S12：内部信号层级浏览
+
+状态：完成
+
+- `wavetrace` 保留 VCD 原始 scope 组件并生成独立纯数据层级，包含稳定 trace signal ID、
+  完整名称和位宽；包含点号的 scope 不再被 UI 字符串拆分误判。
+- Simulation Result 的 Actual 区域新增可搜索、可复选的实例/信号树。scope 复选批量控制
+  子树，单信号复选立即更新 Actual 波形；选择叶节点会揭示对应波形行。
+- 初始可见集合来自场景 trace mapping，未映射内部信号保持可发现但不挤占结果视图；用户
+  自定义集合在同一会话重跑时按稳定 ID 保留。
+- Verilator harness 使用 99 层 trace 深度，并启用 VCD、struct 与下划线信号追踪；编译缓存
+  指纹继续包含 harness，因此不会错误复用旧追踪模型。
+- `wavewidgets` C ABI 与 simulation workspace contract 仍为 v1，新增
+  `internal-signal-hierarchy/v1` 能力声明。
+- 全量 offscreen CTest `90/90` 通过；真实界面截图确认层级树、位宽、搜索区和 Actual 波形
+  同时可见。本机未安装真实 Verilator，外部编译/运行仍由确定性 fixture 验证。
+
 ## ZeroSlack 共享控件嵌入切片 S11
 
 状态：完成

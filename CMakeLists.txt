@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(WaveWorkbench VERSION 0.2.0 LANGUAGES CXX)
+project(WaveWorkbench VERSION 0.3.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -70,6 +70,7 @@ wave_enable_warnings(wavevalidate)
 
 add_library(wavetrace STATIC
     src/waveimport/src/trace.cpp
+    src/waveimport/src/trace_hierarchy.cpp
 )
 target_include_directories(wavetrace
     PUBLIC src/waveimport/include
@@ -143,6 +144,8 @@ add_library(wavewidgets SHARED
     src/app/main_window.h
     src/app/trace_canvas.cpp
     src/app/trace_canvas.h
+    src/app/trace_signal_browser.cpp
+    src/app/trace_signal_browser.h
     src/app/wave_canvas.cpp
     src/app/wave_canvas.h
     src/wavewidgets/src/widgets.cpp

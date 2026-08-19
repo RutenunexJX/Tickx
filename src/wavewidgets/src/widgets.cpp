@@ -6,6 +6,7 @@
 #include <QByteArray>
 #include <QFileInfo>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 #include <QWidget>
 
@@ -69,6 +70,9 @@ int wavewidgets_create_simulation_workspace_v1(
             "wavewidgets.projectPath", QFileInfo(projectPath).absoluteFilePath());
         window->setProperty("wavewidgets.projectId", projectId);
         window->setProperty("wavewidgets.scenarioCount", scenarioCount);
+        window->setProperty(
+            "wavewidgets.capabilities",
+            QStringList{QStringLiteral("internal-signal-hierarchy/v1")});
         *workspace = window;
         writeError(QString(), errorUtf8, errorCapacity);
         return 0;

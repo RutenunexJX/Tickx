@@ -448,7 +448,7 @@ std::optional<QByteArray> makeHarness(
            "    context->traceEverOn(true);\n"
            "    auto top = std::make_unique<Vwave_fixture>(context.get());\n"
            "    auto trace = std::make_unique<VerilatedVcdC>();\n"
-           "    top->trace(trace.get(), 8);\n"
+           "    top->trace(trace.get(), 99);\n"
            "    trace->open(vcdPath.c_str());\n\n"
            "    for (std::uint64_t tick = 0; tick <= plan.duration; ++tick) {\n";
     inputIndex = 0;
@@ -1111,7 +1111,9 @@ struct VerilatorSimulationRunner::Impl {
             QStringLiteral("--cc"),
             QStringLiteral("--exe"),
             QStringLiteral("--build"),
-            QStringLiteral("--trace"),
+            QStringLiteral("--trace-vcd"),
+            QStringLiteral("--trace-structs"),
+            QStringLiteral("--trace-underscore"),
             QStringLiteral("--top-module"),
             qString(prepared->manifest.target.module),
             QStringLiteral("--prefix"),

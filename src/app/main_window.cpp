@@ -9,6 +9,7 @@
 #include "wave/trace.h"
 #include "wave/validation.h"
 #include "trace_canvas.h"
+#include "trace_signal_browser.h"
 #include "wave_canvas.h"
 
 #include <QAction>
@@ -1229,13 +1230,23 @@ MainWindow::MainWindow(
 
         canvas_->setProperty("simulationStimulusCanvas", true);
         compareTraceCanvas_->setProperty("simulationResultCanvas", true);
+        traceSignalBrowser_ = new TraceSignalBrowser(this);
+        simulationActualSplitter_ = new QSplitter(Qt::Horizontal, this);
+        simulationActualSplitter_->setObjectName(
+            QStringLiteral("SimulationActualSplitter"));
+        simulationActualSplitter_->setChildrenCollapsible(false);
+        simulationActualSplitter_->addWidget(traceSignalBrowser_);
+        simulationActualSplitter_->addWidget(compareTraceCanvas_);
+        simulationActualSplitter_->setStretchFactor(0, 0);
+        simulationActualSplitter_->setStretchFactor(1, 1);
+        simulationActualSplitter_->setSizes({260, 1'040});
         simulationResultSplitter_->addWidget(section(
             tr("Stimulus"),
             canvas_,
             QStringLiteral("SimulationStimulusPanel")));
         simulationResultSplitter_->addWidget(section(
             tr("Actual"),
-            compareTraceCanvas_,
+            simulationActualSplitter_,
             QStringLiteral("SimulationActualPanel")));
         simulationResultSplitter_->setStretchFactor(0, 1);
         simulationResultSplitter_->setStretchFactor(1, 1);
@@ -1348,6 +1359,29 @@ MainWindow::MainWindow(
                     .arg(QString::fromStdString(formatTick(tick, project_.timeBase)))
                     .arg(signalId, value));
         });
+    if (traceSignalBrowser_) {
+        connect(
+            traceSignalBrowser_,
+            &TraceSignalBrowser::visibleSignalIdsChanged,
+            this,
+            [this](const QStringList& ids) {
+                traceVisibleSignalIds_.clear();
+                for (const auto& id : ids) {
+                    traceVisibleSignalIds_.insert(id.toStdString());
+                }
+                traceVisibilityCustomized_ = true;
+                if (traceCanvas_) {
+                    traceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+                }
+                compareTraceCanvas_->setVisibleSignalIds(
+                    traceVisibleSignalIds_);
+            });
+        connect(
+            traceSignalBrowser_,
+            &TraceSignalBrowser::signalActivated,
+            compareTraceCanvas_,
+            &TraceCanvas::revealSignal);
+    }
 
     createActions();
     if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
@@ -2100,6 +2134,56 @@ void MainWindow::stopSimulation()
         5'000);
 }
 
+void MainWindow::initializeTraceVisibility(
+    const std::optional<std::set<std::string>>& preferred)
+{
+    traceVisibleSignalIds_.clear();
+    if (!traceIndex_) return;
+
+    std::set<std::string> available;
+    for (const auto& signal : traceIndex_->traceSignals) {
+        available.insert(signal.id);
+    }
+    if (preferred) {
+        for (const auto& id : *preferred) {
+            if (available.contains(id)) traceVisibleSignalIds_.insert(id);
+        }
+        return;
+    }
+
+    if (simulationResultMode_) {
+        if (const auto* reference = activeTraceReference()) {
+            for (const auto& [laneId, signalId] : reference->signalMapping) {
+                static_cast<void>(laneId);
+                if (available.contains(signalId)) {
+                    traceVisibleSignalIds_.insert(signalId);
+                }
+            }
+        }
+    }
+    if (traceVisibleSignalIds_.empty()) {
+        traceVisibleSignalIds_ = std::move(available);
+    }
+}
+
+void MainWindow::refreshTraceViews()
+{
+    const auto* trace = traceIndex_ ? &*traceIndex_ : nullptr;
+    if (traceCanvas_) {
+        traceCanvas_->setTrace(
+            &project_, activeScenario(), trace, activeTraceReference());
+        traceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    }
+    if (compareTraceCanvas_) {
+        compareTraceCanvas_->setTrace(
+            &project_, activeScenario(), trace, activeTraceReference());
+        compareTraceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    }
+    if (traceSignalBrowser_) {
+        traceSignalBrowser_->setTrace(trace, traceVisibleSignalIds_);
+    }
+}
+
 bool MainWindow::applySimulationResult(
     SimulationRunReport& report,
     QString& error)
@@ -2128,20 +2212,13 @@ bool MainWindow::applySimulationResult(
         attachSimulationSession(project_, *simulationRequest_);
     }
 
+    const auto preferredSignals = traceVisibilityCustomized_
+        ? std::optional{traceVisibleSignalIds_}
+        : std::nullopt;
     traceIndex_ = std::move(*report.trace);
     activeTraceId_ = project_.importedTraces.front().id;
-    traceVisibleSignalIds_.clear();
-    for (const auto& signal : traceIndex_->traceSignals) {
-        traceVisibleSignalIds_.insert(signal.id);
-    }
-    if (traceCanvas_) {
-        traceCanvas_->setTrace(
-            &project_, activeScenario(), &*traceIndex_, activeTraceReference());
-        traceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
-    }
-    compareTraceCanvas_->setTrace(
-        &project_, activeScenario(), &*traceIndex_, activeTraceReference());
-    compareTraceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    initializeTraceVisibility(preferredSignals);
+    refreshTraceViews();
     compareTraceCanvas_->show();
     compareTraceCanvas_->fitTrace();
 
@@ -3468,6 +3545,7 @@ void MainWindow::newProject()
     traceIndex_.reset();
     activeTraceId_.clear();
     traceVisibleSignalIds_.clear();
+    traceVisibilityCustomized_ = false;
     canvas_->clearDocumentContexts();
     project_ = std::move(replacement);
     activeScenarioIndex_ = 0;
@@ -7006,23 +7084,13 @@ void MainWindow::finishTraceImport()
         return;
     }
 
+    const auto preferredSignals = traceVisibilityCustomized_
+        ? std::optional{traceVisibleSignalIds_}
+        : std::nullopt;
     traceIndex_ = std::move(*parsed->index);
     activeTraceId_ = pendingTraceId_;
-    traceVisibleSignalIds_.clear();
-    for (const auto& signal : traceIndex_->traceSignals) {
-        traceVisibleSignalIds_.insert(signal.id);
-    }
-    if (traceCanvas_) {
-        traceCanvas_->setTrace(
-            &project_, activeScenario(), &*traceIndex_, activeTraceReference());
-        traceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
-    }
-    compareTraceCanvas_->setTrace(
-        &project_,
-        activeScenario(),
-        &*traceIndex_,
-        activeTraceReference());
-    compareTraceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
+    initializeTraceVisibility(preferredSignals);
+    refreshTraceViews();
     if (pendingRevealTick_) {
         if (traceCanvas_) traceCanvas_->revealTick(*pendingRevealTick_);
         compareTraceCanvas_->revealTick(*pendingRevealTick_);
@@ -7114,12 +7182,9 @@ void MainWindow::loadFirstTraceReference()
     };
     traceIndex_.reset();
     activeTraceId_.clear();
-    traceVisibleSignalIds_.clear();
+    if (!traceVisibilityCustomized_) traceVisibleSignalIds_.clear();
     if (!simulationResultMode_) populateTraceMappingTable();
-    if (traceCanvas_) traceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
-    if (compareTraceCanvas_) {
-        compareTraceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
-    }
+    refreshTraceViews();
     if (!simulationResultMode_) invalidateCompareResult();
     if (project_.importedTraces.empty()) {
         reportFailure(tr("No imported trace"));
@@ -8390,22 +8455,7 @@ bool MainWindow::switchActiveScenario(
     const auto restoredLocation = targetHasSessionContext
         ? std::optional<QString>{}
         : restoreActiveScenarioLocation();
-    if (traceCanvas_) {
-        traceCanvas_->setTrace(
-            &project_,
-            activeScenario(),
-            traceIndex_ ? &*traceIndex_ : nullptr,
-            activeTraceReference());
-        traceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
-    }
-    if (compareTraceCanvas_) {
-        compareTraceCanvas_->setTrace(
-            &project_,
-            activeScenario(),
-            traceIndex_ ? &*traceIndex_ : nullptr,
-            activeTraceReference());
-        compareTraceCanvas_->setVisibleSignalIds(traceVisibleSignalIds_);
-    }
+    refreshTraceViews();
     invalidateCompareResult();
     rememberActiveScenario();
     updateCommandActions();
@@ -9662,11 +9712,8 @@ bool MainWindow::loadFromPath(const QString& path, const bool preferRecovery)
         }
         statusBar()->showMessage(message, 5'000);
     }
-    if (traceCanvas_) traceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
-    if (compareTraceCanvas_) {
-        compareTraceCanvas_->setTrace(&project_, activeScenario(), nullptr, nullptr);
-        compareTraceCanvas_->hide();
-    }
+    refreshTraceViews();
+    if (compareTraceCanvas_) compareTraceCanvas_->hide();
     invalidateCompareResult();
     if (dirty_) scheduleAutosave();
     return true;

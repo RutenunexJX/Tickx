@@ -15,6 +15,12 @@ JSON。VCD/CSV 导入、Expected/Actual 比较、报告生成及跨应用桥接�
 领域模块中，不再占用桌面编辑界面。验收证据见
 [PLAN.md](PLAN.md)。
 
+ZeroSlack 的嵌入式 Simulation Result 工作区在 Actual 区域提供内部信号层级浏览器。
+VCD scope 按原始组件构建实例树，支持搜索、scope 级复选和单信号复选；复选结果直接控制
+Actual 波形可见集合。初次打开优先显示场景已映射的端口与 observation，其他内部信号由用户
+按需加入。Verilator harness 追踪 99 层层级，并启用 struct 与下划线信号追踪；这不改变
+Stimulus Scenario、Module Manifest 或 `wavewidgets` v1 C ABI。
+
 ZeroSlack 的正式 Wave Simulation 工作流通过版本化 `wavewidgets` C ABI 将完整工作区
 嵌入编辑区 Wave Tab，无需用户手工传递文件。独立应用链接同一共享控件实现并继续作为
 可单独运行的工具。当前兼容 Module Manifest v1/v2；v2 可携带选中 `always` 的观察范围

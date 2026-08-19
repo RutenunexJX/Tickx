@@ -4,10 +4,11 @@
 
 ## 目标
 
-ZeroSlack Wave Simulation S11 已完成共享控件嵌入。WaveWorkbench 以版本化
-`wavewidgets` C ABI 提供完整 simulation workspace，独立应用与嵌入形态复用同一画布、
-时间轴和工程模型。本次全量 offscreen CTest 为 90/90；真实共享库已通过跨仓动态加载
-验证。
+ZeroSlack Wave Simulation S12 的第一个独立增强项“内部信号层级浏览”已完成。
+WaveWorkbench 从 VCD 原始 scope 组件构建稳定层级，嵌入式 Actual 区域支持搜索、scope
+复选和单信号复选，并按场景 trace mapping 初始化可见集合。`wavewidgets` C ABI 继续为 v1，
+通过 `internal-signal-hierarchy/v1` 声明新增能力。本次全量 offscreen CTest 为 90/90；
+本机未安装真实 Verilator，外部编译/运行仍由确定性 fixture 验证。
 
 交付一个可独立运行的 Qt 6/C++20 波形桌面应用，使用户能够人工定义与直接编辑 FPGA
 预期数字波形；同一场景模型继续支撑 SystemVerilog/SVA/cocotb、文档图、trace 导入及

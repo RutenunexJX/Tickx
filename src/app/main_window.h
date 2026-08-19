@@ -47,6 +47,7 @@ namespace wave {
 
 class WaveCanvas;
 class TraceCanvas;
+class TraceSignalBrowser;
 
 [[nodiscard]] WAVEWIDGETS_API QString preferredProjectLoadPath(
     const QString& requestedPath);
@@ -236,6 +237,9 @@ private:
         std::string traceId,
         Tick offset,
         bool addReference);
+    void initializeTraceVisibility(
+        const std::optional<std::set<std::string>>& preferred = std::nullopt);
+    void refreshTraceViews();
     void loadFirstTraceReference();
     void configureSimulationSession();
     void loadStoredSimulationScenarios();
@@ -278,7 +282,9 @@ private:
     QTableWidget* traceMappingTable_{nullptr};
     TraceCanvas* traceCanvas_{nullptr};
     TraceCanvas* compareTraceCanvas_{nullptr};
+    TraceSignalBrowser* traceSignalBrowser_{nullptr};
     QSplitter* simulationResultSplitter_{nullptr};
+    QSplitter* simulationActualSplitter_{nullptr};
     QTabWidget* bottomTabs_{nullptr};
     QWidget* tracePanel_{nullptr};
     QWidget* comparePanel_{nullptr};
@@ -368,6 +374,7 @@ private:
     std::optional<TraceIndex> traceIndex_;
     std::optional<CompareResult> compareResult_;
     std::set<std::string> traceVisibleSignalIds_;
+    bool traceVisibilityCustomized_{false};
     std::string activeTraceId_;
     QString pendingTracePath_;
     std::string pendingTraceId_;

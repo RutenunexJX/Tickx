@@ -633,6 +633,7 @@ TraceParseResult parseVcd(std::istream& input, const TraceParseOptions& options)
                     signal.reference += tokens[5];
                 }
                 signal.scope = joinScope(scopes);
+                signal.scopePath = scopes;
                 signal.fullName = signal.scope.empty()
                     ? signal.reference
                     : signal.scope + "." + signal.reference;

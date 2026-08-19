@@ -28,6 +28,7 @@ public:
     void setDifferenceRanges(std::vector<std::pair<Tick, Tick>> ranges);
     void refreshTrace();
     void revealTick(Tick tick);
+    void revealSignal(const QString& signalId);
 
 public slots:
     void fitTrace();

@@ -141,6 +141,27 @@ void TraceCanvas::revealTick(const Tick tick)
     setViewStart(tick - span / 2);
 }
 
+void TraceCanvas::revealSignal(const QString& signalId)
+{
+    if (!trace_ || signalId.isEmpty()) return;
+    const auto row = std::find_if(
+        visibleSignalIndices_.begin(),
+        visibleSignalIndices_.end(),
+        [this, &signalId](const std::size_t index) {
+            return QString::fromStdString(trace_->traceSignals[index].id)
+                == signalId;
+        });
+    if (row == visibleSignalIndices_.end()) return;
+    const auto rowIndex = static_cast<int>(
+        std::distance(visibleSignalIndices_.begin(), row));
+    const auto visibleHeight = std::max(0, viewport()->height() - kRulerHeight);
+    const auto target = std::max(
+        0,
+        rowIndex * kRowHeight - std::max(0, visibleHeight - kRowHeight) / 2);
+    verticalScrollBar()->setValue(target);
+    viewport()->update();
+}
+
 void TraceCanvas::fitTrace()
 {
     if (!trace_) return;

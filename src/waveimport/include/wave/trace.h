@@ -63,6 +63,7 @@ struct TraceSignal {
     std::string id;
     std::string identifierCode;
     std::string scope;
+    std::vector<std::string> scopePath;
     std::string reference;
     std::string fullName;
     std::uint32_t width{1};
