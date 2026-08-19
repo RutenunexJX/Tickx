@@ -7,6 +7,7 @@
 #include "wave/model.h"
 #include "wave/project_io.h"
 #include "wave/simulation_build_cache.h"
+#include "wave/simulation_check.h"
 #include "wave/simulation_pipeline.h"
 #include "wave/simulation_runner.h"
 #include "wave/simulation_scenario_store.h"
@@ -5331,6 +5332,117 @@ void testExpectedActualCompareRules()
     expect(equivalent.matches(), "enum equivalence did not match the configured actual value");
 }
 
+void testLightweightSimulationChecks()
+{
+    const auto project = wave::makeDemonstrationProject();
+    const auto& scenario = project.scenarios.front();
+    const auto trace = loadHandshakeTrace();
+    const auto reference = handshakeReference();
+
+    std::vector<wave::SimulationCheckDefinition> checks;
+    wave::SimulationCheckDefinition valuePass;
+    valuePass.id = "value-pass";
+    valuePass.name = "Request high";
+    valuePass.kind = wave::SimulationCheckKind::ValueAtTick;
+    valuePass.laneId = "lane-request";
+    valuePass.tick = 90'000;
+    valuePass.expectedValue = "1";
+    checks.push_back(valuePass);
+
+    auto valueFail = valuePass;
+    valueFail.id = "value-fail";
+    valueFail.name = "Request low";
+    valueFail.expectedValue = "0";
+    checks.push_back(valueFail);
+
+    wave::SimulationCheckDefinition stablePass;
+    stablePass.id = "stable-pass";
+    stablePass.name = "Payload stable";
+    stablePass.kind = wave::SimulationCheckKind::StableRange;
+    stablePass.laneId = "lane-data";
+    stablePass.start = 80'000;
+    stablePass.end = 150'000;
+    checks.push_back(stablePass);
+
+    auto stableFail = stablePass;
+    stableFail.id = "stable-fail";
+    stableFail.name = "Payload changes";
+    stableFail.end = 160'000;
+    checks.push_back(stableFail);
+
+    wave::SimulationCheckDefinition responsePass;
+    responsePass.id = "response-pass";
+    responsePass.name = "Request acknowledged";
+    responsePass.kind = wave::SimulationCheckKind::EdgeResponse;
+    responsePass.sourceLaneId = "lane-request";
+    responsePass.sourceEdge = wave::SimulationCheckEdge::Rising;
+    responsePass.targetLaneId = "lane-ack";
+    responsePass.targetEdge = wave::SimulationCheckEdge::Rising;
+    responsePass.start = 70'000;
+    responsePass.end = 100'000;
+    responsePass.minimumDelay = 30'000;
+    responsePass.maximumDelay = 40'000;
+    checks.push_back(responsePass);
+
+    auto responseFail = responsePass;
+    responseFail.id = "response-fail";
+    responseFail.name = "Response too slow";
+    responseFail.maximumDelay = 34'000;
+    checks.push_back(responseFail);
+
+    auto unexercised = responsePass;
+    unexercised.id = "response-unexercised";
+    unexercised.name = "No request edge";
+    unexercised.start = 100'000;
+    unexercised.end = 120'000;
+    checks.push_back(unexercised);
+
+    auto disabled = valuePass;
+    disabled.id = "disabled";
+    disabled.name = "Disabled check";
+    disabled.enabled = false;
+    checks.push_back(disabled);
+
+    const auto report = wave::evaluateSimulationChecks(
+        project, scenario, trace, reference, checks);
+    expect(report.outcomes.size() == checks.size()
+               && report.passedCount == 3
+               && report.failedCount == 3
+               && report.unavailableCount == 1
+               && report.disabledCount == 1,
+           "lightweight simulation-check status counts are incorrect");
+    expect(report.outcomes[0].status == wave::SimulationCheckStatus::Passed
+               && report.outcomes[1].status == wave::SimulationCheckStatus::Failed
+               && report.outcomes[1].focusTick == 90'000,
+           "value-at-time checks did not use exact normalized trace values");
+    expect(report.outcomes[2].status == wave::SimulationCheckStatus::Passed
+               && report.outcomes[3].status == wave::SimulationCheckStatus::Failed
+               && report.outcomes[3].focusTick == 155'000,
+           "stable-range checks did not localize the first value change");
+    expect(report.outcomes[4].status == wave::SimulationCheckStatus::Passed
+               && report.outcomes[4].sourceEventCount == 1
+               && report.outcomes[4].matchedEventCount == 1
+               && report.outcomes[5].status == wave::SimulationCheckStatus::Failed
+               && report.outcomes[5].focusTick == 80'000,
+           "edge-response checks did not enforce the inclusive delay window");
+    expect(report.outcomes[6].status == wave::SimulationCheckStatus::Unavailable
+               && report.outcomes[7].status == wave::SimulationCheckStatus::Disabled,
+           "unexercised and disabled checks were not distinguished");
+
+    auto missingMapping = reference;
+    missingMapping.signalMapping.erase("lane-data");
+    const auto unavailable = wave::evaluateSimulationChecks(
+        project,
+        scenario,
+        trace,
+        missingMapping,
+        std::vector<wave::SimulationCheckDefinition>{stablePass});
+    expect(unavailable.unavailableCount == 1
+               && unavailable.outcomes.front().message.find("mapping")
+                    != std::string::npos,
+           "a missing actual mapping was not reported as unavailable");
+}
+
 void testCompareDiagnosticsRelationsAndReports()
 {
     auto project = wave::makeDemonstrationProject();
@@ -6250,6 +6362,39 @@ void testZeroSlackStimulusScenarioContract()
     acknowledgement->segments.clear();
     wave::setSegmentRange(
         *acknowledgement, 35'000, 80'000, "1", "ack-expected-high");
+    std::vector<wave::SimulationCheckDefinition> checks;
+    wave::SimulationCheckDefinition valueCheck;
+    valueCheck.id = "check-ack-value";
+    valueCheck.name = "Acknowledge is high";
+    valueCheck.kind = wave::SimulationCheckKind::ValueAtTick;
+    valueCheck.laneId = acknowledgement->id;
+    valueCheck.tick = 40'000;
+    valueCheck.expectedValue = "1";
+    checks.push_back(valueCheck);
+    wave::SimulationCheckDefinition stableCheck;
+    stableCheck.id = "check-data-stable";
+    stableCheck.name = "Input data remains stable";
+    stableCheck.kind = wave::SimulationCheckKind::StableRange;
+    stableCheck.laneId = data->id;
+    stableCheck.start = 0;
+    stableCheck.end = 60'000;
+    checks.push_back(stableCheck);
+    wave::SimulationCheckDefinition edgeCheck;
+    edgeCheck.id = "check-request-ack";
+    edgeCheck.name = "Request receives acknowledgement";
+    edgeCheck.kind = wave::SimulationCheckKind::EdgeResponse;
+    edgeCheck.sourceLaneId = request->id;
+    edgeCheck.sourceEdge = wave::SimulationCheckEdge::Rising;
+    edgeCheck.targetLaneId = acknowledgement->id;
+    edgeCheck.targetEdge = wave::SimulationCheckEdge::Rising;
+    edgeCheck.start = 0;
+    edgeCheck.end = 80'000;
+    edgeCheck.minimumDelay = 0;
+    edgeCheck.maximumDelay = 20'000;
+    checks.push_back(edgeCheck);
+    QString checkError;
+    expect(wave::storeSimulationChecks(scenario, checks, &checkError),
+           checkError.toStdString());
 
     wave::Lane group;
     group.id = "group-inputs";
@@ -6284,6 +6429,7 @@ void testZeroSlackStimulusScenarioContract()
             && parsedScenario.scenario->ports.size() == 8
             && parsedScenario.scenario->duration == scenario.duration
             && parsedScenario.scenario->markers.size() == 1
+            && parsedScenario.scenario->checks == checks
             && parsedScenario.scenario->view.selectedPortName == "data_i"
             && parsedScenario.scenario->view.cursorTick == 40'000
             && parsedScenario.scenario->view.visibleSpanTicks == 80'000,
@@ -6385,6 +6531,9 @@ void testZeroSlackStimulusScenarioContract()
                && restored.view.selectedPortName == "data_i"
                && restored.view.cursorTick == 40'000,
            "restored project lost markers or portable view state");
+    const auto restoredChecks = wave::loadSimulationChecks(restoredScenario);
+    expect(restoredChecks.ok() && restoredChecks.checks == checks,
+           "restored project lost lightweight simulation checks");
 
     auto legacyScenario = *exported.scenario;
     legacyScenario.schemaVersion = 1;
@@ -6405,7 +6554,9 @@ void testZeroSlackStimulusScenarioContract()
     const auto reopened = wave::loadProjectFile(reopenedPath);
     expect(reopened.ok()
                && reopened.project->scenarios.front().duration == scenario.duration
-               && reopened.project->clockDomains.front().period == 20'000,
+               && reopened.project->clockDomains.front().period == 20'000
+               && wave::loadSimulationChecks(
+                      reopened.project->scenarios.front()).checks == checks,
            "restored project did not survive normal project save/reopen");
 
     auto changedRoot = QJsonDocument::fromJson(manifestDocument).object();
@@ -6468,6 +6619,19 @@ void testZeroSlackStimulusScenarioContract()
            "migration lost a unique rename or overwrote width-safe current defaults");
     expect(migrated.view.selectedPortName == "data_i",
            "manifest migration lost the selected portable view lane");
+    const auto migratedChecks = wave::loadSimulationChecks(
+        migrated.project->scenarios.front());
+    expect(migratedChecks.ok() && migratedChecks.checks.size() == checks.size(),
+           "manifest migration lost compatible lightweight checks");
+    const auto* migratedNewLane = migratedByName("new_i");
+    const auto migratedEdge = std::find_if(
+        migratedChecks.checks.begin(), migratedChecks.checks.end(),
+        [](const wave::SimulationCheckDefinition& check) {
+            return check.kind == wave::SimulationCheckKind::EdgeResponse;
+        });
+    expect(migratedNewLane && migratedEdge != migratedChecks.checks.end()
+               && migratedEdge->sourceLaneId == migratedNewLane->id,
+           "manifest migration did not remap a check from a renamed lane");
 
     auto mismatchedManifest = *parsedManifest.manifest;
     mismatchedManifest.target.module = "other_dut";
@@ -6524,10 +6688,23 @@ void testZeroSlackStimulusScenarioContract()
                 QJsonDocument(unknownRoot).toJson()).ok(),
            "unknown or absolute-path stimulus property was accepted");
     auto futureRoot = QJsonDocument::fromJson(document).object();
-    futureRoot.insert(QStringLiteral("schemaVersion"), 5);
+    futureRoot.insert(QStringLiteral("schemaVersion"), 6);
     expect(!wave::parseZeroSlackStimulusScenario(
                 QJsonDocument(futureRoot).toJson()).ok(),
            "unsupported stimulus schema version was accepted");
+
+    auto invalidCheckRoot = QJsonDocument::fromJson(document).object();
+    auto invalidCheckScenario =
+        invalidCheckRoot.value(QStringLiteral("scenario")).toObject();
+    auto invalidChecks = invalidCheckScenario.value(QStringLiteral("checks")).toArray();
+    auto invalidCheck = invalidChecks.at(0).toObject();
+    invalidCheck.insert(QStringLiteral("laneId"), QStringLiteral("missing-lane"));
+    invalidChecks[0] = invalidCheck;
+    invalidCheckScenario.insert(QStringLiteral("checks"), invalidChecks);
+    invalidCheckRoot.insert(QStringLiteral("scenario"), invalidCheckScenario);
+    expect(!wave::parseZeroSlackStimulusScenario(
+                QJsonDocument(invalidCheckRoot).toJson()).ok(),
+           "a lightweight check referencing an unknown lane was accepted");
 
     auto collisionRoot = QJsonDocument::fromJson(document).object();
     auto collisionScenario = collisionRoot.value(QStringLiteral("scenario")).toObject();
@@ -19464,6 +19641,7 @@ int main(int argc, char* argv[])
         {"trace example and million-transition index", testTraceExampleAndLargeIndex},
         {"relation condition parsing and evaluation", testRelationConditions},
         {"Expected/Actual compare rules", testExpectedActualCompareRules},
+        {"lightweight simulation checks", testLightweightSimulationChecks},
         {"compare diagnostics, relations, and reports", testCompareDiagnosticsRelationsAndReports},
         {"cross-application file and URI contracts", testCrossApplicationContracts},
         {"ZeroSlack Module Manifest import", testZeroSlackModuleManifestImport},

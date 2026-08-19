@@ -120,6 +120,24 @@ int main(int argc, char* argv[])
 
     auto loaded = wave::loadProjectFile(resultProjectPath);
     if (!loaded.ok()) return 9;
+    auto& resultScenario = loaded.project->scenarios.front();
+    const auto countLane = std::find_if(
+        resultScenario.lanes.begin(),
+        resultScenario.lanes.end(),
+        [](const wave::Lane& lane) { return lane.name == "count_o"; });
+    if (countLane == resultScenario.lanes.end()) return 10;
+    wave::SimulationCheckDefinition valueCheck;
+    valueCheck.id = "ui-value-at-time";
+    valueCheck.name = "Counter starts at maximum";
+    valueCheck.kind = wave::SimulationCheckKind::ValueAtTick;
+    valueCheck.laneId = countLane->id;
+    valueCheck.tick = 0;
+    valueCheck.expectedValue = "0xf";
+    QString checkError;
+    if (!wave::storeSimulationChecks(
+            resultScenario, {valueCheck}, &checkError)) {
+        return 11;
+    }
     wave::MainWindow window(
         std::move(*loaded.project), resultProjectPath, nullptr, std::nullopt, true);
     window.resize(1'420, 920);
@@ -137,7 +155,7 @@ int main(int argc, char* argv[])
     window.show();
     watchdog.start(5'000);
     traceLoop.exec();
-    if (!traceLoaded) return 10;
+    if (!traceLoaded) return 12;
 
     auto* compare = window.findChild<QAction*>(
         QStringLiteral("RunSimulationCompareAction"));
@@ -145,14 +163,30 @@ int main(int argc, char* argv[])
         QStringLiteral("CompareResultTable"));
     auto* expectedCanvas = window.findChild<wave::WaveCanvas*>(
         QStringLiteral("StimulusCanvas"));
-    if (!compare || !compare->isEnabled() || !table || !expectedCanvas) return 11;
+    auto* runChecks = window.findChild<QAction*>(
+        QStringLiteral("RunSimulationChecksAction"));
+    auto* checkTable = window.findChild<QTableWidget*>(
+        QStringLiteral("SimulationCheckResultTable"));
+    if (!compare || !compare->isEnabled() || !table || !expectedCanvas
+        || !runChecks || !runChecks->isEnabled() || !checkTable) {
+        return 13;
+    }
     compare->trigger();
     application.processEvents();
     if (window.property("wavewidgets.comparisonStatus").toString()
             != QStringLiteral("mismatch")
         || window.property("wavewidgets.compareDifferenceCount").toULongLong() == 0
         || table->rowCount() == 0) {
-        return 12;
+        return 14;
+    }
+    runChecks->trigger();
+    application.processEvents();
+    if (window.property("wavewidgets.checkStatus").toString()
+            != QStringLiteral("fail")
+        || window.property("wavewidgets.checkFailureCount").toULongLong() != 1
+        || checkTable->rowCount() != 1
+        || checkTable->item(0, 0)->text() != QStringLiteral("failed")) {
+        return 15;
     }
 
     QImage image(window.size(), QImage::Format_ARGB32_Premultiplied);
@@ -162,7 +196,7 @@ int main(int argc, char* argv[])
     painter.end();
     const auto outputPath = application.arguments().at(1);
     QDir().mkpath(QFileInfo(outputPath).absolutePath());
-    if (!image.save(outputPath)) return 13;
+    if (!image.save(outputPath)) return 16;
 
     const auto background = image.pixelColor(0, 0);
     qsizetype differingPixels = 0;
@@ -171,5 +205,5 @@ int main(int argc, char* argv[])
             if (image.pixelColor(x, y) != background) ++differingPixels;
         }
     }
-    return differingPixels > 4'000 ? 0 : 14;
+    return differingPixels > 4'000 ? 0 : 17;
 }

@@ -1,4 +1,5 @@
 #include "wave/stimulus_scenario.h"
+#include "wave/validation.h"
 
 #include <QCryptographicHash>
 #include <QJsonArray>
@@ -18,6 +19,9 @@
 
 namespace wave {
 namespace {
+
+constexpr std::string_view SimulationChecksExtension =
+    "waveSimulation.lightweightChecks";
 
 QString qString(const std::string& value)
 {
@@ -419,6 +423,309 @@ std::optional<StimulusResetSynchronization> resetSynchronizationFromString(
     return std::nullopt;
 }
 
+std::optional<SimulationCheckKind> simulationCheckKindFromString(
+    const std::string_view value) noexcept
+{
+    if (value == "value-at-tick") return SimulationCheckKind::ValueAtTick;
+    if (value == "stable-range") return SimulationCheckKind::StableRange;
+    if (value == "edge-response") return SimulationCheckKind::EdgeResponse;
+    return std::nullopt;
+}
+
+std::optional<SimulationCheckEdge> simulationCheckEdgeFromString(
+    const std::string_view value) noexcept
+{
+    if (value == "rising") return SimulationCheckEdge::Rising;
+    if (value == "falling") return SimulationCheckEdge::Falling;
+    if (value == "any-change") return SimulationCheckEdge::AnyChange;
+    return std::nullopt;
+}
+
+QJsonObject simulationCheckToJson(const SimulationCheckDefinition& check)
+{
+    QJsonObject object{
+        {QStringLiteral("id"), qString(check.id)},
+        {QStringLiteral("name"), qString(check.name)},
+        {QStringLiteral("enabled"), check.enabled},
+        {QStringLiteral("kind"), latinString(toString(check.kind))},
+    };
+    switch (check.kind) {
+    case SimulationCheckKind::ValueAtTick:
+        object.insert(QStringLiteral("laneId"), qString(check.laneId));
+        object.insert(QStringLiteral("tick"), QString::number(check.tick));
+        object.insert(
+            QStringLiteral("expectedValue"), qString(check.expectedValue));
+        break;
+    case SimulationCheckKind::StableRange:
+        object.insert(QStringLiteral("laneId"), qString(check.laneId));
+        object.insert(QStringLiteral("startTick"), QString::number(check.start));
+        object.insert(QStringLiteral("endTick"), QString::number(check.end));
+        break;
+    case SimulationCheckKind::EdgeResponse:
+        object.insert(
+            QStringLiteral("sourceLaneId"), qString(check.sourceLaneId));
+        object.insert(
+            QStringLiteral("sourceEdge"), latinString(toString(check.sourceEdge)));
+        object.insert(
+            QStringLiteral("targetLaneId"), qString(check.targetLaneId));
+        object.insert(
+            QStringLiteral("targetEdge"), latinString(toString(check.targetEdge)));
+        object.insert(QStringLiteral("startTick"), QString::number(check.start));
+        object.insert(QStringLiteral("endTick"), QString::number(check.end));
+        object.insert(
+            QStringLiteral("minimumDelayTicks"),
+            QString::number(check.minimumDelay));
+        object.insert(
+            QStringLiteral("maximumDelayTicks"),
+            QString::number(check.maximumDelay));
+        break;
+    }
+    return object;
+}
+
+bool parseSimulationCheck(
+    const QJsonObject& object,
+    const QString& context,
+    SimulationCheckDefinition& check,
+    QString& error)
+{
+    std::string kindText;
+    if (!readString(object, QStringLiteral("kind"), context, kindText, error)) {
+        return false;
+    }
+    const auto kind = simulationCheckKindFromString(kindText);
+    if (!kind) {
+        error = context + QStringLiteral(".kind is unsupported");
+        return false;
+    }
+    check.kind = *kind;
+    const auto common = [&]() {
+        return readString(object, QStringLiteral("id"), context, check.id, error)
+            && readString(object, QStringLiteral("name"), context, check.name, error)
+            && readBool(
+                object, QStringLiteral("enabled"), context, check.enabled, error);
+    };
+    switch (check.kind) {
+    case SimulationCheckKind::ValueAtTick:
+        return exactKeys(
+                   object,
+                   {QStringLiteral("id"), QStringLiteral("name"),
+                    QStringLiteral("enabled"), QStringLiteral("kind"),
+                    QStringLiteral("laneId"), QStringLiteral("tick"),
+                    QStringLiteral("expectedValue")},
+                   context,
+                   error)
+            && common()
+            && readString(
+                object, QStringLiteral("laneId"), context, check.laneId, error)
+            && readSignedDecimalString(
+                object, QStringLiteral("tick"), context, check.tick, error, false)
+            && readString(
+                object, QStringLiteral("expectedValue"), context,
+                check.expectedValue, error);
+    case SimulationCheckKind::StableRange:
+        return exactKeys(
+                   object,
+                   {QStringLiteral("id"), QStringLiteral("name"),
+                    QStringLiteral("enabled"), QStringLiteral("kind"),
+                    QStringLiteral("laneId"), QStringLiteral("startTick"),
+                    QStringLiteral("endTick")},
+                   context,
+                   error)
+            && common()
+            && readString(
+                object, QStringLiteral("laneId"), context, check.laneId, error)
+            && readSignedDecimalString(
+                object, QStringLiteral("startTick"), context,
+                check.start, error, false)
+            && readSignedDecimalString(
+                object, QStringLiteral("endTick"), context,
+                check.end, error, false);
+    case SimulationCheckKind::EdgeResponse: {
+        std::string sourceEdgeText;
+        std::string targetEdgeText;
+        if (!exactKeys(
+                object,
+                {QStringLiteral("id"), QStringLiteral("name"),
+                 QStringLiteral("enabled"), QStringLiteral("kind"),
+                 QStringLiteral("sourceLaneId"), QStringLiteral("sourceEdge"),
+                 QStringLiteral("targetLaneId"), QStringLiteral("targetEdge"),
+                 QStringLiteral("startTick"), QStringLiteral("endTick"),
+                 QStringLiteral("minimumDelayTicks"),
+                 QStringLiteral("maximumDelayTicks")},
+                context,
+                error)
+            || !common()
+            || !readString(
+                object, QStringLiteral("sourceLaneId"), context,
+                check.sourceLaneId, error)
+            || !readString(
+                object, QStringLiteral("sourceEdge"), context,
+                sourceEdgeText, error)
+            || !readString(
+                object, QStringLiteral("targetLaneId"), context,
+                check.targetLaneId, error)
+            || !readString(
+                object, QStringLiteral("targetEdge"), context,
+                targetEdgeText, error)
+            || !readSignedDecimalString(
+                object, QStringLiteral("startTick"), context,
+                check.start, error, false)
+            || !readSignedDecimalString(
+                object, QStringLiteral("endTick"), context,
+                check.end, error, false)
+            || !readSignedDecimalString(
+                object, QStringLiteral("minimumDelayTicks"), context,
+                check.minimumDelay, error, false)
+            || !readSignedDecimalString(
+                object, QStringLiteral("maximumDelayTicks"), context,
+                check.maximumDelay, error, false)) {
+            return false;
+        }
+        const auto sourceEdge = simulationCheckEdgeFromString(sourceEdgeText);
+        const auto targetEdge = simulationCheckEdgeFromString(targetEdgeText);
+        if (!sourceEdge || !targetEdge) {
+            error = context + QStringLiteral(" contains an unsupported edge kind");
+            return false;
+        }
+        check.sourceEdge = *sourceEdge;
+        check.targetEdge = *targetEdge;
+        return true;
+    }
+    }
+    return false;
+}
+
+bool parseSimulationCheckArray(
+    const QJsonValue& value,
+    const QString& context,
+    std::vector<SimulationCheckDefinition>& checks,
+    QString& error)
+{
+    if (!value.isArray()) {
+        error = context + QStringLiteral(" must be an array");
+        return false;
+    }
+    const auto array = value.toArray();
+    checks.reserve(checks.size() + static_cast<std::size_t>(array.size()));
+    for (qsizetype index = 0; index < array.size(); ++index) {
+        if (!array.at(index).isObject()) {
+            error = QStringLiteral("%1[%2] must be an object")
+                        .arg(context).arg(index);
+            return false;
+        }
+        SimulationCheckDefinition check;
+        if (!parseSimulationCheck(
+                array.at(index).toObject(),
+                QStringLiteral("%1[%2]").arg(context).arg(index),
+                check,
+                error)) {
+            return false;
+        }
+        checks.push_back(std::move(check));
+    }
+    return true;
+}
+
+QJsonArray simulationChecksToJson(
+    const std::vector<SimulationCheckDefinition>& checks)
+{
+    QJsonArray array;
+    for (const auto& check : checks) array.append(simulationCheckToJson(check));
+    return array;
+}
+
+std::map<std::string, Lane> checkLanes(
+    const std::vector<StimulusScenarioPort>& ports)
+{
+    std::map<std::string, Lane> result;
+    for (const auto& port : ports) {
+        Lane lane;
+        lane.id = port.laneId;
+        lane.name = port.binding.name;
+        lane.kind = port.kind;
+        lane.width = port.binding.width;
+        lane.isSigned = port.binding.isSigned;
+        lane.enumMap = port.enumMap;
+        result.emplace(lane.id, std::move(lane));
+    }
+    return result;
+}
+
+std::map<std::string, Lane> checkLanes(const Scenario& scenario)
+{
+    std::map<std::string, Lane> result;
+    for (const auto& lane : scenario.lanes) {
+        if (lane.kind != LaneKind::Group) result.emplace(lane.id, lane);
+    }
+    return result;
+}
+
+bool validateSimulationChecks(
+    const std::vector<SimulationCheckDefinition>& checks,
+    const Tick duration,
+    const std::map<std::string, Lane>& lanes,
+    QString& error)
+{
+    std::set<std::string> ids;
+    const auto laneFor = [&lanes](const std::string& id) -> const Lane* {
+        const auto iterator = lanes.find(id);
+        return iterator == lanes.end() ? nullptr : &iterator->second;
+    };
+    const auto edgeValid = [](const Lane& lane, const SimulationCheckEdge edge) {
+        return edge == SimulationCheckEdge::AnyChange || lane.width == 1;
+    };
+    for (std::size_t index = 0; index < checks.size(); ++index) {
+        const auto& check = checks[index];
+        const auto context = QStringLiteral("simulation check[%1]").arg(index);
+        if (check.id.empty() || check.name.empty() || !ids.insert(check.id).second) {
+            error = context + QStringLiteral(" has an empty or duplicate identity");
+            return false;
+        }
+        switch (check.kind) {
+        case SimulationCheckKind::ValueAtTick: {
+            const auto* lane = laneFor(check.laneId);
+            if (!lane || check.tick < 0 || check.tick > duration) {
+                error = context + QStringLiteral(" references an invalid lane or tick");
+                return false;
+            }
+            auto valueLane = *lane;
+            if (valueLane.kind == LaneKind::Clock) valueLane.kind = LaneKind::Bit;
+            const auto validation = validateLaneValue(valueLane, check.expectedValue);
+            if (!validation.valid) {
+                error = context + QStringLiteral(" has an invalid expected value: ")
+                    + QString::fromStdString(validation.error);
+                return false;
+            }
+            break;
+        }
+        case SimulationCheckKind::StableRange:
+            if (!laneFor(check.laneId) || check.start < 0
+                || check.end <= check.start || check.end > duration) {
+                error = context + QStringLiteral(" references an invalid lane or range");
+                return false;
+            }
+            break;
+        case SimulationCheckKind::EdgeResponse: {
+            const auto* source = laneFor(check.sourceLaneId);
+            const auto* target = laneFor(check.targetLaneId);
+            if (!source || !target || check.start < 0
+                || check.end <= check.start || check.end > duration
+                || check.minimumDelay < 0
+                || check.maximumDelay < check.minimumDelay
+                || !edgeValid(*source, check.sourceEdge)
+                || !edgeValid(*target, check.targetEdge)) {
+                error = context
+                    + QStringLiteral(" has an invalid lane, edge, range, or delay");
+                return false;
+            }
+            break;
+        }
+        }
+    }
+    return true;
+}
+
 bool roleMatchesDirection(
     const StimulusPortRole role,
     const ModulePortDirection direction) noexcept
@@ -573,6 +880,10 @@ QJsonObject scenarioToJson(
         {QStringLiteral("groups"), groups},
         {QStringLiteral("ports"), ports},
     };
+    if (scenario.schemaVersion >= 5) {
+        scenarioObject.insert(
+            QStringLiteral("checks"), simulationChecksToJson(scenario.checks));
+    }
     if (scenario.schemaVersion >= 2) {
         QJsonArray markers;
         for (const auto& marker : scenario.markers) {
@@ -1087,7 +1398,14 @@ StimulusScenarioParseResult parseZeroSlackStimulusScenario(
     }
     const auto scenarioObject = root.value(QStringLiteral("scenario")).toObject();
     const auto scenarioContext = QStringLiteral("stimulus.scenario");
-    const auto scenarioKeys = scenario.schemaVersion >= 2
+    const auto scenarioKeys = scenario.schemaVersion >= 5
+        ? std::initializer_list<QString>{
+              QStringLiteral("id"), QStringLiteral("name"),
+              QStringLiteral("timeBasePicosecondsPerTick"),
+              QStringLiteral("durationTicks"), QStringLiteral("groups"),
+              QStringLiteral("ports"), QStringLiteral("checks"),
+              QStringLiteral("markers"), QStringLiteral("view")}
+        : scenario.schemaVersion >= 2
         ? std::initializer_list<QString>{
               QStringLiteral("id"), QStringLiteral("name"),
               QStringLiteral("timeBasePicosecondsPerTick"),
@@ -1416,6 +1734,21 @@ StimulusScenarioParseResult parseZeroSlackStimulusScenario(
         result.error = QStringLiteral("stimulus.scenario.ports cannot be empty");
         return result;
     }
+    if (scenario.schemaVersion >= 5) {
+        if (!parseSimulationCheckArray(
+                scenarioObject.value(QStringLiteral("checks")),
+                QStringLiteral("stimulus.scenario.checks"),
+                scenario.checks,
+                error)
+            || !validateSimulationChecks(
+                scenario.checks,
+                scenario.duration,
+                checkLanes(scenario.ports),
+                error)) {
+            result.error = error;
+            return result;
+        }
+    }
     if (scenario.schemaVersion >= 2) {
         const auto markersValue = scenarioObject.value(QStringLiteral("markers"));
         const auto viewValue = scenarioObject.value(QStringLiteral("view"));
@@ -1645,6 +1978,13 @@ StimulusScenarioExportResult exportZeroSlackStimulusScenario(
             sourceMarker.note,
         });
     }
+    const auto loadedChecks = loadSimulationChecks(sourceScenario);
+    if (!loadedChecks.ok()) {
+        result.error = QStringLiteral("Cannot export simulation checks: %1")
+                           .arg(loadedChecks.error);
+        return result;
+    }
+    scenario.checks = loadedChecks.checks;
     scenario.view.cursorTick = std::clamp<Tick>(
         scenario.view.cursorTick, 0, scenario.duration);
     scenario.view.visibleSpanTicks = std::clamp<Tick>(
@@ -1720,6 +2060,7 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
             currentPorts.emplace(lane.name, lane);
     }
     std::map<std::string, std::string> restoredNameBySavedName;
+    std::map<std::string, std::string> restoredLaneIdBySavedLaneId;
     std::set<std::string> claimedCurrentNames;
     std::set<std::string> widthChangedSavedNames;
     std::set<std::string> incompatibleSavedNames;
@@ -1882,6 +2223,7 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
                 ? port.groupId : std::string{};
         }
         if (widthChangedSavedNames.contains(port.binding.name)) {
+            restoredLaneIdBySavedLaneId.emplace(port.laneId, lane.id);
             restoredNames.insert(current->first);
             if (!lane.clockDomainId.empty()) {
                 const auto clock = currentClocks.find(lane.clockDomainId);
@@ -1944,6 +2286,7 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
             lane.clockDomainId = clock.id;
             restoredClocks.push_back(std::move(clock));
         }
+        restoredLaneIdBySavedLaneId.emplace(port.laneId, lane.id);
         restoredNames.insert(current->first);
         ordered.push_back({port.displayOrder, tie++, std::move(lane)});
         ++result.restoredPortCount;
@@ -2015,6 +2358,45 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
         jsonStringValue(saved.identity);
     restored.lanes.reserve(ordered.size());
     for (auto& item : ordered) restored.lanes.push_back(std::move(item.lane));
+    std::vector<SimulationCheckDefinition> restoredChecks;
+    restoredChecks.reserve(saved.checks.size());
+    const auto remapLaneId = [&restoredLaneIdBySavedLaneId](
+                                 std::string& laneId) {
+        const auto mapped = restoredLaneIdBySavedLaneId.find(laneId);
+        if (mapped == restoredLaneIdBySavedLaneId.end()) return false;
+        laneId = mapped->second;
+        return true;
+    };
+    for (const auto& savedCheck : saved.checks) {
+        auto restoredCheck = savedCheck;
+        bool mapped = true;
+        switch (restoredCheck.kind) {
+        case SimulationCheckKind::ValueAtTick:
+        case SimulationCheckKind::StableRange:
+            mapped = remapLaneId(restoredCheck.laneId);
+            break;
+        case SimulationCheckKind::EdgeResponse:
+            mapped = remapLaneId(restoredCheck.sourceLaneId)
+                && remapLaneId(restoredCheck.targetLaneId);
+            break;
+        }
+        if (!mapped) {
+            result.diagnostics.append(
+                QStringLiteral("Simulation check %1 was omitted because a referenced port could not be restored.")
+                    .arg(qString(savedCheck.name)));
+            continue;
+        }
+        auto candidateChecks = restoredChecks;
+        candidateChecks.push_back(std::move(restoredCheck));
+        QString checkError;
+        if (!storeSimulationChecks(restored, candidateChecks, &checkError)) {
+            result.diagnostics.append(
+                QStringLiteral("Simulation check %1 was omitted after manifest migration: %2")
+                    .arg(qString(savedCheck.name), checkError));
+            continue;
+        }
+        restoredChecks = std::move(candidateChecks);
+    }
     project.clockDomains = std::move(restoredClocks);
     project.scenarios.clear();
     project.scenarios.push_back(std::move(restored));
@@ -2041,6 +2423,77 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     }
     result.project = std::move(project);
     return result;
+}
+
+SimulationCheckLoadResult loadSimulationChecks(const Scenario& scenario)
+{
+    SimulationCheckLoadResult result;
+    const auto iterator = scenario.extensions.find(
+        std::string(SimulationChecksExtension));
+    if (iterator == scenario.extensions.end()) return result;
+    const auto value = extensionValue(
+        scenario.extensions, SimulationChecksExtension);
+    if (!value || !value->isObject()) {
+        result.error = QStringLiteral(
+            "Stored simulation checks are not a JSON object");
+        return result;
+    }
+    const auto object = value->toObject();
+    QString error;
+    int schemaVersion = 0;
+    if (!exactKeys(
+            object,
+            {QStringLiteral("schemaVersion"), QStringLiteral("checks")},
+            QStringLiteral("simulation checks"),
+            error)
+        || !readSignedInteger(
+            object, QStringLiteral("schemaVersion"),
+            QStringLiteral("simulation checks"), schemaVersion, error)
+        || schemaVersion != 1
+        || !parseSimulationCheckArray(
+            object.value(QStringLiteral("checks")),
+            QStringLiteral("simulation checks.checks"),
+            result.checks,
+            error)
+        || !validateSimulationChecks(
+            result.checks,
+            scenario.duration,
+            checkLanes(scenario),
+            error)) {
+        result.checks.clear();
+        result.error = error.isEmpty()
+            ? QStringLiteral("Unsupported stored simulation-check schema")
+            : error;
+    }
+    return result;
+}
+
+bool storeSimulationChecks(
+    Scenario& scenario,
+    const std::vector<SimulationCheckDefinition>& checks,
+    QString* error)
+{
+    QString validationError;
+    if (!validateSimulationChecks(
+            checks,
+            scenario.duration,
+            checkLanes(scenario),
+            validationError)) {
+        if (error) *error = validationError;
+        return false;
+    }
+    if (checks.empty()) {
+        scenario.extensions.erase(std::string(SimulationChecksExtension));
+    } else {
+        const QJsonObject object{
+            {QStringLiteral("schemaVersion"), 1},
+            {QStringLiteral("checks"), simulationChecksToJson(checks)},
+        };
+        scenario.extensions[std::string(SimulationChecksExtension)] =
+            QJsonDocument(object).toJson(QJsonDocument::Compact).toStdString();
+    }
+    if (error) error->clear();
+    return true;
 }
 
 std::string_view toString(const StimulusPortRole role) noexcept
@@ -2072,6 +2525,26 @@ std::string_view toString(
     case StimulusResetSynchronization::Asynchronous: return "asynchronous";
     }
     return "unspecified";
+}
+
+std::string_view toString(const SimulationCheckKind kind) noexcept
+{
+    switch (kind) {
+    case SimulationCheckKind::ValueAtTick: return "value-at-tick";
+    case SimulationCheckKind::StableRange: return "stable-range";
+    case SimulationCheckKind::EdgeResponse: return "edge-response";
+    }
+    return "value-at-tick";
+}
+
+std::string_view toString(const SimulationCheckEdge edge) noexcept
+{
+    switch (edge) {
+    case SimulationCheckEdge::Rising: return "rising";
+    case SimulationCheckEdge::Falling: return "falling";
+    case SimulationCheckEdge::AnyChange: return "any-change";
+    }
+    return "any-change";
 }
 
 } // namespace wave

@@ -116,8 +116,40 @@ struct StimulusScenarioPort {
     std::optional<StimulusResetConfiguration> reset;
 };
 
+enum class SimulationCheckKind {
+    ValueAtTick,
+    StableRange,
+    EdgeResponse,
+};
+
+enum class SimulationCheckEdge {
+    Rising,
+    Falling,
+    AnyChange,
+};
+
+struct SimulationCheckDefinition {
+    std::string id;
+    std::string name;
+    bool enabled{true};
+    SimulationCheckKind kind{SimulationCheckKind::ValueAtTick};
+    std::string laneId;
+    Tick tick{0};
+    Tick start{0};
+    Tick end{0};
+    std::string expectedValue;
+    std::string sourceLaneId;
+    SimulationCheckEdge sourceEdge{SimulationCheckEdge::Rising};
+    std::string targetLaneId;
+    SimulationCheckEdge targetEdge{SimulationCheckEdge::Rising};
+    Tick minimumDelay{0};
+    Tick maximumDelay{0};
+
+    [[nodiscard]] bool operator==(const SimulationCheckDefinition&) const = default;
+};
+
 struct ZeroSlackStimulusScenario {
-    static constexpr int CurrentSchemaVersion = 4;
+    static constexpr int CurrentSchemaVersion = 5;
     static constexpr int MinimumSupportedSchemaVersion = 1;
 
     int schemaVersion{CurrentSchemaVersion};
@@ -133,7 +165,15 @@ struct ZeroSlackStimulusScenario {
     std::vector<StimulusScenarioGroup> groups;
     std::vector<StimulusScenarioPort> ports;
     std::vector<StimulusScenarioMarker> markers;
+    std::vector<SimulationCheckDefinition> checks;
     StimulusScenarioViewState view;
+};
+
+struct SimulationCheckLoadResult {
+    std::vector<SimulationCheckDefinition> checks;
+    QString error;
+
+    [[nodiscard]] bool ok() const noexcept { return error.isEmpty(); }
 };
 
 struct StimulusScenarioParseResult {
@@ -178,11 +218,19 @@ struct StimulusScenarioRestoreResult {
 [[nodiscard]] StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     const ZeroSlackModuleManifest& manifest,
     const ZeroSlackStimulusScenario& scenario);
+[[nodiscard]] SimulationCheckLoadResult loadSimulationChecks(
+    const Scenario& scenario);
+[[nodiscard]] bool storeSimulationChecks(
+    Scenario& scenario,
+    const std::vector<SimulationCheckDefinition>& checks,
+    QString* error = nullptr);
 
 [[nodiscard]] std::string_view toString(StimulusPortRole role) noexcept;
 [[nodiscard]] std::string_view toString(
     StimulusResetActiveLevel activeLevel) noexcept;
 [[nodiscard]] std::string_view toString(
     StimulusResetSynchronization synchronization) noexcept;
+[[nodiscard]] std::string_view toString(SimulationCheckKind kind) noexcept;
+[[nodiscard]] std::string_view toString(SimulationCheckEdge edge) noexcept;
 
 } // namespace wave

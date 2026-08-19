@@ -59,7 +59,7 @@ std::optional<std::string> maskBits(
     return laneValueBits(lane, mask, LaneValueEncoding::ProjectLiteral);
 }
 
-bool valuesMatch(
+bool valuesMatchImpl(
     const Lane& lane,
     const std::string& expected,
     const std::string& actual,
@@ -106,7 +106,7 @@ const CompareRule& ruleForLane(
     return iterator == options.laneRules.end() ? options.defaultRule : iterator->second;
 }
 
-const TraceSignal* mappedSignal(
+const TraceSignal* mappedSignalImpl(
     const ImportedTrace& reference,
     const TraceIndex& trace,
     const std::string& laneId)
@@ -325,7 +325,7 @@ std::optional<Tick> nearestMatchingTransition(
     std::uint64_t nearestDistance = std::numeric_limits<std::uint64_t>::max();
     const auto transitions = signal.visibleTransitions(start, end, false);
     for (const auto& transition : transitions) {
-        if (!valuesMatch(lane, event.value, transition.value, rule)) continue;
+        if (!valuesMatchImpl(lane, event.value, transition.value, rule)) continue;
         const auto distance = transition.tick >= event.tick
             ? static_cast<std::uint64_t>(transition.tick - event.tick)
             : static_cast<std::uint64_t>(event.tick - transition.tick);
@@ -351,7 +351,7 @@ std::optional<Tick> firstMatchingTransitionAtOrAfter(
         transitions.end(),
         [&](const TraceTransition& transition) {
             return transition.tick >= start
-                && valuesMatch(lane, event.value, transition.value, rule);
+                && valuesMatchImpl(lane, event.value, transition.value, rule);
         });
     return iterator == transitions.end() ? std::nullopt : std::optional<Tick>{iterator->tick};
 }
@@ -428,6 +428,27 @@ std::string htmlEscape(const std::string& value)
 
 } // namespace
 
+bool traceValueMatchesLane(
+    const Lane& lane,
+    const std::string_view expectedProjectLiteral,
+    const std::string_view actualBinaryTraceValue,
+    const CompareRule& rule)
+{
+    return valuesMatchImpl(
+        lane,
+        std::string(expectedProjectLiteral),
+        std::string(actualBinaryTraceValue),
+        rule);
+}
+
+const TraceSignal* mappedTraceSignal(
+    const ImportedTrace& reference,
+    const TraceIndex& trace,
+    const std::string_view laneId) noexcept
+{
+    return mappedSignalImpl(reference, trace, std::string(laneId));
+}
+
 CompareResult compareScenario(
     const Project& project,
     const Scenario& scenario,
@@ -452,7 +473,7 @@ CompareResult compareScenario(
             const auto* sourceEvent = findEvent(scenario, relation.sourceEventId);
             const auto* sourceLane = sourceEvent ? findLane(scenario, sourceEvent->laneId) : nullptr;
             const auto* sourceSignal = sourceLane
-                ? mappedSignal(reference, trace, sourceLane->id)
+                ? mappedSignalImpl(reference, trace, sourceLane->id)
                 : nullptr;
             const auto laneId = sourceLane ? sourceLane->id : std::string{};
             auto& summary = sourceLane
@@ -521,7 +542,7 @@ CompareResult compareScenario(
                         ? sourceLane
                         : findLane(scenario, condition.laneId);
                     const auto* conditionSignal = conditionLane
-                        ? mappedSignal(reference, trace, conditionLane->id)
+                        ? mappedSignalImpl(reference, trace, conditionLane->id)
                         : nullptr;
                     auto& conditionSummary = conditionLane
                         ? laneSummary(
@@ -562,7 +583,7 @@ CompareResult compareScenario(
                 ? findLane(scenario, targetEvent->laneId)
                 : nullptr;
             const auto* targetSignal = targetLane
-                ? mappedSignal(reference, trace, targetLane->id)
+                ? mappedSignalImpl(reference, trace, targetLane->id)
                 : nullptr;
             if (!targetEvent || !targetLane || !targetSignal) {
                 appendDifference(
@@ -768,7 +789,7 @@ CompareResult compareScenario(
                 ? actualTransition->value
                 : std::string{"<undefined>"};
             if (expected && actualTransition
-                && valuesMatch(lane, *expected, actualTransition->value, rule)) {
+                && valuesMatchImpl(lane, *expected, actualTransition->value, rule)) {
                 continue;
             }
 
@@ -782,8 +803,8 @@ CompareResult compareScenario(
                 const auto afterExpected = expectedValueAt(project, lane, intervalEnd);
                 const auto* afterActual = signal->valueAt(intervalEnd);
                 tolerated = beforeExpected && beforeActual && afterExpected && afterActual
-                    && valuesMatch(lane, *beforeExpected, beforeActual->value, rule)
-                    && valuesMatch(lane, *afterExpected, afterActual->value, rule);
+                    && valuesMatchImpl(lane, *beforeExpected, beforeActual->value, rule)
+                    && valuesMatchImpl(lane, *afterExpected, afterActual->value, rule);
             }
             if (tolerated) {
                 ++result.toleratedEdgeCount;

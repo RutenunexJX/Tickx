@@ -75,7 +75,8 @@ int wavewidgets_create_simulation_workspace_v1(
             QStringList{
                 QStringLiteral("internal-signal-hierarchy/v1"),
                 QStringLiteral("multi-clock-async-events/v1"),
-                QStringLiteral("expected-actual-compare/v1")});
+                QStringLiteral("expected-actual-compare/v1"),
+                QStringLiteral("lightweight-trace-checks/v1")});
         *workspace = window;
         writeError(QString(), errorUtf8, errorCapacity);
         return 0;

@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zeroslack.local/schemas/stimulus/v5/stimulus-scenario.schema.json",
+  "title": "ZeroSlack Stimulus Scenario v5",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "manifestSchemaVersion",
+    "identity",
+    "manifestIdentity",
+    "workspaceId",
+    "target",
+    "scenario"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 5},
+    "manifestSchemaVersion": {"enum": [1, 2, 3]},
+    "identity": {"$ref": "../v1/stimulus-scenario.schema.json#/$defs/sha256"},
+    "manifestIdentity": {"$ref": "../v1/stimulus-scenario.schema.json#/$defs/sha256"},
+    "workspaceId": {"type": "string", "minLength": 1},
+    "target": {"$ref": "../v1/stimulus-scenario.schema.json#/$defs/target"},
+    "scenario": {"$ref": "#/$defs/scenario"}
+  },
+  "$defs": {
+    "nonNegativeTick": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "timeBasePicosecondsPerTick",
+        "durationTicks",
+        "groups",
+        "ports",
+        "checks",
+        "markers",
+        "view"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "timeBasePicosecondsPerTick": {"$ref": "../v1/stimulus-scenario.schema.json#/$defs/positiveTick"},
+        "durationTicks": {"$ref": "../v1/stimulus-scenario.schema.json#/$defs/positiveTick"},
+        "groups": {
+          "type": "array",
+          "items": {"$ref": "../v1/stimulus-scenario.schema.json#/$defs/group"}
+        },
+        "ports": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "../v4/stimulus-scenario.schema.json#/$defs/port"}
+        },
+        "checks": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/check"}
+        },
+        "markers": {
+          "type": "array",
+          "items": {"$ref": "../v2/stimulus-scenario.schema.json#/$defs/marker"}
+        },
+        "view": {"$ref": "../v2/stimulus-scenario.schema.json#/$defs/view"}
+      }
+    },
+    "check": {
+      "oneOf": [
+        {"$ref": "#/$defs/valueAtTickCheck"},
+        {"$ref": "#/$defs/stableRangeCheck"},
+        {"$ref": "#/$defs/edgeResponseCheck"}
+      ]
+    },
+    "valueAtTickCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "enabled", "kind", "laneId", "tick", "expectedValue"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "enabled": {"type": "boolean"},
+        "kind": {"const": "value-at-tick"},
+        "laneId": {"type": "string", "minLength": 1},
+        "tick": {"$ref": "#/$defs/nonNegativeTick"},
+        "expectedValue": {"type": "string", "minLength": 1}
+      }
+    },
+    "stableRangeCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "enabled", "kind", "laneId", "startTick", "endTick"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "enabled": {"type": "boolean"},
+        "kind": {"const": "stable-range"},
+        "laneId": {"type": "string", "minLength": 1},
+        "startTick": {"$ref": "#/$defs/nonNegativeTick"},
+        "endTick": {"$ref": "#/$defs/nonNegativeTick"}
+      }
+    },
+    "edgeResponseCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "name", "enabled", "kind",
+        "sourceLaneId", "sourceEdge", "targetLaneId", "targetEdge",
+        "startTick", "endTick", "minimumDelayTicks", "maximumDelayTicks"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "enabled": {"type": "boolean"},
+        "kind": {"const": "edge-response"},
+        "sourceLaneId": {"type": "string", "minLength": 1},
+        "sourceEdge": {"enum": ["rising", "falling", "any-change"]},
+        "targetLaneId": {"type": "string", "minLength": 1},
+        "targetEdge": {"enum": ["rising", "falling", "any-change"]},
+        "startTick": {"$ref": "#/$defs/nonNegativeTick"},
+        "endTick": {"$ref": "#/$defs/nonNegativeTick"},
+        "minimumDelayTicks": {"$ref": "#/$defs/nonNegativeTick"},
+        "maximumDelayTicks": {"$ref": "#/$defs/nonNegativeTick"}
+      }
+    }
+  }
+}

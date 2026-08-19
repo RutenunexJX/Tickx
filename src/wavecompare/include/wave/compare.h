@@ -91,6 +91,16 @@ struct CompareResult {
     [[nodiscard]] bool matches() const noexcept { return differences.empty(); }
 };
 
+[[nodiscard]] bool traceValueMatchesLane(
+    const Lane& lane,
+    std::string_view expectedProjectLiteral,
+    std::string_view actualBinaryTraceValue,
+    const CompareRule& rule = {});
+[[nodiscard]] const TraceSignal* mappedTraceSignal(
+    const ImportedTrace& reference,
+    const TraceIndex& trace,
+    std::string_view laneId) noexcept;
+
 [[nodiscard]] CompareResult compareScenario(
     const Project& project,
     const Scenario& scenario,

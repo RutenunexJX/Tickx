@@ -6,6 +6,7 @@
 #include "wave/compare.h"
 #include "wave/model.h"
 #include "wave/simulation_session.h"
+#include "wave/simulation_check.h"
 #include "wave/stimulus_scenario.h"
 #include "wave/trace.h"
 
@@ -119,6 +120,13 @@ private slots:
     void runCompare();
     void revealCompareDifference(int row, int column);
     void exportCompareReport();
+    void addValueSimulationCheck();
+    void addStableSimulationCheck();
+    void addEdgeResponseSimulationCheck();
+    void editSelectedSimulationCheck();
+    void removeSelectedSimulationCheck();
+    void runSimulationChecks();
+    void revealSimulationCheckOutcome(int row, int column);
     void exportPinloomEntry();
     void startAutosave();
     void finishAutosave();
@@ -173,6 +181,7 @@ private:
     void populateValidationTable();
     void populateTraceMappingTable();
     void populateCompareTable();
+    void populateSimulationCheckTable();
     [[nodiscard]] QString selectedLaneIdForEditing() const;
     [[nodiscard]] bool commitPendingEdits();
     void addQuickLane(LaneKind kind);
@@ -211,6 +220,14 @@ private:
     void updateSegmentActions();
     void editLaneById(const QString& laneId);
     void invalidateCompareResult();
+    void invalidateSimulationCheckResult();
+    void addSimulationCheck(SimulationCheckKind kind);
+    [[nodiscard]] std::optional<SimulationCheckDefinition>
+    promptSimulationCheck(
+        SimulationCheckKind initialKind,
+        const SimulationCheckDefinition* existing = nullptr);
+    [[nodiscard]] std::optional<std::size_t>
+    selectedSimulationCheckIndex() const;
     void scheduleAutosave();
     [[nodiscard]] QString synchronizeDirtyState();
     void resetEditTracking(bool clean);
@@ -290,6 +307,7 @@ private:
     QTabWidget* bottomTabs_{nullptr};
     QWidget* tracePanel_{nullptr};
     QWidget* comparePanel_{nullptr};
+    QTabWidget* simulationReviewTabs_{nullptr};
     QTableWidget* compareTable_{nullptr};
     QComboBox* compareXCombo_{nullptr};
     QLineEdit* compareToleranceEdit_{nullptr};
@@ -297,6 +315,11 @@ private:
     QCheckBox* compareRelationOnly_{nullptr};
     QCheckBox* compareSelectionOnly_{nullptr};
     QLabel* compareSummary_{nullptr};
+    QWidget* simulationCheckPanel_{nullptr};
+    QTableWidget* simulationCheckTable_{nullptr};
+    QLabel* simulationCheckSummary_{nullptr};
+    QAction* editSimulationCheckAction_{nullptr};
+    QAction* removeSimulationCheckAction_{nullptr};
     QProgressBar* traceProgress_{nullptr};
     QLabel* traceSummary_{nullptr};
     QLabel* saveStateLabel_{nullptr};
@@ -361,6 +384,7 @@ private:
     QAction* stopSimulationAction_{nullptr};
     QAction* rerunSimulationAction_{nullptr};
     QAction* runSimulationCompareAction_{nullptr};
+    QAction* runSimulationChecksAction_{nullptr};
     QAction* createSimulationScenarioAction_{nullptr};
     QAction* renameSimulationScenarioAction_{nullptr};
     QAction* deleteSimulationScenarioAction_{nullptr};
@@ -377,6 +401,7 @@ private:
     bool populatingTraceMapping_{false};
     std::optional<TraceIndex> traceIndex_;
     std::optional<CompareResult> compareResult_;
+    std::optional<SimulationCheckReport> simulationCheckResult_;
     std::set<std::string> traceVisibleSignalIds_;
     bool traceVisibilityCustomized_{false};
     std::string activeTraceId_;

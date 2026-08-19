@@ -5,6 +5,23 @@
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
 
+## ZeroSlack Wave Simulation S12.5：轻量 trace 检查
+
+状态：完成
+
+- Stimulus Scenario v5 持久化三类检查定义：指定时刻取值、半开区间稳定性、源边沿到目标
+  边沿的响应窗口；v1-v4 文件继续兼容读取。
+- 检查结果严格由当前 Actual TraceIndex 与既有 lane-to-trace mapping 派生，不持久化，也不
+  成为第二套波形或语义事实源。无映射、无可用值和未激励源边沿明确报告 unavailable。
+- Review 新增 Checks 页，可创建、编辑、删除和运行检查；结果表给出状态、首个失败 tick 和
+  原因，选择结果会定位对应期望 lane、实际 signal 与时间位置。
+- `wavewidgets` C ABI 继续为 v1，新增可选能力声明 `lightweight-trace-checks/v1`；ABI 测试
+  校验运行动作和结果表，ZeroSlack 的真实共享库门禁同步校验该契约。
+- `wave-expected-actual-ui-smoke` 使用确定性 simulator fixture 运行失败检查并验证导航状态；
+  截图证据位于 `artifacts/ui/wave/s12-lightweight-trace-checks.png`。
+- 全量 offscreen CTest `92/92` 通过。本机未安装真实 Verilator，外部编译/运行仍由确定性
+  fixture 验证，不表述为真实 RTL 仿真。
+
 ## ZeroSlack Wave Simulation S12.4：Expected/Actual 比较
 
 状态：完成

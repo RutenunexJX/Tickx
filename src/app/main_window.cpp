@@ -68,6 +68,7 @@
 #include <QTreeWidgetItemIterator>
 #include <QTimer>
 #include <QUrl>
+#include <QUuid>
 #include <QValidator>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
@@ -1300,6 +1301,99 @@ MainWindow::MainWindow(
             this, &MainWindow::revealCompareDifference);
         compareLayout->addWidget(compareTable_, 1);
 
+        simulationCheckPanel_ = new QWidget(this);
+        simulationCheckPanel_->setObjectName(
+            QStringLiteral("SimulationChecksContent"));
+        auto* checkLayout = new QVBoxLayout(simulationCheckPanel_);
+        checkLayout->setContentsMargins(0, 0, 0, 0);
+        checkLayout->setSpacing(0);
+        auto* checkBar = new QToolBar(simulationCheckPanel_);
+        checkBar->setObjectName(QStringLiteral("SimulationChecksToolbar"));
+        checkBar->setIconSize(QSize(16, 16));
+        auto* addValue = checkBar->addAction(
+            tr("Value at time"), this, &MainWindow::addValueSimulationCheck);
+        addValue->setObjectName(QStringLiteral("AddValueSimulationCheckAction"));
+        auto* addStable = checkBar->addAction(
+            tr("Stable range"), this, &MainWindow::addStableSimulationCheck);
+        addStable->setObjectName(QStringLiteral("AddStableSimulationCheckAction"));
+        auto* addResponse = checkBar->addAction(
+            tr("Edge response"), this, &MainWindow::addEdgeResponseSimulationCheck);
+        addResponse->setObjectName(
+            QStringLiteral("AddEdgeResponseSimulationCheckAction"));
+        checkBar->addSeparator();
+        editSimulationCheckAction_ = checkBar->addAction(
+            tr("Edit"), this, &MainWindow::editSelectedSimulationCheck);
+        editSimulationCheckAction_->setObjectName(
+            QStringLiteral("EditSimulationCheckAction"));
+        removeSimulationCheckAction_ = checkBar->addAction(
+            themedIcon(QStringLiteral("edit-delete"), style(), QStyle::SP_TrashIcon),
+            tr("Remove"),
+            this,
+            &MainWindow::removeSelectedSimulationCheck);
+        removeSimulationCheckAction_->setObjectName(
+            QStringLiteral("RemoveSimulationCheckAction"));
+        checkBar->addSeparator();
+        auto* runChecks = checkBar->addAction(
+            themedIcon(
+                QStringLiteral("media-playback-start"),
+                style(),
+                QStyle::SP_MediaPlay),
+            tr("Run checks"),
+            this,
+            &MainWindow::runSimulationChecks);
+        runChecks->setObjectName(
+            QStringLiteral("RunSimulationChecksPanelAction"));
+        auto* checkSpacer = new QWidget(checkBar);
+        checkSpacer->setSizePolicy(
+            QSizePolicy::Expanding, QSizePolicy::Preferred);
+        checkBar->addWidget(checkSpacer);
+        simulationCheckSummary_ = new QLabel(
+            tr("Add a lightweight check to the current scenario"), checkBar);
+        simulationCheckSummary_->setObjectName(
+            QStringLiteral("SimulationCheckSummary"));
+        simulationCheckSummary_->setContentsMargins(8, 0, 8, 0);
+        checkBar->addWidget(simulationCheckSummary_);
+        checkLayout->addWidget(checkBar);
+
+        simulationCheckTable_ = new QTableWidget(simulationCheckPanel_);
+        simulationCheckTable_->setObjectName(
+            QStringLiteral("SimulationCheckResultTable"));
+        simulationCheckTable_->setColumnCount(7);
+        simulationCheckTable_->setHorizontalHeaderLabels({
+            tr("Status"), tr("Check"), tr("Kind"), tr("Source"),
+            tr("Target"), tr("Window"), tr("Result")});
+        simulationCheckTable_->horizontalHeader()->setSectionResizeMode(
+            6, QHeaderView::Stretch);
+        simulationCheckTable_->setSelectionBehavior(
+            QAbstractItemView::SelectRows);
+        simulationCheckTable_->setSelectionMode(
+            QAbstractItemView::SingleSelection);
+        simulationCheckTable_->setEditTriggers(
+            QAbstractItemView::NoEditTriggers);
+        connect(
+            simulationCheckTable_, &QTableWidget::cellClicked,
+            this, &MainWindow::revealSimulationCheckOutcome);
+        connect(
+            simulationCheckTable_, &QTableWidget::cellDoubleClicked,
+            this, &MainWindow::revealSimulationCheckOutcome);
+        connect(
+            simulationCheckTable_, &QTableWidget::itemSelectionChanged,
+            this,
+            [this] {
+                const auto selected = selectedSimulationCheckIndex().has_value();
+                if (editSimulationCheckAction_)
+                    editSimulationCheckAction_->setEnabled(selected);
+                if (removeSimulationCheckAction_)
+                    removeSimulationCheckAction_->setEnabled(selected);
+            });
+        checkLayout->addWidget(simulationCheckTable_, 1);
+
+        simulationReviewTabs_ = new QTabWidget(this);
+        simulationReviewTabs_->setObjectName(
+            QStringLiteral("SimulationReviewTabs"));
+        simulationReviewTabs_->addTab(comparePanel_, tr("Expected / Actual"));
+        simulationReviewTabs_->addTab(simulationCheckPanel_, tr("Checks"));
+
         simulationResultSplitter_->addWidget(section(
             tr("Stimulus / Expected"),
             canvas_,
@@ -1309,8 +1403,8 @@ MainWindow::MainWindow(
             simulationActualSplitter_,
             QStringLiteral("SimulationActualPanel")));
         simulationResultSplitter_->addWidget(section(
-            tr("Comparison"),
-            comparePanel_,
+            tr("Review"),
+            simulationReviewTabs_,
             QStringLiteral("SimulationComparisonPanel")));
         simulationResultSplitter_->setStretchFactor(0, 1);
         simulationResultSplitter_->setStretchFactor(1, 1);
@@ -1503,6 +1597,16 @@ MainWindow::MainWindow(
             &MainWindow::runCompare);
         runSimulationCompareAction_->setObjectName(
             QStringLiteral("RunSimulationCompareAction"));
+        runSimulationChecksAction_ = resultToolbar->addAction(
+            themedIcon(
+                QStringLiteral("task-complete"),
+                style(),
+                QStyle::SP_DialogApplyButton),
+            tr("Checks"),
+            this,
+            &MainWindow::runSimulationChecks);
+        runSimulationChecksAction_->setObjectName(
+            QStringLiteral("RunSimulationChecksAction"));
         resultToolbar->addSeparator();
         createSimulationScenarioAction_ = resultToolbar->addAction(
             themedIcon(QStringLiteral("document-new"), style(), QStyle::SP_FileIcon),
@@ -1569,6 +1673,7 @@ MainWindow::MainWindow(
     rememberActiveScenario();
     const auto restoredLocation = restoreActiveScenarioLocation();
     updateWaveContext();
+    if (simulationResultMode_) populateSimulationCheckTable();
     scenarioLocationMemoryTimer_ = new QTimer(this);
     scenarioLocationMemoryTimer_->setObjectName(
         QStringLiteral("ScenarioLocationMemoryTimer"));
@@ -2108,6 +2213,16 @@ void MainWindow::updateSimulationControls(const QString& detail)
             ready
                 ? tr("Compare expected output ranges with the current simulation trace")
                 : tr("Run the current scenario before comparing expected and actual waveforms"));
+    }
+    if (runSimulationChecksAction_) {
+        const auto ready = state == SimulationSessionState::Current
+            && traceIndex_.has_value()
+            && activeTraceReference() != nullptr;
+        runSimulationChecksAction_->setEnabled(ready);
+        runSimulationChecksAction_->setToolTip(
+            ready
+                ? tr("Evaluate lightweight checks against the current actual trace")
+                : tr("Run the current scenario before evaluating lightweight checks"));
     }
     if (canvas_) {
         canvas_->setEnabled(
@@ -7526,6 +7641,489 @@ void MainWindow::runCompare()
         static_cast<qulonglong>(compareResult_->differences.size()));
 }
 
+void MainWindow::addValueSimulationCheck()
+{
+    addSimulationCheck(SimulationCheckKind::ValueAtTick);
+}
+
+void MainWindow::addStableSimulationCheck()
+{
+    addSimulationCheck(SimulationCheckKind::StableRange);
+}
+
+void MainWindow::addEdgeResponseSimulationCheck()
+{
+    addSimulationCheck(SimulationCheckKind::EdgeResponse);
+}
+
+void MainWindow::addSimulationCheck(const SimulationCheckKind kind)
+{
+    auto* scenario = activeScenario();
+    if (!scenario) return;
+    const auto loaded = loadSimulationChecks(*scenario);
+    if (!loaded.ok()) {
+        QMessageBox::warning(this, tr("Checks unavailable"), loaded.error);
+        return;
+    }
+    const auto check = promptSimulationCheck(kind);
+    if (!check) return;
+    auto checks = loaded.checks;
+    checks.push_back(*check);
+    QString error;
+    if (!storeSimulationChecks(*scenario, checks, &error)) {
+        QMessageBox::warning(this, tr("Invalid check"), error);
+        return;
+    }
+    markEdited();
+    populateSimulationCheckTable();
+    if (simulationReviewTabs_ && simulationCheckPanel_) {
+        simulationReviewTabs_->setCurrentWidget(simulationCheckPanel_);
+    }
+}
+
+std::optional<SimulationCheckDefinition> MainWindow::promptSimulationCheck(
+    const SimulationCheckKind initialKind,
+    const SimulationCheckDefinition* existing)
+{
+    const auto* scenario = activeScenario();
+    if (!scenario) return std::nullopt;
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(existing ? tr("Edit simulation check")
+                                   : tr("Add simulation check"));
+    dialog.setMinimumWidth(520);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout;
+    auto* name = new QLineEdit(&dialog);
+    auto* enabled = new QCheckBox(tr("Enabled"), &dialog);
+    auto* kind = new QComboBox(&dialog);
+    kind->addItem(
+        tr("Value at time"), static_cast<int>(SimulationCheckKind::ValueAtTick));
+    kind->addItem(
+        tr("Stable range"), static_cast<int>(SimulationCheckKind::StableRange));
+    kind->addItem(
+        tr("Edge response"), static_cast<int>(SimulationCheckKind::EdgeResponse));
+    auto* lane = new QComboBox(&dialog);
+    auto* sourceLane = new QComboBox(&dialog);
+    auto* targetLane = new QComboBox(&dialog);
+    const auto addLanes = [scenario](QComboBox* combo) {
+        for (const auto& item : scenario->lanes) {
+            if (item.kind == LaneKind::Group) continue;
+            combo->addItem(
+                QString::fromStdString(item.name),
+                QString::fromStdString(item.id));
+        }
+    };
+    addLanes(lane);
+    addLanes(sourceLane);
+    addLanes(targetLane);
+    if (lane->count() == 0) {
+        QMessageBox::warning(
+            this, tr("Checks unavailable"), tr("The scenario has no signal lanes."));
+        return std::nullopt;
+    }
+
+    auto* tick = new QLineEdit(&dialog);
+    auto* expected = new QLineEdit(&dialog);
+    auto* start = new QLineEdit(&dialog);
+    auto* end = new QLineEdit(&dialog);
+    auto* sourceEdge = new QComboBox(&dialog);
+    auto* targetEdge = new QComboBox(&dialog);
+    auto* minimumDelay = new QLineEdit(&dialog);
+    auto* maximumDelay = new QLineEdit(&dialog);
+    tick->setPlaceholderText(tr("tick or time, for example 120 ns"));
+    start->setPlaceholderText(tr("inclusive start"));
+    end->setPlaceholderText(tr("exclusive end"));
+    minimumDelay->setPlaceholderText(tr("minimum response delay"));
+    maximumDelay->setPlaceholderText(tr("maximum response delay"));
+
+    form->addRow(tr("Name"), name);
+    form->addRow(QString(), enabled);
+    form->addRow(tr("Kind"), kind);
+    form->addRow(tr("Signal"), lane);
+    form->addRow(tr("Time"), tick);
+    form->addRow(tr("Expected value"), expected);
+    form->addRow(tr("Range start"), start);
+    form->addRow(tr("Range end"), end);
+    form->addRow(tr("Source signal"), sourceLane);
+    form->addRow(tr("Source edge"), sourceEdge);
+    form->addRow(tr("Target signal"), targetLane);
+    form->addRow(tr("Target edge"), targetEdge);
+    form->addRow(tr("Minimum delay"), minimumDelay);
+    form->addRow(tr("Maximum delay"), maximumDelay);
+    layout->addLayout(form);
+
+    auto* semantics = new QLabel(
+        tr("Ranges use [start, end). Rising and falling edges require a one-bit signal. "
+           "Each target edge satisfies at most one source edge."),
+        &dialog);
+    semantics->setWordWrap(true);
+    semantics->setStyleSheet(QStringLiteral("color:#596579"));
+    layout->addWidget(semantics);
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    const auto setLane = [](QComboBox* combo, const std::string& laneId) {
+        const auto index = combo->findData(QString::fromStdString(laneId));
+        if (index >= 0) combo->setCurrentIndex(index);
+    };
+    const auto selectedLane = canvas_ ? canvas_->selectedLaneId() : QString{};
+    for (auto* combo : {lane, sourceLane}) {
+        const auto index = combo->findData(selectedLane);
+        if (index >= 0) combo->setCurrentIndex(index);
+    }
+    if (targetLane->count() > 1) targetLane->setCurrentIndex(1);
+
+    const auto configureEdgeCombo = [scenario](
+                                         QComboBox* laneCombo,
+                                         QComboBox* edgeCombo,
+                                         const std::optional<SimulationCheckEdge> preferred) {
+        const auto selectedId = laneCombo->currentData().toString().toStdString();
+        const auto* selected = findLane(*scenario, selectedId);
+        edgeCombo->clear();
+        if (selected && selected->width == 1) {
+            edgeCombo->addItem(
+                QObject::tr("Rising"), static_cast<int>(SimulationCheckEdge::Rising));
+            edgeCombo->addItem(
+                QObject::tr("Falling"), static_cast<int>(SimulationCheckEdge::Falling));
+        }
+        edgeCombo->addItem(
+            QObject::tr("Any change"),
+            static_cast<int>(SimulationCheckEdge::AnyChange));
+        if (preferred) {
+            const auto index = edgeCombo->findData(static_cast<int>(*preferred));
+            if (index >= 0) edgeCombo->setCurrentIndex(index);
+        }
+    };
+    configureEdgeCombo(sourceLane, sourceEdge, std::nullopt);
+    configureEdgeCombo(targetLane, targetEdge, std::nullopt);
+    connect(sourceLane, &QComboBox::currentIndexChanged, &dialog, [=](const int) {
+        configureEdgeCombo(sourceLane, sourceEdge, std::nullopt);
+    });
+    connect(targetLane, &QComboBox::currentIndexChanged, &dialog, [=](const int) {
+        configureEdgeCombo(targetLane, targetEdge, std::nullopt);
+    });
+
+    const auto setFieldVisible = [form](QWidget* field, const bool visible) {
+        field->setVisible(visible);
+        if (auto* labelWidget = form->labelForField(field)) {
+            labelWidget->setVisible(visible);
+        }
+    };
+    const auto updateKindRows = [=] {
+        const auto selectedKind = static_cast<SimulationCheckKind>(
+            kind->currentData().toInt());
+        const auto value = selectedKind == SimulationCheckKind::ValueAtTick;
+        const auto stable = selectedKind == SimulationCheckKind::StableRange;
+        const auto response = selectedKind == SimulationCheckKind::EdgeResponse;
+        setFieldVisible(lane, value || stable);
+        setFieldVisible(tick, value);
+        setFieldVisible(expected, value);
+        setFieldVisible(start, stable || response);
+        setFieldVisible(end, stable || response);
+        setFieldVisible(sourceLane, response);
+        setFieldVisible(sourceEdge, response);
+        setFieldVisible(targetLane, response);
+        setFieldVisible(targetEdge, response);
+        setFieldVisible(minimumDelay, response);
+        setFieldVisible(maximumDelay, response);
+    };
+    connect(kind, &QComboBox::currentIndexChanged, &dialog, [=](const int) {
+        updateKindRows();
+    });
+
+    const auto initialIndex = kind->findData(static_cast<int>(
+        existing ? existing->kind : initialKind));
+    kind->setCurrentIndex(std::max(0, initialIndex));
+    enabled->setChecked(!existing || existing->enabled);
+    if (existing) {
+        name->setText(QString::fromStdString(existing->name));
+        setLane(lane, existing->laneId);
+        setLane(sourceLane, existing->sourceLaneId);
+        setLane(targetLane, existing->targetLaneId);
+        configureEdgeCombo(sourceLane, sourceEdge, existing->sourceEdge);
+        configureEdgeCombo(targetLane, targetEdge, existing->targetEdge);
+        tick->setText(QString::number(existing->tick));
+        expected->setText(QString::fromStdString(existing->expectedValue));
+        start->setText(QString::number(existing->start));
+        end->setText(QString::number(existing->end));
+        minimumDelay->setText(QString::number(existing->minimumDelay));
+        maximumDelay->setText(QString::number(existing->maximumDelay));
+    } else {
+        const auto cursor = canvas_ ? canvas_->cursorTick() : Tick{0};
+        const auto range = canvas_ ? canvas_->selectedTimeRange() : std::nullopt;
+        name->setText(
+            initialKind == SimulationCheckKind::ValueAtTick
+                ? tr("Value at time")
+                : initialKind == SimulationCheckKind::StableRange
+                    ? tr("Stable range") : tr("Edge response"));
+        tick->setText(QString::number(cursor));
+        expected->setText(QStringLiteral("0"));
+        start->setText(QString::number(range ? range->first : Tick{0}));
+        end->setText(QString::number(
+            range ? range->second : std::max<Tick>(1, scenario->duration)));
+        minimumDelay->setText(QStringLiteral("0"));
+        maximumDelay->setText(QStringLiteral("1"));
+    }
+    updateKindRows();
+    name->selectAll();
+    name->setFocus(Qt::OtherFocusReason);
+
+    const auto parseTick = [this](QLineEdit* edit, const QString& field,
+                                  QString& error) -> std::optional<Tick> {
+        std::optional<std::int64_t> cycle;
+        QString parseError;
+        const auto value = parseTimeText(
+            edit->text(), project_.timeBase, nullptr, cycle, parseError);
+        if (!value) error = tr("%1: %2").arg(field, parseError);
+        return value;
+    };
+    while (dialog.exec() == QDialog::Accepted) {
+        SimulationCheckDefinition check;
+        check.id = existing
+            ? existing->id
+            : "simulation-check-"
+                + QUuid::createUuid().toString(QUuid::WithoutBraces)
+                      .toStdString();
+        check.name = name->text().trimmed().toStdString();
+        check.enabled = enabled->isChecked();
+        check.kind = static_cast<SimulationCheckKind>(
+            kind->currentData().toInt());
+        QString error;
+        if (check.name.empty()) {
+            error = tr("A check name is required.");
+        } else if (check.kind == SimulationCheckKind::ValueAtTick) {
+            check.laneId = lane->currentData().toString().toStdString();
+            const auto parsed = parseTick(tick, tr("Time"), error);
+            if (parsed) check.tick = *parsed;
+            check.expectedValue = expected->text().trimmed().toStdString();
+        } else if (check.kind == SimulationCheckKind::StableRange) {
+            check.laneId = lane->currentData().toString().toStdString();
+            const auto parsedStart = parseTick(start, tr("Range start"), error);
+            const auto parsedEnd = error.isEmpty()
+                ? parseTick(end, tr("Range end"), error) : std::nullopt;
+            if (parsedStart) check.start = *parsedStart;
+            if (parsedEnd) check.end = *parsedEnd;
+        } else {
+            check.sourceLaneId =
+                sourceLane->currentData().toString().toStdString();
+            check.sourceEdge = static_cast<SimulationCheckEdge>(
+                sourceEdge->currentData().toInt());
+            check.targetLaneId =
+                targetLane->currentData().toString().toStdString();
+            check.targetEdge = static_cast<SimulationCheckEdge>(
+                targetEdge->currentData().toInt());
+            const auto parsedStart = parseTick(start, tr("Range start"), error);
+            const auto parsedEnd = error.isEmpty()
+                ? parseTick(end, tr("Range end"), error) : std::nullopt;
+            const auto parsedMinimum = error.isEmpty()
+                ? parseTick(minimumDelay, tr("Minimum delay"), error)
+                : std::nullopt;
+            const auto parsedMaximum = error.isEmpty()
+                ? parseTick(maximumDelay, tr("Maximum delay"), error)
+                : std::nullopt;
+            if (parsedStart) check.start = *parsedStart;
+            if (parsedEnd) check.end = *parsedEnd;
+            if (parsedMinimum) check.minimumDelay = *parsedMinimum;
+            if (parsedMaximum) check.maximumDelay = *parsedMaximum;
+        }
+        if (error.isEmpty()) {
+            auto validationScenario = *scenario;
+            if (storeSimulationChecks(validationScenario, {check}, &error)) {
+                return check;
+            }
+        }
+        QMessageBox::warning(&dialog, tr("Invalid check"), error);
+    }
+    return std::nullopt;
+}
+
+std::optional<std::size_t> MainWindow::selectedSimulationCheckIndex() const
+{
+    const auto* scenario = activeScenario();
+    if (!scenario || !simulationCheckTable_) return std::nullopt;
+    const auto row = simulationCheckTable_->currentRow();
+    if (row < 0 || !simulationCheckTable_->item(row, 0)) return std::nullopt;
+    const auto id = simulationCheckTable_->item(row, 0)
+                        ->data(Qt::UserRole).toString().toStdString();
+    const auto loaded = loadSimulationChecks(*scenario);
+    if (!loaded.ok()) return std::nullopt;
+    const auto found = std::find_if(
+        loaded.checks.begin(), loaded.checks.end(),
+        [&id](const SimulationCheckDefinition& check) {
+            return check.id == id;
+        });
+    return found == loaded.checks.end()
+        ? std::nullopt
+        : std::optional<std::size_t>{
+              static_cast<std::size_t>(found - loaded.checks.begin())};
+}
+
+void MainWindow::editSelectedSimulationCheck()
+{
+    auto* scenario = activeScenario();
+    const auto selected = selectedSimulationCheckIndex();
+    if (!scenario || !selected) return;
+    const auto loaded = loadSimulationChecks(*scenario);
+    if (!loaded.ok() || *selected >= loaded.checks.size()) return;
+    const auto replacement = promptSimulationCheck(
+        loaded.checks[*selected].kind, &loaded.checks[*selected]);
+    if (!replacement) return;
+    auto checks = loaded.checks;
+    checks[*selected] = *replacement;
+    QString error;
+    if (!storeSimulationChecks(*scenario, checks, &error)) {
+        QMessageBox::warning(this, tr("Invalid check"), error);
+        return;
+    }
+    markEdited();
+    populateSimulationCheckTable();
+}
+
+void MainWindow::removeSelectedSimulationCheck()
+{
+    auto* scenario = activeScenario();
+    const auto selected = selectedSimulationCheckIndex();
+    if (!scenario || !selected) return;
+    const auto loaded = loadSimulationChecks(*scenario);
+    if (!loaded.ok() || *selected >= loaded.checks.size()) return;
+    if (QMessageBox::question(
+            this,
+            tr("Remove check"),
+            tr("Remove '%1' from this scenario?")
+                .arg(QString::fromStdString(loaded.checks[*selected].name)))
+        != QMessageBox::Yes) {
+        return;
+    }
+    auto checks = loaded.checks;
+    checks.erase(checks.begin() + static_cast<std::ptrdiff_t>(*selected));
+    QString error;
+    if (!storeSimulationChecks(*scenario, checks, &error)) {
+        QMessageBox::warning(this, tr("Cannot remove check"), error);
+        return;
+    }
+    markEdited();
+    populateSimulationCheckTable();
+}
+
+void MainWindow::runSimulationChecks()
+{
+    const auto reportUnavailable = [this](const QString& message) {
+        simulationCheckResult_.reset();
+        populateSimulationCheckTable();
+        if (simulationCheckSummary_) {
+            simulationCheckSummary_->setText(message);
+            simulationCheckSummary_->setToolTip(message);
+            simulationCheckSummary_->setStyleSheet(
+                QStringLiteral("color:#815400;font-weight:600"));
+        }
+        setProperty("wavewidgets.checkStatus", QStringLiteral("unavailable"));
+        setProperty("wavewidgets.checkFailureCount", 0);
+    };
+    if (!simulationResultMode_) {
+        QMessageBox::warning(
+            this, tr("Checks unavailable"),
+            tr("Lightweight checks run in a simulation-result workspace."));
+        return;
+    }
+    if (simulationStateMachine_.state() != SimulationSessionState::Current) {
+        reportUnavailable(tr("Run the current scenario before evaluating checks"));
+        return;
+    }
+    const auto* scenario = activeScenario();
+    const auto* reference = activeTraceReference();
+    if (!scenario || !reference || !traceIndex_) {
+        reportUnavailable(tr("No current mapped simulation trace is available"));
+        return;
+    }
+    const auto loaded = loadSimulationChecks(*scenario);
+    if (!loaded.ok()) {
+        reportUnavailable(loaded.error);
+        return;
+    }
+    if (loaded.checks.empty()) {
+        reportUnavailable(tr("No lightweight checks are defined for this scenario"));
+        return;
+    }
+    simulationCheckResult_ = evaluateSimulationChecks(
+        project_, *scenario, *traceIndex_, *reference, loaded.checks);
+    populateSimulationCheckTable();
+
+    std::vector<std::pair<Tick, Tick>> traceRanges;
+    std::vector<WaveCanvas::DifferenceRange> expectedRanges;
+    for (const auto& outcome : simulationCheckResult_->outcomes) {
+        if (outcome.status != SimulationCheckStatus::Failed
+            || !outcome.focusTick) {
+            continue;
+        }
+        const auto startTick = *outcome.focusTick;
+        const auto nextTick = startTick < std::numeric_limits<Tick>::max()
+            ? startTick + 1 : startTick;
+        const auto endTick = std::max<Tick>(nextTick, outcome.end);
+        traceRanges.emplace_back(startTick, endTick);
+        const auto& laneId = outcome.kind == SimulationCheckKind::EdgeResponse
+            ? outcome.sourceLaneId : outcome.laneId;
+        if (!laneId.empty()) {
+            expectedRanges.push_back({laneId, startTick, endTick});
+        }
+    }
+    canvas_->setDifferenceRanges(std::move(expectedRanges));
+    if (compareTraceCanvas_) {
+        compareTraceCanvas_->setDifferenceRanges(std::move(traceRanges));
+        compareTraceCanvas_->setVisible(true);
+    }
+    if (simulationReviewTabs_ && simulationCheckPanel_) {
+        simulationReviewTabs_->setCurrentWidget(simulationCheckPanel_);
+    }
+    setProperty(
+        "wavewidgets.checkStatus",
+        simulationCheckResult_->allPassed()
+            ? QStringLiteral("pass") : QStringLiteral("fail"));
+    setProperty(
+        "wavewidgets.checkFailureCount",
+        static_cast<qulonglong>(simulationCheckResult_->failedCount));
+    setProperty(
+        "wavewidgets.checkUnavailableCount",
+        static_cast<qulonglong>(simulationCheckResult_->unavailableCount));
+}
+
+void MainWindow::revealSimulationCheckOutcome(const int row, const int column)
+{
+    Q_UNUSED(column)
+    if (!simulationCheckResult_ || row < 0
+        || row >= static_cast<int>(simulationCheckResult_->outcomes.size())) {
+        return;
+    }
+    const auto& outcome = simulationCheckResult_->outcomes[
+        static_cast<std::size_t>(row)];
+    if (!outcome.focusTick) return;
+    const auto& laneId = outcome.kind == SimulationCheckKind::EdgeResponse
+        ? outcome.sourceLaneId : outcome.laneId;
+    const auto& traceSignalId = outcome.kind == SimulationCheckKind::EdgeResponse
+        ? outcome.sourceTraceSignalId : outcome.traceSignalId;
+    if (!laneId.empty()) {
+        canvas_->revealLocation(QString::fromStdString(laneId), *outcome.focusTick);
+    }
+    if (compareTraceCanvas_) {
+        if (!traceSignalId.empty()) {
+            compareTraceCanvas_->revealSignal(
+                QString::fromStdString(traceSignalId));
+        }
+        compareTraceCanvas_->revealTick(*outcome.focusTick);
+        compareTraceCanvas_->setVisible(true);
+    }
+    statusBar()->showMessage(
+        tr("%1 at %2")
+            .arg(
+                QString::fromStdString(outcome.name),
+                QString::fromStdString(
+                    formatTick(*outcome.focusTick, project_.timeBase))),
+        5'000);
+}
+
 void MainWindow::revealCompareDifference(const int row, const int column)
 {
     Q_UNUSED(column)
@@ -9820,6 +10418,164 @@ void MainWindow::populateCompareTable()
     }
 }
 
+void MainWindow::populateSimulationCheckTable()
+{
+    if (!simulationCheckTable_ || !simulationCheckSummary_) return;
+    simulationCheckTable_->setRowCount(0);
+    const auto* scenario = activeScenario();
+    if (!scenario) {
+        simulationCheckSummary_->setText(tr("No active scenario"));
+        return;
+    }
+    const auto loaded = loadSimulationChecks(*scenario);
+    if (!loaded.ok()) {
+        simulationCheckSummary_->setText(loaded.error);
+        simulationCheckSummary_->setToolTip(loaded.error);
+        simulationCheckSummary_->setStyleSheet(
+            QStringLiteral("color:#a52222;font-weight:600"));
+        return;
+    }
+    const auto laneName = [scenario](const std::string& laneId) {
+        const auto* lane = findLane(*scenario, laneId);
+        return lane ? QString::fromStdString(lane->name)
+                    : QString::fromStdString(laneId);
+    };
+    const auto kindText = [this](const SimulationCheckKind kind) {
+        switch (kind) {
+        case SimulationCheckKind::ValueAtTick: return tr("Value at time");
+        case SimulationCheckKind::StableRange: return tr("Stable range");
+        case SimulationCheckKind::EdgeResponse: return tr("Edge response");
+        }
+        return tr("Unknown");
+    };
+    const auto edgeText = [this](const SimulationCheckEdge edge) {
+        switch (edge) {
+        case SimulationCheckEdge::Rising: return tr("rising");
+        case SimulationCheckEdge::Falling: return tr("falling");
+        case SimulationCheckEdge::AnyChange: return tr("any change");
+        }
+        return tr("unknown");
+    };
+    simulationCheckTable_->setRowCount(
+        static_cast<int>(loaded.checks.size()));
+    for (int row = 0; row < simulationCheckTable_->rowCount(); ++row) {
+        const auto& check = loaded.checks[static_cast<std::size_t>(row)];
+        const SimulationCheckOutcome* outcome = nullptr;
+        if (simulationCheckResult_) {
+            const auto found = std::find_if(
+                simulationCheckResult_->outcomes.begin(),
+                simulationCheckResult_->outcomes.end(),
+                [&check](const SimulationCheckOutcome& candidate) {
+                    return candidate.checkId == check.id;
+                });
+            if (found != simulationCheckResult_->outcomes.end()) outcome = &*found;
+        }
+        QString status = check.enabled ? tr("Stale") : tr("Disabled");
+        QColor statusColor(129, 84, 0);
+        if (outcome) {
+            status = QString::fromLatin1(toString(outcome->status).data());
+            switch (outcome->status) {
+            case SimulationCheckStatus::Disabled:
+                statusColor = QColor(89, 101, 121);
+                break;
+            case SimulationCheckStatus::Passed:
+                statusColor = QColor(22, 132, 91);
+                break;
+            case SimulationCheckStatus::Failed:
+                statusColor = QColor(198, 40, 40);
+                break;
+            case SimulationCheckStatus::Unavailable:
+                statusColor = QColor(129, 84, 0);
+                break;
+            }
+        }
+        QString source;
+        QString target;
+        QString window;
+        switch (check.kind) {
+        case SimulationCheckKind::ValueAtTick:
+            source = laneName(check.laneId);
+            target = tr("equals %1").arg(
+                QString::fromStdString(check.expectedValue));
+            window = QString::fromStdString(
+                formatTick(check.tick, project_.timeBase));
+            break;
+        case SimulationCheckKind::StableRange:
+            source = laneName(check.laneId);
+            target = tr("unchanged");
+            window = tr("[%1, %2)")
+                         .arg(
+                             QString::fromStdString(
+                                 formatTick(check.start, project_.timeBase)),
+                             QString::fromStdString(
+                                 formatTick(check.end, project_.timeBase)));
+            break;
+        case SimulationCheckKind::EdgeResponse:
+            source = tr("%1 · %2")
+                         .arg(laneName(check.sourceLaneId), edgeText(check.sourceEdge));
+            target = tr("%1 · %2")
+                         .arg(laneName(check.targetLaneId), edgeText(check.targetEdge));
+            window = tr("[%1, %2) · %3..%4")
+                         .arg(
+                             QString::fromStdString(
+                                 formatTick(check.start, project_.timeBase)),
+                             QString::fromStdString(
+                                 formatTick(check.end, project_.timeBase)),
+                             QString::fromStdString(
+                                 formatTick(check.minimumDelay, project_.timeBase)),
+                             QString::fromStdString(
+                                 formatTick(check.maximumDelay, project_.timeBase)));
+            break;
+        }
+        const std::array<QString, 7> values{{
+            status,
+            QString::fromStdString(check.name),
+            kindText(check.kind),
+            source,
+            target,
+            window,
+            outcome ? QString::fromStdString(outcome->message) : tr("Run checks"),
+        }};
+        for (int column = 0; column < static_cast<int>(values.size()); ++column) {
+            auto* item = new QTableWidgetItem(values[static_cast<std::size_t>(column)]);
+            if (column == 0) {
+                item->setData(Qt::UserRole, QString::fromStdString(check.id));
+                item->setForeground(statusColor);
+                QFont font = item->font();
+                font.setBold(true);
+                item->setFont(font);
+            }
+            simulationCheckTable_->setItem(row, column, item);
+        }
+    }
+    if (editSimulationCheckAction_) editSimulationCheckAction_->setEnabled(false);
+    if (removeSimulationCheckAction_) removeSimulationCheckAction_->setEnabled(false);
+    simulationCheckSummary_->setToolTip({});
+    if (!simulationCheckResult_) {
+        simulationCheckSummary_->setText(
+            loaded.checks.empty()
+                ? tr("No checks defined")
+                : tr("%1 check(s) · run to evaluate").arg(loaded.checks.size()));
+        simulationCheckSummary_->setStyleSheet({});
+    } else if (simulationCheckResult_->allPassed()) {
+        simulationCheckSummary_->setText(
+            tr("%1 passed · %2 disabled")
+                .arg(simulationCheckResult_->passedCount)
+                .arg(simulationCheckResult_->disabledCount));
+        simulationCheckSummary_->setStyleSheet(
+            QStringLiteral("color:#16845b;font-weight:600"));
+    } else {
+        simulationCheckSummary_->setText(
+            tr("%1 passed · %2 failed · %3 unavailable · %4 disabled")
+                .arg(simulationCheckResult_->passedCount)
+                .arg(simulationCheckResult_->failedCount)
+                .arg(simulationCheckResult_->unavailableCount)
+                .arg(simulationCheckResult_->disabledCount));
+        simulationCheckSummary_->setStyleSheet(
+            QStringLiteral("color:#c62828;font-weight:600"));
+    }
+}
+
 void MainWindow::invalidateCompareResult()
 {
     compareResult_.reset();
@@ -9834,6 +10590,16 @@ void MainWindow::invalidateCompareResult()
     if (traceCanvas_) traceCanvas_->setDifferenceRanges({});
     if (compareTraceCanvas_) compareTraceCanvas_->setDifferenceRanges({});
     if (canvas_) canvas_->setDifferenceRanges({});
+    invalidateSimulationCheckResult();
+}
+
+void MainWindow::invalidateSimulationCheckResult()
+{
+    simulationCheckResult_.reset();
+    setProperty("wavewidgets.checkStatus", QStringLiteral("stale"));
+    setProperty("wavewidgets.checkFailureCount", 0);
+    setProperty("wavewidgets.checkUnavailableCount", 0);
+    populateSimulationCheckTable();
 }
 
 void MainWindow::updateWindowTitle()

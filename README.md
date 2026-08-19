@@ -23,8 +23,12 @@ Stimulus Scenario、Module Manifest 或 `wavewidgets` v1 C ABI。
 
 输出 watch lane 可直接绘制期望区间。Simulation Result 的 Compare 动作只比较具有期望区间
 的输出，按完整 lane 身份过滤实际 trace，并在期望画布、实际波形和差异表中
-同步标出不一致区间；单击差异会同时定位期望 lane 与实际 signal。Stimulus Scenario v4 以
+同步标出不一致区间；单击差异会同时定位期望 lane 与实际 signal。Stimulus Scenario v5 以
 `expectedSegments` 持久化该意图，且运行计划仍只消费 `segments`，期望值不会被驱动进 DUT。
+
+Review 区域还提供轻量 trace 检查：指定时刻取值、区间稳定性，以及源边沿到目标边沿的
+响应窗口。检查定义随 Stimulus Scenario v5 保存并在端口安全迁移时同步重映射；检查结果
+只由当前 Actual TraceIndex 计算，场景或 trace 变化后立即失效，不写回工程或场景文件。
 
 Module Manifest 中的多个语义时钟候选会分别导入为独立 ClockDomain，不再因候选数大于一而
 全部放弃。Simulation Result 工具栏直接显示 `Clocks (N)`，可逐个编辑周期、相位、占空比和
@@ -33,7 +37,7 @@ Module Manifest 中的多个语义时钟候选会分别导入为独立 ClockDoma
 
 Module Manifest v3 将 packed struct、固定 unpacked array 和显式 modport interface 输入
 展开为分组的可编辑 leaf lane。每个 leaf 保留 Slang selector、类型、方向和稳定 trace 名；
-runner 生成 wrapper 重建原始端口，Stimulus Scenario v4 可在结构化根重命名后安全迁移既有
+runner 生成 wrapper 重建原始端口，Stimulus Scenario v5 可在结构化根重命名后安全迁移既有
 激励。当前 interface 范围限于无构造端口且显式指定 modport 的类型，`inout/ref`、动态数组
 及宽度超过 64 bit 的 leaf 会给出明确诊断。
 

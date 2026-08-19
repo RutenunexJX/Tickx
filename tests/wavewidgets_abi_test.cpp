@@ -74,6 +74,10 @@ int main(int argc, char** argv)
                   .toStringList()
                   .contains(QStringLiteral("expected-actual-compare/v1")),
               "embedded workspace advertises expected/actual comparison");
+        check(workspace->property("wavewidgets.capabilities")
+                  .toStringList()
+                  .contains(QStringLiteral("lightweight-trace-checks/v1")),
+              "embedded workspace advertises lightweight trace checks");
         check(workspace->findChild<wave::WaveCanvas*>(
                   QStringLiteral("StimulusCanvas")),
               "embedded workspace exposes the shared stimulus canvas");
@@ -87,6 +91,10 @@ int main(int argc, char** argv)
                   QStringLiteral("RunSimulationCompareAction"))
                   && workspace->findChild<QTableWidget*>(
                       QStringLiteral("CompareResultTable"))
+                  && workspace->findChild<QAction*>(
+                      QStringLiteral("RunSimulationChecksAction"))
+                  && workspace->findChild<QTableWidget*>(
+                      QStringLiteral("SimulationCheckResultTable"))
                   && workspace->findChild<QWidget*>(
                       QStringLiteral("SimulationComparisonPanel")),
               "embedded workspace exposes comparison controls and results");
