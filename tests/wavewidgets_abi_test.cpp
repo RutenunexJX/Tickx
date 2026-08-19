@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QLineEdit>
 #include <QMenu>
+#include <QTableWidget>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -69,6 +70,10 @@ int main(int argc, char** argv)
                   .toStringList()
                   .contains(QStringLiteral("multi-clock-async-events/v1")),
               "embedded workspace advertises multi-clock asynchronous timing");
+        check(workspace->property("wavewidgets.capabilities")
+                  .toStringList()
+                  .contains(QStringLiteral("expected-actual-compare/v1")),
+              "embedded workspace advertises expected/actual comparison");
         check(workspace->findChild<wave::WaveCanvas*>(
                   QStringLiteral("StimulusCanvas")),
               "embedded workspace exposes the shared stimulus canvas");
@@ -78,6 +83,13 @@ int main(int argc, char** argv)
         check(workspace->findChild<wave::TraceSignalBrowser*>(
                   QStringLiteral("TraceSignalBrowser")),
               "embedded workspace exposes the internal signal hierarchy browser");
+        check(workspace->findChild<QAction*>(
+                  QStringLiteral("RunSimulationCompareAction"))
+                  && workspace->findChild<QTableWidget*>(
+                      QStringLiteral("CompareResultTable"))
+                  && workspace->findChild<QWidget*>(
+                      QStringLiteral("SimulationComparisonPanel")),
+              "embedded workspace exposes comparison controls and results");
         auto* stimulusCanvas = workspace->findChild<wave::WaveCanvas*>(
             QStringLiteral("StimulusCanvas"));
         auto* asyncTiming = workspace->findChild<QAction*>(

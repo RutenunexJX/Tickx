@@ -1182,6 +1182,12 @@ void WaveCanvas::setSignalHeaderWidth(const int width)
     viewport()->update();
 }
 
+void WaveCanvas::setDifferenceRanges(std::vector<DifferenceRange> ranges)
+{
+    differenceRanges_ = std::move(ranges);
+    viewport()->update();
+}
+
 QWidget* WaveCanvas::busEditPaletteWidget() const noexcept
 {
     return busPresetPalette_;
@@ -5717,6 +5723,26 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
             layout,
             visibleStart,
             visibleEnd);
+        const auto& lane = scenario_->lanes.at(layout.laneIndex);
+        for (const auto& range : differenceRanges_) {
+            if (range.laneId != lane.id
+                || range.end <= visibleStart
+                || range.start >= visibleEnd) {
+                continue;
+            }
+            const auto left = xAtTick(std::max(range.start, visibleStart));
+            const auto right = std::max(
+                left + 2,
+                xAtTick(std::min(range.end, visibleEnd)));
+            const QRect highlight(
+                left,
+                screenTop + 2,
+                right - left,
+                std::max(1, layout.height - 4));
+            painter.fillRect(highlight, QColor(198, 40, 40, 42));
+            painter.setPen(QPen(QColor(198, 40, 40, 150), 1));
+            painter.drawRect(highlight.adjusted(0, 0, -1, -1));
+        }
     }
     const auto rangeTransferActive =
         drawing_

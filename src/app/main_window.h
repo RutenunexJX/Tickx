@@ -360,6 +360,7 @@ private:
     QAction* runSimulationAction_{nullptr};
     QAction* stopSimulationAction_{nullptr};
     QAction* rerunSimulationAction_{nullptr};
+    QAction* runSimulationCompareAction_{nullptr};
     QAction* createSimulationScenarioAction_{nullptr};
     QAction* renameSimulationScenarioAction_{nullptr};
     QAction* deleteSimulationScenarioAction_{nullptr};

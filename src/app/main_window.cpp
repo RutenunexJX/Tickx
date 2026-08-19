@@ -1240,17 +1240,82 @@ MainWindow::MainWindow(
         simulationActualSplitter_->setStretchFactor(0, 0);
         simulationActualSplitter_->setStretchFactor(1, 1);
         simulationActualSplitter_->setSizes({260, 1'040});
+
+        comparePanel_ = new QWidget(this);
+        comparePanel_->setObjectName(QStringLiteral("SimulationComparisonContent"));
+        auto* compareLayout = new QVBoxLayout(comparePanel_);
+        compareLayout->setContentsMargins(0, 0, 0, 0);
+        compareLayout->setSpacing(0);
+        auto* compareBar = new QToolBar(comparePanel_);
+        compareBar->setObjectName(QStringLiteral("SimulationComparisonToolbar"));
+        compareBar->setIconSize(QSize(16, 16));
+        compareXCombo_ = new QComboBox(compareBar);
+        compareXCombo_->setObjectName(QStringLiteral("SimulationCompareXHandling"));
+        compareXCombo_->setToolTip(
+            tr("Choose how X values participate in expected/actual comparison"));
+        compareXCombo_->addItem(
+            tr("Exact X"), static_cast<int>(XHandling::Exact));
+        compareXCombo_->addItem(
+            tr("Ignore any X"), static_cast<int>(XHandling::IgnoreAnyX));
+        compareXCombo_->addItem(
+            tr("Expected X wildcard"),
+            static_cast<int>(XHandling::ExpectedXWildcard));
+        compareBar->addWidget(compareXCombo_);
+        compareToleranceEdit_ = new QLineEdit(QStringLiteral("0 tick"), compareBar);
+        compareToleranceEdit_->setObjectName(
+            QStringLiteral("SimulationCompareEdgeTolerance"));
+        compareToleranceEdit_->setPlaceholderText(tr("Edge tolerance"));
+        compareToleranceEdit_->setToolTip(
+            tr("Maximum accepted skew between matching expected and actual edges"));
+        compareToleranceEdit_->setMaximumWidth(120);
+        compareBar->addWidget(compareToleranceEdit_);
+        auto* compareSpacer = new QWidget(compareBar);
+        compareSpacer->setSizePolicy(
+            QSizePolicy::Expanding, QSizePolicy::Preferred);
+        compareBar->addWidget(compareSpacer);
+        compareSummary_ = new QLabel(
+            tr("Add an expected waveform to an output lane, then compare"),
+            compareBar);
+        compareSummary_->setObjectName(QStringLiteral("CompareSummary"));
+        compareSummary_->setContentsMargins(8, 0, 8, 0);
+        compareBar->addWidget(compareSummary_);
+        compareLayout->addWidget(compareBar);
+
+        compareTable_ = new QTableWidget(comparePanel_);
+        compareTable_->setObjectName(QStringLiteral("CompareResultTable"));
+        compareTable_->setColumnCount(7);
+        compareTable_->setHorizontalHeaderLabels({
+            tr("Kind"), tr("Lane"), tr("Start"), tr("End"),
+            tr("Expected"), tr("Actual"), tr("Message")});
+        compareTable_->horizontalHeader()->setSectionResizeMode(
+            6, QHeaderView::Stretch);
+        compareTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+        compareTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+        compareTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        connect(
+            compareTable_, &QTableWidget::cellClicked,
+            this, &MainWindow::revealCompareDifference);
+        connect(
+            compareTable_, &QTableWidget::cellDoubleClicked,
+            this, &MainWindow::revealCompareDifference);
+        compareLayout->addWidget(compareTable_, 1);
+
         simulationResultSplitter_->addWidget(section(
-            tr("Stimulus"),
+            tr("Stimulus / Expected"),
             canvas_,
             QStringLiteral("SimulationStimulusPanel")));
         simulationResultSplitter_->addWidget(section(
             tr("Actual"),
             simulationActualSplitter_,
             QStringLiteral("SimulationActualPanel")));
+        simulationResultSplitter_->addWidget(section(
+            tr("Comparison"),
+            comparePanel_,
+            QStringLiteral("SimulationComparisonPanel")));
         simulationResultSplitter_->setStretchFactor(0, 1);
         simulationResultSplitter_->setStretchFactor(1, 1);
-        simulationResultSplitter_->setSizes({400, 430});
+        simulationResultSplitter_->setStretchFactor(2, 0);
+        simulationResultSplitter_->setSizes({340, 360, 170});
         setCentralWidget(simulationResultSplitter_);
     } else {
         setCentralWidget(canvas_);
@@ -1428,6 +1493,16 @@ MainWindow::MainWindow(
             this,
             &MainWindow::rerunSimulation);
         rerunSimulationAction_->setObjectName(QStringLiteral("RerunSimulationAction"));
+        runSimulationCompareAction_ = resultToolbar->addAction(
+            themedIcon(
+                QStringLiteral("view-statistics"),
+                style(),
+                QStyle::SP_DialogApplyButton),
+            tr("Compare"),
+            this,
+            &MainWindow::runCompare);
+        runSimulationCompareAction_->setObjectName(
+            QStringLiteral("RunSimulationCompareAction"));
         resultToolbar->addSeparator();
         createSimulationScenarioAction_ = resultToolbar->addAction(
             themedIcon(QStringLiteral("document-new"), style(), QStyle::SP_FileIcon),
@@ -2024,6 +2099,16 @@ void MainWindow::updateSimulationControls(const QString& detail)
             actions.rerunEnabled ? tr("Run the current stimulus again")
                                  : simulationSessionError_);
     }
+    if (runSimulationCompareAction_) {
+        const auto ready = state == SimulationSessionState::Current
+            && traceIndex_.has_value()
+            && activeTraceReference() != nullptr;
+        runSimulationCompareAction_->setEnabled(ready);
+        runSimulationCompareAction_->setToolTip(
+            ready
+                ? tr("Compare expected output ranges with the current simulation trace")
+                : tr("Run the current scenario before comparing expected and actual waveforms"));
+    }
     if (canvas_) {
         canvas_->setEnabled(
             state != SimulationSessionState::Compiling
@@ -2106,6 +2191,7 @@ void MainWindow::runSimulation()
         return;
     }
     if (!simulationStateMachine_.beginRun()) return;
+    invalidateCompareResult();
 
     const auto generation = nextSimulationGeneration();
     simulationGeneration_ = generation;
@@ -7310,40 +7396,71 @@ void MainWindow::loadFirstTraceReference()
 
 void MainWindow::runCompare()
 {
+    const auto reportUnavailable = [this](const QString& message) {
+        if (!simulationResultMode_) {
+            QMessageBox::warning(this, tr("Compare unavailable"), message);
+            return;
+        }
+        compareResult_.reset();
+        if (compareTable_) compareTable_->setRowCount(0);
+        if (compareSummary_) {
+            compareSummary_->setText(message);
+            compareSummary_->setToolTip(message);
+            compareSummary_->setStyleSheet(QStringLiteral("color:#815400;font-weight:600"));
+        }
+        setProperty("wavewidgets.comparisonStatus", QStringLiteral("unavailable"));
+        setProperty("wavewidgets.compareDifferenceCount", 0);
+        canvas_->setDifferenceRanges({});
+        if (compareTraceCanvas_) compareTraceCanvas_->setDifferenceRanges({});
+    };
+
+    if (simulationResultMode_
+        && simulationStateMachine_.state() != SimulationSessionState::Current) {
+        reportUnavailable(
+            tr("Run the current scenario before comparing expected and actual waveforms"));
+        return;
+    }
     const auto* scenario = activeScenario();
     const auto* reference = activeTraceReference();
     if (!scenario || !reference || !traceIndex_) {
-        QMessageBox::warning(
-            this,
-            tr("Compare unavailable"),
+        reportUnavailable(
             tr("Import and map an actual VCD or CSV trace before comparing."));
         return;
     }
     QString parseError;
     std::optional<std::int64_t> cycle;
     const auto tolerance = parseTimeText(
-        compareToleranceEdit_->text(),
+        compareToleranceEdit_
+            ? compareToleranceEdit_->text() : QStringLiteral("0 tick"),
         project_.timeBase,
         nullptr,
         cycle,
         parseError);
     if (!tolerance || *tolerance < 0) {
-        QMessageBox::warning(
-            this,
-            tr("Invalid edge tolerance"),
-            parseError.isEmpty()
-                ? tr("Edge tolerance must be a non-negative exactly representable time.")
-                : parseError);
+        const auto message = parseError.isEmpty()
+            ? tr("Edge tolerance must be a non-negative exactly representable time.")
+            : parseError;
+        if (simulationResultMode_) {
+            reportUnavailable(message);
+        } else {
+            QMessageBox::warning(this, tr("Invalid edge tolerance"), message);
+        }
         return;
     }
 
     CompareOptions options;
-    options.defaultRule.xHandling = static_cast<XHandling>(
-        compareXCombo_->currentData().toInt());
+    if (compareXCombo_) {
+        options.defaultRule.xHandling = static_cast<XHandling>(
+            compareXCombo_->currentData().toInt());
+    }
     options.defaultRule.edgeTolerance = *tolerance;
-    options.defaultRule.busMask = compareMaskEdit_->text().trimmed().toStdString();
-    options.relationOnly = compareRelationOnly_->isChecked();
-    if (compareSelectionOnly_->isChecked()) {
+    if (compareMaskEdit_) {
+        options.defaultRule.busMask =
+            compareMaskEdit_->text().trimmed().toStdString();
+    }
+    options.relationOnly = compareRelationOnly_
+        && compareRelationOnly_->isChecked();
+    if (compareSelectionOnly_ && compareSelectionOnly_->isChecked()) {
         const auto selection = canvas_->selectedTimeRange();
         if (!selection || selection->second <= selection->first) {
             QMessageBox::warning(
@@ -7355,6 +7472,25 @@ void MainWindow::runCompare()
         options.start = selection->first;
         options.end = selection->second;
     }
+    if (simulationResultMode_) {
+        const auto exported = exportZeroSlackStimulusScenario(
+            project_, *scenario, activeSimulationViewState());
+        if (!exported.ok()) {
+            reportUnavailable(exported.error);
+            return;
+        }
+        for (const auto& port : exported.scenario->ports) {
+            if (port.role == StimulusPortRole::Watch
+                && !port.expectedSegments.empty()) {
+                options.includedLaneIds.insert(port.laneId);
+            }
+        }
+        if (options.includedLaneIds.empty()) {
+            reportUnavailable(
+                tr("No expected output ranges are defined in the current scenario"));
+            return;
+        }
+    }
     compareResult_ = compareScenario(
         project_,
         *scenario,
@@ -7363,15 +7499,31 @@ void MainWindow::runCompare()
         options);
     populateCompareTable();
     std::vector<std::pair<Tick, Tick>> ranges;
+    std::vector<WaveCanvas::DifferenceRange> expectedRanges;
     ranges.reserve(compareResult_->differences.size());
+    expectedRanges.reserve(compareResult_->differences.size());
     for (const auto& difference : compareResult_->differences) {
         ranges.emplace_back(difference.start, difference.end);
+        if (!difference.laneId.empty()) {
+            expectedRanges.push_back({
+                difference.laneId, difference.start, difference.end});
+        }
     }
-    traceCanvas_->setDifferenceRanges(ranges);
-    compareTraceCanvas_->setDifferenceRanges(std::move(ranges));
-    compareTraceCanvas_->setVisible(true);
+    canvas_->setDifferenceRanges(std::move(expectedRanges));
+    if (traceCanvas_) traceCanvas_->setDifferenceRanges(ranges);
+    if (compareTraceCanvas_) {
+        compareTraceCanvas_->setDifferenceRanges(std::move(ranges));
+        compareTraceCanvas_->setVisible(true);
+    }
     if (compareModeAction_) compareModeAction_->setChecked(true);
-    bottomTabs_->setCurrentWidget(comparePanel_);
+    if (bottomTabs_ && comparePanel_) bottomTabs_->setCurrentWidget(comparePanel_);
+    setProperty(
+        "wavewidgets.comparisonStatus",
+        compareResult_->matches()
+            ? QStringLiteral("match") : QStringLiteral("mismatch"));
+    setProperty(
+        "wavewidgets.compareDifferenceCount",
+        static_cast<qulonglong>(compareResult_->differences.size()));
 }
 
 void MainWindow::revealCompareDifference(const int row, const int column)
@@ -7385,9 +7537,15 @@ void MainWindow::revealCompareDifference(const int row, const int column)
     if (!difference.laneId.empty()) {
         canvas_->revealLocation(QString::fromStdString(difference.laneId), difference.start);
     }
-    traceCanvas_->revealTick(difference.start);
-    compareTraceCanvas_->revealTick(difference.start);
-    compareTraceCanvas_->setVisible(true);
+    if (traceCanvas_) traceCanvas_->revealTick(difference.start);
+    if (compareTraceCanvas_) {
+        if (!difference.traceSignalId.empty()) {
+            compareTraceCanvas_->revealSignal(
+                QString::fromStdString(difference.traceSignalId));
+        }
+        compareTraceCanvas_->revealTick(difference.start);
+        compareTraceCanvas_->setVisible(true);
+    }
     if (compareModeAction_) compareModeAction_->setChecked(true);
     statusBar()->showMessage(
         tr("First selected difference at %1")
@@ -9665,6 +9823,8 @@ void MainWindow::populateCompareTable()
 void MainWindow::invalidateCompareResult()
 {
     compareResult_.reset();
+    setProperty("wavewidgets.comparisonStatus", QStringLiteral("stale"));
+    setProperty("wavewidgets.compareDifferenceCount", 0);
     if (compareTable_) compareTable_->setRowCount(0);
     if (compareSummary_) {
         compareSummary_->setText(tr("Trace or scenario changed; run compare again"));
@@ -9673,6 +9833,7 @@ void MainWindow::invalidateCompareResult()
     }
     if (traceCanvas_) traceCanvas_->setDifferenceRanges({});
     if (compareTraceCanvas_) compareTraceCanvas_->setDifferenceRanges({});
+    if (canvas_) canvas_->setDifferenceRanges({});
 }
 
 void MainWindow::updateWindowTitle()

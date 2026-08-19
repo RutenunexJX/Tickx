@@ -11,8 +11,8 @@ Project、Inspector、Scenario Dock 或模式切换栏。它提供整数 tick
 事件重定时、Lane/Group 创建、属性编辑、显示重排与事务化删除、复制/粘贴、撤销/重做、
 Event/Segment 双向同步、Marker、Relation、版本化 JSON 工程安全保存与迁移、包含未命名工程的后台恢复快照，
 以及由共享行为语义生成的 SystemVerilog、SVA、cocotb、SVG、PNG、PDF 和 WaveDrom
-JSON。VCD/CSV 导入、Expected/Actual 比较、报告生成及跨应用桥接能力保留在独立 CLI 和
-领域模块中，不再占用桌面编辑界面。验收证据见
+JSON。VCD/CSV 导入、报告生成及跨应用桥接能力保留在独立 CLI 和领域模块中；嵌入式
+Simulation Result 工作区直接复用同一比较领域模块。验收证据见
 [PLAN.md](PLAN.md)。
 
 ZeroSlack 的嵌入式 Simulation Result 工作区在 Actual 区域提供内部信号层级浏览器。
@@ -21,6 +21,11 @@ Actual 波形可见集合。初次打开优先显示场景已映射的端口与 
 按需加入。Verilator harness 追踪 99 层层级，并启用 struct 与下划线信号追踪；这不改变
 Stimulus Scenario、Module Manifest 或 `wavewidgets` v1 C ABI。
 
+输出 watch lane 可直接绘制期望区间。Simulation Result 的 Compare 动作只比较具有期望区间
+的输出，按完整 lane 身份过滤实际 trace，并在期望画布、实际波形和差异表中
+同步标出不一致区间；单击差异会同时定位期望 lane 与实际 signal。Stimulus Scenario v4 以
+`expectedSegments` 持久化该意图，且运行计划仍只消费 `segments`，期望值不会被驱动进 DUT。
+
 Module Manifest 中的多个语义时钟候选会分别导入为独立 ClockDomain，不再因候选数大于一而
 全部放弃。Simulation Result 工具栏直接显示 `Clocks (N)`，可逐个编辑周期、相位、占空比和
 有效边沿；`Timing` 可在关联时钟网格与 1 tick 异步编辑之间切换。运行计划分别驱动每个时钟，
@@ -28,7 +33,7 @@ Module Manifest 中的多个语义时钟候选会分别导入为独立 ClockDoma
 
 Module Manifest v3 将 packed struct、固定 unpacked array 和显式 modport interface 输入
 展开为分组的可编辑 leaf lane。每个 leaf 保留 Slang selector、类型、方向和稳定 trace 名；
-runner 生成 wrapper 重建原始端口，Stimulus Scenario v3 可在结构化根重命名后安全迁移既有
+runner 生成 wrapper 重建原始端口，Stimulus Scenario v4 可在结构化根重命名后安全迁移既有
 激励。当前 interface 范围限于无构造端口且显式指定 modport 的类型，`inout/ref`、动态数组
 及宽度超过 64 bit 的 leaf 会给出明确诊断。
 

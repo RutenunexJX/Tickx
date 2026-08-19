@@ -115,8 +115,9 @@ Manifest、Stimulus 与源码镜像由宿主负责生成；runner 仍严格校�
 - 稳定 runtime harness 的内容摘要；
 - Verilator/C++ 编译器的解析路径、版本、类型、显式参数和会影响编译的环境字段。
 
-Stimulus Scenario 不属于构建指纹。每次运行把当前激励写入私有 runtime plan，并传给已编译
-模型；因此仅修改激励会跳过 `BuildModel`。缓存命中前会同时校验元数据 evidence 和实际
+Stimulus Scenario 不属于构建指纹。每次运行只把各端口的 `segments` 激励写入私有 runtime
+plan，并传给已编译模型；watch lane 的 `expectedSegments` 仅用于结果比较，不会驱动 DUT。
+因此仅修改激励或期望值会跳过 `BuildModel`。缓存命中前会同时校验元数据 evidence 和实际
 可执行文件摘要；损坏或不完整条目不会被复用。缓存未命中时先在唯一 staging 目录构建，
 元数据与可执行文件验证完成后再发布，不会把取消构建留下的半成品作为有效条目。
 

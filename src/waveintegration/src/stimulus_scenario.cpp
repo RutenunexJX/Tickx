@@ -516,6 +516,10 @@ QJsonObject scenarioToJson(
         }
         QJsonArray ranges;
         for (const auto& range : port.segments) ranges.append(rangeToJson(range));
+        QJsonArray expectedRanges;
+        for (const auto& range : port.expectedSegments) {
+            expectedRanges.append(rangeToJson(range));
+        }
 
         QJsonValue clock = QJsonValue::Null;
         if (port.clock) {
@@ -539,7 +543,7 @@ QJsonObject scenarioToJson(
                  latinString(toString(port.reset->synchronization))},
             };
         }
-        ports.append(QJsonObject{
+        QJsonObject portObject{
             {QStringLiteral("laneId"), qString(port.laneId)},
             {QStringLiteral("displayOrder"), static_cast<qint64>(port.displayOrder)},
             {QStringLiteral("role"), latinString(toString(port.role))},
@@ -553,7 +557,11 @@ QJsonObject scenarioToJson(
             {QStringLiteral("segments"), ranges},
             {QStringLiteral("clock"), clock},
             {QStringLiteral("reset"), reset},
-        });
+        };
+        if (scenario.schemaVersion >= 4) {
+            portObject.insert(QStringLiteral("expectedSegments"), expectedRanges);
+        }
+        ports.append(portObject);
     }
 
     QJsonObject scenarioObject{
@@ -746,33 +754,45 @@ bool validatePortRanges(
     const QString& context,
     QString& error)
 {
-    Lane lane;
-    lane.id = port.laneId;
-    lane.name = port.binding.name;
-    lane.kind = port.kind;
-    lane.width = port.binding.width;
-    lane.isSigned = port.binding.isSigned;
-    lane.enumMap = port.enumMap;
-    for (std::size_t index = 0; index < port.segments.size(); ++index) {
-        const auto& range = port.segments[index];
-        if (range.start < 0 || range.end <= range.start || range.end > duration) {
-            error = QStringLiteral("%1.segments[%2] is outside the scenario duration")
-                        .arg(context).arg(index);
-            return false;
+    const auto validateRanges = [&](const std::vector<StimulusRange>& ranges,
+                                    const QString& field) -> std::optional<Lane> {
+        Lane lane;
+        lane.id = port.laneId;
+        lane.name = port.binding.name;
+        lane.kind = port.kind;
+        lane.width = port.binding.width;
+        lane.isSigned = port.binding.isSigned;
+        lane.enumMap = port.enumMap;
+        for (std::size_t index = 0; index < ranges.size(); ++index) {
+            const auto& range = ranges[index];
+            if (range.start < 0 || range.end <= range.start || range.end > duration) {
+                error = QStringLiteral("%1.%2[%3] is outside the scenario duration")
+                            .arg(context, field).arg(index);
+                return std::nullopt;
+            }
+            lane.segments.push_back({
+                "range-" + std::to_string(index), range.start, range.end,
+                range.value, {}});
         }
-        lane.segments.push_back({
-            "range-" + std::to_string(index), range.start, range.end, range.value, {}});
-    }
-    try {
-        normalizeSegments(lane);
-    } catch (const std::exception& exception) {
-        error = QStringLiteral("%1.segments are invalid: %2")
-                    .arg(context, QString::fromUtf8(exception.what()));
-        return false;
-    }
+        try {
+            normalizeSegments(lane);
+        } catch (const std::exception& exception) {
+            error = QStringLiteral("%1.%2 are invalid: %3")
+                        .arg(context, field, QString::fromUtf8(exception.what()));
+            return std::nullopt;
+        }
+        return lane;
+    };
+
+    const auto stimulusLane = validateRanges(
+        port.segments, QStringLiteral("segments"));
+    if (!stimulusLane) return false;
+    const auto expectedLane = validateRanges(
+        port.expectedSegments, QStringLiteral("expectedSegments"));
+    if (!expectedLane) return false;
     if (port.kind != LaneKind::Clock && hasStimulus(port.role)) {
         Tick next = 0;
-        for (const auto& segment : lane.segments) {
+        for (const auto& segment : stimulusLane->segments) {
             if (segment.start != next) {
                 error = QStringLiteral("%1 stimulus segments must cover the duration without gaps")
                             .arg(context);
@@ -788,6 +808,13 @@ bool validatePortRanges(
     }
     if (!hasStimulus(port.role) && !port.segments.empty()) {
         error = QStringLiteral("%1 watch-only port cannot contain stimulus segments")
+                    .arg(context);
+        return false;
+    }
+    if (port.role != StimulusPortRole::Watch
+        && !port.expectedSegments.empty()) {
+        error = QStringLiteral(
+                    "%1 expected waveform is only supported for watch-only ports")
                     .arg(context);
         return false;
     }
@@ -1148,16 +1175,29 @@ StimulusScenarioParseResult parseZeroSlackStimulusScenario(
         std::string roleText;
         std::string kindText;
         std::string radixText;
-        if (!exactKeys(
-                object,
-                {QStringLiteral("laneId"), QStringLiteral("displayOrder"),
-                 QStringLiteral("role"), QStringLiteral("kind"),
-                 QStringLiteral("radix"), QStringLiteral("visible"),
-                 QStringLiteral("groupId"), QStringLiteral("binding"),
-                 QStringLiteral("enumMap"), QStringLiteral("segments"),
-                 QStringLiteral("clock"), QStringLiteral("reset")},
-                context,
-                error)
+        const auto keysValid = scenario.schemaVersion >= 4
+            ? exactKeys(
+                  object,
+                  {QStringLiteral("laneId"), QStringLiteral("displayOrder"),
+                   QStringLiteral("role"), QStringLiteral("kind"),
+                   QStringLiteral("radix"), QStringLiteral("visible"),
+                   QStringLiteral("groupId"), QStringLiteral("binding"),
+                   QStringLiteral("enumMap"), QStringLiteral("segments"),
+                   QStringLiteral("expectedSegments"), QStringLiteral("clock"),
+                   QStringLiteral("reset")},
+                  context,
+                  error)
+            : exactKeys(
+                  object,
+                  {QStringLiteral("laneId"), QStringLiteral("displayOrder"),
+                   QStringLiteral("role"), QStringLiteral("kind"),
+                   QStringLiteral("radix"), QStringLiteral("visible"),
+                   QStringLiteral("groupId"), QStringLiteral("binding"),
+                   QStringLiteral("enumMap"), QStringLiteral("segments"),
+                   QStringLiteral("clock"), QStringLiteral("reset")},
+                  context,
+                  error);
+        if (!keysValid
             || !readString(object, QStringLiteral("laneId"), context, port.laneId, error)
             || !readUnsigned(object, QStringLiteral("displayOrder"), context,
                              displayOrder, error)
@@ -1229,26 +1269,42 @@ StimulusScenarioParseResult parseZeroSlackStimulusScenario(
             return result;
         }
 
-        const auto segments = object.value(QStringLiteral("segments"));
-        if (!segments.isArray()) {
-            result.error = QStringLiteral("%1.segments must be an array").arg(context);
+        const auto parseRanges = [&](const QString& field,
+                                     std::vector<StimulusRange>& destination) {
+            const auto ranges = object.value(field);
+            if (!ranges.isArray()) {
+                result.error = QStringLiteral("%1.%2 must be an array")
+                                   .arg(context, field);
+                return false;
+            }
+            for (qsizetype rangeIndex = 0;
+                 rangeIndex < ranges.toArray().size(); ++rangeIndex) {
+                const auto value = ranges.toArray().at(rangeIndex);
+                if (!value.isObject()) {
+                    result.error = QStringLiteral("%1.%2[%3] must be an object")
+                                       .arg(context, field).arg(rangeIndex);
+                    return false;
+                }
+                StimulusRange range;
+                if (!parseRange(
+                        value.toObject(),
+                        context + QStringLiteral(".%1[%2]")
+                                      .arg(field).arg(rangeIndex),
+                        range,
+                        error)) {
+                    result.error = error;
+                    return false;
+                }
+                destination.push_back(std::move(range));
+            }
+            return true;
+        };
+        if (!parseRanges(QStringLiteral("segments"), port.segments)
+            || (scenario.schemaVersion >= 4
+                && !parseRanges(
+                    QStringLiteral("expectedSegments"),
+                    port.expectedSegments))) {
             return result;
-        }
-        for (qsizetype rangeIndex = 0; rangeIndex < segments.toArray().size(); ++rangeIndex) {
-            const auto value = segments.toArray().at(rangeIndex);
-            if (!value.isObject()) {
-                result.error = QStringLiteral("%1.segments[%2] must be an object")
-                                   .arg(context).arg(rangeIndex);
-                return result;
-            }
-            StimulusRange range;
-            if (!parseRange(value.toObject(),
-                            context + QStringLiteral(".segments[%1]").arg(rangeIndex),
-                            range, error)) {
-                result.error = error;
-                return result;
-            }
-            port.segments.push_back(std::move(range));
         }
 
         const auto clockValue = object.value(QStringLiteral("clock"));
@@ -1534,7 +1590,9 @@ StimulusScenarioExportResult exportZeroSlackStimulusScenario(
         port.groupId = lane.groupId;
         port.enumMap = lane.enumMap;
         for (const auto& segment : lane.segments) {
-            port.segments.push_back({segment.start, segment.end, segment.value});
+            auto& destination = port.role == StimulusPortRole::Watch
+                ? port.expectedSegments : port.segments;
+            destination.push_back({segment.start, segment.end, segment.value});
         }
         if (lane.kind == LaneKind::Clock) {
             const auto* clock = findClock(project, lane.clockDomainId);
@@ -1849,15 +1907,19 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
                 jsonStringValue(std::string(toString(port.reset->synchronization)));
         }
         try {
-            for (std::size_t rangeIndex = 0; rangeIndex < port.segments.size(); ++rangeIndex) {
-                const auto& range = port.segments[rangeIndex];
+            const auto& ranges = port.role == StimulusPortRole::Watch
+                ? port.expectedSegments : port.segments;
+            const auto segmentKind = port.role == StimulusPortRole::Watch
+                ? "zs-expected-segment" : "zs-stimulus-segment";
+            for (std::size_t rangeIndex = 0; rangeIndex < ranges.size(); ++rangeIndex) {
+                const auto& range = ranges[rangeIndex];
                 setSegmentRange(
                     lane,
                     range.start,
                     range.end,
                     range.value,
                     stableDigestId(
-                        "zs-stimulus-segment",
+                        segmentKind,
                         saved.identity,
                         port.binding.name + ":" + std::to_string(rangeIndex)));
             }

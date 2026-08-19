@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,6 +44,7 @@ struct CompareOptions {
     std::map<std::string, CompareRule> laneRules;
     std::optional<Tick> start;
     std::optional<Tick> end;
+    std::set<std::string> includedLaneIds;
     bool relationOnly{false};
     bool compareUndefinedExpected{false};
     std::size_t maximumDifferences{100'000};

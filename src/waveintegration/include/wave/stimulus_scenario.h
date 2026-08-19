@@ -111,12 +111,13 @@ struct StimulusScenarioPort {
     std::string groupId;
     std::map<std::string, std::string> enumMap;
     std::vector<StimulusRange> segments;
+    std::vector<StimulusRange> expectedSegments;
     std::optional<StimulusClockConfiguration> clock;
     std::optional<StimulusResetConfiguration> reset;
 };
 
 struct ZeroSlackStimulusScenario {
-    static constexpr int CurrentSchemaVersion = 3;
+    static constexpr int CurrentSchemaVersion = 4;
     static constexpr int MinimumSupportedSchemaVersion = 1;
 
     int schemaVersion{CurrentSchemaVersion};

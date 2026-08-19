@@ -4,16 +4,16 @@
 
 ## 目标
 
-ZeroSlack Wave Simulation S12.3“struct、array 和 interface 输入编辑”已完成。Module
-Manifest v3 由 Slang 输出结构化 selector，WaveWorkbench 将 packed
-struct、固定 unpacked array 和显式 modport interface 映射为可编辑 leaf group；Stimulus
-Scenario v3 保存并迁移该身份，runner wrapper 重建原始端口并映射稳定 trace 名。
-`wavewidgets` C ABI 继续为 v1；全量 offscreen CTest 为 `91/91`。本机未安装真实
+ZeroSlack Wave Simulation S12.4“Expected/Actual 比较”已完成。Stimulus Scenario v4
+将 watch lane 的期望区间与 DUT stimulus 分离持久化；嵌入式 Simulation Result 可按当前
+实际 trace 比较具有期望区间的输出，显示摘要、差异区间并双向定位期望与实际波形。
+`wavewidgets` C ABI 继续为 v1，并声明 `expected-actual-compare/v1`；全量 offscreen
+CTest 为 `92/92`。本机未安装真实
 Verilator，外部编译/运行只能由确定性 fixture 验证，不表述为真实 RTL 仿真。
 
 交付一个可独立运行的 Qt 6/C++20 波形桌面应用，使用户能够人工定义与直接编辑 FPGA
 预期数字波形；同一场景模型继续支撑 SystemVerilog/SVA/cocotb、文档图、trace 导入及
-Expected/Actual 比较，这些派生与比较能力由独立 CLI 和领域模块提供。
+Expected/Actual 比较。独立 CLI 和嵌入式 Simulation Result 复用同一比较领域模块。
 
 该目标已登记为长期 goal，并在第 1030 轮按用户要求结束为 `complete`；用户随后明确追加的
 第 1031–1040 轮阶段可用版本也已完成。当前工作是 goal 完成后的追加维护收敛，未重新将长期 Goal 改为

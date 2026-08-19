@@ -5,6 +5,23 @@
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
 
+## ZeroSlack Wave Simulation S12.4：Expected/Actual 比较
+
+状态：完成
+
+- Stimulus Scenario v4 为 watch lane 增加独立 `expectedSegments`。期望区间可部分覆盖，
+  不参与 DUT 运行计划；v1/v2/v3 文件继续按原契约读取。
+- Simulation Result 新增 Compare 动作、X 策略、边沿容差、摘要和差异表。比较范围严格
+  限于具有期望区间的 watch lane，不要求其他未映射输出参加比较。
+- 不一致区间同步标注在期望画布和实际波形；选择差异行同时定位期望 lane、实际 signal
+  和对应 tick。场景或结果变化会使旧比较结果立即变为 stale。
+- `wavewidgets` C ABI 继续为 v1，并新增可选能力声明
+  `expected-actual-compare/v1`；ZeroSlack 的真实共享库门禁校验该能力和界面控制。
+- `wave-expected-actual-ui-smoke` 使用确定性 simulator fixture 跑通生成结果、载入 Actual、
+  执行比较与截图，证据位于 `artifacts/ui/wave/s12-expected-actual-compare.png`。
+- 全量 offscreen CTest `92/92` 通过。本机未安装真实 Verilator，外部编译/运行仍由确定性
+  fixture 验证，不表述为真实 RTL 仿真。
+
 ## ZeroSlack Wave Simulation S12.3：struct、array 和 interface 输入编辑
 
 状态：完成

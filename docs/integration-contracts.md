@@ -58,7 +58,7 @@ SystemVerilog：
 激励生成逻辑。ZeroSlack 正式入口仍通过该显式文件契约调用独立 runner，两个进程不共享
 内部数据库或可变对象。
 
-### 保存和恢复 Stimulus Scenario v3
+### 保存和恢复 Stimulus Scenario v4
 
 ```powershell
 wave-bridge export-stimulus module.wave.json stimulus.json `
@@ -75,13 +75,14 @@ wave-bridge import-stimulus module-manifest.json stimulus.json restored.wave.jso
   和原始顺序；
 - stimulus/watch 角色、显示顺序、分组、可见性、radix 和 enum map；
 - bit、bus、enum、reset 的显式连续 Segment；
+- watch lane 的独立 `expectedSegments`；期望区间允许部分覆盖且不会进入 DUT runtime plan；
 - clock 的 period、phase、duty、edge、初始值及显式 override Segment；
 - reset 的 active level、同步属性及由可见 Segment 表达的 assert/deassert 区间。
 - Marker、当前信号、游标位置和可见时间跨度；这些视图信息仍以端口名称和 tick 表达，
   不依赖窗口像素或绝对路径。
 
 tick 使用十进制字符串，避免 JSON number 在跨语言实现中丢失 int64 精度。正式 schema 位于
-`schemas/stimulus/v3/stimulus-scenario.schema.json`；v1/v2 仍可读取和恢复。解析器还执行 schema 难以完整表达的
+`schemas/stimulus/v4/stimulus-scenario.schema.json`；v1/v2/v3 仍可读取和恢复。解析器还执行 schema 难以完整表达的
 约束，包括端口身份唯一、显示顺序唯一、stimulus 全时段覆盖、Segment 不重叠、值符合
 lane 类型，以及内容哈希 identity 校验。
 
@@ -97,6 +98,8 @@ lane 类型，以及内容哈希 identity 校验。
 - 结构化根端口重命名时，leaf selector 与类型身份形成唯一匹配后迁移既有刺激；自动生成的
   group 使用当前 manifest 的新身份，同时保留用户设置的显示顺序和可见性。用户自建 group
   不参与该自动重写。
+- watch lane 的 `expectedSegments` 按同一稳定 binding 迁移，但不会转换为 stimulus；旧版
+  场景没有该字段时恢复为空期望。
 - 保存文件移动到其他目录后内容与 identity 不变，恢复只依赖显式传入的当前 Manifest。
 
 仿真结果窗口把默认场景和命名场景原子保存到调用方提供的场景目录：默认场景固定为

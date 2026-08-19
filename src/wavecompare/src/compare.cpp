@@ -632,6 +632,10 @@ CompareResult compareScenario(
     }
 
     for (const auto& lane : scenario.lanes) {
+        if (!options.includedLaneIds.empty()
+            && !options.includedLaneIds.contains(lane.id)) {
+            continue;
+        }
         if (lane.kind == LaneKind::Group
             || lane.kind == LaneKind::Transaction
             || lane.kind == LaneKind::Event) {

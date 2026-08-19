@@ -97,6 +97,12 @@ public:
         QString summary;
     };
 
+    struct DifferenceRange {
+        std::string laneId;
+        Tick start{0};
+        Tick end{0};
+    };
+
     explicit WaveCanvas(QWidget* parent = nullptr);
 
     void setDocument(Project* project, Scenario* scenario, CommandStack* commandStack);
@@ -242,6 +248,7 @@ public:
     void showLaneRenameError(const QString& message);
     void showDurationEditError(const QString& message);
     void setSignalHeaderWidth(int width);
+    void setDifferenceRanges(std::vector<DifferenceRange> ranges);
 
 public slots:
     void zoomIn();
@@ -1089,6 +1096,7 @@ private:
     QPoint rangeSequenceTokenPressPosition_;
     bool explicitRangeSelection_{false};
     std::vector<LaneLayout> laneLayout_;
+    std::vector<DifferenceRange> differenceRanges_;
     std::set<std::string> collapsedGroupIds_;
     std::vector<Tick> signalEdgeIndex_;
     std::optional<Tick> movableCursorTick_;

@@ -5230,6 +5230,19 @@ void testExpectedActualCompareRules()
     expect(tolerant.matches(), "edge tolerance did not accept bounded edge skew");
     expectEqual(tolerant.toleratedEdgeCount, std::uint64_t{4}, "tolerated edge count is incorrect");
 
+    auto filteredReference = reference;
+    filteredReference.signalMapping.erase("lane-request");
+    wave::CompareOptions filtered;
+    filtered.defaultRule.edgeTolerance = 5'000;
+    filtered.includedLaneIds.insert("lane-data");
+    const auto selectedLaneOnly = wave::compareScenario(
+        project, scenario, trace, filteredReference, filtered);
+    expect(
+        selectedLaneOnly.matches()
+            && selectedLaneOnly.lanes.size() == 1
+            && selectedLaneOnly.lanes.front().laneId == "lane-data",
+        "included-lane filter compared unrelated or unmapped lanes");
+
     auto maskedProject = project;
     auto* data = wave::findLane(maskedProject.scenarios.front(), "lane-data");
     expect(data != nullptr, "data lane is missing");
@@ -6064,7 +6077,8 @@ void testZeroSlackStructuredModuleManifestImport()
             return item.binding.name == "samples_i[1]";
         });
     expect(
-        restored.scenario->schemaVersion == 3
+        restored.scenario->schemaVersion
+                == wave::ZeroSlackStimulusScenario::CurrentSchemaVersion
             && savedLeaf != restored.scenario->ports.cend()
             && savedLeaf->binding.structured
             && savedLeaf->binding.rootPortName == "samples_i"
@@ -6072,7 +6086,7 @@ void testZeroSlackStructuredModuleManifestImport()
             && savedLeaf->binding.selectors.size() == 1
             && savedLeaf->binding.selectors.front().storageIndex == 1
             && savedLeaf->segments.front().value == "0xa",
-        "stimulus v3 did not round-trip a structured edit binding");
+        "current stimulus schema did not round-trip a structured edit binding");
     expect(
         wave::restoreZeroSlackStimulusScenario(
             *parsed.manifest, *restored.scenario).ok(),
@@ -6207,8 +6221,9 @@ void testZeroSlackStimulusScenarioContract()
     auto* request = laneByName("req_i");
     auto* data = laneByName("data_i");
     auto* mode = laneByName("mode_i");
-    expect(clock && reset && request && data && mode,
-           "stimulus fixture is missing editable input lanes");
+    auto* acknowledgement = laneByName("ack_o");
+    expect(clock && reset && request && data && mode && acknowledgement,
+           "stimulus fixture is missing editable input or expected output lanes");
 
     auto* clockDomain = wave::findClock(project, clock->clockDomainId);
     expect(clockDomain != nullptr, "stimulus fixture has no clock domain");
@@ -6232,6 +6247,9 @@ void testZeroSlackStimulusScenarioContract()
     mode->segments.clear();
     wave::setSegmentRange(*mode, 0, 70'000, "MODE_IDLE", "mode-idle");
     wave::setSegmentRange(*mode, 70'000, scenario.duration, "MODE_RUN", "mode-run");
+    acknowledgement->segments.clear();
+    wave::setSegmentRange(
+        *acknowledgement, 35'000, 80'000, "1", "ack-expected-high");
 
     wave::Lane group;
     group.id = "group-inputs";
@@ -6284,6 +6302,7 @@ void testZeroSlackStimulusScenarioContract()
     const auto* savedReset = savedPort("rst_ni");
     const auto* savedData = savedPort("data_i");
     const auto* savedMode = savedPort("mode_i");
+    const auto* savedAcknowledgement = savedPort("ack_o");
     expect(
         savedClock && savedClock->clock
             && savedClock->clock->period == 20'000
@@ -6307,6 +6326,12 @@ void testZeroSlackStimulusScenarioContract()
             && savedMode && savedMode->kind == wave::LaneKind::Enum
             && savedMode->segments.size() == 2,
         "bus/enum stimulus or display metadata was not exported");
+    expect(
+        savedAcknowledgement
+            && savedAcknowledgement->segments.empty()
+            && savedAcknowledgement->expectedSegments.size() == 1
+            && savedAcknowledgement->expectedSegments.front().start == 35'000,
+        "watch-lane expected waveform was lost or exported as DUT stimulus");
 
     QTemporaryDir firstDirectory;
     QTemporaryDir movedDirectory;
@@ -6346,12 +6371,16 @@ void testZeroSlackStimulusScenarioContract()
     };
     const auto* restoredData = restoredLane("data_i");
     const auto* restoredMode = restoredLane("mode_i");
+    const auto* restoredAcknowledgement = restoredLane("ack_o");
     expect(restored.project->clockDomains.size() == 1
                && restored.project->clockDomains.front().period == 20'000
                && restoredData && restoredData->radix == wave::Radix::Binary
                && restoredData->segments.size() == 2
-               && restoredMode && restoredMode->segments.size() == 2,
-           "restored project lost explicit stimulus configuration");
+               && restoredMode && restoredMode->segments.size() == 2
+               && restoredAcknowledgement
+               && restoredAcknowledgement->segments.size() == 1
+               && restoredAcknowledgement->segments.front().start == 35'000,
+           "restored project lost explicit stimulus or expected configuration");
     expect(restoredScenario.markers.size() == 1
                && restored.view.selectedPortName == "data_i"
                && restored.view.cursorTick == 40'000,
@@ -6495,7 +6524,7 @@ void testZeroSlackStimulusScenarioContract()
                 QJsonDocument(unknownRoot).toJson()).ok(),
            "unknown or absolute-path stimulus property was accepted");
     auto futureRoot = QJsonDocument::fromJson(document).object();
-    futureRoot.insert(QStringLiteral("schemaVersion"), 4);
+    futureRoot.insert(QStringLiteral("schemaVersion"), 5);
     expect(!wave::parseZeroSlackStimulusScenario(
                 QJsonDocument(futureRoot).toJson()).ok(),
            "unsupported stimulus schema version was accepted");
