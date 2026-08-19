@@ -42,6 +42,12 @@ Review 区域还提供轻量 trace 检查：指定时刻取值、区间稳定性
 响应窗口。检查定义随 Stimulus Scenario v5 保存并在端口安全迁移时同步重映射；检查结果
 只由当前 Actual TraceIndex 计算，场景或 trace 变化后立即失效，不写回工程或场景文件。
 
+Simulation Result 工具栏的 `Run all (N)` 会按存储顺序串行运行当前模块的全部场景。Batch
+页逐项显示等待、运行、通过、失败或取消状态，以及诊断、模型构建/缓存来源和耗时；单项失败
+不会阻止后续场景，Stop 会取消当前项及剩余队列。每项使用独立结果文件并共享已有构建缓存，
+点击成功行可切换到该场景的 Actual 波形。批量结果是运行期派生状态，场景编辑或单独重跑后
+立即失效，不进入 Stimulus Scenario 或 simulation session schema。
+
 Module Manifest 中的多个语义时钟候选会分别导入为独立 ClockDomain，不再因候选数大于一而
 全部放弃。Simulation Result 工具栏直接显示 `Clocks (N)`，可逐个编辑周期、相位、占空比和
 有效边沿；`Timing` 可在关联时钟网格与 1 tick 异步编辑之间切换。运行计划分别驱动每个时钟，

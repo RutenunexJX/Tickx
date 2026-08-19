@@ -8,6 +8,7 @@
 #include "wave/model.h"
 #include "wave/project_io.h"
 #include "wave/simulation_build_cache.h"
+#include "wave/simulation_batch.h"
 #include "wave/simulation_check.h"
 #include "wave/simulation_pipeline.h"
 #include "wave/simulation_runner.h"
@@ -7219,6 +7220,86 @@ void testSimulationSessionContractAndState()
                && states.actions().runEnabled
                && states.actions().rerunEnabled,
            "failed run did not expose a recoverable failed state");
+}
+
+void testSimulationBatchRunState()
+{
+    wave::SimulationBatchRun batch;
+    expect(!batch.begin({}), "an empty simulation batch was accepted");
+    expectEqual(
+        batch.state(),
+        wave::SimulationBatchState::Idle,
+        "an empty batch changed state");
+
+    std::vector<wave::SimulationBatchScenarioDescriptor> scenarios{
+        {0, "scenario-a", QStringLiteral("Scenario A")},
+        {1, "scenario-b", QStringLiteral("Scenario B")},
+        {2, "scenario-c", QStringLiteral("Scenario C")},
+        {3, "scenario-d", QStringLiteral("Scenario D")},
+    };
+    expect(batch.begin(scenarios), "simulation batch did not start");
+    expect(
+        batch.running() && batch.current()
+            && batch.current()->scenario.scenarioId == "scenario-a",
+        "simulation batch did not expose its first running scenario");
+    expect(!batch.begin(scenarios), "a running simulation batch was restarted");
+
+    wave::SimulationRunReport succeeded;
+    succeeded.status = wave::SimulationRunStatus::Succeeded;
+    succeeded.durationMs = 12;
+    succeeded.buildCache.hit = false;
+    expect(batch.completeCurrent(succeeded), "successful batch item was not accepted");
+    expect(
+        batch.current()
+            && batch.current()->scenario.scenarioId == "scenario-b",
+        "simulation batch did not advance after success");
+
+    wave::SimulationRunReport failed;
+    failed.status = wave::SimulationRunStatus::RunFailed;
+    failed.diagnostic = QStringLiteral("scenario failed");
+    failed.durationMs = 7;
+    expect(batch.completeCurrent(failed), "failed batch item was not accepted");
+    const auto afterFailure = batch.summary();
+    expect(
+        afterFailure.succeeded == 1 && afterFailure.failed == 1
+            && afterFailure.running == 1 && afterFailure.pending == 1,
+        "one scenario failure stopped or corrupted the remaining batch");
+
+    expect(batch.requestCancel(), "batch cancellation was not accepted");
+    expect(!batch.requestCancel(), "duplicate batch cancellation was accepted");
+    wave::SimulationRunReport cancelled;
+    cancelled.status = wave::SimulationRunStatus::Cancelled;
+    expect(batch.completeCurrent(cancelled), "cancelled batch item was not accepted");
+    const auto cancelledSummary = batch.summary();
+    expect(
+        batch.state() == wave::SimulationBatchState::Cancelled
+            && cancelledSummary.succeeded == 1
+            && cancelledSummary.failed == 1
+            && cancelledSummary.cancelled == 2
+            && cancelledSummary.complete(),
+        "batch cancellation did not preserve completed results and cancel pending work");
+    expect(
+        !batch.completeCurrent(cancelled),
+        "a stale completion mutated a terminal batch");
+
+    expect(batch.begin(scenarios), "terminal batch could not be restarted");
+    for (std::size_t index = 0; index < scenarios.size(); ++index) {
+        succeeded.buildCache.hit = index != 0;
+        expect(
+            batch.completeCurrent(succeeded),
+            "batch did not accept a successful scenario");
+    }
+    const auto completedSummary = batch.summary();
+    expect(
+        batch.state() == wave::SimulationBatchState::Completed
+            && completedSummary.succeeded == scenarios.size()
+            && completedSummary.complete(),
+        "all-success simulation batch did not complete");
+    expect(
+        batch.scenarios().front().durationMs == 12
+            && !batch.scenarios().front().buildCacheHit
+            && batch.scenarios().back().buildCacheHit,
+        "batch item reports lost duration or cache provenance");
 }
 
 void testSimulationBuildFingerprintContract()
@@ -20083,6 +20164,7 @@ int main(int argc, char* argv[])
         {"asynchronous process runner", testAsynchronousProcessRunner},
         {"Verilator toolchain probe", testVerilatorToolchainProbe},
         {"simulation session contract and state", testSimulationSessionContractAndState},
+        {"multi-scenario simulation batch state", testSimulationBatchRunState},
         {"simulation build fingerprint contract", testSimulationBuildFingerprintContract},
         {"explicit unresolved module stubs", testExplicitUnresolvedModuleStubs},
         {"fixed fixture simulation pipeline", testFixedFixtureSimulationPipeline},

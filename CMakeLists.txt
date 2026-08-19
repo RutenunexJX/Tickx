@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(WaveWorkbench VERSION 0.9.0 LANGUAGES CXX)
+project(WaveWorkbench VERSION 0.10.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -156,6 +156,7 @@ wave_enable_warnings(waveintegration)
 add_library(wavesim STATIC
     src/wavesim/src/simulation_runner.cpp
     src/wavesim/src/simulation_build_cache.cpp
+    src/wavesim/src/simulation_batch.cpp
     src/wavesim/src/simulation_pipeline.cpp
     src/wavesim/src/simulation_session.cpp
 )

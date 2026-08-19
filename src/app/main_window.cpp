@@ -91,6 +91,43 @@ namespace {
 constexpr int ScenarioLocationMemoryDelayMs = 400;
 constexpr std::size_t DefaultFstVisibleSignals = 32;
 
+QString simulationBatchStateLabel(const SimulationBatchScenarioState state)
+{
+    switch (state) {
+    case SimulationBatchScenarioState::Pending: return QObject::tr("Pending");
+    case SimulationBatchScenarioState::Running: return QObject::tr("Running");
+    case SimulationBatchScenarioState::Succeeded: return QObject::tr("Passed");
+    case SimulationBatchScenarioState::Failed: return QObject::tr("Failed");
+    case SimulationBatchScenarioState::Cancelled: return QObject::tr("Cancelled");
+    }
+    return QObject::tr("Pending");
+}
+
+QString simulationStageDetail(const SimulationRunStage stage)
+{
+    switch (stage) {
+    case SimulationRunStage::ValidateInputs:
+        return QObject::tr("Validating simulation inputs");
+    case SimulationRunStage::ProbeToolchain:
+        return QObject::tr("Checking Verilator and the C++ toolchain");
+    case SimulationRunStage::GenerateHarness:
+        return QObject::tr("Preparing the runtime stimulus");
+    case SimulationRunStage::ResolveBuildCache:
+        return QObject::tr("Checking the compiled model cache");
+    case SimulationRunStage::BuildModel:
+        return QObject::tr("Compiling the simulation model");
+    case SimulationRunStage::RunModel:
+        return QObject::tr("Running the graphical stimulus");
+    case SimulationRunStage::ImportTrace:
+        return QObject::tr("Importing the generated waveform");
+    case SimulationRunStage::MaterializeProject:
+        return QObject::tr("Updating the result workspace");
+    case SimulationRunStage::Completed:
+        return QObject::tr("Simulation completed");
+    }
+    return QObject::tr("Running simulation");
+}
+
 QString defaultWellenReaderPath()
 {
 #ifdef Q_OS_WIN
@@ -1405,11 +1442,53 @@ MainWindow::MainWindow(
             });
         checkLayout->addWidget(simulationCheckTable_, 1);
 
+        auto* simulationBatchPanel = new QWidget(this);
+        simulationBatchPanel->setObjectName(
+            QStringLiteral("SimulationBatchContent"));
+        auto* batchLayout = new QVBoxLayout(simulationBatchPanel);
+        batchLayout->setContentsMargins(0, 0, 0, 0);
+        batchLayout->setSpacing(0);
+        auto* batchBar = new QToolBar(simulationBatchPanel);
+        batchBar->setObjectName(QStringLiteral("SimulationBatchToolbar"));
+        batchBar->setIconSize(QSize(16, 16));
+        simulationBatchSummary_ = new QLabel(
+            tr("Run all stored scenarios to compare their simulation status"),
+            batchBar);
+        simulationBatchSummary_->setObjectName(
+            QStringLiteral("SimulationBatchSummary"));
+        simulationBatchSummary_->setContentsMargins(8, 0, 8, 0);
+        batchBar->addWidget(simulationBatchSummary_);
+        batchLayout->addWidget(batchBar);
+
+        simulationBatchTable_ = new QTableWidget(simulationBatchPanel);
+        simulationBatchTable_->setObjectName(
+            QStringLiteral("SimulationBatchResultTable"));
+        simulationBatchTable_->setColumnCount(5);
+        simulationBatchTable_->setHorizontalHeaderLabels({
+            tr("Status"), tr("Scenario"), tr("Result"), tr("Model"),
+            tr("Duration")});
+        simulationBatchTable_->horizontalHeader()->setSectionResizeMode(
+            2, QHeaderView::Stretch);
+        simulationBatchTable_->setSelectionBehavior(
+            QAbstractItemView::SelectRows);
+        simulationBatchTable_->setSelectionMode(
+            QAbstractItemView::SingleSelection);
+        simulationBatchTable_->setEditTriggers(
+            QAbstractItemView::NoEditTriggers);
+        connect(
+            simulationBatchTable_, &QTableWidget::cellClicked,
+            this, &MainWindow::revealSimulationBatchResult);
+        connect(
+            simulationBatchTable_, &QTableWidget::cellDoubleClicked,
+            this, &MainWindow::revealSimulationBatchResult);
+        batchLayout->addWidget(simulationBatchTable_, 1);
+
         simulationReviewTabs_ = new QTabWidget(this);
         simulationReviewTabs_->setObjectName(
             QStringLiteral("SimulationReviewTabs"));
         simulationReviewTabs_->addTab(comparePanel_, tr("Expected / Actual"));
         simulationReviewTabs_->addTab(simulationCheckPanel_, tr("Checks"));
+        simulationReviewTabs_->addTab(simulationBatchPanel, tr("Batch"));
 
         simulationResultSplitter_->addWidget(section(
             tr("Stimulus / Expected"),
@@ -1588,6 +1667,16 @@ MainWindow::MainWindow(
             this,
             &MainWindow::runSimulation);
         runSimulationAction_->setObjectName(QStringLiteral("RunSimulationAction"));
+        runAllSimulationScenariosAction_ = resultToolbar->addAction(
+            themedIcon(
+                QStringLiteral("media-playlist-repeat"),
+                style(),
+                QStyle::SP_MediaPlay),
+            tr("Run all"),
+            this,
+            &MainWindow::runAllSimulationScenarios);
+        runAllSimulationScenariosAction_->setObjectName(
+            QStringLiteral("RunAllSimulationScenariosAction"));
         stopSimulationAction_ = resultToolbar->addAction(
             themedIcon(
                 QStringLiteral("media-playback-stop"),
@@ -1697,6 +1786,7 @@ MainWindow::MainWindow(
         resultToolbar->addWidget(simulationStateLabel_);
         updateSimulationStubButton();
         updateSimulationClockButton();
+        updateSimulationBatchView();
         updateSimulationControls(simulationSessionError_);
     }
     rememberActiveScenario();
@@ -2111,9 +2201,12 @@ void MainWindow::deleteSimulationScenario()
 void MainWindow::updateSimulationScenarioActions()
 {
     const auto* scenario = activeScenario();
+    const auto state = simulationStateMachine_.state();
+    const auto editable = state != SimulationSessionState::Compiling
+        && state != SimulationSessionState::Running;
     const auto available = simulationResultMode_
         && !simulationScenarioDirectory_.isEmpty()
-        && scenario;
+        && scenario && editable;
     if (createSimulationScenarioAction_) {
         createSimulationScenarioAction_->setEnabled(available);
     }
@@ -2128,6 +2221,11 @@ void MainWindow::updateSimulationScenarioActions()
     }
     updateSimulationClockButton();
     updateSimulationStubButton();
+    if (runAllSimulationScenariosAction_) {
+        runAllSimulationScenariosAction_->setText(
+            tr("Run all (%1)")
+                .arg(static_cast<qulonglong>(project_.scenarios.size())));
+    }
 }
 
 void MainWindow::updateSimulationClockButton()
@@ -2340,6 +2438,18 @@ void MainWindow::updateSimulationControls(const QString& detail)
             actions.runEnabled ? tr("Run the current graphical stimulus")
                                : simulationSessionError_);
     }
+    if (runAllSimulationScenariosAction_) {
+        const auto batchEnabled = actions.runEnabled || actions.rerunEnabled;
+        runAllSimulationScenariosAction_->setEnabled(
+            batchEnabled && !project_.scenarios.empty());
+        runAllSimulationScenariosAction_->setText(
+            tr("Run all (%1)")
+                .arg(static_cast<qulonglong>(project_.scenarios.size())));
+        runAllSimulationScenariosAction_->setToolTip(
+            batchEnabled
+                ? tr("Run every stored scenario sequentially")
+                : simulationSessionError_);
+    }
     if (stopSimulationAction_) {
         stopSimulationAction_->setEnabled(
             actions.stopEnabled && !simulationStopRequested_);
@@ -2385,6 +2495,7 @@ void MainWindow::updateSimulationControls(const QString& detail)
             && state != SimulationSessionState::Compiling
             && state != SimulationSessionState::Running);
     }
+    updateSimulationScenarioActions();
     if (previous != key) emit simulationSessionStateChanged(key);
 }
 
@@ -2401,9 +2512,23 @@ bool MainWindow::exportSimulationStimulus(QString& error)
         error = tr("No active graphical stimulus scenario");
         return false;
     }
-    const auto view = activeSimulationViewState();
+    return exportSimulationStimulus(
+        *scenario, activeSimulationViewState(), error);
+}
+
+bool MainWindow::exportSimulationStimulus(
+    const Scenario& scenario,
+    const StimulusScenarioViewState& view,
+    QString& error)
+{
+    if (!simulationRequest_) {
+        error = simulationSessionError_.isEmpty()
+            ? tr("Simulation session is unavailable")
+            : simulationSessionError_;
+        return false;
+    }
     const auto exported = exportZeroSlackStimulusScenario(
-        project_, *scenario, view);
+        project_, scenario, view);
     if (!exported.ok()) {
         error = exported.error.isEmpty()
             ? tr("The graphical stimulus could not be exported")
@@ -2432,12 +2557,12 @@ bool MainWindow::exportSimulationStimulus(QString& error)
         const auto saved = saveSimulationScenario(
             simulationScenarioDirectory_,
             *exported.scenario,
-            scenario->id == defaultSimulationScenarioId_);
+            scenario.id == defaultSimulationScenarioId_);
         if (!saved.ok()) {
             error = saved.error;
             return false;
         }
-        simulationScenarioViews_[scenario->id] = view;
+        simulationScenarioViews_[scenario.id] = view;
     }
     return true;
 }
@@ -2446,7 +2571,11 @@ void MainWindow::runSimulation()
 {
     if (!simulationResultMode_ || !simulationRequest_ || !simulationRunner_)
         return;
+    if (simulationBatchRun_.running()) return;
     if (!commitPendingEdits()) return;
+    simulationBatchRun_.reset();
+    simulationBatchReports_.clear();
+    updateSimulationBatchView();
 
     if (!projectFile_.isEmpty()) {
         simulationRequest_->resultProjectPath =
@@ -2487,36 +2616,7 @@ void MainWindow::runSimulation()
                 return;
             }
             simulationStateMachine_.observeStage(stage);
-            QString detail;
-            switch (stage) {
-            case SimulationRunStage::ValidateInputs:
-                detail = tr("Validating simulation inputs");
-                break;
-            case SimulationRunStage::ProbeToolchain:
-                detail = tr("Checking Verilator and the C++ toolchain");
-                break;
-            case SimulationRunStage::GenerateHarness:
-                detail = tr("Preparing the runtime stimulus");
-                break;
-            case SimulationRunStage::ResolveBuildCache:
-                detail = tr("Checking the compiled model cache");
-                break;
-            case SimulationRunStage::BuildModel:
-                detail = tr("Compiling the simulation model");
-                break;
-            case SimulationRunStage::RunModel:
-                detail = tr("Running the graphical stimulus");
-                break;
-            case SimulationRunStage::ImportTrace:
-                detail = tr("Importing the generated waveform");
-                break;
-            case SimulationRunStage::MaterializeProject:
-                detail = tr("Updating the result workspace");
-                break;
-            case SimulationRunStage::Completed:
-                detail = tr("Simulation completed");
-                break;
-            }
+            const auto detail = simulationStageDetail(stage);
             updateSimulationControls(detail);
             statusBar()->showMessage(detail);
         });
@@ -2525,6 +2625,379 @@ void MainWindow::runSimulation()
         updateSimulationControls(tr("Simulation runner is already active"));
         statusBar()->showMessage(tr("Simulation could not be started"), 10'000);
     }
+}
+
+void MainWindow::runAllSimulationScenarios()
+{
+    if (!simulationResultMode_ || !simulationRequest_ || !simulationRunner_
+        || project_.scenarios.empty() || simulationBatchRun_.running()) {
+        return;
+    }
+    if (!commitPendingEdits()) return;
+
+    if (!projectFile_.isEmpty()) {
+        simulationRequest_->resultProjectPath =
+            QFileInfo(projectFile_).absoluteFilePath();
+    }
+    attachSimulationSession(project_, *simulationRequest_);
+
+    QString error;
+    if (!persistActiveSimulationScenario(&error)) {
+        simulationStateMachine_.markFailed();
+        updateSimulationControls(error);
+        statusBar()->showMessage(error, 10'000);
+        return;
+    }
+
+    std::vector<SimulationBatchScenarioDescriptor> scenarios;
+    scenarios.reserve(project_.scenarios.size());
+    for (std::size_t index = 0; index < project_.scenarios.size(); ++index) {
+        const auto& scenario = project_.scenarios.at(index);
+        scenarios.push_back({
+            index,
+            scenario.id,
+            scenario.name.empty()
+                ? tr("Scenario %1").arg(static_cast<qulonglong>(index + 1))
+                : QString::fromStdString(scenario.name),
+        });
+    }
+
+    simulationBatchGeneration_ = nextSimulationGeneration();
+    simulationBatchResultDirectory_ = QDir(simulationRequest_->artifactDirectory)
+        .filePath(
+            QStringLiteral("batch-%1")
+                .arg(simulationBatchGeneration_));
+    if (!QDir().mkpath(simulationBatchResultDirectory_)) {
+        error = tr("Cannot create the batch result directory: %1")
+                    .arg(simulationBatchResultDirectory_);
+        simulationStateMachine_.markFailed();
+        updateSimulationControls(error);
+        statusBar()->showMessage(error, 10'000);
+        return;
+    }
+    if (!simulationBatchRun_.begin(std::move(scenarios))
+        || !simulationStateMachine_.beginRun()) {
+        simulationBatchRun_.reset();
+        updateSimulationControls(tr("The simulation batch could not be started"));
+        return;
+    }
+
+    simulationBatchReports_.clear();
+    simulationBatchReturnScenarioIndex_ = activeScenarioIndex_;
+    simulationStopRequested_ = false;
+    invalidateCompareResult();
+    if (simulationReviewTabs_) simulationReviewTabs_->setCurrentIndex(2);
+    updateSimulationBatchView();
+    updateSimulationControls(tr("Preparing all stored scenarios"));
+    statusBar()->showMessage(
+        tr("Running %1 simulation scenarios")
+            .arg(static_cast<qulonglong>(project_.scenarios.size())));
+    startNextSimulationBatchScenario();
+}
+
+void MainWindow::startNextSimulationBatchScenario()
+{
+    const auto* item = simulationBatchRun_.current();
+    if (!item || !simulationRequest_ || !simulationRunner_) {
+        finishSimulationBatch();
+        return;
+    }
+    const auto scenarioIndex = item->scenario.scenarioIndex;
+    if (scenarioIndex >= project_.scenarios.size()) {
+        SimulationRunReport report;
+        report.status = SimulationRunStatus::InvalidStimulus;
+        report.diagnostic = tr("A queued scenario no longer exists");
+        finishSimulationBatchScenario(
+            scenarioIndex, simulationBatchGeneration_, std::move(report));
+        return;
+    }
+
+    const auto& scenario = project_.scenarios.at(scenarioIndex);
+    const auto viewIterator = simulationScenarioViews_.find(scenario.id);
+    const auto view = viewIterator == simulationScenarioViews_.end()
+        ? StimulusScenarioViewState{}
+        : viewIterator->second;
+    QString error;
+    if (!exportSimulationStimulus(scenario, view, error)) {
+        SimulationRunReport report;
+        report.status = SimulationRunStatus::InvalidStimulus;
+        report.diagnostic = error;
+        finishSimulationBatchScenario(
+            scenarioIndex, simulationBatchGeneration_, std::move(report));
+        return;
+    }
+
+    auto request = *simulationRequest_;
+    const auto generation = nextSimulationGeneration();
+    simulationGeneration_ = generation;
+    request.generation = generation;
+    request.resultProjectPath = QDir(simulationBatchResultDirectory_)
+        .filePath(
+            QStringLiteral("scenario-%1.wave.json")
+                .arg(static_cast<qulonglong>(scenarioIndex + 1)));
+    const auto batchGeneration = simulationBatchGeneration_;
+    updateSimulationBatchView();
+    const auto preparing = tr("Scenario %1/%2: %3")
+        .arg(static_cast<qulonglong>(scenarioIndex + 1))
+        .arg(static_cast<qulonglong>(project_.scenarios.size()))
+        .arg(item->scenario.scenarioName);
+    updateSimulationControls(preparing);
+    statusBar()->showMessage(preparing);
+
+    const auto started = simulationRunner_->start(
+        std::move(request),
+        [this, scenarioIndex, batchGeneration, generation](
+            SimulationRunReport report) {
+            if (batchGeneration != simulationBatchGeneration_
+                || generation != simulationGeneration_) {
+                return;
+            }
+            finishSimulationBatchScenario(
+                scenarioIndex, batchGeneration, std::move(report));
+        },
+        [this, scenarioIndex, batchGeneration, generation](
+            const quint64 reportedGeneration,
+            const SimulationRunStage stage) {
+            if (batchGeneration != simulationBatchGeneration_
+                || reportedGeneration != generation
+                || generation != simulationGeneration_) {
+                return;
+            }
+            simulationStateMachine_.observeStage(stage);
+            const auto detail = tr("Scenario %1/%2: %3")
+                .arg(static_cast<qulonglong>(scenarioIndex + 1))
+                .arg(static_cast<qulonglong>(project_.scenarios.size()))
+                .arg(simulationStageDetail(stage));
+            updateSimulationControls(detail);
+            statusBar()->showMessage(detail);
+        });
+    if (!started) {
+        SimulationRunReport report;
+        report.generation = generation;
+        report.status = SimulationRunStatus::RunFailed;
+        report.diagnostic = tr("Simulation runner is already active");
+        finishSimulationBatchScenario(
+            scenarioIndex, batchGeneration, std::move(report));
+    }
+}
+
+void MainWindow::finishSimulationBatchScenario(
+    const std::size_t scenarioIndex,
+    const quint64 batchGeneration,
+    SimulationRunReport report)
+{
+    if (batchGeneration != simulationBatchGeneration_) return;
+    const auto* current = simulationBatchRun_.current();
+    if (!current || current->scenario.scenarioIndex != scenarioIndex) return;
+
+    const auto succeeded = report.ok();
+    if (!simulationBatchRun_.completeCurrent(report)) return;
+    if (succeeded) {
+        simulationBatchReports_.insert_or_assign(
+            scenarioIndex, std::move(report));
+    }
+    updateSimulationBatchView();
+    if (simulationBatchRun_.running()) {
+        QTimer::singleShot(
+            0, this, &MainWindow::startNextSimulationBatchScenario);
+        return;
+    }
+    finishSimulationBatch();
+}
+
+void MainWindow::finishSimulationBatch()
+{
+    if (simulationBatchRun_.running()) return;
+    simulationStopRequested_ = false;
+    const auto summary = simulationBatchRun_.summary();
+    const auto terminalStatus = simulationBatchRun_.state()
+            == SimulationBatchState::Cancelled
+        ? SimulationRunStatus::Cancelled
+        : summary.failed > 0 ? SimulationRunStatus::RunFailed
+                             : SimulationRunStatus::Succeeded;
+    simulationStateMachine_.finish(terminalStatus);
+
+    std::optional<std::size_t> resultIndex;
+    if (simulationBatchReturnScenarioIndex_
+        && simulationBatchReports_.contains(
+            *simulationBatchReturnScenarioIndex_)) {
+        resultIndex = *simulationBatchReturnScenarioIndex_;
+    } else if (!simulationBatchReports_.empty()) {
+        resultIndex = simulationBatchReports_.begin()->first;
+    }
+    QString resultError;
+    const auto resultShown = resultIndex
+        && showSimulationBatchResult(*resultIndex, resultError);
+    if (resultShown) {
+        simulationStateMachine_.markCurrent();
+    } else {
+        traceIndex_.reset();
+        activeTraceId_.clear();
+        traceVisibleSignalIds_.clear();
+        traceVisibilityCustomized_ = false;
+        project_.importedTraces.clear();
+        refreshTraceViews();
+        compareTraceCanvas_->hide();
+        invalidateCompareResult();
+        simulationStateMachine_.markFailed();
+    }
+
+    auto message = tr("Batch complete: %1 passed, %2 failed, %3 cancelled")
+        .arg(static_cast<qulonglong>(summary.succeeded))
+        .arg(static_cast<qulonglong>(summary.failed))
+        .arg(static_cast<qulonglong>(summary.cancelled));
+    if (!resultError.isEmpty()) message.append(tr(" · %1").arg(resultError));
+    updateSimulationBatchView();
+    updateSimulationControls(message);
+    statusBar()->showMessage(message, 10'000);
+    emit simulationBatchFinished(
+        static_cast<int>(summary.succeeded),
+        static_cast<int>(summary.failed),
+        static_cast<int>(summary.cancelled));
+}
+
+void MainWindow::updateSimulationBatchView()
+{
+    if (!simulationBatchTable_ || !simulationBatchSummary_) return;
+    const auto& scenarios = simulationBatchRun_.scenarios();
+    simulationBatchTable_->setRowCount(static_cast<int>(scenarios.size()));
+    for (std::size_t index = 0; index < scenarios.size(); ++index) {
+        const auto& result = scenarios.at(index);
+        const auto row = static_cast<int>(index);
+        auto* status = new QTableWidgetItem(
+            simulationBatchStateLabel(result.state));
+        status->setData(
+            Qt::UserRole,
+            QVariant::fromValue<qulonglong>(
+                static_cast<qulonglong>(result.scenario.scenarioIndex)));
+        switch (result.state) {
+        case SimulationBatchScenarioState::Succeeded:
+            status->setForeground(QColor(QStringLiteral("#126442")));
+            break;
+        case SimulationBatchScenarioState::Failed:
+            status->setForeground(QColor(QStringLiteral("#a52222")));
+            break;
+        case SimulationBatchScenarioState::Running:
+            status->setForeground(QColor(QStringLiteral("#1659a7")));
+            break;
+        case SimulationBatchScenarioState::Cancelled:
+            status->setForeground(QColor(QStringLiteral("#815400")));
+            break;
+        case SimulationBatchScenarioState::Pending:
+            break;
+        }
+        simulationBatchTable_->setItem(row, 0, status);
+        simulationBatchTable_->setItem(
+            row, 1, new QTableWidgetItem(result.scenario.scenarioName));
+        const auto resultText = result.state
+                == SimulationBatchScenarioState::Succeeded
+            ? tr("Waveform available")
+            : result.diagnostic;
+        auto* resultItem = new QTableWidgetItem(resultText);
+        resultItem->setToolTip(resultText);
+        simulationBatchTable_->setItem(row, 2, resultItem);
+        const auto modelText = result.state
+                == SimulationBatchScenarioState::Succeeded
+            ? result.buildCacheHit ? tr("Cached") : tr("Built")
+            : QString{};
+        simulationBatchTable_->setItem(
+            row, 3, new QTableWidgetItem(modelText));
+        const auto durationText = result.durationMs > 0
+            ? tr("%1 ms").arg(result.durationMs)
+            : QString{};
+        simulationBatchTable_->setItem(
+            row, 4, new QTableWidgetItem(durationText));
+    }
+
+    const auto summary = simulationBatchRun_.summary();
+    if (summary.total == 0) {
+        simulationBatchSummary_->setText(
+            tr("Run all stored scenarios to compare their simulation status"));
+        return;
+    }
+    simulationBatchSummary_->setText(
+        tr("%1/%2 complete · %3 passed · %4 failed · %5 cancelled")
+            .arg(static_cast<qulonglong>(
+                summary.succeeded + summary.failed + summary.cancelled))
+            .arg(static_cast<qulonglong>(summary.total))
+            .arg(static_cast<qulonglong>(summary.succeeded))
+            .arg(static_cast<qulonglong>(summary.failed))
+            .arg(static_cast<qulonglong>(summary.cancelled)));
+}
+
+bool MainWindow::showSimulationBatchResult(
+    const std::size_t scenarioIndex,
+    QString& error)
+{
+    const auto report = simulationBatchReports_.find(scenarioIndex);
+    if (report == simulationBatchReports_.end()) {
+        error = tr("This scenario has no successful waveform result");
+        return false;
+    }
+    if (!switchActiveScenario(scenarioIndex, false)) {
+        error = tr("The scenario could not be activated");
+        return false;
+    }
+    auto selectedReport = report->second;
+    invalidateCompareResult();
+    if (!applySimulationResult(selectedReport, error)) return false;
+    populateSimulationCheckTable();
+    return true;
+}
+
+void MainWindow::revealSimulationBatchResult(const int row, const int)
+{
+    if (!simulationBatchTable_ || row < 0
+        || row >= simulationBatchTable_->rowCount()) {
+        return;
+    }
+    const auto* statusItem = simulationBatchTable_->item(row, 0);
+    if (!statusItem) return;
+    const auto scenarioIndex = static_cast<std::size_t>(
+        statusItem->data(Qt::UserRole).toULongLong());
+    const auto& scenarios = simulationBatchRun_.scenarios();
+    const auto result = std::find_if(
+        scenarios.begin(), scenarios.end(),
+        [scenarioIndex](const SimulationBatchScenarioResult& candidate) {
+            return candidate.scenario.scenarioIndex == scenarioIndex;
+        });
+    if (result == scenarios.end()
+        || result->state == SimulationBatchScenarioState::Pending
+        || result->state == SimulationBatchScenarioState::Running) {
+        return;
+    }
+
+    if (result->state == SimulationBatchScenarioState::Succeeded) {
+        QString error;
+        if (!showSimulationBatchResult(scenarioIndex, error)) {
+            simulationStateMachine_.markFailed();
+            updateSimulationControls(error);
+            statusBar()->showMessage(error, 10'000);
+            return;
+        }
+        simulationStateMachine_.markCurrent();
+        const auto message = tr("Showing batch result: %1")
+            .arg(result->scenario.scenarioName);
+        updateSimulationControls(message);
+        statusBar()->showMessage(message, 5'000);
+        return;
+    }
+
+    static_cast<void>(switchActiveScenario(scenarioIndex, false));
+    traceIndex_.reset();
+    activeTraceId_.clear();
+    traceVisibleSignalIds_.clear();
+    traceVisibilityCustomized_ = false;
+    project_.importedTraces.clear();
+    refreshTraceViews();
+    compareTraceCanvas_->hide();
+    invalidateCompareResult();
+    simulationStateMachine_.markFailed();
+    const auto message = result->diagnostic.isEmpty()
+        ? tr("This scenario did not produce a waveform")
+        : result->diagnostic;
+    updateSimulationControls(message);
+    statusBar()->showMessage(message, 10'000);
 }
 
 void MainWindow::rerunSimulation()
@@ -2537,6 +3010,10 @@ void MainWindow::stopSimulation()
     if (!simulationRunner_ || !simulationRunner_->running()
         || simulationStopRequested_) {
         return;
+    }
+    if (simulationBatchRun_.running()) {
+        static_cast<void>(simulationBatchRun_.requestCancel());
+        updateSimulationBatchView();
     }
     simulationStopRequested_ = simulationRunner_->cancel();
     updateSimulationControls(
@@ -2794,14 +3271,15 @@ bool MainWindow::applySimulationResult(
         return false;
     }
 
-    project_.importedTraces = loaded.project->importedTraces;
-    const auto session = loaded.project->extensions.find(
-        SimulationSessionExtension);
-    if (session != loaded.project->extensions.end()) {
-        project_.extensions[SimulationSessionExtension] = session->second;
-    } else {
-        attachSimulationSession(project_, *simulationRequest_);
-    }
+    auto traceReference = loaded.project->importedTraces.front();
+    const auto storedTrace = QString::fromStdString(traceReference.path);
+    const auto absoluteTrace = QFileInfo(storedTrace).isAbsolute()
+        ? QFileInfo(storedTrace).absoluteFilePath()
+        : QFileInfo(resultPath).absoluteDir().absoluteFilePath(storedTrace);
+    traceReference.path = storedTracePath(absoluteTrace).toStdString();
+    project_.importedTraces.clear();
+    project_.importedTraces.push_back(std::move(traceReference));
+    attachSimulationSession(project_, *simulationRequest_);
 
     const auto preferredSignals = traceVisibilityCustomized_
         ? std::optional{traceVisibleSignalIds_}
@@ -3849,6 +4327,12 @@ void MainWindow::markEdited()
 {
     invalidateCompareResult();
     if (simulationResultMode_) {
+        if (!simulationBatchRun_.running()
+            && simulationBatchRun_.state() != SimulationBatchState::Idle) {
+            simulationBatchRun_.reset();
+            simulationBatchReports_.clear();
+            updateSimulationBatchView();
+        }
         simulationStateMachine_.markStimulusEdited();
         updateSimulationControls();
     }

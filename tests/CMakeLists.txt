@@ -85,6 +85,20 @@ target_compile_definitions(wave-stub-selection-ui-smoke
     PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 wave_enable_warnings(wave-stub-selection-ui-smoke)
 
+add_executable(wave-multi-scenario-batch-ui-smoke
+    multi_scenario_batch_ui_smoke.cpp
+)
+target_link_libraries(wave-multi-scenario-batch-ui-smoke
+    PRIVATE wavewidgets wavesim waveintegration waveproject wavecore
+            Qt6::Core Qt6::Gui Qt6::Widgets)
+target_compile_definitions(wave-multi-scenario-batch-ui-smoke
+    PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_dependencies(wave-multi-scenario-batch-ui-smoke
+    wave-toolchain-fixture-ready
+    wave-verilator-fixture
+    wave-simulator-fixture)
+wave_enable_warnings(wave-multi-scenario-batch-ui-smoke)
+
 if(WAVEWORKBENCH_ENABLE_WELLEN)
     add_executable(wave-fst-on-demand-ui-smoke
         fst_on_demand_ui_smoke.cpp
@@ -135,6 +149,11 @@ add_test(
     NAME wave-stub-selection-ui-smoke
     COMMAND wave-stub-selection-ui-smoke
             "${CMAKE_BINARY_DIR}/stub-selection-ui-smoke.png"
+)
+add_test(
+    NAME wave-multi-scenario-batch-ui-smoke
+    COMMAND wave-multi-scenario-batch-ui-smoke
+            "${CMAKE_BINARY_DIR}/multi-scenario-batch-ui-smoke.png"
 )
 add_test(NAME wave-timeline-viewport-test COMMAND wave-timeline-viewport-test)
 add_test(NAME wavewidgets-abi-test COMMAND wavewidgets-abi-test)
@@ -945,6 +964,7 @@ set(_wave_fixed_fixture_tests
     wave-expected-actual-ui-smoke
     wave-structured-input-ui-smoke
     wave-stub-selection-ui-smoke)
+list(APPEND _wave_fixed_fixture_tests wave-multi-scenario-batch-ui-smoke)
 if(TEST wave-fixed-fixture-real-verilator)
     list(APPEND _wave_fixed_fixture_tests wave-fixed-fixture-real-verilator)
 endif()
@@ -954,6 +974,9 @@ set_tests_properties(${_wave_fixed_fixture_tests} PROPERTIES
     ENVIRONMENT "${_wave_test_environment}"
     TIMEOUT 180
 )
+set_property(TEST wave-multi-scenario-batch-ui-smoke APPEND PROPERTY ENVIRONMENT
+    "WAVEWORKBENCH_RECOVERY_DIR=${CMAKE_BINARY_DIR}/test-recovery/wave-multi-scenario-batch-ui-smoke"
+    "WAVEWORKBENCH_SETTINGS_DIR=${CMAKE_BINARY_DIR}/test-settings/wave-multi-scenario-batch-ui-smoke")
 if(WIN32)
     set_tests_properties(
         wave-cli-powershell-stdin-smoke

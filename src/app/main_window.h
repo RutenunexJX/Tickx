@@ -8,6 +8,7 @@
 #include "wave/model.h"
 #include "wave/module_manifest.h"
 #include "wave/simulation_session.h"
+#include "wave/simulation_batch.h"
 #include "wave/simulation_check.h"
 #include "wave/stimulus_scenario.h"
 #include "wave/trace.h"
@@ -78,6 +79,7 @@ public:
 signals:
     void initialTraceReferenceLoaded(bool success, const QString& message);
     void simulationSessionStateChanged(const QString& state);
+    void simulationBatchFinished(int succeeded, int failed, int cancelled);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -119,6 +121,7 @@ private slots:
     void finishTraceImport();
     void finishFstSignalLoad();
     void runSimulation();
+    void runAllSimulationScenarios();
     void rerunSimulation();
     void stopSimulation();
     void runCompare();
@@ -130,6 +133,7 @@ private slots:
     void editSelectedSimulationCheck();
     void removeSelectedSimulationCheck();
     void runSimulationChecks();
+    void revealSimulationBatchResult(int row, int column);
     void revealSimulationCheckOutcome(int row, int column);
     void exportPinloomEntry();
     void startAutosave();
@@ -275,11 +279,25 @@ private:
     void renameSimulationScenario();
     void deleteSimulationScenario();
     void updateSimulationScenarioActions();
+    void updateSimulationBatchView();
     void updateSimulationClockButton();
     void updateSimulationStubButton();
     void editClockById(const std::string& clockId);
     void updateSimulationControls(const QString& detail = {});
     [[nodiscard]] bool exportSimulationStimulus(QString& error);
+    [[nodiscard]] bool exportSimulationStimulus(
+        const Scenario& scenario,
+        const StimulusScenarioViewState& view,
+        QString& error);
+    void startNextSimulationBatchScenario();
+    void finishSimulationBatchScenario(
+        std::size_t scenarioIndex,
+        quint64 batchGeneration,
+        SimulationRunReport report);
+    void finishSimulationBatch();
+    [[nodiscard]] bool showSimulationBatchResult(
+        std::size_t scenarioIndex,
+        QString& error);
     void finishSimulationRun(SimulationRunReport report);
     [[nodiscard]] bool applySimulationResult(
         SimulationRunReport& report,
@@ -391,6 +409,7 @@ private:
     QAction* importTraceAction_{nullptr};
     QAction* cancelTraceAction_{nullptr};
     QAction* runSimulationAction_{nullptr};
+    QAction* runAllSimulationScenariosAction_{nullptr};
     QAction* stopSimulationAction_{nullptr};
     QAction* rerunSimulationAction_{nullptr};
     QAction* runSimulationCompareAction_{nullptr};
@@ -398,6 +417,8 @@ private:
     QAction* createSimulationScenarioAction_{nullptr};
     QAction* renameSimulationScenarioAction_{nullptr};
     QAction* deleteSimulationScenarioAction_{nullptr};
+    QLabel* simulationBatchSummary_{nullptr};
+    QTableWidget* simulationBatchTable_{nullptr};
     QToolButton* simulationStubButton_{nullptr};
     QToolButton* simulationClockButton_{nullptr};
     QAction* compareModeAction_{nullptr};
@@ -444,6 +465,7 @@ private:
     std::optional<SimulationRunRequest> simulationRequest_;
     std::optional<ZeroSlackModuleManifest> simulationManifest_;
     SimulationSessionStateMachine simulationStateMachine_;
+    SimulationBatchRun simulationBatchRun_;
     std::unique_ptr<VerilatorSimulationRunner> simulationRunner_;
     QString simulationSessionError_;
     QString simulationStateDetail_;
@@ -451,6 +473,10 @@ private:
     std::string defaultSimulationScenarioId_;
     std::map<std::string, StimulusScenarioViewState> simulationScenarioViews_;
     quint64 simulationGeneration_{0};
+    quint64 simulationBatchGeneration_{0};
+    std::map<std::size_t, SimulationRunReport> simulationBatchReports_;
+    std::optional<std::size_t> simulationBatchReturnScenarioIndex_;
+    QString simulationBatchResultDirectory_;
     bool simulationStopRequested_{false};
     QString pendingRevealLaneId_;
     std::optional<Tick> pendingRevealTick_;

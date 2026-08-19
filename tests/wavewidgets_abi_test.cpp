@@ -83,6 +83,11 @@ int main(int argc, char** argv)
                   .contains(QStringLiteral(
                       "explicit-unresolved-module-stubs/v1")),
               "embedded workspace advertises explicit unresolved-module stubs");
+        check(workspace->property("wavewidgets.capabilities")
+                  .toStringList()
+                  .contains(QStringLiteral(
+                      "multi-scenario-batch-run/v1")),
+              "embedded workspace advertises multi-scenario batch runs");
 #if defined(WAVE_WELLEN_READER)
         check(QFileInfo(QStringLiteral(WAVE_WELLEN_READER)).isFile()
                   && workspace->property("wavewidgets.capabilities")
@@ -112,6 +117,10 @@ int main(int argc, char** argv)
                       QStringLiteral("RunSimulationChecksAction"))
                   && workspace->findChild<QTableWidget*>(
                       QStringLiteral("SimulationCheckResultTable"))
+                  && workspace->findChild<QAction*>(
+                      QStringLiteral("RunAllSimulationScenariosAction"))
+                  && workspace->findChild<QTableWidget*>(
+                      QStringLiteral("SimulationBatchResultTable"))
                   && workspace->findChild<QWidget*>(
                       QStringLiteral("SimulationComparisonPanel")),
               "embedded workspace exposes comparison controls and results");

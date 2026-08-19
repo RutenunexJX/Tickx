@@ -125,6 +125,14 @@ plan，并传给已编译模型；watch lane 的 `expectedSegments` 仅用于结
 generation 可以物化结果；较旧运行无论先启动后完成，还是在较新运行之后才启动，均返回
 `superseded`，不能覆盖新场景。未显式传入 `--generation` 时 runner 使用跨进程时间基编号。
 
+## 多场景批量运行
+
+GUI 的 `Run all (N)` 由 `SimulationBatchRun` 维护确定性队列，仍只复用一个
+`VerilatorSimulationRunner`。场景按工程顺序串行执行，每项使用独立 result project 与
+generation，因而不存在并发覆盖；所有项共享同一 build cache，刺激差异不会触发重复编译。
+单项失败记录诊断后继续，Stop 取消当前外部进程并将剩余项标记为 cancelled。成功报告留在
+当前窗口中供 Batch 表切换，场景编辑、单项重跑或关闭窗口即失效，不写入持久化 schema。
+
 ## 结构化结果
 
 stdout 始终输出 `wave-workbench.toolchain-probe/v1` JSON。总体状态为：
