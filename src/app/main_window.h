@@ -249,6 +249,8 @@ private:
     void renameSimulationScenario();
     void deleteSimulationScenario();
     void updateSimulationScenarioActions();
+    void updateSimulationClockButton();
+    void editClockById(const std::string& clockId);
     void updateSimulationControls(const QString& detail = {});
     [[nodiscard]] bool exportSimulationStimulus(QString& error);
     void finishSimulationRun(SimulationRunReport report);
@@ -361,6 +363,7 @@ private:
     QAction* createSimulationScenarioAction_{nullptr};
     QAction* renameSimulationScenarioAction_{nullptr};
     QAction* deleteSimulationScenarioAction_{nullptr};
+    QToolButton* simulationClockButton_{nullptr};
     QAction* compareModeAction_{nullptr};
     QMenu* editMenu_{nullptr};
     QMenu* segmentMenu_{nullptr};

@@ -1450,6 +1450,17 @@ MainWindow::MainWindow(
         deleteSimulationScenarioAction_->setObjectName(
             QStringLiteral("DeleteSimulationScenarioAction"));
         resultToolbar->addSeparator();
+        simulationClockButton_ = new QToolButton(resultToolbar);
+        simulationClockButton_->setObjectName(
+            QStringLiteral("SimulationClockDomainsButton"));
+        simulationClockButton_->setPopupMode(QToolButton::InstantPopup);
+        simulationClockButton_->setToolButtonStyle(
+            Qt::ToolButtonTextBesideIcon);
+        simulationClockButton_->setMenu(
+            new QMenu(simulationClockButton_));
+        resultToolbar->addWidget(simulationClockButton_);
+        resultToolbar->addAction(asyncTimingAction_);
+        resultToolbar->addSeparator();
         resultToolbar->addAction(
             themedIcon(QStringLiteral("zoom-in"), style(), QStyle::SP_ArrowUp),
             tr("Zoom in"),
@@ -1477,6 +1488,7 @@ MainWindow::MainWindow(
         simulationStateLabel_->setAlignment(Qt::AlignCenter);
         simulationStateLabel_->setContentsMargins(10, 3, 10, 3);
         resultToolbar->addWidget(simulationStateLabel_);
+        updateSimulationClockButton();
         updateSimulationControls(simulationSessionError_);
     }
     rememberActiveScenario();
@@ -1889,6 +1901,51 @@ void MainWindow::updateSimulationScenarioActions()
         deleteSimulationScenarioAction_->setEnabled(
             named && project_.scenarios.size() > 1);
     }
+    updateSimulationClockButton();
+}
+
+void MainWindow::updateSimulationClockButton()
+{
+    if (!simulationClockButton_ || !simulationClockButton_->menu()) return;
+
+    auto* menu = simulationClockButton_->menu();
+    menu->clear();
+    std::set<std::string> clockIds;
+    if (const auto* scenario = activeScenario()) {
+        for (const auto& lane : scenario->lanes) {
+            if (lane.kind == LaneKind::Clock && !lane.clockDomainId.empty())
+                clockIds.insert(lane.clockDomainId);
+        }
+    }
+
+    std::size_t count = 0;
+    for (const auto& clock : project_.clockDomains) {
+        if (!clockIds.contains(clock.id)) continue;
+        ++count;
+        const QString period = QString::fromStdString(
+            formatTick(clock.period, project_.timeBase));
+        const QString phase = QString::fromStdString(
+            formatTick(clock.phase, project_.timeBase));
+        auto* action = menu->addAction(
+            tr("%1  ·  %2  ·  phase %3")
+                .arg(QString::fromStdString(clock.name), period, phase));
+        action->setObjectName(QStringLiteral("EditSimulationClockAction"));
+        action->setToolTip(tr("Edit period, phase, duty cycle, and active edge"));
+        const auto clockId = clock.id;
+        connect(action, &QAction::triggered, this, [this, clockId] {
+            editClockById(clockId);
+        });
+    }
+    if (count == 0) {
+        auto* unavailable = menu->addAction(tr("No clock domains in this scenario"));
+        unavailable->setEnabled(false);
+    }
+    simulationClockButton_->setText(
+        tr("Clocks (%1)").arg(static_cast<qulonglong>(count)));
+    simulationClockButton_->setToolTip(
+        count == 0
+            ? tr("No semantic clock candidate was found for this scenario")
+            : tr("Edit each independent simulation clock domain"));
 }
 
 void MainWindow::updateSimulationControls(const QString& detail)
@@ -6277,11 +6334,17 @@ void MainWindow::editLaneById(const QString& laneId)
 
 void MainWindow::editSelectedClock()
 {
+    const auto* item = clockTree_ ? clockTree_->currentItem() : nullptr;
+    if (!item) return;
+    const auto clockId = item->data(0, Qt::UserRole).toString().toStdString();
+    editClockById(clockId);
+}
+
+void MainWindow::editClockById(const std::string& clockId)
+{
     if (!commitPendingEdits()) return;
     auto* scenario = activeScenario();
-    const auto* item = clockTree_ ? clockTree_->currentItem() : nullptr;
-    if (!scenario || !item) return;
-    const auto clockId = item->data(0, Qt::UserRole).toString().toStdString();
+    if (!scenario) return;
     const auto* original = findClock(project_, clockId);
     if (!original) return;
 
@@ -6387,6 +6450,7 @@ void MainWindow::editSelectedClock()
     }
     canvas_->refreshModel();
     markEdited();
+    updateSimulationClockButton();
 }
 
 void MainWindow::addEvent()

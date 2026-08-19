@@ -21,6 +21,11 @@ Actual 波形可见集合。初次打开优先显示场景已映射的端口与 
 按需加入。Verilator harness 追踪 99 层层级，并启用 struct 与下划线信号追踪；这不改变
 Stimulus Scenario、Module Manifest 或 `wavewidgets` v1 C ABI。
 
+Module Manifest 中的多个语义时钟候选会分别导入为独立 ClockDomain，不再因候选数大于一而
+全部放弃。Simulation Result 工具栏直接显示 `Clocks (N)`，可逐个编辑周期、相位、占空比和
+有效边沿；`Timing` 可在关联时钟网格与 1 tick 异步编辑之间切换。运行计划分别驱动每个时钟，
+并保留任意 tick 的普通输入事件。仅修改时钟或异步刺激会复用已编译模型。
+
 ZeroSlack 的正式 Wave Simulation 工作流通过版本化 `wavewidgets` C ABI 将完整工作区
 嵌入编辑区 Wave Tab，无需用户手工传递文件。独立应用链接同一共享控件实现并继续作为
 可单独运行的工具。当前兼容 Module Manifest v1/v2；v2 可携带选中 `always` 的观察范围

@@ -1001,7 +1001,7 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
     result.resetSuggestion = suggestion(manifest.resetCandidates);
     if (result.clockSuggestion.state == ModuleCandidateState::Ambiguous) {
         result.diagnostics.append(
-            QStringLiteral("Clock candidates are ambiguous (%1); no clock was selected.")
+            QStringLiteral("Multiple clock candidates will be imported as independent clock domains (%1).")
                 .arg(candidateList(manifest.clockCandidates)));
     }
     if (result.resetSuggestion.state == ModuleCandidateState::Ambiguous) {
@@ -1123,9 +1123,10 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
             || stimulus
             || observedPortNames.contains(qString(port.name));
 
-        const bool selectedClock =
-            result.clockSuggestion.state == ModuleCandidateState::Unique
-            && result.clockSuggestion.selectedPortName == port.name;
+        const bool selectedClock = std::find(
+            manifest.clockCandidates.cbegin(),
+            manifest.clockCandidates.cend(),
+            port.name) != manifest.clockCandidates.cend();
         const bool selectedReset =
             result.resetSuggestion.state == ModuleCandidateState::Unique
             && result.resetSuggestion.selectedPortName == port.name;
@@ -1207,7 +1208,8 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
                 lane.clockDomainId = clock.id;
                 lane.color = "#81c784";
                 project.clockDomains.push_back(std::move(clock));
-                result.clockSuggestion.selectedLaneId = lane.id;
+                if (result.clockSuggestion.state == ModuleCandidateState::Unique)
+                    result.clockSuggestion.selectedLaneId = lane.id;
             }
         }
         if (selectedReset) {

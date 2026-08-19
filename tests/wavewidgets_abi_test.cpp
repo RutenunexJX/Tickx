@@ -6,9 +6,12 @@
 #include "wave/widgets.h"
 
 #include <QApplication>
+#include <QAction>
 #include <QDir>
 #include <QFileInfo>
 #include <QLineEdit>
+#include <QMenu>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QWidget>
@@ -62,6 +65,10 @@ int main(int argc, char** argv)
                   .toStringList()
                   .contains(QStringLiteral("internal-signal-hierarchy/v1")),
               "embedded workspace advertises hierarchy browsing capability");
+        check(workspace->property("wavewidgets.capabilities")
+                  .toStringList()
+                  .contains(QStringLiteral("multi-clock-async-events/v1")),
+              "embedded workspace advertises multi-clock asynchronous timing");
         check(workspace->findChild<wave::WaveCanvas*>(
                   QStringLiteral("StimulusCanvas")),
               "embedded workspace exposes the shared stimulus canvas");
@@ -71,6 +78,22 @@ int main(int argc, char** argv)
         check(workspace->findChild<wave::TraceSignalBrowser*>(
                   QStringLiteral("TraceSignalBrowser")),
               "embedded workspace exposes the internal signal hierarchy browser");
+        auto* stimulusCanvas = workspace->findChild<wave::WaveCanvas*>(
+            QStringLiteral("StimulusCanvas"));
+        auto* asyncTiming = workspace->findChild<QAction*>(
+            QStringLiteral("AsyncTimingAction"));
+        auto* clockDomains = workspace->findChild<QToolButton*>(
+            QStringLiteral("SimulationClockDomainsButton"));
+        check(asyncTiming && stimulusCanvas,
+              "embedded workspace exposes asynchronous event timing");
+        if (asyncTiming && stimulusCanvas) {
+            asyncTiming->setChecked(true);
+            check(stimulusCanvas->asynchronousEditing(),
+                  "asynchronous timing action enables one-tick editing");
+        }
+        check(clockDomains && clockDomains->menu()
+                  && !clockDomains->menu()->actions().isEmpty(),
+              "embedded workspace exposes independent clock-domain editing");
         workspace->close();
         delete workspace;
     }

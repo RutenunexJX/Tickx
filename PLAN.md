@@ -5,7 +5,24 @@
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
 
-## ZeroSlack Wave Simulation S12：内部信号层级浏览
+## ZeroSlack Wave Simulation S12.2：多时钟和异步事件
+
+状态：完成
+
+- Module Manifest 的所有有效语义时钟候选分别导入为独立 ClockDomain；多候选诊断不再
+  丢弃全部时钟，唯一候选的既有建议元数据保持兼容。
+- Simulation Result 工具栏新增 `Clocks (N)` 入口，可逐个编辑周期、相位、占空比和
+  有效边沿；结果视图同时公开现有 `Timing` 动作，可切换到 1 tick 异步编辑。
+- runner 继续按每个输入端口独立生成运行计划。自动测试确认两个不等周期/相位/占空比
+  的时钟不会合并，普通输入在非网格 tick 的事件不会被吸附。
+- 构建缓存身份仍只包含源码、manifest、harness 和工具链；修改时钟或普通刺激仅生成新
+  运行计划，复用同一已编译模型。
+- `wavewidgets` C ABI 与 simulation workspace contract 仍为 v1，新增可选能力声明
+  `multi-clock-async-events/v1`。
+- 全量 offscreen CTest `90/90` 通过；结果窗口截图确认时钟域入口和 Timing 动作在双画布
+  布局中可见。本机未安装真实 Verilator，外部编译/运行仍由确定性 fixture 验证。
+
+## ZeroSlack Wave Simulation S12.1：内部信号层级浏览
 
 状态：完成
 

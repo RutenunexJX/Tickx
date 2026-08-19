@@ -5727,18 +5727,33 @@ void testZeroSlackModuleManifestImport()
         QJsonDocument(ambiguousObject).toJson());
     expect(ambiguousParsed.ok(), ambiguousParsed.error.toStdString());
     const auto ambiguous = wave::importZeroSlackModuleManifest(*ambiguousParsed.manifest);
+    expect(ambiguous.ok(), ambiguous.error.toStdString());
+    if (!ambiguous.ok()) return;
+    const auto& multiClockLanes = ambiguous.project->scenarios.front().lanes;
+    const auto multiClockLane = [&multiClockLanes](const std::string_view name)
+        -> const wave::Lane* {
+        const auto found = std::find_if(
+            multiClockLanes.begin(), multiClockLanes.end(),
+            [name](const wave::Lane& lane) { return lane.name == name; });
+        return found == multiClockLanes.end() ? nullptr : &*found;
+    };
+    const auto* primaryClock = multiClockLane("clk_i");
+    const auto* secondaryClock = multiClockLane("rst_ni");
     expect(
-        ambiguous.ok()
-            && ambiguous.clockSuggestion.state == wave::ModuleCandidateState::Ambiguous
+        ambiguous.clockSuggestion.state == wave::ModuleCandidateState::Ambiguous
             && ambiguous.clockSuggestion.selectedLaneId.empty()
-            && ambiguous.project->clockDomains.empty()
+            && ambiguous.project->clockDomains.size() == 2
+            && primaryClock && primaryClock->kind == wave::LaneKind::Clock
+            && secondaryClock && secondaryClock->kind == wave::LaneKind::Clock
+            && primaryClock->clockDomainId != secondaryClock->clockDomainId
             && std::any_of(
                 ambiguous.diagnostics.begin(),
                 ambiguous.diagnostics.end(),
                 [](const QString& diagnostic) {
-                    return diagnostic.contains(QStringLiteral("ambiguous"));
+                    return diagnostic.contains(
+                        QStringLiteral("independent clock domains"));
                 }),
-        "ambiguous clock candidates were guessed or hidden");
+        "multiple semantic clock candidates did not become independent domains");
 
     auto invalidObject = QJsonDocument::fromJson(document).object();
     invalidObject.insert(QStringLiteral("unexpected"), true);
@@ -6810,7 +6825,10 @@ void testFixedFixtureSimulationPipeline()
     expect(resetPort != changedStimulus.ports.end()
                && !resetPort->segments.empty(),
            "mutable fixed stimulus has no reset segment");
-    resetPort->segments.front().value = "1";
+    resetPort->segments = {
+        {0, 1'234, "0"},
+        {1'234, changedStimulus.duration, "1"},
+    };
     const auto changedStimulusDocument =
         wave::serializeZeroSlackStimulusScenario(changedStimulus);
     expect(stimulusFile.open(QIODevice::WriteOnly | QIODevice::Truncate)
@@ -6831,18 +6849,61 @@ void testFixedFixtureSimulationPipeline()
     QFile secondRuntimePlan(rerun.artifacts.runtimeStimulusPath);
     expect(secondRuntimePlan.open(QIODevice::ReadOnly),
            "cannot read stimulus-only rerun plan");
+    const auto secondRuntimePlanDocument = secondRuntimePlan.readAll();
     expect(rerun.ok() && rerun.buildCache.hit
                && !rerun.buildProcess.has_value()
                && rerun.buildCache.fingerprint
                    == completed.buildCache.fingerprint
                && buildCount() == 1
-               && secondRuntimePlan.readAll() != firstRuntimePlanDocument
+               && secondRuntimePlanDocument != firstRuntimePlanDocument
+               && secondRuntimePlanDocument.contains(
+                   "range 1234 200000 1")
                && std::find(
                       rerunStages.begin(),
                       rerunStages.end(),
                       wave::SimulationRunStage::BuildModel)
                    == rerunStages.end(),
-           "stimulus-only edit rebuilt or failed to reuse the verified model");
+           "asynchronous stimulus edit rebuilt, snapped, or missed the verified model");
+
+    resetPort->kind = wave::LaneKind::Clock;
+    resetPort->segments.clear();
+    resetPort->reset.reset();
+    resetPort->clock = wave::StimulusClockConfiguration{
+        17'000,
+        2'500,
+        {1, 3},
+        wave::ClockEdge::Falling,
+        '0',
+    };
+    const auto multiClockStimulusDocument =
+        wave::serializeZeroSlackStimulusScenario(changedStimulus);
+    expect(stimulusFile.open(QIODevice::WriteOnly | QIODevice::Truncate)
+               && stimulusFile.write(multiClockStimulusDocument)
+                   == multiClockStimulusDocument.size(),
+           "cannot write a two-clock runtime stimulus");
+    stimulusFile.close();
+
+    QTemporaryDir multiClockArtifacts;
+    expect(multiClockArtifacts.isValid(),
+           "cannot create two-clock simulation artifacts");
+    auto multiClockRequest = requestFor(multiClockArtifacts.path(), simulator);
+    multiClockRequest.resultProjectPath = multiClockArtifacts.filePath(
+        QStringLiteral("counter-multi-clock.wave.json"));
+    const auto multiClock = runSimulationFixture(std::move(multiClockRequest));
+    QFile multiClockRuntimePlan(multiClock.artifacts.runtimeStimulusPath);
+    expect(multiClockRuntimePlan.open(QIODevice::ReadOnly),
+           "cannot read two-clock runtime plan");
+    const auto multiClockPlanDocument = multiClockRuntimePlan.readAll();
+    expect(multiClock.ok() && multiClock.buildCache.hit
+               && !multiClock.buildProcess.has_value()
+               && multiClock.buildCache.fingerprint
+                   == completed.buildCache.fingerprint
+               && buildCount() == 1
+               && multiClockPlanDocument.contains(
+                   "input clk_i clock 10000 0 5000")
+               && multiClockPlanDocument.contains(
+                   "input rst_i clock 17000 2500 5666"),
+           "independent clocks were merged or caused a model rebuild");
 
     QFile sourceFile(
         fixtureRoot.filePath(QStringLiteral("rtl/wave_fixed_counter.sv")));

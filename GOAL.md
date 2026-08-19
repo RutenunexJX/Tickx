@@ -4,11 +4,11 @@
 
 ## 目标
 
-ZeroSlack Wave Simulation S12 的第一个独立增强项“内部信号层级浏览”已完成。
-WaveWorkbench 从 VCD 原始 scope 组件构建稳定层级，嵌入式 Actual 区域支持搜索、scope
-复选和单信号复选，并按场景 trace mapping 初始化可见集合。`wavewidgets` C ABI 继续为 v1，
-通过 `internal-signal-hierarchy/v1` 声明新增能力。本次全量 offscreen CTest 为 90/90；
-本机未安装真实 Verilator，外部编译/运行仍由确定性 fixture 验证。
+ZeroSlack Wave Simulation S12.2“多时钟和异步事件”已完成。WaveWorkbench 将所有有效
+语义时钟候选导入为独立 ClockDomain，Simulation Result 提供逐时钟编辑和 1 tick 异步
+事件入口；运行计划保留非网格事件，并在仅刺激变化时复用已编译模型。`wavewidgets` C ABI
+继续为 v1，通过 `multi-clock-async-events/v1` 声明新增能力。本次全量 offscreen CTest
+为 90/90；本机未安装真实 Verilator，外部编译/运行仍由确定性 fixture 验证。
 
 交付一个可独立运行的 Qt 6/C++20 波形桌面应用，使用户能够人工定义与直接编辑 FPGA
 预期数字波形；同一场景模型继续支撑 SystemVerilog/SVA/cocotb、文档图、trace 导入及
