@@ -26,7 +26,9 @@
 #include <atomic>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <optional>
+#include <set>
 #include <utility>
 
 namespace wave {
@@ -96,6 +98,321 @@ bool cppIdentifier(const QString& value)
         });
 }
 
+bool svQualifiedIdentifier(const QString& value)
+{
+    if (value.isEmpty()) return false;
+    const auto parts = value.split(QStringLiteral("::"));
+    return !parts.isEmpty()
+        && std::all_of(parts.cbegin(), parts.cend(), [](const QString& part) {
+               return cppIdentifier(part);
+           });
+}
+
+QString structuredTraceName(
+    const std::size_t portIndex,
+    const std::size_t leafIndex)
+{
+    return QStringLiteral("zs_structured_%1_%2")
+        .arg(portIndex)
+        .arg(leafIndex);
+}
+
+QString logicType(const std::uint64_t width, const bool isSigned = false)
+{
+    QString result = QStringLiteral("logic");
+    if (isSigned) result += QStringLiteral(" signed");
+    if (width > 1) {
+        result += QStringLiteral(" [%1:0]").arg(width - 1);
+    }
+    return result;
+}
+
+QString selectorSuffix(
+    const std::vector<ModuleManifestStructuredSelector>& selectors)
+{
+    QString result;
+    for (const auto& selector : selectors) {
+        switch (selector.kind) {
+        case ModuleManifestStructuredSelectorKind::StructMember:
+        case ModuleManifestStructuredSelectorKind::InterfaceMember:
+            result += QStringLiteral(".%1").arg(qString(selector.name));
+            break;
+        case ModuleManifestStructuredSelectorKind::PackedIndex:
+        case ModuleManifestStructuredSelectorKind::UnpackedIndex:
+            result += QStringLiteral("[%1]").arg(selector.sourceIndex);
+            break;
+        }
+    }
+    return result;
+}
+
+struct FixedArrayShape {
+    std::uint64_t elementWidth{0};
+    QString dimensions;
+};
+
+std::optional<FixedArrayShape> fixedArrayShape(
+    const ModuleManifestPort& port,
+    QString& error)
+{
+    std::vector<std::map<int, int>> dimensions;
+    std::uint64_t elementWidth = 0;
+    std::set<QString> elementPaths;
+    for (const auto& leaf : port.editableLeaves) {
+        std::vector<const ModuleManifestStructuredSelector*> unpacked;
+        QString elementPath;
+        for (const auto& selector : leaf.selectors) {
+            if (selector.kind
+                == ModuleManifestStructuredSelectorKind::UnpackedIndex) {
+                unpacked.push_back(&selector);
+                elementPath += QStringLiteral("[%1]").arg(selector.storageIndex);
+            }
+        }
+        if (unpacked.empty()) {
+            error = QStringLiteral("Structured array port %1 has a leaf without an unpacked selector.")
+                        .arg(qString(port.name));
+            return std::nullopt;
+        }
+        if (dimensions.empty()) dimensions.resize(unpacked.size());
+        if (dimensions.size() != unpacked.size()) {
+            error = QStringLiteral("Structured array port %1 has inconsistent dimensions.")
+                        .arg(qString(port.name));
+            return std::nullopt;
+        }
+        for (std::size_t index = 0; index < unpacked.size(); ++index) {
+            const auto [iterator, inserted] = dimensions[index].emplace(
+                unpacked[index]->storageIndex,
+                unpacked[index]->sourceIndex);
+            if (!inserted && iterator->second != unpacked[index]->sourceIndex) {
+                error = QStringLiteral("Structured array port %1 has inconsistent index mapping.")
+                            .arg(qString(port.name));
+                return std::nullopt;
+            }
+        }
+        if (!leaf.packedBitOffsetValid) {
+            if (!elementPaths.insert(elementPath).second) {
+                error = QStringLiteral("Structured array port %1 has multiple unsliced leaves for one element.")
+                            .arg(qString(port.name));
+                return std::nullopt;
+            }
+            if (elementWidth != 0 && elementWidth != leaf.type.bitWidth) {
+                error = QStringLiteral("Structured array port %1 has inconsistent element widths.")
+                            .arg(qString(port.name));
+                return std::nullopt;
+            }
+            elementWidth = leaf.type.bitWidth;
+        } else {
+            if (leaf.packedBitOffset
+                > std::numeric_limits<std::uint64_t>::max()
+                    - leaf.type.bitWidth) {
+                error = QStringLiteral("Structured array port %1 exceeds the supported packed range.")
+                            .arg(qString(port.name));
+                return std::nullopt;
+            }
+            elementWidth = std::max(
+                elementWidth,
+                leaf.packedBitOffset + leaf.type.bitWidth);
+        }
+    }
+    if (elementWidth == 0) {
+        error = QStringLiteral("Structured array port %1 has no fixed element width.")
+                    .arg(qString(port.name));
+        return std::nullopt;
+    }
+
+    QString dimensionText;
+    for (const auto& dimension : dimensions) {
+        if (dimension.empty()) return std::nullopt;
+        const auto count = static_cast<int>(dimension.size());
+        for (int storage = 0; storage < count; ++storage) {
+            if (!dimension.contains(storage)) {
+                error = QStringLiteral("Structured array port %1 has a sparse storage index.")
+                            .arg(qString(port.name));
+                return std::nullopt;
+            }
+        }
+        // Slang storage index zero denotes the declared right bound for both
+        // ascending and descending ranges. Reconstruct the source range in
+        // declaration order rather than reversing its element mapping.
+        const auto left = dimension.at(count - 1);
+        const auto right = dimension.at(0);
+        const auto storageStep = count == 1 ? 0 : (left > right ? 1 : -1);
+        for (int storage = 1; storage < count; ++storage) {
+            if (dimension.at(storage)
+                != right + storage * storageStep) {
+                error = QStringLiteral("Structured array port %1 has a non-contiguous source range.")
+                            .arg(qString(port.name));
+                return std::nullopt;
+            }
+        }
+        dimensionText += QStringLiteral(" [%1:%2]").arg(left).arg(right);
+    }
+    return FixedArrayShape{elementWidth, dimensionText};
+}
+
+QString structuredTargetExpression(
+    const ModuleManifestPort& port,
+    const ModuleManifestEditableLeaf& leaf)
+{
+    QString expression = qString(port.name);
+    if (port.direction == ModulePortDirection::Interface
+        || port.type.shape.interfaceType) {
+        return expression + selectorSuffix(leaf.selectors);
+    }
+    if (port.type.shape.unpackedArray) {
+        for (const auto& selector : leaf.selectors) {
+            if (selector.kind
+                == ModuleManifestStructuredSelectorKind::UnpackedIndex) {
+                expression += QStringLiteral("[%1]").arg(selector.sourceIndex);
+            }
+        }
+    }
+    if (leaf.packedBitOffsetValid) {
+        expression += QStringLiteral("[%1 +: %2]")
+                          .arg(leaf.packedBitOffset)
+                          .arg(leaf.type.bitWidth);
+    }
+    return expression;
+}
+
+std::optional<QByteArray> makeStructuredWrapper(
+    const ZeroSlackModuleManifest& manifest,
+    QString& error)
+{
+    QStringList declarations;
+    QStringList internals;
+    QStringList assignments;
+    QStringList connections;
+
+    for (std::size_t portIndex = 0; portIndex < manifest.ports.size(); ++portIndex) {
+        const auto& port = manifest.ports[portIndex];
+        const auto portName = qString(port.name);
+        if (!cppIdentifier(portName)) {
+            error = QStringLiteral("Port %1 cannot be emitted in the structured wrapper.")
+                        .arg(portName);
+            return std::nullopt;
+        }
+        connections.append(QStringLiteral("        .%1(%1)").arg(portName));
+        if (!port.structuredLeavesAvailable) {
+            const auto& shape = port.type.shape;
+            if (!port.structuredFailureReason.empty()
+                || !shape.semanticAvailable || !shape.fixedSize || !shape.integral
+                || shape.unpackedArray || shape.interfaceType
+                || shape.bitWidth == 0 || shape.bitWidth > 64
+                || port.direction == ModulePortDirection::Inout
+                || port.direction == ModulePortDirection::Ref
+                || port.direction == ModulePortDirection::Interface
+                || port.direction == ModulePortDirection::Unknown) {
+                error = QStringLiteral("Structured wrapper cannot represent port %1: %2")
+                            .arg(
+                                portName,
+                                qString(port.structuredFailureReason.empty()
+                                            ? std::string("unsupported port shape")
+                                            : port.structuredFailureReason));
+                return std::nullopt;
+            }
+            const auto direction = port.direction == ModulePortDirection::Input
+                ? QStringLiteral("input") : QStringLiteral("output");
+            declarations.append(
+                QStringLiteral("    %1 %2 %3")
+                    .arg(direction, logicType(shape.bitWidth, shape.isSigned), portName));
+            continue;
+        }
+
+        const bool interfacePort =
+            port.direction == ModulePortDirection::Interface
+            || port.type.shape.interfaceType;
+        if (interfacePort) {
+            const auto interfaceName = qString(port.type.shape.interfaceName);
+            if (!svQualifiedIdentifier(interfaceName)
+                || port.type.shape.modportName.empty()) {
+                error = QStringLiteral("Interface port %1 has no safe interface/modport identity.")
+                            .arg(portName);
+                return std::nullopt;
+            }
+            internals.append(
+                QStringLiteral("    %1 %2();").arg(interfaceName, portName));
+        } else if (port.type.shape.unpackedArray) {
+            const auto arrayShape = fixedArrayShape(port, error);
+            if (!arrayShape) return std::nullopt;
+            internals.append(
+                QStringLiteral("    %1 %2%3;")
+                    .arg(
+                        logicType(arrayShape->elementWidth),
+                        portName,
+                        arrayShape->dimensions));
+        } else {
+            if (!port.type.shape.fixedSize || !port.type.shape.integral
+                || port.type.shape.bitWidth == 0) {
+                error = QStringLiteral("Packed structured port %1 has no fixed width.")
+                            .arg(portName);
+                return std::nullopt;
+            }
+            internals.append(
+                QStringLiteral("    %1 %2;")
+                    .arg(
+                        logicType(
+                            port.type.shape.bitWidth,
+                            port.type.shape.isSigned),
+                        portName));
+        }
+
+        for (std::size_t leafIndex = 0;
+             leafIndex < port.editableLeaves.size(); ++leafIndex) {
+            const auto& leaf = port.editableLeaves[leafIndex];
+            if (leaf.type.bitWidth == 0 || leaf.type.bitWidth > 64
+                || (leaf.direction != ModulePortDirection::Input
+                    && leaf.direction != ModulePortDirection::Output)) {
+                error = QStringLiteral("Structured leaf %1%2 is not a fixed input/output up to 64 bits.")
+                            .arg(portName, qString(leaf.relativePath));
+                return std::nullopt;
+            }
+            const auto flatName = structuredTraceName(portIndex, leafIndex);
+            const auto direction = leaf.direction == ModulePortDirection::Input
+                ? QStringLiteral("input") : QStringLiteral("output");
+            declarations.append(
+                QStringLiteral("    %1 %2 %3")
+                    .arg(direction, logicType(leaf.type.bitWidth, leaf.type.isSigned), flatName));
+            const auto target = structuredTargetExpression(port, leaf);
+            assignments.append(
+                leaf.direction == ModulePortDirection::Input
+                    ? QStringLiteral("    assign %1 = %2;").arg(target, flatName)
+                    : QStringLiteral("    assign %1 = %2;").arg(flatName, target));
+        }
+    }
+
+    if (declarations.isEmpty()) {
+        error = QStringLiteral("Structured wrapper has no visible ports.");
+        return std::nullopt;
+    }
+    QString parameterBlock;
+    QStringList parameters;
+    for (const auto& parameter : manifest.parameters) {
+        if (parameter.semanticAvailable && !parameter.valueText.empty()
+            && cppIdentifier(qString(parameter.name))) {
+            parameters.append(
+                QStringLiteral("        .%1(%2)")
+                    .arg(qString(parameter.name), qString(parameter.valueText)));
+        }
+    }
+    if (!parameters.isEmpty()) {
+        parameterBlock = QStringLiteral(" #(\n%1\n    )")
+                             .arg(parameters.join(QStringLiteral(",\n")));
+    }
+
+    QString document;
+    QTextStream stream(&document);
+    stream << "// Generated solely from ZeroSlack Module Manifest v3 facts.\n"
+           << "module wave_fixture(\n"
+           << declarations.join(QStringLiteral(",\n")) << "\n);\n";
+    if (!internals.isEmpty()) stream << internals.join(QStringLiteral("\n")) << "\n";
+    if (!assignments.isEmpty()) stream << assignments.join(QStringLiteral("\n")) << "\n";
+    stream << "    " << qString(manifest.target.module) << parameterBlock
+           << " dut (\n" << connections.join(QStringLiteral(",\n"))
+           << "\n    );\nendmodule\n";
+    return document.toUtf8();
+}
+
 struct PreparedSimulation {
     ZeroSlackModuleManifest manifest;
     ZeroSlackStimulusScenario stimulus;
@@ -104,6 +421,8 @@ struct PreparedSimulation {
     std::vector<SimulationBuildSourceInput> buildSources;
     QStringList sourceFiles;
     QStringList includeDirectories;
+    QString simulationTopModule;
+    QByteArray wrapperDocument;
 };
 
 std::optional<PreparedSimulation> prepareSimulation(
@@ -210,6 +529,7 @@ std::optional<PreparedSimulation> prepareSimulation(
             "Wave Simulation requires a top-module name that maps directly to a C++ identifier.");
         return std::nullopt;
     }
+    prepared.simulationTopModule = qString(prepared.manifest.target.module);
     if (prepared.stimulus.duration <= 0
         || prepared.stimulus.timeBase.picosecondsPerTick <= 0
         || prepared.stimulus.duration
@@ -220,20 +540,53 @@ std::optional<PreparedSimulation> prepareSimulation(
         return std::nullopt;
     }
 
-    for (const auto& manifestPort : prepared.manifest.ports) {
-        const auto& shape = manifestPort.type.shape;
-        if (!cppIdentifier(qString(manifestPort.name))
-            || !shape.semanticAvailable || !shape.fixedSize || !shape.integral
-            || shape.unpackedArray || shape.interfaceType || shape.bitWidth == 0
-            || shape.bitWidth > 64
-            || manifestPort.direction == ModulePortDirection::Inout
-            || manifestPort.direction == ModulePortDirection::Ref
-            || manifestPort.direction == ModulePortDirection::Interface
-            || manifestPort.direction == ModulePortDirection::Unknown) {
+    const bool requiresStructuredWrapper = std::any_of(
+        prepared.manifest.ports.cbegin(),
+        prepared.manifest.ports.cend(),
+        [](const ModuleManifestPort& port) {
+            return port.structuredLeavesAvailable;
+        });
+    if (requiresStructuredWrapper) {
+        const auto wrapper = makeStructuredWrapper(prepared.manifest, error);
+        if (!wrapper) {
+            status = SimulationRunStatus::UnsupportedFixture;
+            return std::nullopt;
+        }
+        prepared.wrapperDocument = *wrapper;
+        prepared.simulationTopModule = QStringLiteral("wave_fixture");
+        prepared.buildSources.push_back({
+            QStringLiteral("wave_fixture_wrapper.sv"),
+            QStringLiteral("generated-wrapper"),
+            prepared.wrapperDocument,
+        });
+    } else {
+        for (const auto& manifestPort : prepared.manifest.ports) {
+            const auto& shape = manifestPort.type.shape;
+            if (!cppIdentifier(qString(manifestPort.name))
+                || !shape.semanticAvailable || !shape.fixedSize
+                || !shape.integral || shape.unpackedArray
+                || shape.interfaceType || shape.bitWidth == 0
+                || shape.bitWidth > 64
+                || manifestPort.direction == ModulePortDirection::Inout
+                || manifestPort.direction == ModulePortDirection::Ref
+                || manifestPort.direction == ModulePortDirection::Interface
+                || manifestPort.direction == ModulePortDirection::Unknown) {
+                status = SimulationRunStatus::UnsupportedFixture;
+                error = QStringLiteral(
+                    "Wave Simulation supports fixed integral input/output ports up to 64 bits; unsupported port: %1")
+                            .arg(qString(manifestPort.name));
+                return std::nullopt;
+            }
+        }
+    }
+    for (const auto& port : prepared.stimulus.ports) {
+        if (port.binding.direction == ModulePortDirection::Inout
+            || port.binding.direction == ModulePortDirection::Ref
+            || port.binding.width == 0 || port.binding.width > 64) {
             status = SimulationRunStatus::UnsupportedFixture;
             error = QStringLiteral(
-                "Wave Simulation supports fixed integral input/output ports up to 64 bits; unsupported port: %1")
-                        .arg(qString(manifestPort.name));
+                "Wave Simulation cannot drive stimulus leaf %1 with this direction or width.")
+                        .arg(qString(port.binding.name));
             return std::nullopt;
         }
     }
@@ -261,6 +614,45 @@ std::optional<quint64> binaryValue(
     quint64 result = 0;
     for (const auto bit : *bits) result = (result << 1U) | (bit == '1' ? 1U : 0U);
     return result;
+}
+
+std::optional<QString> runtimeInputMember(
+    const PreparedSimulation& prepared,
+    const StimulusScenarioPort& stimulus,
+    QString& error)
+{
+    if (!stimulus.binding.structured) {
+        const auto name = qString(stimulus.binding.rootPortName);
+        if (!cppIdentifier(name)) {
+            error = QStringLiteral("Input port cannot be emitted in the runtime harness: %1")
+                        .arg(name);
+            return std::nullopt;
+        }
+        return name;
+    }
+    for (std::size_t portIndex = 0;
+         portIndex < prepared.manifest.ports.size(); ++portIndex) {
+        const auto& port = prepared.manifest.ports[portIndex];
+        if (port.name != stimulus.binding.rootPortName) continue;
+        for (std::size_t leafIndex = 0;
+             leafIndex < port.editableLeaves.size(); ++leafIndex) {
+            const auto& leaf = port.editableLeaves[leafIndex];
+            if (leaf.relativePath == stimulus.binding.relativePath
+                && leaf.selectors == stimulus.binding.selectors
+                && leaf.direction == stimulus.binding.direction
+                && leaf.type.bitWidth == stimulus.binding.width
+                && leaf.type.isSigned == stimulus.binding.isSigned
+                && leaf.packedBitOffsetValid
+                    == stimulus.binding.packedBitOffsetValid
+                && leaf.packedBitOffset
+                    == stimulus.binding.packedBitOffset) {
+                return structuredTraceName(portIndex, leafIndex);
+            }
+        }
+    }
+    error = QStringLiteral("Structured stimulus binding %1 no longer exists in the manifest.")
+                .arg(qString(stimulus.binding.name));
+    return std::nullopt;
 }
 
 std::optional<QByteArray> makeRuntimePlan(
@@ -428,17 +820,16 @@ std::optional<QByteArray> makeHarness(
            "    if (vcdPath.empty() || stimulusPath.empty() || !loadPlan(stimulusPath, plan)) return 2;\n\n";
 
     std::size_t inputIndex = 0;
-    for (const auto& port : prepared.manifest.ports) {
-        if (port.direction != ModulePortDirection::Input) continue;
-        const auto name = qString(port.name);
-        if (!cppIdentifier(name)) {
-            error = QStringLiteral("Input port cannot be emitted in the runtime harness: %1")
-                        .arg(name);
-            return std::nullopt;
-        }
+    std::vector<QString> inputMembers;
+    for (const auto& port : prepared.stimulus.ports) {
+        if (port.binding.direction != ModulePortDirection::Input) continue;
+        const auto member = runtimeInputMember(prepared, port, error);
+        if (!member) return std::nullopt;
+        const auto name = qString(port.binding.name);
         stream << "    if (plan.inputs.size() <= " << inputIndex
                << " || plan.inputs[" << inputIndex << "].name != \"" << name
                << "\") return 3;\n";
+        inputMembers.push_back(*member);
         ++inputIndex;
     }
     stream
@@ -451,12 +842,9 @@ std::optional<QByteArray> makeHarness(
            "    top->trace(trace.get(), 99);\n"
            "    trace->open(vcdPath.c_str());\n\n"
            "    for (std::uint64_t tick = 0; tick <= plan.duration; ++tick) {\n";
-    inputIndex = 0;
-    for (const auto& port : prepared.manifest.ports) {
-        if (port.direction != ModulePortDirection::Input) continue;
-        stream << "        top->" << qString(port.name) << " = valueAt(plan.inputs["
-               << inputIndex << "], tick);\n";
-        ++inputIndex;
+    for (inputIndex = 0; inputIndex < inputMembers.size(); ++inputIndex) {
+        stream << "        top->" << inputMembers[inputIndex]
+               << " = valueAt(plan.inputs[" << inputIndex << "], tick);\n";
     }
     stream
         << "        context->time(tick * plan.picosecondsPerTick);\n"
@@ -825,6 +1213,15 @@ SimulationRunStatus processFailureStatus(
 
 } // namespace
 
+StructuredSimulationWrapperResult generateStructuredSimulationWrapper(
+    const ZeroSlackModuleManifest& manifest)
+{
+    StructuredSimulationWrapperResult result;
+    const auto document = makeStructuredWrapper(manifest, result.error);
+    if (document) result.document = *document;
+    return result;
+}
+
 quint64 nextSimulationGeneration() noexcept
 {
     static std::atomic<quint64> next{
@@ -841,6 +1238,7 @@ struct VerilatorSimulationRunner::Impl {
     SimulationRunReport report;
     std::optional<PreparedSimulation> prepared;
     QByteArray harnessDocument;
+    QString wrapperPath;
     SimulationBuildFingerprint fingerprint;
     QString buildStagingDirectory;
     QString resultGenerationToken;
@@ -862,6 +1260,8 @@ struct VerilatorSimulationRunner::Impl {
         report.artifacts.objectDirectory =
             QDir(directory).filePath(QStringLiteral("obj_dir"));
         report.artifacts.executablePath = cacheExecutablePath(directory);
+        wrapperPath = QDir(directory).filePath(
+            QStringLiteral("wave_fixture_wrapper.sv"));
     }
 
     void cleanupBuildStaging()
@@ -1115,7 +1515,7 @@ struct VerilatorSimulationRunner::Impl {
             QStringLiteral("--trace-structs"),
             QStringLiteral("--trace-underscore"),
             QStringLiteral("--top-module"),
-            qString(prepared->manifest.target.module),
+            prepared->simulationTopModule,
             QStringLiteral("--prefix"),
             QStringLiteral("Vwave_fixture"),
             QStringLiteral("--timescale"),
@@ -1134,14 +1534,17 @@ struct VerilatorSimulationRunner::Impl {
                     ? QStringLiteral("-D%1").arg(qString(name))
                     : QStringLiteral("-D%1=%2").arg(qString(name), qString(value)));
         }
-        for (const auto& parameter : prepared->manifest.parameters) {
-            if (parameter.semanticAvailable && !parameter.valueText.empty()) {
-                arguments.append(
-                    QStringLiteral("-G%1=%2")
-                        .arg(qString(parameter.name), qString(parameter.valueText)));
+        if (prepared->wrapperDocument.isEmpty()) {
+            for (const auto& parameter : prepared->manifest.parameters) {
+                if (parameter.semanticAvailable && !parameter.valueText.empty()) {
+                    arguments.append(
+                        QStringLiteral("-G%1=%2")
+                            .arg(qString(parameter.name), qString(parameter.valueText)));
+                }
             }
         }
         arguments.append(prepared->sourceFiles);
+        if (!prepared->wrapperDocument.isEmpty()) arguments.append(wrapperPath);
         arguments.append(report.artifacts.harnessPath);
 
         ProcessRunRequest process;
@@ -1237,6 +1640,11 @@ struct VerilatorSimulationRunner::Impl {
         QString error;
         if (!writeDocument(
                 report.artifacts.harnessPath, harnessDocument, error)) {
+            finish(SimulationRunStatus::HarnessGenerationFailed, error);
+            return;
+        }
+        if (!prepared->wrapperDocument.isEmpty()
+            && !writeDocument(wrapperPath, prepared->wrapperDocument, error)) {
             finish(SimulationRunStatus::HarnessGenerationFailed, error);
             return;
         }

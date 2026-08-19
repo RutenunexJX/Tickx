@@ -59,6 +59,7 @@ foreach(document IN ITEMS
     schemas/automation/v1/operation-batch.schema.json
     schemas/stimulus/v1/stimulus-scenario.schema.json
     schemas/stimulus/v2/stimulus-scenario.schema.json
+    schemas/stimulus/v3/stimulus-scenario.schema.json
     examples/handshake/project.wave.json)
     if(NOT EXISTS "${OUTPUT}/${document}")
         message(FATAL_ERROR "Portable install omitted ${document}")

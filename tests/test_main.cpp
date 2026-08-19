@@ -5773,6 +5773,414 @@ void testZeroSlackModuleManifestImport()
         "absolute source path was accepted by the portable manifest reader");
 }
 
+void testZeroSlackStructuredModuleManifestImport()
+{
+    const auto manifestPath = std::filesystem::path(WAVE_SOURCE_DIR)
+        / "examples" / "handshake" / "integration"
+        / "zeroslack_module_manifest_v1.json";
+    QFile fixture(QString::fromStdWString(manifestPath.wstring()));
+    expect(fixture.open(QIODevice::ReadOnly),
+           "cannot open Module Manifest fixture for structured import");
+    auto root = QJsonDocument::fromJson(fixture.readAll()).object();
+    root.insert(QStringLiteral("schemaVersion"), 3);
+    root.insert(
+        QStringLiteral("observationScope"),
+        QJsonObject{
+            {QStringLiteral("mode"), QStringLiteral("module")},
+            {QStringLiteral("label"), QStringLiteral("handshake_dut")},
+            {QStringLiteral("sourceFile"), QStringLiteral("rtl/handshake_dut.sv")},
+            {QStringLiteral("startLine"), 3},
+            {QStringLiteral("endLine"), 40},
+        });
+    root.insert(QStringLiteral("observations"), QJsonArray{});
+
+    const auto leafShape = [](QJsonObject shape,
+                              const int width,
+                              const QString& identity) {
+        shape.remove(QStringLiteral("enumValues"));
+        shape.remove(QStringLiteral("structMembers"));
+        shape.insert(QStringLiteral("rawTypeText"),
+                     width == 1 ? QStringLiteral("logic")
+                                : QStringLiteral("logic [%1:0]").arg(width - 1));
+        shape.insert(QStringLiteral("resolvedTypeName"), QStringLiteral("logic"));
+        shape.insert(QStringLiteral("semanticKind"), QStringLiteral("integral"));
+        shape.insert(QStringLiteral("resolvedTypeText"),
+                     shape.value(QStringLiteral("rawTypeText")));
+        shape.insert(QStringLiteral("canonicalTypeId"), identity);
+        shape.insert(QStringLiteral("declarationShapeId"), identity);
+        shape.insert(QStringLiteral("fixedSize"), true);
+        shape.insert(QStringLiteral("integral"), true);
+        shape.insert(QStringLiteral("signed"), false);
+        shape.insert(QStringLiteral("unpackedArray"), false);
+        shape.insert(QStringLiteral("interfaceType"), false);
+        shape.insert(QStringLiteral("bitWidth"), width);
+        shape.insert(
+            QStringLiteral("packedDimensions"),
+            width == 1 ? QString{} : QStringLiteral("[%1:0]").arg(width - 1));
+        shape.insert(QStringLiteral("unpackedDimensions"), QString{});
+        shape.insert(QStringLiteral("unpackedElementCount"), QString{});
+        shape.insert(QStringLiteral("interfaceName"), QString{});
+        shape.insert(QStringLiteral("modportName"), QString{});
+        shape.insert(QStringLiteral("typedefChain"), QJsonArray{});
+        shape.insert(QStringLiteral("failureReason"), QString{});
+        return shape;
+    };
+    const auto selector = [](const QString& kind,
+                             const QString& name,
+                             const int sourceIndex,
+                             const int storageIndex) {
+        return QJsonObject{
+            {QStringLiteral("kind"), kind},
+            {QStringLiteral("name"), name},
+            {QStringLiteral("sourceIndex"), sourceIndex},
+            {QStringLiteral("storageIndex"), storageIndex},
+        };
+    };
+    const auto leaf = [](const QString& path,
+                         const QString& direction,
+                         const QJsonArray& selectors,
+                         const QJsonObject& type,
+                         const bool offsetValid,
+                         const int offset) {
+        return QJsonObject{
+            {QStringLiteral("relativePath"), path},
+            {QStringLiteral("direction"), direction},
+            {QStringLiteral("selectors"), selectors},
+            {QStringLiteral("type"), type},
+            {QStringLiteral("enumValues"), QJsonArray{}},
+            {QStringLiteral("packedBitOffsetValid"), offsetValid},
+            {QStringLiteral("packedBitOffset"), offset},
+        };
+    };
+
+    const auto originalPorts = root.value(QStringLiteral("ports")).toArray();
+    QJsonArray ports;
+    for (const auto& value : originalPorts) {
+        if (value.toObject().value(QStringLiteral("name")).toString()
+            != QStringLiteral("ready_io")) {
+            ports.append(value);
+        }
+    }
+    const auto basePort = ports.at(3).toObject();
+    for (qsizetype index = 0; index < ports.size(); ++index) {
+        auto port = ports.at(index).toObject();
+        port.insert(QStringLiteral("structuredLeavesAvailable"), false);
+        port.insert(QStringLiteral("editableLeaves"), QJsonArray{});
+        port.insert(QStringLiteral("structuredFailureReason"), QString{});
+        if (port.value(QStringLiteral("name")).toString()
+            == QStringLiteral("control_if")) {
+            const auto baseType = basePort.value(QStringLiteral("type")).toObject();
+            port.insert(QStringLiteral("structuredLeavesAvailable"), true);
+            port.insert(
+                QStringLiteral("editableLeaves"),
+                QJsonArray{
+                    leaf(
+                        QStringLiteral(".request"), QStringLiteral("input"),
+                        QJsonArray{selector(QStringLiteral("interface-member"),
+                                            QStringLiteral("request"), 0, 0)},
+                        leafShape(baseType, 1, QStringLiteral("logic:1")),
+                        false, 0),
+                    leaf(
+                        QStringLiteral(".command"), QStringLiteral("input"),
+                        QJsonArray{selector(QStringLiteral("interface-member"),
+                                            QStringLiteral("command"), 0, 0)},
+                        leafShape(baseType, 3, QStringLiteral("logic:3")),
+                        false, 0),
+                    leaf(
+                        QStringLiteral(".ready"), QStringLiteral("output"),
+                        QJsonArray{selector(QStringLiteral("interface-member"),
+                                            QStringLiteral("ready"), 0, 0)},
+                        leafShape(baseType, 1, QStringLiteral("logic:1")),
+                        false, 0),
+                });
+        }
+        ports[index] = port;
+    }
+
+    auto packed = basePort;
+    packed.insert(QStringLiteral("name"), QStringLiteral("cfg_i"));
+    packed.insert(QStringLiteral("declarationText"),
+                  QStringLiteral("input cfg_t cfg_i"));
+    auto packedType = packed.value(QStringLiteral("type")).toObject();
+    packedType.insert(QStringLiteral("rawTypeText"), QStringLiteral("cfg_t"));
+    packedType.insert(QStringLiteral("resolvedTypeName"), QStringLiteral("cfg_t"));
+    packedType.insert(QStringLiteral("semanticKind"), QStringLiteral("struct"));
+    packedType.insert(QStringLiteral("resolvedTypeText"), QStringLiteral("cfg_t"));
+    packedType.insert(QStringLiteral("canonicalTypeId"), QStringLiteral("struct:cfg_t"));
+    packedType.insert(QStringLiteral("declarationShapeId"), QStringLiteral("cfg_t"));
+    packedType.insert(QStringLiteral("bitWidth"), 6);
+    packedType.insert(QStringLiteral("packedDimensions"), QStringLiteral("[5:0]"));
+    packed.insert(QStringLiteral("type"), packedType);
+    packed.insert(QStringLiteral("structuredLeavesAvailable"), true);
+    packed.insert(
+        QStringLiteral("editableLeaves"),
+        QJsonArray{
+            leaf(
+                QStringLiteral(".valid"), QString{},
+                QJsonArray{selector(QStringLiteral("struct-member"),
+                                    QStringLiteral("valid"), 0, 0)},
+                leafShape(packedType, 1, QStringLiteral("logic:1")), true, 5),
+            leaf(
+                QStringLiteral(".payload"), QString{},
+                QJsonArray{selector(QStringLiteral("struct-member"),
+                                    QStringLiteral("payload"), 0, 0)},
+                leafShape(packedType, 5, QStringLiteral("logic:5")), true, 0),
+        });
+    packed.insert(QStringLiteral("structuredFailureReason"), QString{});
+    packed.insert(QStringLiteral("sourceLine"), 15);
+    ports.append(packed);
+
+    auto array = basePort;
+    array.insert(QStringLiteral("name"), QStringLiteral("samples_i"));
+    array.insert(QStringLiteral("declarationText"),
+                 QStringLiteral("input logic [3:0] samples_i [1:0]"));
+    auto arrayType = array.value(QStringLiteral("type")).toObject();
+    arrayType.insert(QStringLiteral("rawTypeText"),
+                     QStringLiteral("logic [3:0] [1:0]"));
+    arrayType.insert(QStringLiteral("resolvedTypeName"), QStringLiteral("logic"));
+    arrayType.insert(QStringLiteral("semanticKind"),
+                     QStringLiteral("fixed-unpacked-array"));
+    arrayType.insert(QStringLiteral("resolvedTypeText"),
+                     QStringLiteral("logic [3:0] [1:0]"));
+    arrayType.insert(QStringLiteral("canonicalTypeId"),
+                     QStringLiteral("array:logic4:2"));
+    arrayType.insert(QStringLiteral("declarationShapeId"),
+                     QStringLiteral("logic[3:0][1:0]"));
+    arrayType.insert(QStringLiteral("unpackedArray"), true);
+    arrayType.insert(QStringLiteral("bitWidth"), 8);
+    arrayType.insert(QStringLiteral("packedDimensions"), QStringLiteral("[3:0]"));
+    arrayType.insert(QStringLiteral("unpackedDimensions"), QStringLiteral("[1:0]"));
+    arrayType.insert(QStringLiteral("unpackedElementCount"), QStringLiteral("2"));
+    array.insert(QStringLiteral("type"), arrayType);
+    array.insert(QStringLiteral("structuredLeavesAvailable"), true);
+    array.insert(
+        QStringLiteral("editableLeaves"),
+        QJsonArray{
+            leaf(
+                QStringLiteral("[1]"), QString{},
+                QJsonArray{selector(QStringLiteral("unpacked-index"),
+                                    QString{}, 1, 1)},
+                leafShape(arrayType, 4, QStringLiteral("logic:4")), false, 0),
+            leaf(
+                QStringLiteral("[0]"), QString{},
+                QJsonArray{selector(QStringLiteral("unpacked-index"),
+                                    QString{}, 0, 0)},
+                leafShape(arrayType, 4, QStringLiteral("logic:4")), false, 0),
+        });
+    array.insert(QStringLiteral("structuredFailureReason"), QString{});
+    array.insert(QStringLiteral("sourceLine"), 16);
+    ports.append(array);
+    root.insert(QStringLiteral("ports"), ports);
+
+    const auto parsed = wave::parseZeroSlackModuleManifest(
+        QJsonDocument(root).toJson());
+    expect(parsed.ok(), parsed.error.toStdString());
+    const auto wrapper = wave::generateStructuredSimulationWrapper(
+        *parsed.manifest);
+    expect(
+        wrapper.ok()
+            && wrapper.document.contains("module wave_fixture(")
+            && wrapper.document.contains("handshake_if control_if();")
+            && wrapper.document.contains(
+                "assign control_if.request = zs_structured_7_0;")
+            && wrapper.document.contains(
+                "assign zs_structured_7_2 = control_if.ready;")
+            && wrapper.document.contains("logic [5:0] cfg_i;")
+            && wrapper.document.contains(
+                "assign cfg_i[5 +: 1] = zs_structured_8_0;")
+            && wrapper.document.contains(
+                "logic [3:0] samples_i [1:0];")
+            && wrapper.document.contains(
+                "assign samples_i[1] = zs_structured_9_0;")
+            && wrapper.document.contains(".control_if(control_if)")
+            && wrapper.document.contains(".samples_i(samples_i)"),
+        wrapper.error.isEmpty()
+            ? "structured wrapper did not reconstruct machine-readable port shapes"
+            : wrapper.error.toStdString());
+    const auto imported = wave::importZeroSlackModuleManifest(*parsed.manifest);
+    expect(imported.ok(), imported.error.toStdString());
+    const auto& scenario = imported.project->scenarios.front();
+    const auto lane = [&scenario](const std::string_view name) -> const wave::Lane* {
+        const auto found = std::find_if(
+            scenario.lanes.cbegin(), scenario.lanes.cend(),
+            [name](const wave::Lane& item) { return item.name == name; });
+        return found == scenario.lanes.cend() ? nullptr : &*found;
+    };
+    expect(
+        lane("cfg_i") && lane("cfg_i")->kind == wave::LaneKind::Group
+            && lane("cfg_i.valid") && lane("cfg_i.valid")->width == 1
+            && lane("cfg_i.payload") && lane("cfg_i.payload")->width == 5
+            && lane("samples_i") && lane("samples_i")->kind == wave::LaneKind::Group
+            && lane("samples_i[1]") && lane("samples_i[0]")
+            && lane("control_if")
+            && lane("control_if.request")
+            && lane("control_if.command")
+            && lane("control_if.ready")
+            && lane("control_if.ready")->segments.empty(),
+        "structured manifest did not create grouped editable leaf lanes");
+    expect(
+        lane("cfg_i.payload")->extensions.at("waveSimulation.packedBitOffset") == "0"
+            && lane("samples_i[1]")->extensions.at(
+                   "waveSimulation.structuredSelectors")
+                .find("\"storageIndex\":1") != std::string::npos
+            && lane("control_if.request")->extensions.at(
+                   "waveSimulation.traceName")
+                == R"("zs_structured_7_0")",
+        "structured lane lost packed offset, storage index, or trace identity");
+    std::istringstream traceDocument(
+        "$timescale 1ps $end\n"
+        "$scope module TOP $end\n"
+        "$var wire 1 ! zs_structured_7_0 $end\n"
+        "$upscope $end\n"
+        "$enddefinitions $end\n"
+        "#0\n0!\n#10\n1!\n");
+    const auto trace = wave::parseVcd(traceDocument, {});
+    expect(trace.ok(), "cannot parse structured trace mapping fixture");
+    const auto mapping = wave::suggestSignalMapping(scenario, *trace.index);
+    expect(
+        mapping.contains(lane("control_if.request")->id),
+        "generated structured trace identity did not map back to its semantic lane");
+
+    auto project = *imported.project;
+    auto& editableScenario = project.scenarios.front();
+    auto editable = std::find_if(
+        editableScenario.lanes.begin(), editableScenario.lanes.end(),
+        [](const wave::Lane& item) { return item.name == "samples_i[1]"; });
+    expect(editable != editableScenario.lanes.end(),
+           "structured array leaf is missing before edit");
+    wave::SetLaneRangeCommand edit(
+        editableScenario, editable->id, 0, 25'000, "0xa");
+    edit.redo();
+    const auto exported = wave::exportZeroSlackStimulusScenario(
+        project, editableScenario);
+    expect(exported.ok(), exported.error.toStdString());
+    const auto serialized = wave::serializeZeroSlackStimulusScenario(
+        *exported.scenario);
+    const auto restored = wave::parseZeroSlackStimulusScenario(serialized);
+    expect(restored.ok(), restored.error.toStdString());
+    const auto savedLeaf = std::find_if(
+        restored.scenario->ports.cbegin(), restored.scenario->ports.cend(),
+        [](const wave::StimulusScenarioPort& item) {
+            return item.binding.name == "samples_i[1]";
+        });
+    expect(
+        restored.scenario->schemaVersion == 3
+            && savedLeaf != restored.scenario->ports.cend()
+            && savedLeaf->binding.structured
+            && savedLeaf->binding.rootPortName == "samples_i"
+            && savedLeaf->binding.relativePath == "[1]"
+            && savedLeaf->binding.selectors.size() == 1
+            && savedLeaf->binding.selectors.front().storageIndex == 1
+            && savedLeaf->segments.front().value == "0xa",
+        "stimulus v3 did not round-trip a structured edit binding");
+    expect(
+        wave::restoreZeroSlackStimulusScenario(
+            *parsed.manifest, *restored.scenario).ok(),
+        "structured stimulus could not be restored against its exact manifest");
+
+    auto renamedRoot = root;
+    auto renamedPorts = renamedRoot.value(QStringLiteral("ports")).toArray();
+    for (qsizetype index = 0; index < renamedPorts.size(); ++index) {
+        auto port = renamedPorts.at(index).toObject();
+        if (port.value(QStringLiteral("name")).toString()
+            != QStringLiteral("samples_i")) {
+            continue;
+        }
+        port.insert(QStringLiteral("name"), QStringLiteral("renamed_samples_i"));
+        port.insert(
+            QStringLiteral("declarationText"),
+            QStringLiteral("input logic [3:0] renamed_samples_i [1:0]"));
+        renamedPorts[index] = port;
+        break;
+    }
+    renamedRoot.insert(QStringLiteral("ports"), renamedPorts);
+    const auto renamedManifest = wave::parseZeroSlackModuleManifest(
+        QJsonDocument(renamedRoot).toJson());
+    expect(renamedManifest.ok(), renamedManifest.error.toStdString());
+    const auto migrated = wave::restoreZeroSlackStimulusScenario(
+        *renamedManifest.manifest, *restored.scenario);
+    expect(migrated.ok(), migrated.error.toStdString());
+    const auto& migratedScenario = migrated.project->scenarios.front();
+    const auto migratedLane = [&migratedScenario](const std::string_view name)
+        -> const wave::Lane* {
+        const auto found = std::find_if(
+            migratedScenario.lanes.cbegin(), migratedScenario.lanes.cend(),
+            [name](const wave::Lane& item) { return item.name == name; });
+        return found == migratedScenario.lanes.cend() ? nullptr : &*found;
+    };
+    const auto* renamedGroup = migratedLane("renamed_samples_i");
+    const auto* renamedLeaf = migratedLane("renamed_samples_i[1]");
+    expect(
+        migrated.renamedPortCount == 2
+            && renamedGroup && renamedGroup->kind == wave::LaneKind::Group
+            && renamedLeaf && renamedLeaf->groupId == renamedGroup->id
+            && renamedLeaf->segments.size() == 2
+            && !migratedLane("samples_i") && !migratedLane("samples_i[1]"),
+        "structured root rename did not preserve edited leaves in the current auto group");
+
+    auto invalidDirectionRoot = root;
+    auto invalidDirectionPorts =
+        invalidDirectionRoot.value(QStringLiteral("ports")).toArray();
+    for (qsizetype index = 0; index < invalidDirectionPorts.size(); ++index) {
+        auto port = invalidDirectionPorts.at(index).toObject();
+        if (port.value(QStringLiteral("name")).toString()
+            != QStringLiteral("cfg_i")) {
+            continue;
+        }
+        auto leaves = port.value(QStringLiteral("editableLeaves")).toArray();
+        auto first = leaves.first().toObject();
+        first.insert(QStringLiteral("direction"), QStringLiteral("output"));
+        leaves[0] = first;
+        port.insert(QStringLiteral("editableLeaves"), leaves);
+        invalidDirectionPorts[index] = port;
+        break;
+    }
+    invalidDirectionRoot.insert(
+        QStringLiteral("ports"), invalidDirectionPorts);
+    expect(
+        !wave::parseZeroSlackModuleManifest(
+             QJsonDocument(invalidDirectionRoot).toJson()).ok(),
+        "a packed leaf overrode its root port direction");
+
+    auto unsupportedRoot = root;
+    auto unsupportedPorts =
+        unsupportedRoot.value(QStringLiteral("ports")).toArray();
+    for (qsizetype index = 0; index < unsupportedPorts.size(); ++index) {
+        auto port = unsupportedPorts.at(index).toObject();
+        if (port.value(QStringLiteral("name")).toString()
+            != QStringLiteral("cfg_i")) {
+            continue;
+        }
+        port.insert(QStringLiteral("structuredLeavesAvailable"), false);
+        port.insert(QStringLiteral("editableLeaves"), QJsonArray{});
+        port.insert(
+            QStringLiteral("structuredFailureReason"),
+            QStringLiteral("unsupported packed union"));
+        unsupportedPorts[index] = port;
+        break;
+    }
+    unsupportedRoot.insert(QStringLiteral("ports"), unsupportedPorts);
+    const auto unsupportedManifest = wave::parseZeroSlackModuleManifest(
+        QJsonDocument(unsupportedRoot).toJson());
+    expect(unsupportedManifest.ok(), unsupportedManifest.error.toStdString());
+    const auto unsupportedImport = wave::importZeroSlackModuleManifest(
+        *unsupportedManifest.manifest);
+    expect(
+        unsupportedImport.ok()
+            && std::none_of(
+                unsupportedImport.project->scenarios.front().lanes.cbegin(),
+                unsupportedImport.project->scenarios.front().lanes.cend(),
+                [](const wave::Lane& item) { return item.name == "cfg_i"; })
+            && std::any_of(
+                unsupportedImport.diagnostics.cbegin(),
+                unsupportedImport.diagnostics.cend(),
+                [](const QString& diagnostic) {
+                    return diagnostic.contains(
+                        QStringLiteral("unsupported packed union"));
+                }),
+        "an unsupported structured root silently fell back to a flat lane");
+}
+
 void testZeroSlackStimulusScenarioContract()
 {
     const auto manifestPath = std::filesystem::path(WAVE_SOURCE_DIR)
@@ -6087,7 +6495,7 @@ void testZeroSlackStimulusScenarioContract()
                 QJsonDocument(unknownRoot).toJson()).ok(),
            "unknown or absolute-path stimulus property was accepted");
     auto futureRoot = QJsonDocument::fromJson(document).object();
-    futureRoot.insert(QStringLiteral("schemaVersion"), 3);
+    futureRoot.insert(QStringLiteral("schemaVersion"), 4);
     expect(!wave::parseZeroSlackStimulusScenario(
                 QJsonDocument(futureRoot).toJson()).ok(),
            "unsupported stimulus schema version was accepted");
@@ -19030,6 +19438,8 @@ int main(int argc, char* argv[])
         {"compare diagnostics, relations, and reports", testCompareDiagnosticsRelationsAndReports},
         {"cross-application file and URI contracts", testCrossApplicationContracts},
         {"ZeroSlack Module Manifest import", testZeroSlackModuleManifestImport},
+        {"ZeroSlack structured Module Manifest import",
+         testZeroSlackStructuredModuleManifestImport},
         {"ZeroSlack Stimulus Scenario contract", testZeroSlackStimulusScenarioContract},
         {"asynchronous process runner", testAsynchronousProcessRunner},
         {"Verilator toolchain probe", testVerilatorToolchainProbe},

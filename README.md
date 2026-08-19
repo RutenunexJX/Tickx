@@ -26,10 +26,17 @@ Module Manifest 中的多个语义时钟候选会分别导入为独立 ClockDoma
 有效边沿；`Timing` 可在关联时钟网格与 1 tick 异步编辑之间切换。运行计划分别驱动每个时钟，
 并保留任意 tick 的普通输入事件。仅修改时钟或异步刺激会复用已编译模型。
 
+Module Manifest v3 将 packed struct、固定 unpacked array 和显式 modport interface 输入
+展开为分组的可编辑 leaf lane。每个 leaf 保留 Slang selector、类型、方向和稳定 trace 名；
+runner 生成 wrapper 重建原始端口，Stimulus Scenario v3 可在结构化根重命名后安全迁移既有
+激励。当前 interface 范围限于无构造端口且显式指定 modport 的类型，`inout/ref`、动态数组
+及宽度超过 64 bit 的 leaf 会给出明确诊断。
+
 ZeroSlack 的正式 Wave Simulation 工作流通过版本化 `wavewidgets` C ABI 将完整工作区
 嵌入编辑区 Wave Tab，无需用户手工传递文件。独立应用链接同一共享控件实现并继续作为
-可单独运行的工具。当前兼容 Module Manifest v1/v2；v2 可携带选中 `always` 的观察范围
-和内部信号 access path，并将构建或运行错误以源码文件、行、列回传 ZeroSlack。
+可单独运行的工具。当前兼容 Module Manifest v1/v2/v3；v2 可携带选中 `always` 的观察范围
+和内部信号 access path，v3 增加结构化输入 leaf 契约，并将构建或运行错误以源码文件、行、列
+回传 ZeroSlack。
 
 ## 构建
 

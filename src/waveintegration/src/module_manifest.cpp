@@ -149,6 +149,67 @@ bool readPositiveInt(
     return true;
 }
 
+QString structuredSelectorKindName(
+    const ModuleManifestStructuredSelectorKind kind)
+{
+    switch (kind) {
+    case ModuleManifestStructuredSelectorKind::StructMember:
+        return QStringLiteral("struct-member");
+    case ModuleManifestStructuredSelectorKind::PackedIndex:
+        return QStringLiteral("packed-index");
+    case ModuleManifestStructuredSelectorKind::UnpackedIndex:
+        return QStringLiteral("unpacked-index");
+    case ModuleManifestStructuredSelectorKind::InterfaceMember:
+        return QStringLiteral("interface-member");
+    }
+    return {};
+}
+
+std::string jsonStructuredSelectorsValue(
+    const std::vector<ModuleManifestStructuredSelector>& selectors)
+{
+    QJsonArray array;
+    for (const auto& selector : selectors) {
+        array.append(QJsonObject{
+            {QStringLiteral("kind"), structuredSelectorKindName(selector.kind)},
+            {QStringLiteral("name"), qString(selector.name)},
+            {QStringLiteral("sourceIndex"), selector.sourceIndex},
+            {QStringLiteral("storageIndex"), selector.storageIndex},
+        });
+    }
+    return QJsonDocument(array).toJson(QJsonDocument::Compact).toStdString();
+}
+
+std::string structuredTraceName(
+    const std::size_t portIndex,
+    const std::size_t leafIndex)
+{
+    return "zs_structured_" + std::to_string(portIndex) + "_"
+        + std::to_string(leafIndex);
+}
+
+bool readSignedInteger(
+    const QJsonObject& object,
+    const QString& name,
+    const QString& context,
+    int& output,
+    QString& error)
+{
+    const auto value = object.value(name);
+    const auto number = value.toDouble(
+        std::numeric_limits<double>::quiet_NaN());
+    if (!value.isDouble() || !std::isfinite(number)
+        || std::floor(number) != number
+        || number < static_cast<double>(std::numeric_limits<int>::min())
+        || number > static_cast<double>(std::numeric_limits<int>::max())) {
+        error = QStringLiteral("%1.%2 must be a supported integer")
+                    .arg(context, name);
+        return false;
+    }
+    output = static_cast<int>(number);
+    return true;
+}
+
 bool relativeProjectPath(const std::string& path)
 {
     const auto text = qString(path);
@@ -416,6 +477,260 @@ std::optional<ModulePortDirection> portDirection(const QString& text)
     return std::nullopt;
 }
 
+std::optional<ModuleManifestStructuredSelectorKind> selectorKind(
+    const QString& text)
+{
+    if (text == QStringLiteral("struct-member"))
+        return ModuleManifestStructuredSelectorKind::StructMember;
+    if (text == QStringLiteral("packed-index"))
+        return ModuleManifestStructuredSelectorKind::PackedIndex;
+    if (text == QStringLiteral("unpacked-index"))
+        return ModuleManifestStructuredSelectorKind::UnpackedIndex;
+    if (text == QStringLiteral("interface-member"))
+        return ModuleManifestStructuredSelectorKind::InterfaceMember;
+    return std::nullopt;
+}
+
+QString selectorPath(const ModuleManifestStructuredSelector& selector)
+{
+    switch (selector.kind) {
+    case ModuleManifestStructuredSelectorKind::StructMember:
+    case ModuleManifestStructuredSelectorKind::InterfaceMember:
+        return QStringLiteral(".%1").arg(qString(selector.name));
+    case ModuleManifestStructuredSelectorKind::PackedIndex:
+    case ModuleManifestStructuredSelectorKind::UnpackedIndex:
+        return QStringLiteral("[%1]").arg(selector.sourceIndex);
+    }
+    return {};
+}
+
+bool parseEditableLeaves(
+    const QJsonValue& value,
+    const QString& context,
+    const ModulePortDirection rootDirection,
+    std::vector<ModuleManifestEditableLeaf>& leaves,
+    QString& error)
+{
+    if (!value.isArray()) {
+        error = context + QStringLiteral(" must be an array");
+        return false;
+    }
+    QSet<QString> paths;
+    for (qsizetype index = 0; index < value.toArray().size(); ++index) {
+        const auto leafValue = value.toArray().at(index);
+        const auto leafContext = QStringLiteral("%1[%2]")
+                                     .arg(context)
+                                     .arg(index);
+        if (!leafValue.isObject()) {
+            error = leafContext + QStringLiteral(" must be an object");
+            return false;
+        }
+        const auto object = leafValue.toObject();
+        if (!exactKeys(
+                object,
+                {QStringLiteral("relativePath"), QStringLiteral("direction"),
+                 QStringLiteral("selectors"), QStringLiteral("type"),
+                 QStringLiteral("enumValues"),
+                 QStringLiteral("packedBitOffsetValid"),
+                 QStringLiteral("packedBitOffset")},
+                leafContext,
+                error)) {
+            return false;
+        }
+
+        ModuleManifestEditableLeaf leaf;
+        std::string directionText;
+        if (!readString(object, QStringLiteral("relativePath"), leafContext,
+                        leaf.relativePath, error, false)
+            || !readString(object, QStringLiteral("direction"), leafContext,
+                           directionText, error)
+            || !readBool(object, QStringLiteral("packedBitOffsetValid"),
+                         leafContext, leaf.packedBitOffsetValid, error)
+            || !readInteger(object, QStringLiteral("packedBitOffset"),
+                            leafContext, leaf.packedBitOffset, error)) {
+            return false;
+        }
+        if (rootDirection == ModulePortDirection::Interface) {
+            if (directionText.empty()) {
+                error = leafContext
+                    + QStringLiteral(
+                        ".direction is required for an interface member");
+                return false;
+            }
+            const auto parsedDirection = portDirection(qString(directionText));
+            if (!parsedDirection
+                || *parsedDirection == ModulePortDirection::Interface
+                || *parsedDirection == ModulePortDirection::Unknown) {
+                error = leafContext + QStringLiteral(".direction is unsupported");
+                return false;
+            }
+            leaf.direction = *parsedDirection;
+            leaf.inheritsPortDirection = false;
+        } else {
+            if (!directionText.empty()) {
+                error = leafContext
+                    + QStringLiteral(
+                        ".direction must inherit the root data-port direction");
+                return false;
+            }
+            leaf.direction = rootDirection;
+            leaf.inheritsPortDirection = true;
+        }
+
+        const auto selectors = object.value(QStringLiteral("selectors"));
+        if (!selectors.isArray() || selectors.toArray().isEmpty()) {
+            error = leafContext + QStringLiteral(".selectors must be a non-empty array");
+            return false;
+        }
+        QString computedPath;
+        for (qsizetype selectorIndex = 0;
+             selectorIndex < selectors.toArray().size(); ++selectorIndex) {
+            const auto selectorValue = selectors.toArray().at(selectorIndex);
+            const auto selectorContext = QStringLiteral("%1.selectors[%2]")
+                                             .arg(leafContext)
+                                             .arg(selectorIndex);
+            if (!selectorValue.isObject()) {
+                error = selectorContext + QStringLiteral(" must be an object");
+                return false;
+            }
+            const auto selectorObject = selectorValue.toObject();
+            if (!exactKeys(
+                    selectorObject,
+                    {QStringLiteral("kind"), QStringLiteral("name"),
+                     QStringLiteral("sourceIndex"),
+                     QStringLiteral("storageIndex")},
+                    selectorContext,
+                    error)) {
+                return false;
+            }
+            std::string kindText;
+            ModuleManifestStructuredSelector selector;
+            std::uint64_t storageIndex = 0;
+            if (!readString(selectorObject, QStringLiteral("kind"),
+                            selectorContext, kindText, error, false)
+                || !readString(selectorObject, QStringLiteral("name"),
+                               selectorContext, selector.name, error)
+                || !readSignedInteger(selectorObject,
+                                      QStringLiteral("sourceIndex"),
+                                      selectorContext,
+                                      selector.sourceIndex,
+                                      error)
+                || !readInteger(selectorObject,
+                                QStringLiteral("storageIndex"),
+                                selectorContext,
+                                storageIndex,
+                                error)
+                || storageIndex
+                       > static_cast<std::uint64_t>(
+                           std::numeric_limits<int>::max())) {
+                if (error.isEmpty()) {
+                    error = selectorContext
+                        + QStringLiteral(".storageIndex is unsupported");
+                }
+                return false;
+            }
+            const auto parsedKind = selectorKind(qString(kindText));
+            if (!parsedKind) {
+                error = selectorContext + QStringLiteral(".kind is unsupported");
+                return false;
+            }
+            selector.kind = *parsedKind;
+            selector.storageIndex = static_cast<int>(storageIndex);
+            const bool memberSelector =
+                selector.kind
+                    == ModuleManifestStructuredSelectorKind::StructMember
+                || selector.kind
+                    == ModuleManifestStructuredSelectorKind::InterfaceMember;
+            if (memberSelector != !selector.name.empty()) {
+                error = selectorContext
+                    + QStringLiteral(".name does not match selector kind");
+                return false;
+            }
+            computedPath += selectorPath(selector);
+            leaf.selectors.push_back(std::move(selector));
+        }
+        if (computedPath != qString(leaf.relativePath)) {
+            error = leafContext
+                + QStringLiteral(".relativePath does not match selectors");
+            return false;
+        }
+        if (!object.value(QStringLiteral("type")).isObject()
+            || !parseTypeShape(
+                object.value(QStringLiteral("type")).toObject(),
+                leafContext + QStringLiteral(".type"),
+                leaf.type,
+                error)
+            || !leaf.type.semanticAvailable || !leaf.type.fixedSize
+            || !leaf.type.integral || leaf.type.bitWidth == 0
+            || leaf.type.bitWidth
+                   > std::numeric_limits<std::uint32_t>::max()) {
+            if (error.isEmpty()) {
+                error = leafContext
+                    + QStringLiteral(".type must be a fixed integral leaf");
+            }
+            return false;
+        }
+
+        const auto enumValues = object.value(QStringLiteral("enumValues"));
+        if (!enumValues.isArray()) {
+            error = leafContext + QStringLiteral(".enumValues must be an array");
+            return false;
+        }
+        QSet<QString> enumNames;
+        for (qsizetype enumIndex = 0;
+             enumIndex < enumValues.toArray().size(); ++enumIndex) {
+            const auto enumValue = enumValues.toArray().at(enumIndex);
+            const auto enumContext = QStringLiteral("%1.enumValues[%2]")
+                                         .arg(leafContext)
+                                         .arg(enumIndex);
+            if (!enumValue.isObject()) {
+                error = enumContext + QStringLiteral(" must be an object");
+                return false;
+            }
+            const auto enumObject = enumValue.toObject();
+            if (!exactKeys(
+                    enumObject,
+                    {QStringLiteral("name"),
+                     QStringLiteral("declarationText"),
+                     QStringLiteral("valueText"),
+                     QStringLiteral("displayValueText"),
+                     QStringLiteral("semanticAvailable")},
+                    enumContext,
+                    error)) {
+                return false;
+            }
+            ModuleManifestEnumValue parsed;
+            if (!readString(enumObject, QStringLiteral("name"), enumContext,
+                            parsed.name, error, false)
+                || !readString(enumObject,
+                               QStringLiteral("declarationText"), enumContext,
+                               parsed.declarationText, error)
+                || !readString(enumObject, QStringLiteral("valueText"),
+                               enumContext, parsed.valueText, error)
+                || !readString(enumObject,
+                               QStringLiteral("displayValueText"), enumContext,
+                               parsed.displayValueText, error)
+                || !readBool(enumObject,
+                             QStringLiteral("semanticAvailable"), enumContext,
+                             parsed.semanticAvailable, error)
+                || enumNames.contains(qString(parsed.name))) {
+                if (error.isEmpty())
+                    error = enumContext + QStringLiteral(" duplicates enum name");
+                return false;
+            }
+            enumNames.insert(qString(parsed.name));
+            leaf.enumValues.push_back(std::move(parsed));
+        }
+        if (paths.contains(qString(leaf.relativePath))) {
+            error = leafContext + QStringLiteral(" duplicates relativePath");
+            return false;
+        }
+        paths.insert(qString(leaf.relativePath));
+        leaves.push_back(std::move(leaf));
+    }
+    return true;
+}
+
 ModuleCandidateSuggestion suggestion(const std::vector<std::string>& candidates)
 {
     ModuleCandidateSuggestion result;
@@ -490,6 +805,16 @@ bool watchDirection(const ModulePortDirection direction)
 }
 
 } // namespace
+
+std::string moduleManifestStructuredGroupId(
+    const std::string_view manifestIdentity,
+    const std::string_view rootPortName)
+{
+    return stableDigestId(
+        "zs-port-group",
+        std::string(manifestIdentity),
+        std::string(rootPortName));
+}
 
 ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& document)
 {
@@ -885,13 +1210,25 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
             return result;
         }
         const auto port = value.toObject();
-        if (!exactKeys(
-                port,
-                {QStringLiteral("name"), QStringLiteral("direction"),
-                 QStringLiteral("declarationText"), QStringLiteral("type"),
-                 QStringLiteral("sourceFile"), QStringLiteral("sourceLine")},
-                context,
-                error)) {
+        const bool portKeysValid = schemaVersion >= 3
+            ? exactKeys(
+                  port,
+                  {QStringLiteral("name"), QStringLiteral("direction"),
+                   QStringLiteral("declarationText"), QStringLiteral("type"),
+                   QStringLiteral("structuredLeavesAvailable"),
+                   QStringLiteral("editableLeaves"),
+                   QStringLiteral("structuredFailureReason"),
+                   QStringLiteral("sourceFile"), QStringLiteral("sourceLine")},
+                  context,
+                  error)
+            : exactKeys(
+                  port,
+                  {QStringLiteral("name"), QStringLiteral("direction"),
+                   QStringLiteral("declarationText"), QStringLiteral("type"),
+                   QStringLiteral("sourceFile"), QStringLiteral("sourceLine")},
+                  context,
+                  error);
+        if (!portKeysValid) {
             result.error = error;
             return result;
         }
@@ -924,6 +1261,41 @@ ModuleManifestParseResult parseZeroSlackModuleManifest(const QByteArray& documen
                 ? context + QStringLiteral(".type must be an object")
                 : error;
             return result;
+        }
+        if (schemaVersion >= 3) {
+            if (!readBool(port,
+                          QStringLiteral("structuredLeavesAvailable"),
+                          context,
+                          parsedPort.structuredLeavesAvailable,
+                          error)
+                || !readString(port,
+                               QStringLiteral("structuredFailureReason"),
+                               context,
+                               parsedPort.structuredFailureReason,
+                               error)
+                || !parseEditableLeaves(
+                    port.value(QStringLiteral("editableLeaves")),
+                    context + QStringLiteral(".editableLeaves"),
+                    parsedPort.direction,
+                    parsedPort.editableLeaves,
+                    error)) {
+                result.error = error;
+                return result;
+            }
+            if (parsedPort.structuredLeavesAvailable
+                != !parsedPort.editableLeaves.empty()) {
+                result.error = context
+                    + QStringLiteral(
+                        ".structuredLeavesAvailable does not match editableLeaves");
+                return result;
+            }
+            if (parsedPort.structuredLeavesAvailable
+                && !parsedPort.structuredFailureReason.empty()) {
+                result.error = context
+                    + QStringLiteral(
+                        ".structuredFailureReason must be empty when leaves are available");
+                return result;
+            }
         }
         if (portNames.contains(qString(parsedPort.name))) {
             result.error = QStringLiteral("manifest.ports contains duplicate name %1")
@@ -1078,11 +1450,179 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
     for (std::size_t index = 0; index < manifest.ports.size(); ++index) {
         const auto& port = manifest.ports[index];
         const auto& shape = port.type.shape;
+        const auto baseSourceOrder = index;
+        if (port.structuredLeavesAvailable) {
+            bool anyStimulus = false;
+            bool anyWatch = false;
+            for (const auto& leaf : port.editableLeaves) {
+                anyStimulus = anyStimulus || stimulusDirection(leaf.direction);
+                anyWatch = anyWatch || watchDirection(leaf.direction);
+            }
+
+            Lane group;
+            group.id = moduleManifestStructuredGroupId(
+                manifest.identity, port.name);
+            group.name = port.name;
+            group.kind = LaneKind::Group;
+            group.color = "#90a4ae";
+            group.height = 40;
+            group.visible = true;
+            group.extensions.emplace(
+                "sourceApplication", jsonStringValue("ZeroSlack"));
+            group.extensions.emplace(
+                "waveSimulation.moduleManifestIdentity",
+                jsonStringValue(manifest.identity));
+            group.extensions.emplace("waveSimulation.structuredGroup", "true");
+            group.extensions.emplace(
+                "waveSimulation.rootPortName", jsonStringValue(port.name));
+            group.extensions.emplace(
+                "waveSimulation.sourceOrder", std::to_string(baseSourceOrder));
+
+            int priority = anyStimulus && anyWatch ? 3 : anyStimulus ? 2 : 4;
+            lanes.push_back({priority, baseSourceOrder, group, false, false});
+
+            for (std::size_t leafIndex = 0;
+                 leafIndex < port.editableLeaves.size(); ++leafIndex) {
+                const auto& leaf = port.editableLeaves[leafIndex];
+                const auto stimulus = stimulusDirection(leaf.direction);
+                const auto watch = watchDirection(leaf.direction);
+                const auto sourceOrder = baseSourceOrder;
+                const auto leafName = port.name + leaf.relativePath;
+                const auto role = stimulus && watch
+                    ? std::string("stimulus-watch")
+                    : stimulus ? std::string("stimulus")
+                               : std::string("watch");
+
+                Lane lane;
+                lane.id = stableDigestId(
+                    "zs-port-leaf", manifest.identity, leafName);
+                lane.name = leafName;
+                lane.width = static_cast<std::uint32_t>(leaf.type.bitWidth);
+                lane.isSigned = leaf.type.isSigned;
+                lane.kind = !leaf.enumValues.empty()
+                        || leaf.type.semanticKind == "enum"
+                    ? LaneKind::Enum
+                    : lane.width == 1 ? LaneKind::Bit : LaneKind::Bus;
+                lane.radix = Radix::Hexadecimal;
+                lane.height = 56;
+                lane.visible = !focusedObservationScope
+                    || stimulus
+                    || observedPortNames.contains(qString(port.name));
+                lane.groupId = group.id;
+                lane.color = watch && stimulus
+                    ? "#ce93d8"
+                    : watch ? "#ffb74d" : "#64b5f6";
+                lane.extensions.emplace(
+                    "sourceApplication", jsonStringValue("ZeroSlack"));
+                lane.extensions.emplace(
+                    "waveSimulation.moduleManifestIdentity",
+                    jsonStringValue(manifest.identity));
+                lane.extensions.emplace(
+                    "waveSimulation.role", jsonStringValue(role));
+                lane.extensions.emplace(
+                    "waveSimulation.direction",
+                    jsonStringValue(std::string(toString(leaf.direction))));
+                lane.extensions.emplace(
+                    "waveSimulation.declarationText",
+                    jsonStringValue(port.declarationText));
+                lane.extensions.emplace(
+                    "waveSimulation.sourceFile", jsonStringValue(port.sourceFile));
+                lane.extensions.emplace(
+                    "waveSimulation.sourceLine", std::to_string(port.sourceLine));
+                lane.extensions.emplace(
+                    "waveSimulation.canonicalTypeId",
+                    jsonStringValue(leaf.type.canonicalTypeId));
+                lane.extensions.emplace(
+                    "waveSimulation.declarationShapeId",
+                    jsonStringValue(leaf.type.declarationShapeId));
+                lane.extensions.emplace(
+                    "waveSimulation.sourceOrder", std::to_string(sourceOrder));
+                lane.extensions.emplace(
+                    "waveSimulation.resolvedTypeText",
+                    jsonStringValue(leaf.type.resolvedTypeText));
+                lane.extensions.emplace(
+                    "waveSimulation.typedefChain",
+                    jsonStringArrayValue(leaf.type.typedefChain));
+                lane.extensions.emplace("waveSimulation.clockCandidate", "false");
+                lane.extensions.emplace("waveSimulation.resetCandidate", "false");
+                lane.extensions.emplace("waveSimulation.structured", "true");
+                lane.extensions.emplace(
+                    "waveSimulation.rootPortName", jsonStringValue(port.name));
+                lane.extensions.emplace(
+                    "waveSimulation.structuredRelativePath",
+                    jsonStringValue(leaf.relativePath));
+                lane.extensions.emplace(
+                    "waveSimulation.structuredSelectors",
+                    jsonStructuredSelectorsValue(leaf.selectors));
+                lane.extensions.emplace(
+                    "waveSimulation.packedBitOffsetValid",
+                    leaf.packedBitOffsetValid ? "true" : "false");
+                lane.extensions.emplace(
+                    "waveSimulation.packedBitOffset",
+                    std::to_string(leaf.packedBitOffset));
+                lane.extensions.emplace(
+                    "waveSimulation.rootDirection",
+                    jsonStringValue(std::string(toString(port.direction))));
+                lane.extensions.emplace(
+                    "waveSimulation.rootCanonicalTypeId",
+                    jsonStringValue(shape.canonicalTypeId));
+                lane.extensions.emplace(
+                    "waveSimulation.rootDeclarationShapeId",
+                    jsonStringValue(shape.declarationShapeId));
+                lane.extensions.emplace(
+                    "waveSimulation.interfaceName",
+                    jsonStringValue(shape.interfaceName));
+                lane.extensions.emplace(
+                    "waveSimulation.modportName",
+                    jsonStringValue(shape.modportName));
+                lane.extensions.emplace(
+                    "waveSimulation.traceName",
+                    jsonStringValue(structuredTraceName(index, leafIndex)));
+
+                for (const auto& value : leaf.enumValues) {
+                    const auto normalized = normalizedEnumValue(value);
+                    if (!value.semanticAvailable || !normalized) {
+                        result.diagnostics.append(
+                            QStringLiteral("Enum value %1 for structured input %2 could not be normalized and was omitted.")
+                                .arg(qString(value.name), qString(leafName)));
+                        continue;
+                    }
+                    lane.enumMap.emplace(value.name, *normalized);
+                }
+                if (stimulus) {
+                    setSegmentRange(
+                        lane,
+                        0,
+                        options.duration,
+                        lane.kind == LaneKind::Bit ? std::string("0")
+                                                   : std::string("0x0"),
+                        stableDigestId(
+                            "zs-segment", manifest.identity, leafName));
+                }
+                lanes.push_back({
+                    priority, sourceOrder, std::move(lane), stimulus, watch});
+            }
+            result.diagnostics.append(
+                QStringLiteral("Port %1 was imported as %2 structured leaf lanes.")
+                    .arg(qString(port.name))
+                    .arg(port.editableLeaves.size()));
+            continue;
+        }
+        if (!port.structuredFailureReason.empty()) {
+            result.diagnostics.append(
+                QStringLiteral("Port %1 cannot be edited as structured data: %2")
+                    .arg(qString(port.name),
+                         qString(port.structuredFailureReason)));
+            continue;
+        }
         if (port.direction == ModulePortDirection::Interface
             || shape.interfaceType) {
             result.diagnostics.append(
-                QStringLiteral("Port %1 is an interface and is deferred to the structured-input slice.")
-                    .arg(qString(port.name)));
+                QStringLiteral("Port %1 cannot be edited as an interface: %2")
+                    .arg(qString(port.name),
+                         qString(port.structuredFailureReason.empty()
+                                     ? std::string("structured member facts are unavailable")
+                                     : port.structuredFailureReason)));
             continue;
         }
         if (port.direction == ModulePortDirection::Unknown) {
@@ -1093,8 +1633,11 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
         }
         if (shape.unpackedArray) {
             result.diagnostics.append(
-                QStringLiteral("Port %1 is an unpacked array and is deferred to the structured-input slice.")
-                    .arg(qString(port.name)));
+                QStringLiteral("Port %1 cannot be edited as an unpacked array: %2")
+                    .arg(qString(port.name),
+                         qString(port.structuredFailureReason.empty()
+                                     ? std::string("structured element facts are unavailable")
+                                     : port.structuredFailureReason)));
             continue;
         }
         if (!shape.semanticAvailable || !shape.fixedSize || !shape.integral
@@ -1235,7 +1778,7 @@ ModuleManifestImportResult importZeroSlackModuleManifest(
         else if (stimulus && !watch) priority = 2;
         else if (stimulus) priority = 3;
         lanes.push_back({
-            priority, index, std::move(lane), stimulus, watch});
+            priority, baseSourceOrder, std::move(lane), stimulus, watch});
     }
 
     QSet<QString> importedObservationPaths;

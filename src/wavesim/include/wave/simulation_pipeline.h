@@ -1,8 +1,10 @@
 #pragma once
 
+#include "wave/module_manifest.h"
 #include "wave/simulation_runner.h"
 #include "wave/trace.h"
 
+#include <QByteArray>
 #include <QJsonObject>
 #include <QString>
 
@@ -110,6 +112,16 @@ struct SimulationRunReport {
     }
 };
 
+struct StructuredSimulationWrapperResult {
+    QByteArray document;
+    QString error;
+
+    [[nodiscard]] bool ok() const noexcept
+    {
+        return !document.isEmpty() && error.isEmpty();
+    }
+};
+
 class VerilatorSimulationRunner final {
 public:
     using Completion = std::function<void(SimulationRunReport)>;
@@ -139,6 +151,10 @@ private:
     const SimulationRunReport& report);
 
 [[nodiscard]] quint64 nextSimulationGeneration() noexcept;
+
+[[nodiscard]] StructuredSimulationWrapperResult
+generateStructuredSimulationWrapper(
+    const ZeroSlackModuleManifest& manifest);
 
 [[nodiscard]] std::string_view toString(SimulationRunStage stage) noexcept;
 [[nodiscard]] std::string_view toString(SimulationRunStatus status) noexcept;

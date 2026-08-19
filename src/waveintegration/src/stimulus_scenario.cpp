@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <exception>
 #include <limits>
 #include <map>
@@ -116,6 +117,28 @@ bool readUnsigned(
                     .arg(minimum);
         return false;
     }
+    return true;
+}
+
+bool readSignedInteger(
+    const QJsonObject& object,
+    const QString& key,
+    const QString& context,
+    int& output,
+    QString& error)
+{
+    const auto value = object.value(key);
+    const auto number = value.toDouble(
+        std::numeric_limits<double>::quiet_NaN());
+    if (!value.isDouble() || !std::isfinite(number)
+        || std::floor(number) != number
+        || number < static_cast<double>(std::numeric_limits<int>::min())
+        || number > static_cast<double>(std::numeric_limits<int>::max())) {
+        error = QStringLiteral("%1.%2 must be a supported integer")
+                    .arg(context, key);
+        return false;
+    }
+    output = static_cast<int>(number);
     return true;
 }
 
@@ -240,6 +263,135 @@ std::optional<ModulePortDirection> directionFromString(
     return std::nullopt;
 }
 
+std::string_view structuredSelectorKindString(
+    const ModuleManifestStructuredSelectorKind kind) noexcept
+{
+    switch (kind) {
+    case ModuleManifestStructuredSelectorKind::StructMember:
+        return "struct-member";
+    case ModuleManifestStructuredSelectorKind::PackedIndex:
+        return "packed-index";
+    case ModuleManifestStructuredSelectorKind::UnpackedIndex:
+        return "unpacked-index";
+    case ModuleManifestStructuredSelectorKind::InterfaceMember:
+        return "interface-member";
+    }
+    return "struct-member";
+}
+
+std::optional<ModuleManifestStructuredSelectorKind> structuredSelectorKindFromString(
+    const std::string_view value) noexcept
+{
+    if (value == "struct-member")
+        return ModuleManifestStructuredSelectorKind::StructMember;
+    if (value == "packed-index")
+        return ModuleManifestStructuredSelectorKind::PackedIndex;
+    if (value == "unpacked-index")
+        return ModuleManifestStructuredSelectorKind::UnpackedIndex;
+    if (value == "interface-member")
+        return ModuleManifestStructuredSelectorKind::InterfaceMember;
+    return std::nullopt;
+}
+
+QString structuredSelectorPath(
+    const ModuleManifestStructuredSelector& selector)
+{
+    switch (selector.kind) {
+    case ModuleManifestStructuredSelectorKind::StructMember:
+    case ModuleManifestStructuredSelectorKind::InterfaceMember:
+        return QStringLiteral(".%1").arg(qString(selector.name));
+    case ModuleManifestStructuredSelectorKind::PackedIndex:
+    case ModuleManifestStructuredSelectorKind::UnpackedIndex:
+        return QStringLiteral("[%1]").arg(selector.sourceIndex);
+    }
+    return {};
+}
+
+QJsonArray selectorsToJson(
+    const std::vector<ModuleManifestStructuredSelector>& selectors)
+{
+    QJsonArray result;
+    for (const auto& selector : selectors) {
+        result.append(QJsonObject{
+            {QStringLiteral("kind"),
+             latinString(structuredSelectorKindString(selector.kind))},
+            {QStringLiteral("name"), qString(selector.name)},
+            {QStringLiteral("sourceIndex"), selector.sourceIndex},
+            {QStringLiteral("storageIndex"), selector.storageIndex},
+        });
+    }
+    return result;
+}
+
+bool parseSelectors(
+    const QJsonValue& value,
+    const QString& context,
+    std::vector<ModuleManifestStructuredSelector>& selectors,
+    QString& relativePath,
+    QString& error)
+{
+    if (!value.isArray()) {
+        error = context + QStringLiteral(" must be an array");
+        return false;
+    }
+    for (qsizetype index = 0; index < value.toArray().size(); ++index) {
+        const auto selectorValue = value.toArray().at(index);
+        const auto selectorContext = QStringLiteral("%1[%2]")
+                                         .arg(context)
+                                         .arg(index);
+        if (!selectorValue.isObject()) {
+            error = selectorContext + QStringLiteral(" must be an object");
+            return false;
+        }
+        const auto object = selectorValue.toObject();
+        ModuleManifestStructuredSelector selector;
+        std::string kindText;
+        std::uint64_t storageIndex = 0;
+        if (!exactKeys(
+                object,
+                {QStringLiteral("kind"), QStringLiteral("name"),
+                 QStringLiteral("sourceIndex"), QStringLiteral("storageIndex")},
+                selectorContext,
+                error)
+            || !readString(object, QStringLiteral("kind"), selectorContext,
+                           kindText, error)
+            || !readString(object, QStringLiteral("name"), selectorContext,
+                           selector.name, error, true)
+            || !readSignedInteger(object, QStringLiteral("sourceIndex"),
+                                  selectorContext, selector.sourceIndex, error)
+            || !readUnsigned(object, QStringLiteral("storageIndex"),
+                             selectorContext, storageIndex, error)
+            || storageIndex
+                   > static_cast<std::uint64_t>(
+                       std::numeric_limits<int>::max())) {
+            if (error.isEmpty()) {
+                error = selectorContext
+                    + QStringLiteral(".storageIndex is unsupported");
+            }
+            return false;
+        }
+        const auto kind = structuredSelectorKindFromString(kindText);
+        if (!kind) {
+            error = selectorContext + QStringLiteral(".kind is unsupported");
+            return false;
+        }
+        selector.kind = *kind;
+        selector.storageIndex = static_cast<int>(storageIndex);
+        const bool memberSelector =
+            selector.kind == ModuleManifestStructuredSelectorKind::StructMember
+            || selector.kind
+                == ModuleManifestStructuredSelectorKind::InterfaceMember;
+        if (memberSelector != !selector.name.empty()) {
+            error = selectorContext
+                + QStringLiteral(".name does not match selector kind");
+            return false;
+        }
+        relativePath += structuredSelectorPath(selector);
+        selectors.push_back(std::move(selector));
+    }
+    return true;
+}
+
 std::optional<StimulusPortRole> roleFromString(
     const std::string_view value) noexcept
 {
@@ -292,9 +444,11 @@ bool hasStimulus(const StimulusPortRole role) noexcept
         || role == StimulusPortRole::StimulusWatch;
 }
 
-QJsonObject bindingToJson(const StimulusPortBinding& binding)
+QJsonObject bindingToJson(
+    const StimulusPortBinding& binding,
+    const int schemaVersion)
 {
-    return {
+    QJsonObject result{
         {QStringLiteral("name"), qString(binding.name)},
         {QStringLiteral("direction"), latinString(toString(binding.direction))},
         {QStringLiteral("canonicalTypeId"), qString(binding.canonicalTypeId)},
@@ -303,6 +457,26 @@ QJsonObject bindingToJson(const StimulusPortBinding& binding)
         {QStringLiteral("signed"), binding.isSigned},
         {QStringLiteral("sourceOrder"), static_cast<qint64>(binding.sourceOrder)},
     };
+    if (schemaVersion >= 3) {
+        result.insert(
+            QStringLiteral("rootPortName"), qString(binding.rootPortName));
+        result.insert(
+            QStringLiteral("relativePath"), qString(binding.relativePath));
+        result.insert(
+            QStringLiteral("selectors"), selectorsToJson(binding.selectors));
+        result.insert(QStringLiteral("structured"), binding.structured);
+        result.insert(
+            QStringLiteral("packedBitOffsetValid"),
+            binding.packedBitOffsetValid);
+        result.insert(
+            QStringLiteral("packedBitOffset"),
+            static_cast<qint64>(binding.packedBitOffset));
+        result.insert(
+            QStringLiteral("interfaceName"), qString(binding.interfaceName));
+        result.insert(
+            QStringLiteral("modportName"), qString(binding.modportName));
+    }
+    return result;
 }
 
 QJsonObject rangeToJson(const StimulusRange& range)
@@ -373,7 +547,8 @@ QJsonObject scenarioToJson(
             {QStringLiteral("radix"), latinString(toString(port.radix))},
             {QStringLiteral("visible"), port.visible},
             {QStringLiteral("groupId"), qString(port.groupId)},
-            {QStringLiteral("binding"), bindingToJson(port.binding)},
+            {QStringLiteral("binding"),
+             bindingToJson(port.binding, scenario.schemaVersion)},
             {QStringLiteral("enumMap"), enumMap},
             {QStringLiteral("segments"), ranges},
             {QStringLiteral("clock"), clock},
@@ -438,15 +613,30 @@ std::string computeIdentity(const ZeroSlackStimulusScenario& scenario)
 bool parseBinding(
     const QJsonObject& object,
     const QString& context,
+    const int schemaVersion,
     StimulusPortBinding& binding,
     QString& error)
 {
+    const auto keys = schemaVersion >= 3
+        ? std::initializer_list<QString>{
+              QStringLiteral("name"), QStringLiteral("rootPortName"),
+              QStringLiteral("relativePath"), QStringLiteral("selectors"),
+              QStringLiteral("structured"),
+              QStringLiteral("packedBitOffsetValid"),
+              QStringLiteral("packedBitOffset"),
+              QStringLiteral("interfaceName"), QStringLiteral("modportName"),
+              QStringLiteral("direction"),
+              QStringLiteral("canonicalTypeId"),
+              QStringLiteral("declarationShapeId"), QStringLiteral("width"),
+              QStringLiteral("signed"), QStringLiteral("sourceOrder")}
+        : std::initializer_list<QString>{
+              QStringLiteral("name"), QStringLiteral("direction"),
+              QStringLiteral("canonicalTypeId"),
+              QStringLiteral("declarationShapeId"), QStringLiteral("width"),
+              QStringLiteral("signed"), QStringLiteral("sourceOrder")};
     if (!exactKeys(
             object,
-            {QStringLiteral("name"), QStringLiteral("direction"),
-             QStringLiteral("canonicalTypeId"), QStringLiteral("declarationShapeId"),
-             QStringLiteral("width"), QStringLiteral("signed"),
-             QStringLiteral("sourceOrder")},
+            keys,
             context,
             error)) {
         return false;
@@ -454,6 +644,7 @@ bool parseBinding(
     std::string directionText;
     std::uint64_t width = 0;
     std::uint64_t sourceOrder = 0;
+    std::uint64_t packedBitOffset = 0;
     if (!readString(object, QStringLiteral("name"), context, binding.name, error)
         || !readString(object, QStringLiteral("direction"), context, directionText, error)
         || !readString(object, QStringLiteral("canonicalTypeId"), context,
@@ -467,6 +658,51 @@ bool parseBinding(
                          sourceOrder, error)) {
         if (error.isEmpty()) error = QStringLiteral("%1.width is unsupported").arg(context);
         return false;
+    }
+    if (schemaVersion >= 3) {
+        QString computedPath;
+        if (!readString(object, QStringLiteral("rootPortName"), context,
+                        binding.rootPortName, error)
+            || !readString(object, QStringLiteral("relativePath"), context,
+                           binding.relativePath, error, true)
+            || !readBool(object, QStringLiteral("structured"), context,
+                         binding.structured, error)
+            || !readBool(object, QStringLiteral("packedBitOffsetValid"), context,
+                         binding.packedBitOffsetValid, error)
+            || !readUnsigned(object, QStringLiteral("packedBitOffset"), context,
+                             packedBitOffset, error)
+            || !readString(object, QStringLiteral("interfaceName"), context,
+                           binding.interfaceName, error, true)
+            || !readString(object, QStringLiteral("modportName"), context,
+                           binding.modportName, error, true)
+            || !parseSelectors(object.value(QStringLiteral("selectors")),
+                               context + QStringLiteral(".selectors"),
+                               binding.selectors, computedPath, error)) {
+            return false;
+        }
+        binding.packedBitOffset = packedBitOffset;
+        if (binding.structured
+            != (!binding.relativePath.empty() && !binding.selectors.empty())
+            || (binding.structured
+                && (computedPath != qString(binding.relativePath)
+                    || binding.name
+                        != binding.rootPortName + binding.relativePath))
+            || (!binding.structured
+                && (binding.rootPortName != binding.name
+                    || !binding.relativePath.empty()
+                    || !binding.selectors.empty()
+                    || binding.packedBitOffsetValid
+                    || binding.packedBitOffset != 0
+                    || !binding.interfaceName.empty()
+                    || !binding.modportName.empty()))
+            || (binding.interfaceName.empty()
+                != binding.modportName.empty())) {
+            error = context
+                + QStringLiteral(" structured identity fields are inconsistent");
+            return false;
+        }
+    } else {
+        binding.rootPortName = binding.name;
     }
     const auto direction = directionFromString(directionText);
     if (!direction || *direction == ModulePortDirection::Interface
@@ -588,15 +824,66 @@ std::optional<StimulusPortBinding> bindingFromLane(
             QStringLiteral("Port %1 used its visible lane order as the legacy source order.")
                 .arg(qString(lane.name)));
     }
-    return StimulusPortBinding{
-        lane.name,
-        *direction,
-        *canonicalTypeId,
-        *declarationShapeId,
-        lane.width,
-        lane.isSigned,
-        static_cast<std::size_t>(sourceOrder.value_or(fallbackOrder)),
-    };
+    StimulusPortBinding binding;
+    binding.name = lane.name;
+    binding.rootPortName = lane.name;
+    binding.direction = *direction;
+    binding.canonicalTypeId = *canonicalTypeId;
+    binding.declarationShapeId = *declarationShapeId;
+    binding.width = lane.width;
+    binding.isSigned = lane.isSigned;
+    binding.sourceOrder = static_cast<std::size_t>(
+        sourceOrder.value_or(fallbackOrder));
+
+    binding.structured = extensionBool(
+        lane.extensions, "waveSimulation.structured").value_or(false);
+    if (!binding.structured) return binding;
+
+    const auto rootPortName = extensionString(
+        lane.extensions, "waveSimulation.rootPortName");
+    const auto relativePath = extensionString(
+        lane.extensions, "waveSimulation.structuredRelativePath");
+    const auto selectorsValue = extensionValue(
+        lane.extensions, "waveSimulation.structuredSelectors");
+    const auto packedBitOffsetValid = extensionBool(
+        lane.extensions, "waveSimulation.packedBitOffsetValid");
+    const auto packedBitOffset = extensionUnsigned(
+        lane.extensions, "waveSimulation.packedBitOffset");
+    const auto interfaceName = extensionString(
+        lane.extensions, "waveSimulation.interfaceName");
+    const auto modportName = extensionString(
+        lane.extensions, "waveSimulation.modportName");
+    if (!rootPortName || rootPortName->empty() || !relativePath
+        || relativePath->empty() || !selectorsValue
+        || !packedBitOffsetValid || !packedBitOffset
+        || !interfaceName || !modportName) {
+        diagnostics.append(
+            QStringLiteral("Structured port %1 has incomplete selector metadata and was omitted.")
+                .arg(qString(lane.name)));
+        return std::nullopt;
+    }
+    QString computedPath;
+    QString parseError;
+    if (!parseSelectors(
+            *selectorsValue,
+            QStringLiteral("lane %1 selectors").arg(qString(lane.name)),
+            binding.selectors,
+            computedPath,
+            parseError)
+        || computedPath != qString(*relativePath)
+        || lane.name != *rootPortName + *relativePath) {
+        diagnostics.append(
+            QStringLiteral("Structured port %1 has invalid selector metadata: %2")
+                .arg(qString(lane.name), parseError));
+        return std::nullopt;
+    }
+    binding.rootPortName = *rootPortName;
+    binding.relativePath = *relativePath;
+    binding.packedBitOffsetValid = *packedBitOffsetValid;
+    binding.packedBitOffset = *packedBitOffset;
+    binding.interfaceName = *interfaceName;
+    binding.modportName = *modportName;
+    return binding;
 }
 
 bool compatibleBinding(
@@ -608,6 +895,15 @@ bool compatibleBinding(
     const auto savedKind = saved.kind == LaneKind::Clock ? LaneKind::Bit : saved.kind;
     const auto currentKind = current.kind == LaneKind::Clock ? LaneKind::Bit : current.kind;
     if (!binding || saved.binding.direction != binding->direction
+        || saved.binding.structured != binding->structured
+        || (saved.binding.structured
+            && (saved.binding.relativePath != binding->relativePath
+                || saved.binding.selectors != binding->selectors
+                || saved.binding.packedBitOffsetValid
+                    != binding->packedBitOffsetValid
+                || saved.binding.packedBitOffset != binding->packedBitOffset
+                || saved.binding.interfaceName != binding->interfaceName
+                || saved.binding.modportName != binding->modportName))
         || saved.binding.width != binding->width
         || saved.binding.isSigned != binding->isSigned
         || savedKind != currentKind
@@ -631,6 +927,15 @@ bool sameBindingExceptWidth(
     const auto currentKind = current.kind == LaneKind::Clock ? LaneKind::Bit : current.kind;
     return binding
         && saved.binding.direction == binding->direction
+        && saved.binding.structured == binding->structured
+        && (!saved.binding.structured
+            || (saved.binding.relativePath == binding->relativePath
+                && saved.binding.selectors == binding->selectors
+                && saved.binding.packedBitOffsetValid
+                    == binding->packedBitOffsetValid
+                && saved.binding.packedBitOffset == binding->packedBitOffset
+                && saved.binding.interfaceName == binding->interfaceName
+                && saved.binding.modportName == binding->modportName))
         && saved.binding.isSigned == binding->isSigned
         && saved.binding.width != binding->width
         && savedKind == currentKind
@@ -864,7 +1169,10 @@ StimulusScenarioParseResult parseZeroSlackStimulusScenario(
                            port.groupId, error, true)
             || !object.value(QStringLiteral("binding")).isObject()
             || !parseBinding(object.value(QStringLiteral("binding")).toObject(),
-                            context + QStringLiteral(".binding"), port.binding, error)) {
+                            context + QStringLiteral(".binding"),
+                            scenario.schemaVersion,
+                            port.binding,
+                            error)) {
             result.error = error.isEmpty()
                 ? QStringLiteral("%1.binding must be an object").arg(context) : error;
             return result;
@@ -1344,10 +1652,14 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     auto baseScenario = project.scenarios.front();
 
     std::map<std::string, Lane> currentPorts;
+    std::map<std::string, Lane> currentGroups;
     std::map<std::string, ClockDomain> currentClocks;
     for (const auto& clock : project.clockDomains) currentClocks.emplace(clock.id, clock);
     for (const auto& lane : baseScenario.lanes) {
-        if (lane.kind != LaneKind::Group) currentPorts.emplace(lane.name, lane);
+        if (lane.kind == LaneKind::Group)
+            currentGroups.emplace(lane.id, lane);
+        else
+            currentPorts.emplace(lane.name, lane);
     }
     std::map<std::string, std::string> restoredNameBySavedName;
     std::set<std::string> claimedCurrentNames;
@@ -1440,9 +1752,25 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     std::vector<OrderedLane> ordered;
     ordered.reserve(saved.groups.size() + currentPorts.size());
     std::set<std::string> validGroups;
+    std::set<std::string> generatedStructuredGroups;
+    std::map<std::string, StimulusScenarioGroup> savedGroups;
+    for (const auto& group : saved.groups)
+        savedGroups.emplace(group.id, group);
+    for (const auto& port : saved.ports) {
+        if (port.binding.structured
+            && !port.groupId.empty()
+            && port.groupId
+                == moduleManifestStructuredGroupId(
+                    saved.manifestIdentity,
+                    port.binding.rootPortName)) {
+            generatedStructuredGroups.insert(port.groupId);
+        }
+    }
     std::size_t tie = 0;
     std::size_t nextOrder = 0;
     for (const auto& group : saved.groups) {
+        if (generatedStructuredGroups.contains(group.id))
+            continue;
         validGroups.insert(group.id);
         ordered.push_back({group.displayOrder, tie++, makeGroupLane(group)});
         nextOrder = std::max(nextOrder, group.displayOrder + 1);
@@ -1470,7 +1798,31 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
         auto lane = current->second;
         lane.radix = port.radix;
         lane.visible = port.visible;
-        lane.groupId = validGroups.contains(port.groupId) ? port.groupId : std::string{};
+        const bool generatedStructuredGroup =
+            generatedStructuredGroups.contains(port.groupId);
+        if (generatedStructuredGroup) {
+            const auto currentGroup = currentGroups.find(lane.groupId);
+            if (currentGroup != currentGroups.end()) {
+                if (!validGroups.contains(currentGroup->first)) {
+                    auto groupLane = currentGroup->second;
+                    const auto savedGroup = savedGroups.find(port.groupId);
+                    const auto groupOrder = savedGroup != savedGroups.end()
+                        ? savedGroup->second.displayOrder
+                        : port.displayOrder;
+                    if (savedGroup != savedGroups.end())
+                        groupLane.visible = savedGroup->second.visible;
+                    validGroups.insert(currentGroup->first);
+                    ordered.push_back(
+                        {groupOrder, tie++, std::move(groupLane)});
+                    nextOrder = std::max(nextOrder, groupOrder + 1);
+                }
+            } else {
+                lane.groupId.clear();
+            }
+        } else {
+            lane.groupId = validGroups.contains(port.groupId)
+                ? port.groupId : std::string{};
+        }
         if (widthChangedSavedNames.contains(port.binding.name)) {
             restoredNames.insert(current->first);
             if (!lane.clockDomainId.empty()) {
@@ -1555,6 +1907,20 @@ StimulusScenarioRestoreResult restoreZeroSlackStimulusScenario(
     });
     for (const auto& item : defaults) {
         auto lane = std::move(currentPorts.at(item.name));
+        if (!lane.groupId.empty()
+            && extensionBool(
+                   lane.extensions,
+                   "waveSimulation.structured").value_or(false)
+            && !validGroups.contains(lane.groupId)) {
+            const auto group = currentGroups.find(lane.groupId);
+            if (group != currentGroups.end()) {
+                validGroups.insert(group->first);
+                ordered.push_back(
+                    {nextOrder++, tie++, group->second});
+            } else {
+                lane.groupId.clear();
+            }
+        }
         if (!lane.clockDomainId.empty()) {
             const auto clock = currentClocks.find(lane.clockDomainId);
             if (clock != currentClocks.end()) restoredClocks.push_back(clock->second);

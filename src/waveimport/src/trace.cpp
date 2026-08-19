@@ -433,6 +433,21 @@ std::string mappingName(std::string text)
     return text;
 }
 
+std::string explicitTraceName(const Lane& lane)
+{
+    const auto found = lane.extensions.find("waveSimulation.traceName");
+    if (found == lane.extensions.end()) return {};
+    const auto& encoded = found->second;
+    if (encoded.size() < 3 || encoded.front() != '"'
+        || encoded.back() != '"') {
+        return {};
+    }
+    const auto value = encoded.substr(1, encoded.size() - 2);
+    return std::all_of(value.cbegin(), value.cend(), [](const unsigned char character) {
+        return std::isalnum(character) != 0 || character == '_';
+    }) ? value : std::string{};
+}
+
 } // namespace
 
 std::pair<std::size_t, std::size_t> TraceSignal::visibleRange(
@@ -898,7 +913,9 @@ std::map<std::string, std::string> suggestSignalMapping(
     std::map<std::string, std::string> mapping;
     for (const auto& lane : scenario.lanes) {
         if (lane.kind == LaneKind::Group) continue;
-        const auto laneName = mappingName(lane.name);
+        const auto explicitName = explicitTraceName(lane);
+        const auto laneName = mappingName(
+            explicitName.empty() ? lane.name : explicitName);
         std::vector<const TraceSignal*> candidates;
         for (const auto& signal : trace.traceSignals) {
             if (mappingName(signal.reference) == laneName) candidates.push_back(&signal);

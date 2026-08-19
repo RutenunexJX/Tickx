@@ -1,6 +1,6 @@
 # Wave Workbench 跨应用接口
 
-当前 Module Manifest schema 版本：`2`（兼容读取 `1`）
+当前 Module Manifest schema 版本：`3`（兼容读取 `1`、`2`）
 
 接口仅使用显式 JSON 文件、CLI 参数和 URI。任何命令都不读取 ZeroSlack、Private Frame
 Workbench 或 Pinloom 的内部数据库。
@@ -24,7 +24,7 @@ wave-generate project.wave.json <workspace> --scenario=<稳定 ID 或唯一名�
 manifest 中的 Generate/Compare 命令模板包含该选择器占位，不再暗示数组首项。生成物是单向
 派生产物，不回写场景事实源。
 
-### 导入 Wave Simulation Module Manifest v1/v2
+### 导入 Wave Simulation Module Manifest v1/v2/v3
 
 ```powershell
 wave-bridge import-module module-manifest.json output.wave.json
@@ -46,14 +46,19 @@ SystemVerilog：
   watch lane 导入。
 - `always` 范围下，stimulus input 始终可见，已观察的 output 和内部信号可见，其他
   output 默认隐藏但不从工程模型删除。同一声明的不同成员按 access path 保持独立。
-- 当前切片不展开 interface 或 unpacked array，导入时给出明确 warning；该限制属于后续
-  structured-input 切片，不会静默扁平化。
+- v3 的 `editableLeaves` 由 ZeroSlack 的 Slang elaboration 生成。packed struct member、
+  固定 unpacked array element 和显式 modport interface member 作为分组 leaf lane 导入；
+  selector、成员方向、enum map、packed bit offset、source/storage index 和稳定 trace 名均
+  保存在扩展字段中。WaveWorkbench 不重新解析 SystemVerilog。
+- 结构化事实缺失或形态不安全时跳过该输入并返回明确 warning，不退回到按总位宽扁平化。
+  当前 runner 仅重建无构造端口的 interface，且拒绝 `inout/ref`、动态数组和宽度超过
+  64 bit 的 leaf。
 
 候选状态和端口角色均写入工程扩展字段，输入默认 Segment 直接进入工程 JSON，不存在隐藏的
 激励生成逻辑。ZeroSlack 正式入口仍通过该显式文件契约调用独立 runner，两个进程不共享
 内部数据库或可变对象。
 
-### 保存和恢复 Stimulus Scenario v2
+### 保存和恢复 Stimulus Scenario v3
 
 ```powershell
 wave-bridge export-stimulus module.wave.json stimulus.json `
@@ -66,7 +71,8 @@ wave-bridge import-stimulus module-manifest.json stimulus.json restored.wave.jso
 
 - Module Manifest identity、schema、workspace identity 和 module/instance target；
 - Scenario 稳定 ID、名称、整数 tick timebase 和 duration；
-- port 的名称、方向、宽度、signed、canonical type、declaration shape 和原始顺序；
+- port/leaf 的名称、方向、宽度、signed、canonical type、declaration shape、结构化 selector
+  和原始顺序；
 - stimulus/watch 角色、显示顺序、分组、可见性、radix 和 enum map；
 - bit、bus、enum、reset 的显式连续 Segment；
 - clock 的 period、phase、duty、edge、初始值及显式 override Segment；
@@ -75,7 +81,7 @@ wave-bridge import-stimulus module-manifest.json stimulus.json restored.wave.jso
   不依赖窗口像素或绝对路径。
 
 tick 使用十进制字符串，避免 JSON number 在跨语言实现中丢失 int64 精度。正式 schema 位于
-`schemas/stimulus/v2/stimulus-scenario.schema.json`；v1 仍可读取和恢复。解析器还执行 schema 难以完整表达的
+`schemas/stimulus/v3/stimulus-scenario.schema.json`；v1/v2 仍可读取和恢复。解析器还执行 schema 难以完整表达的
 约束，包括端口身份唯一、显示顺序唯一、stimulus 全时段覆盖、Segment 不重叠、值符合
 lane 类型，以及内容哈希 identity 校验。
 
@@ -88,6 +94,9 @@ lane 类型，以及内容哈希 identity 校验。
   不做字符串相似度猜测。
 - 位宽变化保留顺序、radix、分组和可见性，但丢弃不安全的旧 stimulus，使用当前
   Manifest 默认值；已删除端口报告为 missing，新增端口按当前默认值追加。
+- 结构化根端口重命名时，leaf selector 与类型身份形成唯一匹配后迁移既有刺激；自动生成的
+  group 使用当前 manifest 的新身份，同时保留用户设置的显示顺序和可见性。用户自建 group
+  不参与该自动重写。
 - 保存文件移动到其他目录后内容与 identity 不变，恢复只依赖显式传入的当前 Manifest。
 
 仿真结果窗口把默认场景和命名场景原子保存到调用方提供的场景目录：默认场景固定为

@@ -42,6 +42,14 @@ struct StimulusScenarioTarget {
 
 struct StimulusPortBinding {
     std::string name;
+    std::string rootPortName;
+    std::string relativePath;
+    std::vector<ModuleManifestStructuredSelector> selectors;
+    bool structured{false};
+    bool packedBitOffsetValid{false};
+    std::uint64_t packedBitOffset{0};
+    std::string interfaceName;
+    std::string modportName;
     ModulePortDirection direction{ModulePortDirection::Unknown};
     std::string canonicalTypeId;
     std::string declarationShapeId;
@@ -108,7 +116,7 @@ struct StimulusScenarioPort {
 };
 
 struct ZeroSlackStimulusScenario {
-    static constexpr int CurrentSchemaVersion = 2;
+    static constexpr int CurrentSchemaVersion = 3;
     static constexpr int MinimumSupportedSchemaVersion = 1;
 
     int schemaVersion{CurrentSchemaVersion};

@@ -69,15 +69,19 @@ wave-sim-runner run-fixture `
 该命令严格恢复 Manifest 与 Stimulus 的同一模块契约，生成稳定 C++ runtime harness，
 调用 Verilator 构建并运行模型，随后将 VCD 解析为现有 `TraceIndex`。每次运行使用唯一目录，
 保留私有运行时激励与 VCD；harness、Verilator object directory 和仿真可执行文件保存在
-按构建指纹寻址的共享缓存中。当前固定运行范围仅支持：
+按构建指纹寻址的共享缓存中。当前固定运行范围支持：
 
 - module-definition 目标；
 - 名称可直接映射为 C++ 标识符的模块与端口；
 - 宽度不超过 64 bit 的固定 integral input/output；
+- packed struct、固定 unpacked array，以及无构造端口且显式指定 modport 的 interface；
+  这些结构由 manifest v3 的 Slang selector 生成 wrapper 后重建，VCD 使用稳定 flat trace
+  名映射回 leaf lane；
 - 已知二值输入、时钟及禁用时钟区间；
 - Manifest 中的 source、include、define 与可求值 parameter。
 
-interface、inout/ref、unpacked array、未知位宽、X/Z 激励与未完整 elaboration 的目标会
+带构造端口或缺少显式 modport 的 interface、inout/ref、动态/关联数组、宽度超过 64 bit
+的 leaf、未知位宽、X/Z 激励与未完整 elaboration 的目标会
 返回明确的 `unsupported-fixture` 状态码（为了兼容已有自动化名称）或契约错误，不会静默降级。
 
 固定测试 DUT 位于 `tests/fixtures/simulation/fixed-counter/`。常规自动化使用确定性的

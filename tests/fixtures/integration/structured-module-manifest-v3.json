@@ -1,0 +1,968 @@
+{
+    "clockCandidates": [
+    ],
+    "defines": {
+        "MANIFEST_DEFAULT_WIDTH": "5"
+    },
+    "includeDirs": [
+        "."
+    ],
+    "observationScope": {
+        "endLine": 24,
+        "label": "always_comb at manifest_child.sv:16",
+        "mode": "always",
+        "sourceFile": "manifest_child.sv",
+        "startLine": 18
+    },
+    "observations": [
+        {
+            "accessPath": "next_data",
+            "declarationText": "",
+            "name": "next_data",
+            "port": false,
+            "semanticId": "sha256:c56c9b83c525c7ccb012308bf60bba24d071ebd679d96acaca85723098885cb9",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 16,
+            "type": {
+                "bitWidth": 7,
+                "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                "declarationShapeId": "sha256:f8579a1e6eefe43b89f422333ea42cb8e66f1d9362f709a5cc79e37cc012d861",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "[6:0]",
+                "rawTypeText": "",
+                "resolvedTypeName": "logic unsigned",
+                "resolvedTypeText": "logic[6:0]",
+                "semanticAvailable": true,
+                "semanticKind": "unknown",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        },
+        {
+            "accessPath": "payload_i",
+            "declarationText": "input manifest_payload_t payload_i",
+            "name": "payload_i",
+            "port": true,
+            "semanticId": "sha256:8c4f5f4e9ce0d6137b7bd07e01b7ac29cee077b04075b0389e8ad4ab968dd0d3",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 11,
+            "type": {
+                "bitWidth": 6,
+                "canonicalTypeId": "sha256:18184071aa8ecfdc4640f07289e4e7f1e3c9d1e19131ddc645d84303a41e9e71",
+                "declarationShapeId": "sha256:6db93b10d8284654679b655cbcedfabf4360e83f416fc781040d6c8e14b70481",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "",
+                "rawTypeText": "",
+                "resolvedTypeName": "manifest_payload_t",
+                "resolvedTypeText": "manifest_payload_t",
+                "semanticAvailable": true,
+                "semanticKind": "packed-struct",
+                "signed": false,
+                "structMembers": [
+                    {
+                        "declarationText": "",
+                        "name": "valid",
+                        "type": {
+                            "bitWidth": 0,
+                            "canonicalTypeId": "",
+                            "declarationShapeId": "",
+                            "failureReason": "",
+                            "fixedSize": false,
+                            "integral": false,
+                            "interfaceName": "",
+                            "interfaceType": false,
+                            "modportName": "",
+                            "packedDimensions": "",
+                            "rawTypeText": "",
+                            "resolvedTypeName": "",
+                            "resolvedTypeText": "",
+                            "semanticAvailable": false,
+                            "semanticKind": "unknown",
+                            "signed": false,
+                            "typedefChain": [
+                            ],
+                            "unpackedArray": false,
+                            "unpackedDimensions": "",
+                            "unpackedElementCount": ""
+                        }
+                    },
+                    {
+                        "declarationText": "",
+                        "name": "payload",
+                        "type": {
+                            "bitWidth": 0,
+                            "canonicalTypeId": "",
+                            "declarationShapeId": "",
+                            "failureReason": "",
+                            "fixedSize": false,
+                            "integral": false,
+                            "interfaceName": "",
+                            "interfaceType": false,
+                            "modportName": "",
+                            "packedDimensions": "",
+                            "rawTypeText": "",
+                            "resolvedTypeName": "",
+                            "resolvedTypeText": "",
+                            "semanticAvailable": false,
+                            "semanticKind": "unknown",
+                            "signed": false,
+                            "typedefChain": [
+                            ],
+                            "unpackedArray": false,
+                            "unpackedDimensions": "",
+                            "unpackedElementCount": ""
+                        }
+                    }
+                ],
+                "typedefChain": [
+                    "manifest_payload_t"
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        },
+        {
+            "accessPath": "data_i",
+            "declarationText": "input logic [WIDTH-1:0] data_i",
+            "name": "data_i",
+            "port": true,
+            "semanticId": "sha256:1e694b7b89cbe22c8fc8623fb7be6c166721378675cf522271eeac30beb70ef1",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 9,
+            "type": {
+                "bitWidth": 6,
+                "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                "declarationShapeId": "sha256:96ed186565b2362f10ceeb673bab4c704d45aaa38ed80d602b4f82cbf6b925ae",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "[5:0]",
+                "rawTypeText": "",
+                "resolvedTypeName": "logic unsigned",
+                "resolvedTypeText": "logic[5:0]",
+                "semanticAvailable": true,
+                "semanticKind": "unknown",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        },
+        {
+            "accessPath": "data_o",
+            "declarationText": "output logic [WIDTH:0] data_o",
+            "name": "data_o",
+            "port": true,
+            "semanticId": "sha256:0913a771f32c5b7acd2a31dd3be95a4a83c5a5e38928232d83aee1c0df428618",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 14,
+            "type": {
+                "bitWidth": 7,
+                "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                "declarationShapeId": "sha256:f8579a1e6eefe43b89f422333ea42cb8e66f1d9362f709a5cc79e37cc012d861",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "[6:0]",
+                "rawTypeText": "",
+                "resolvedTypeName": "logic unsigned",
+                "resolvedTypeText": "logic[6:0]",
+                "semanticAvailable": true,
+                "semanticKind": "unknown",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        }
+    ],
+    "parameters": {
+        "RESET_MODE": {
+            "declarationText": "parameter manifest_mode_t RESET_MODE = MANIFEST_IDLE",
+            "displayValueText": "",
+            "expressionText": "MANIFEST_IDLE",
+            "name": "RESET_MODE",
+            "semanticAvailable": true,
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 5,
+            "type": {
+                "bitWidth": 2,
+                "canonicalTypeId": "",
+                "declarationShapeId": "",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "",
+                "rawTypeText": "",
+                "resolvedTypeName": "",
+                "resolvedTypeText": "enum logic[1:0]",
+                "semanticAvailable": true,
+                "semanticKind": "unknown",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            },
+            "valueText": "2'b1"
+        },
+        "WIDTH": {
+            "declarationText": "parameter int WIDTH = 5",
+            "displayValueText": "",
+            "expressionText": "5",
+            "name": "WIDTH",
+            "semanticAvailable": true,
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 4,
+            "type": {
+                "bitWidth": 32,
+                "canonicalTypeId": "",
+                "declarationShapeId": "",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "",
+                "rawTypeText": "",
+                "resolvedTypeName": "",
+                "resolvedTypeText": "int",
+                "semanticAvailable": true,
+                "semanticKind": "unknown",
+                "signed": true,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            },
+            "valueText": "6"
+        }
+    },
+    "ports": [
+        {
+            "declarationText": "input logic clk_i",
+            "direction": "input",
+            "editableLeaves": [
+            ],
+            "name": "clk_i",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 7,
+            "structuredFailureReason": "",
+            "structuredLeavesAvailable": false,
+            "type": {
+                "bitWidth": 1,
+                "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                "declarationShapeId": "sha256:f862bf301a66ed8dfe2a8ec5d2cf7bffb0b8dd9ca7018ee4e4f3fc48a0c2c692",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "",
+                "rawTypeText": "",
+                "resolvedTypeName": "logic",
+                "resolvedTypeText": "logic",
+                "semanticAvailable": true,
+                "semanticKind": "unknown",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        },
+        {
+            "declarationText": "input logic rst_ni",
+            "direction": "input",
+            "editableLeaves": [
+            ],
+            "name": "rst_ni",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 8,
+            "structuredFailureReason": "",
+            "structuredLeavesAvailable": false,
+            "type": {
+                "bitWidth": 1,
+                "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                "declarationShapeId": "sha256:f862bf301a66ed8dfe2a8ec5d2cf7bffb0b8dd9ca7018ee4e4f3fc48a0c2c692",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "",
+                "rawTypeText": "",
+                "resolvedTypeName": "logic",
+                "resolvedTypeText": "logic",
+                "semanticAvailable": true,
+                "semanticKind": "unknown",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        },
+        {
+            "declarationText": "input logic [WIDTH-1:0] data_i",
+            "direction": "input",
+            "editableLeaves": [
+            ],
+            "name": "data_i",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 9,
+            "structuredFailureReason": "",
+            "structuredLeavesAvailable": false,
+            "type": {
+                "bitWidth": 6,
+                "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                "declarationShapeId": "sha256:96ed186565b2362f10ceeb673bab4c704d45aaa38ed80d602b4f82cbf6b925ae",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "[5:0]",
+                "rawTypeText": "",
+                "resolvedTypeName": "logic unsigned",
+                "resolvedTypeText": "logic[5:0]",
+                "semanticAvailable": true,
+                "semanticKind": "unknown",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        },
+        {
+            "declarationText": "input manifest_mode_t mode_i",
+            "direction": "input",
+            "editableLeaves": [
+            ],
+            "name": "mode_i",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 10,
+            "structuredFailureReason": "",
+            "structuredLeavesAvailable": false,
+            "type": {
+                "bitWidth": 2,
+                "canonicalTypeId": "sha256:c118820a5835319b246456e186ce578e1982d44f8040318e6cfce9cde204f66d",
+                "declarationShapeId": "sha256:7461be306bccfdcbf43a99a0d7eef207c8e3369e9b0c1a9a0f24692f325570e7",
+                "enumValues": [
+                    {
+                        "declarationText": "MANIFEST_IDLE = 2'd0",
+                        "displayValueText": "0",
+                        "name": "MANIFEST_IDLE",
+                        "semanticAvailable": true,
+                        "valueText": "2'b0"
+                    },
+                    {
+                        "declarationText": "MANIFEST_RUN = 2'd1",
+                        "displayValueText": "1",
+                        "name": "MANIFEST_RUN",
+                        "semanticAvailable": true,
+                        "valueText": "2'b1"
+                    }
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "",
+                "rawTypeText": "",
+                "resolvedTypeName": "manifest_mode_t",
+                "resolvedTypeText": "enum logic[1:0]",
+                "semanticAvailable": true,
+                "semanticKind": "enum",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                    "manifest_mode_t"
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        },
+        {
+            "declarationText": "input manifest_payload_t payload_i",
+            "direction": "input",
+            "editableLeaves": [
+                {
+                    "direction": "",
+                    "enumValues": [
+                    ],
+                    "packedBitOffset": 5,
+                    "packedBitOffsetValid": true,
+                    "relativePath": ".valid",
+                    "selectors": [
+                        {
+                            "kind": "struct-member",
+                            "name": "valid",
+                            "sourceIndex": 0,
+                            "storageIndex": 0
+                        }
+                    ],
+                    "type": {
+                        "bitWidth": 1,
+                        "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                        "declarationShapeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                        "failureReason": "",
+                        "fixedSize": true,
+                        "integral": true,
+                        "interfaceName": "",
+                        "interfaceType": false,
+                        "modportName": "",
+                        "packedDimensions": "",
+                        "rawTypeText": "",
+                        "resolvedTypeName": "",
+                        "resolvedTypeText": "logic",
+                        "semanticAvailable": true,
+                        "semanticKind": "",
+                        "signed": false,
+                        "typedefChain": [
+                        ],
+                        "unpackedArray": false,
+                        "unpackedDimensions": "",
+                        "unpackedElementCount": ""
+                    }
+                },
+                {
+                    "direction": "",
+                    "enumValues": [
+                    ],
+                    "packedBitOffset": 0,
+                    "packedBitOffsetValid": true,
+                    "relativePath": ".payload",
+                    "selectors": [
+                        {
+                            "kind": "struct-member",
+                            "name": "payload",
+                            "sourceIndex": 0,
+                            "storageIndex": 0
+                        }
+                    ],
+                    "type": {
+                        "bitWidth": 5,
+                        "canonicalTypeId": "sha256:022a3a0eb4fe5a0f737ee800494faf90ea7eaaa31bdd51eba77e7b03d8fb86a0",
+                        "declarationShapeId": "sha256:022a3a0eb4fe5a0f737ee800494faf90ea7eaaa31bdd51eba77e7b03d8fb86a0",
+                        "failureReason": "",
+                        "fixedSize": true,
+                        "integral": true,
+                        "interfaceName": "",
+                        "interfaceType": false,
+                        "modportName": "",
+                        "packedDimensions": "",
+                        "rawTypeText": "",
+                        "resolvedTypeName": "",
+                        "resolvedTypeText": "logic[4:0]",
+                        "semanticAvailable": true,
+                        "semanticKind": "",
+                        "signed": false,
+                        "typedefChain": [
+                        ],
+                        "unpackedArray": false,
+                        "unpackedDimensions": "",
+                        "unpackedElementCount": ""
+                    }
+                }
+            ],
+            "name": "payload_i",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 11,
+            "structuredFailureReason": "",
+            "structuredLeavesAvailable": true,
+            "type": {
+                "bitWidth": 6,
+                "canonicalTypeId": "sha256:18184071aa8ecfdc4640f07289e4e7f1e3c9d1e19131ddc645d84303a41e9e71",
+                "declarationShapeId": "sha256:6db93b10d8284654679b655cbcedfabf4360e83f416fc781040d6c8e14b70481",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "",
+                "rawTypeText": "",
+                "resolvedTypeName": "manifest_payload_t",
+                "resolvedTypeText": "manifest_payload_t",
+                "semanticAvailable": true,
+                "semanticKind": "packed-struct",
+                "signed": false,
+                "structMembers": [
+                    {
+                        "declarationText": "",
+                        "name": "valid",
+                        "type": {
+                            "bitWidth": 0,
+                            "canonicalTypeId": "",
+                            "declarationShapeId": "",
+                            "failureReason": "",
+                            "fixedSize": false,
+                            "integral": false,
+                            "interfaceName": "",
+                            "interfaceType": false,
+                            "modportName": "",
+                            "packedDimensions": "",
+                            "rawTypeText": "",
+                            "resolvedTypeName": "",
+                            "resolvedTypeText": "",
+                            "semanticAvailable": false,
+                            "semanticKind": "unknown",
+                            "signed": false,
+                            "typedefChain": [
+                            ],
+                            "unpackedArray": false,
+                            "unpackedDimensions": "",
+                            "unpackedElementCount": ""
+                        }
+                    },
+                    {
+                        "declarationText": "",
+                        "name": "payload",
+                        "type": {
+                            "bitWidth": 0,
+                            "canonicalTypeId": "",
+                            "declarationShapeId": "",
+                            "failureReason": "",
+                            "fixedSize": false,
+                            "integral": false,
+                            "interfaceName": "",
+                            "interfaceType": false,
+                            "modportName": "",
+                            "packedDimensions": "",
+                            "rawTypeText": "",
+                            "resolvedTypeName": "",
+                            "resolvedTypeText": "",
+                            "semanticAvailable": false,
+                            "semanticKind": "unknown",
+                            "signed": false,
+                            "typedefChain": [
+                            ],
+                            "unpackedArray": false,
+                            "unpackedDimensions": "",
+                            "unpackedElementCount": ""
+                        }
+                    }
+                ],
+                "typedefChain": [
+                    "manifest_payload_t"
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        },
+        {
+            "declarationText": "input logic [3:0] samples_i [1:0]",
+            "direction": "input",
+            "editableLeaves": [
+                {
+                    "direction": "",
+                    "enumValues": [
+                    ],
+                    "packedBitOffset": 0,
+                    "packedBitOffsetValid": false,
+                    "relativePath": "[1]",
+                    "selectors": [
+                        {
+                            "kind": "unpacked-index",
+                            "name": "",
+                            "sourceIndex": 1,
+                            "storageIndex": 1
+                        }
+                    ],
+                    "type": {
+                        "bitWidth": 4,
+                        "canonicalTypeId": "sha256:d7de3f994c303ac6bbf638f10f9f5747e81ca137be0457e54205bd416a8bdf69",
+                        "declarationShapeId": "sha256:d7de3f994c303ac6bbf638f10f9f5747e81ca137be0457e54205bd416a8bdf69",
+                        "failureReason": "",
+                        "fixedSize": true,
+                        "integral": true,
+                        "interfaceName": "",
+                        "interfaceType": false,
+                        "modportName": "",
+                        "packedDimensions": "",
+                        "rawTypeText": "",
+                        "resolvedTypeName": "",
+                        "resolvedTypeText": "logic[3:0]",
+                        "semanticAvailable": true,
+                        "semanticKind": "",
+                        "signed": false,
+                        "typedefChain": [
+                        ],
+                        "unpackedArray": false,
+                        "unpackedDimensions": "",
+                        "unpackedElementCount": ""
+                    }
+                },
+                {
+                    "direction": "",
+                    "enumValues": [
+                    ],
+                    "packedBitOffset": 0,
+                    "packedBitOffsetValid": false,
+                    "relativePath": "[0]",
+                    "selectors": [
+                        {
+                            "kind": "unpacked-index",
+                            "name": "",
+                            "sourceIndex": 0,
+                            "storageIndex": 0
+                        }
+                    ],
+                    "type": {
+                        "bitWidth": 4,
+                        "canonicalTypeId": "sha256:d7de3f994c303ac6bbf638f10f9f5747e81ca137be0457e54205bd416a8bdf69",
+                        "declarationShapeId": "sha256:d7de3f994c303ac6bbf638f10f9f5747e81ca137be0457e54205bd416a8bdf69",
+                        "failureReason": "",
+                        "fixedSize": true,
+                        "integral": true,
+                        "interfaceName": "",
+                        "interfaceType": false,
+                        "modportName": "",
+                        "packedDimensions": "",
+                        "rawTypeText": "",
+                        "resolvedTypeName": "",
+                        "resolvedTypeText": "logic[3:0]",
+                        "semanticAvailable": true,
+                        "semanticKind": "",
+                        "signed": false,
+                        "typedefChain": [
+                        ],
+                        "unpackedArray": false,
+                        "unpackedDimensions": "",
+                        "unpackedElementCount": ""
+                    }
+                }
+            ],
+            "name": "samples_i",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 12,
+            "structuredFailureReason": "",
+            "structuredLeavesAvailable": true,
+            "type": {
+                "bitWidth": 8,
+                "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                "declarationShapeId": "sha256:609f9db01fe0fd680957143efb5c4bc66ab95b1c7e307654af80a7d5fa6503d9",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": false,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "[3:0]",
+                "rawTypeText": "",
+                "resolvedTypeName": "logic unsigned",
+                "resolvedTypeText": "logic[3:0]$[1:0]",
+                "semanticAvailable": true,
+                "semanticKind": "unknown",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": true,
+                "unpackedDimensions": "[1:0]",
+                "unpackedElementCount": "2"
+            }
+        },
+        {
+            "declarationText": "manifest_control_if.dut control",
+            "direction": "interface",
+            "editableLeaves": [
+                {
+                    "direction": "input",
+                    "enumValues": [
+                    ],
+                    "packedBitOffset": 0,
+                    "packedBitOffsetValid": true,
+                    "relativePath": ".request",
+                    "selectors": [
+                        {
+                            "kind": "interface-member",
+                            "name": "request",
+                            "sourceIndex": 0,
+                            "storageIndex": 0
+                        }
+                    ],
+                    "type": {
+                        "bitWidth": 1,
+                        "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                        "declarationShapeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                        "failureReason": "",
+                        "fixedSize": true,
+                        "integral": true,
+                        "interfaceName": "",
+                        "interfaceType": false,
+                        "modportName": "",
+                        "packedDimensions": "",
+                        "rawTypeText": "",
+                        "resolvedTypeName": "",
+                        "resolvedTypeText": "logic",
+                        "semanticAvailable": true,
+                        "semanticKind": "",
+                        "signed": false,
+                        "typedefChain": [
+                        ],
+                        "unpackedArray": false,
+                        "unpackedDimensions": "",
+                        "unpackedElementCount": ""
+                    }
+                },
+                {
+                    "direction": "input",
+                    "enumValues": [
+                    ],
+                    "packedBitOffset": 0,
+                    "packedBitOffsetValid": true,
+                    "relativePath": ".command",
+                    "selectors": [
+                        {
+                            "kind": "interface-member",
+                            "name": "command",
+                            "sourceIndex": 0,
+                            "storageIndex": 0
+                        }
+                    ],
+                    "type": {
+                        "bitWidth": 3,
+                        "canonicalTypeId": "sha256:a5737a5f5f06df5946e93164f5a9febfbb0013b23bb2f6eebae5eb4e6354d6d9",
+                        "declarationShapeId": "sha256:a5737a5f5f06df5946e93164f5a9febfbb0013b23bb2f6eebae5eb4e6354d6d9",
+                        "failureReason": "",
+                        "fixedSize": true,
+                        "integral": true,
+                        "interfaceName": "",
+                        "interfaceType": false,
+                        "modportName": "",
+                        "packedDimensions": "",
+                        "rawTypeText": "",
+                        "resolvedTypeName": "",
+                        "resolvedTypeText": "logic[2:0]",
+                        "semanticAvailable": true,
+                        "semanticKind": "",
+                        "signed": false,
+                        "typedefChain": [
+                        ],
+                        "unpackedArray": false,
+                        "unpackedDimensions": "",
+                        "unpackedElementCount": ""
+                    }
+                },
+                {
+                    "direction": "output",
+                    "enumValues": [
+                    ],
+                    "packedBitOffset": 0,
+                    "packedBitOffsetValid": true,
+                    "relativePath": ".ready",
+                    "selectors": [
+                        {
+                            "kind": "interface-member",
+                            "name": "ready",
+                            "sourceIndex": 0,
+                            "storageIndex": 0
+                        }
+                    ],
+                    "type": {
+                        "bitWidth": 1,
+                        "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                        "declarationShapeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                        "failureReason": "",
+                        "fixedSize": true,
+                        "integral": true,
+                        "interfaceName": "",
+                        "interfaceType": false,
+                        "modportName": "",
+                        "packedDimensions": "",
+                        "rawTypeText": "",
+                        "resolvedTypeName": "",
+                        "resolvedTypeText": "logic",
+                        "semanticAvailable": true,
+                        "semanticKind": "",
+                        "signed": false,
+                        "typedefChain": [
+                        ],
+                        "unpackedArray": false,
+                        "unpackedDimensions": "",
+                        "unpackedElementCount": ""
+                    }
+                }
+            ],
+            "name": "control",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 13,
+            "structuredFailureReason": "",
+            "structuredLeavesAvailable": true,
+            "type": {
+                "bitWidth": 0,
+                "canonicalTypeId": "",
+                "declarationShapeId": "",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": false,
+                "integral": false,
+                "interfaceName": "manifest_control_if",
+                "interfaceType": true,
+                "modportName": "dut",
+                "packedDimensions": "",
+                "rawTypeText": "manifest_control_if.dut",
+                "resolvedTypeName": "manifest_control_if",
+                "resolvedTypeText": "manifest_control_if.dut",
+                "semanticAvailable": true,
+                "semanticKind": "interface",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        },
+        {
+            "declarationText": "output logic [WIDTH:0] data_o",
+            "direction": "output",
+            "editableLeaves": [
+            ],
+            "name": "data_o",
+            "sourceFile": "manifest_child.sv",
+            "sourceLine": 14,
+            "structuredFailureReason": "",
+            "structuredLeavesAvailable": false,
+            "type": {
+                "bitWidth": 7,
+                "canonicalTypeId": "sha256:50277401d77bea0fdd1e7cdb6b6d15b14e57ec11fa2db76d787d3ae8fdb9e7ba",
+                "declarationShapeId": "sha256:f8579a1e6eefe43b89f422333ea42cb8e66f1d9362f709a5cc79e37cc012d861",
+                "enumValues": [
+                ],
+                "failureReason": "",
+                "fixedSize": true,
+                "integral": true,
+                "interfaceName": "",
+                "interfaceType": false,
+                "modportName": "",
+                "packedDimensions": "[6:0]",
+                "rawTypeText": "",
+                "resolvedTypeName": "logic unsigned",
+                "resolvedTypeText": "logic[6:0]",
+                "semanticAvailable": true,
+                "semanticKind": "unknown",
+                "signed": false,
+                "structMembers": [
+                ],
+                "typedefChain": [
+                ],
+                "unpackedArray": false,
+                "unpackedDimensions": "",
+                "unpackedElementCount": ""
+            }
+        }
+    ],
+    "resetCandidates": [
+    ],
+    "schemaVersion": 3,
+    "sources": [
+        {
+            "path": "manifest_child.sv",
+            "role": "design"
+        },
+        {
+            "path": "manifest_top.sv",
+            "role": "design"
+        },
+        {
+            "path": "manifest_defs.svh",
+            "role": "header"
+        }
+    ],
+    "target": {
+        "instancePath": "manifest_top.u_fast",
+        "mode": "instance",
+        "module": "manifest_child",
+        "sourceFile": "manifest_child.sv",
+        "sourceLine": 3
+    },
+    "workspaceId": "sha256:e15bc4b2d42eee2ad22ae58aea115872bca1c24028c9e4be7247552b749f1b07"
+}

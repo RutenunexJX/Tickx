@@ -40,6 +40,13 @@ enum class ModuleCandidateState {
     Ambiguous,
 };
 
+enum class ModuleManifestStructuredSelectorKind {
+    StructMember,
+    PackedIndex,
+    UnpackedIndex,
+    InterfaceMember,
+};
+
 struct ModuleManifestSource {
     std::string path;
     std::string role;
@@ -82,6 +89,28 @@ struct ModuleManifestStructMember {
     ModuleManifestTypeShape type;
 };
 
+struct ModuleManifestStructuredSelector {
+    ModuleManifestStructuredSelectorKind kind{
+        ModuleManifestStructuredSelectorKind::StructMember};
+    std::string name;
+    int sourceIndex{0};
+    int storageIndex{0};
+
+    [[nodiscard]] bool operator==(
+        const ModuleManifestStructuredSelector&) const = default;
+};
+
+struct ModuleManifestEditableLeaf {
+    std::string relativePath;
+    ModulePortDirection direction{ModulePortDirection::Unknown};
+    bool inheritsPortDirection{true};
+    std::vector<ModuleManifestStructuredSelector> selectors;
+    ModuleManifestTypeShape type;
+    std::vector<ModuleManifestEnumValue> enumValues;
+    bool packedBitOffsetValid{false};
+    std::uint64_t packedBitOffset{0};
+};
+
 struct ModuleManifestType {
     ModuleManifestTypeShape shape;
     std::vector<ModuleManifestEnumValue> enumValues;
@@ -105,6 +134,9 @@ struct ModuleManifestPort {
     ModulePortDirection direction{ModulePortDirection::Unknown};
     std::string declarationText;
     ModuleManifestType type;
+    bool structuredLeavesAvailable{false};
+    std::vector<ModuleManifestEditableLeaf> editableLeaves;
+    std::string structuredFailureReason;
     std::string sourceFile;
     int sourceLine{0};
 };
@@ -139,7 +171,7 @@ struct ModuleManifestObservation {
 
 struct ZeroSlackModuleManifest {
     static constexpr int MinimumSupportedSchemaVersion = 1;
-    static constexpr int CurrentSchemaVersion = 2;
+    static constexpr int CurrentSchemaVersion = 3;
 
     int schemaVersion{CurrentSchemaVersion};
     std::string identity;
@@ -192,6 +224,9 @@ struct ModuleManifestImportResult {
 [[nodiscard]] ModuleManifestImportResult importZeroSlackModuleManifest(
     const ZeroSlackModuleManifest& manifest,
     const ModuleManifestImportOptions& options = {});
+[[nodiscard]] std::string moduleManifestStructuredGroupId(
+    std::string_view manifestIdentity,
+    std::string_view rootPortName);
 
 [[nodiscard]] std::string_view toString(ModulePortDirection direction) noexcept;
 [[nodiscard]] std::string_view toString(ModuleCandidateState state) noexcept;

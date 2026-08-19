@@ -46,6 +46,16 @@ add_dependencies(wave-fixed-fixture-ui-smoke
     wave-simulator-fixture)
 wave_enable_warnings(wave-fixed-fixture-ui-smoke)
 
+add_executable(wave-structured-input-ui-smoke
+    structured_input_ui_smoke.cpp
+)
+target_link_libraries(wave-structured-input-ui-smoke
+    PRIVATE wavewidgets waveintegration waveedit wavecore
+            Qt6::Core Qt6::Gui Qt6::Widgets)
+target_compile_definitions(wave-structured-input-ui-smoke
+    PRIVATE WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+wave_enable_warnings(wave-structured-input-ui-smoke)
+
 add_executable(wave-timeline-viewport-test timeline_viewport_test.cpp)
 target_link_libraries(wave-timeline-viewport-test PRIVATE wavetime)
 wave_enable_warnings(wave-timeline-viewport-test)
@@ -58,6 +68,11 @@ target_compile_definitions(wavewidgets-abi-test
 wave_enable_warnings(wavewidgets-abi-test)
 
 add_test(NAME wave-core-tests COMMAND wave-tests)
+add_test(
+    NAME wave-structured-input-ui-smoke
+    COMMAND wave-structured-input-ui-smoke
+            "${CMAKE_BINARY_DIR}/structured-input-ui-smoke.png"
+)
 add_test(NAME wave-timeline-viewport-test COMMAND wave-timeline-viewport-test)
 add_test(NAME wavewidgets-abi-test COMMAND wavewidgets-abi-test)
 add_test(NAME wave-app-smoke COMMAND wave-workbench --smoke-test)
@@ -853,7 +868,8 @@ set_property(TEST wave-simulation-stop-smoke APPEND PROPERTY ENVIRONMENT
     "WAVE_SIMULATOR_FIXTURE=$<TARGET_FILE:wave-toolchain-fixture-hang>")
 set(_wave_fixed_fixture_tests
     wave-fixed-fixture-cli-smoke
-    wave-fixed-fixture-ui-smoke)
+    wave-fixed-fixture-ui-smoke
+    wave-structured-input-ui-smoke)
 if(TEST wave-fixed-fixture-real-verilator)
     list(APPEND _wave_fixed_fixture_tests wave-fixed-fixture-real-verilator)
 endif()

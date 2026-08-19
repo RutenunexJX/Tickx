@@ -5,6 +5,23 @@
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
 
+## ZeroSlack Wave Simulation S12.3：struct、array 和 interface 输入编辑
+
+状态：完成
+
+- Module Manifest v3 消费 ZeroSlack Slang 产出的结构化 leaf selector，不在消费者侧重新
+  解释 SystemVerilog。packed struct、固定 unpacked array 和显式 modport interface 均导入
+  为分组、可直接编辑的 lane。
+- Stimulus Scenario v3 持久化结构化 binding；结构化根重命名后可按 selector/type 唯一迁移
+  leaf 刺激和自动 group，同时保留显示顺序与可见性。
+- runner 生成确定性 wrapper 重建 struct、array 和 interface 根端口，VCD flat trace 名稳定
+  映射回语义 leaf。无安全事实时明确拒绝，不使用字符串扫描或总位宽猜测。
+- `wave-structured-input-ui-smoke` 使用 ZeroSlack 实际生成的 manifest fixture 编辑三类输入并
+  渲染真实 WaveCanvas；截图位于 `artifacts/ui/wave/s12-structured-input-editor.png`。
+- 当前 interface 限于无构造端口且显式指定 modport；`inout/ref`、动态数组和超过 64 bit 的
+  leaf 明确拒绝。本机未安装真实 Verilator，wrapper 与运行链由确定性 fixture 验证。
+- 全量 offscreen CTest `91/91` 通过。
+
 ## ZeroSlack Wave Simulation S12.2：多时钟和异步事件
 
 状态：完成
