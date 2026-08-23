@@ -1,4 +1,7 @@
 #include "main_window.h"
+#ifdef WAVEWORKBENCH_HAS_SUITEAPP
+#include "suite_integration.h"
+#endif
 #include "wave_canvas.h"
 
 #include "wave/model.h"
@@ -28,6 +31,7 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QHelpEvent>
+#include <QIcon>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -64,6 +68,8 @@
 int main(int argc, char* argv[])
 {
     QApplication application(argc, argv);
+    application.setWindowIcon(
+        QIcon(QStringLiteral(":/branding/wave-workbench-icon.png")));
     if (QGuiApplication::platformName() == QStringLiteral("offscreen")) {
         application.setFont(QFont(QStringLiteral("Segoe UI"), 9));
         qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString& message) {
@@ -550,6 +556,12 @@ int main(int argc, char* argv[])
         initialScenarioIndex,
         loadFirstTrace);
     window.show();
+#ifdef WAVEWORKBENCH_HAS_SUITEAPP
+    wave::WaveSuiteIntegration suiteIntegration(&window, &application);
+    QTimer::singleShot(0, &application, [&suiteIntegration]() {
+        suiteIntegration.start();
+    });
+#endif
     if (compareMode) window.requestCompareMode();
     if (launchRequest && launchRequest->tick) {
         window.revealLocation(launchRequest->laneId, *launchRequest->tick);

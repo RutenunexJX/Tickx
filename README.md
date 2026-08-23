@@ -1216,6 +1216,21 @@ Segment 列表阻断及保留草稿的 Beat 恢复入口。
 上述已完成的 GUI 路径使用 offscreen，迭代期间未操作桌面、未打包、未提交、未推送。完整验收记录见
 [PLAN.md](PLAN.md)。
 
+## Suite application protocol
+
+WaveWorkbench provides `wave://project?...` resources through
+`suite-app/v1`, exposes `wave.project.open`, and publishes the
+`wave.waveform` Surface. The Surface uses native mode with ABI version 1,
+library `wavewidgets`, and factory
+`wavewidgets_create_simulation_workspace_v1`; external application opening is
+always declared as the fallback.
+
+The adapter delegates project parsing and opening to the existing Wave model
+and window APIs. The neutral Runtime does not duplicate wave-project state,
+and other applications do not include WaveWorkbench private headers. When the
+Runtime is missing, the standalone editor, CLI, bridge, and widget ABI remain
+unchanged.
+
 ## 当前限制
 
 - FST 当前只加载数字 bit-vector 信号；analog/string 等 Wellen 值类型会被跳过并给出诊断。

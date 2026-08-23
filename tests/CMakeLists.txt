@@ -6,6 +6,21 @@ function(wave_add_toolchain_fixture target mode)
     wave_enable_warnings(${target})
 endfunction()
 
+if(SuiteApp_FOUND)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
+    add_executable(wave-suiteapp-integration-test
+        suiteapp_integration_test.cpp)
+    target_link_libraries(wave-suiteapp-integration-test
+        PRIVATE wavewidgets waveproject SuiteApp::suiteapp Qt6::Test)
+    wave_enable_warnings(wave-suiteapp-integration-test)
+    add_test(NAME wave-suiteapp-integration-test
+        COMMAND wave-suiteapp-integration-test)
+    set_tests_properties(wave-suiteapp-integration-test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+endif()
+
 wave_add_toolchain_fixture(wave-toolchain-fixture-ready 1)
 wave_add_toolchain_fixture(wave-toolchain-fixture-old 2)
 wave_add_toolchain_fixture(wave-toolchain-fixture-failure 3)

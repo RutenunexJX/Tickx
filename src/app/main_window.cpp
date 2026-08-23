@@ -4333,6 +4333,19 @@ void MainWindow::openProjectPath(const QString& path)
     if (!loadFromPath(normalized) && dirty_) scheduleAutosave();
 }
 
+bool MainWindow::openSuiteProject(const QString& path)
+{
+    const QString normalized = normalizedProjectPath(path);
+    openProjectPath(normalized);
+    if (sameProjectPath(projectFile_, normalized)) {
+        show();
+        raise();
+        activateWindow();
+        return true;
+    }
+    return false;
+}
+
 void MainWindow::openProject()
 {
     if (!commitPendingEdits()) return;

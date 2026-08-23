@@ -90,6 +90,7 @@ public:
         int sourceColumn,
         const QString& symbolName,
         const QString& accessPath);
+    bool openSuiteProject(const QString& path);
 
 signals:
     void initialTraceReferenceLoaded(bool success, const QString& message);

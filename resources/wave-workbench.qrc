@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/branding">
+        <file alias="wave-workbench-icon.png">wave-workbench-icon.png</file>
+    </qresource>
+</RCC>

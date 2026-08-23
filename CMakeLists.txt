@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(WaveWorkbench VERSION 0.11.0 LANGUAGES CXX)
+project(WaveWorkbench VERSION 0.11.1 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -10,10 +10,15 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
+if(WIN32)
+    enable_language(RC)
+endif()
+
 option(WAVEWORKBENCH_BUILD_TESTS "Build automated tests" ON)
 option(WAVEWORKBENCH_ENABLE_WELLEN "Build the Wellen FST reader" ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent)
+find_package(SuiteApp 1 CONFIG QUIET)
 
 if(WAVEWORKBENCH_ENABLE_WELLEN)
     find_program(CARGO_EXECUTABLE
@@ -213,6 +218,12 @@ target_link_libraries(wavewidgets
     PUBLIC wavecore wavetime waveedit waveproject wavevalidate wavegenerate wavetrace wavefst wavecompare waveintegration wavesim
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent ${CMAKE_DL_LIBS}
 )
+if(SuiteApp_FOUND)
+    target_sources(wavewidgets PRIVATE
+        src/app/suite_integration.cpp
+        src/app/suite_integration.h)
+    target_link_libraries(wavewidgets PRIVATE SuiteApp::suiteapp)
+endif()
 if(WAVEWORKBENCH_ENABLE_WELLEN)
     add_dependencies(wavewidgets wave-wellen-reader)
 endif()
@@ -225,10 +236,18 @@ wave_enable_warnings(wavewidgets)
 
 add_executable(wave-workbench
     src/app/main.cpp
+    resources/wave-workbench.qrc
 )
+if(WIN32)
+    target_sources(wave-workbench PRIVATE resources/wave-workbench.rc)
+endif()
 target_link_libraries(wave-workbench PRIVATE wavewidgets)
 target_compile_definitions(wave-workbench
     PRIVATE WAVEWORKBENCH_VERSION="${PROJECT_VERSION}")
+if(SuiteApp_FOUND)
+    target_compile_definitions(wave-workbench
+        PRIVATE WAVEWORKBENCH_HAS_SUITEAPP=1)
+endif()
 wave_enable_warnings(wave-workbench)
 
 add_executable(wave-generate
