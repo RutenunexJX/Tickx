@@ -363,7 +363,7 @@ install(
 )
 
 if(WIN32)
-    set_property(TARGET wave-workbench PROPERTY WIN32_EXECUTABLE FALSE)
+    set_property(TARGET wave-workbench PROPERTY WIN32_EXECUTABLE TRUE)
 endif()
 
 if(WAVEWORKBENCH_BUILD_TESTS)
