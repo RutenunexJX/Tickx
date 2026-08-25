@@ -1,9 +1,40 @@
 # Wave Workbench 实施计划
 
-更新时间：2026-08-19
+更新时间：2026-08-25
 
 状态定义：`完成` 表示具有可运行行为和自动化证据；`进行中` 表示正在实施；`未开始`
 表示尚无可验收实现。文档中的完成状态不替代测试结果。
+
+## ZeroSlack Live Insight：可复用 Waveform View
+
+状态：未开始
+
+目标是由 WaveWorkbench 统一承担 ZeroSlack Symbolic Wave Preview 与正式 Simulated Result
+的波形渲染和交互。ZeroSlack 继续负责 SystemVerilog 语义分析与符号值推导；源码编辑不会
+隐式触发编译或完整仿真。
+
+- 从现有 `TraceCanvas` 中分离可复用的波形模型、时间映射、布局、绘制和交互层，使独立应用、
+  完整 Simulation Workspace 及轻量嵌入视图共享同一实现。
+- 在保留现有完整 workspace v1 C ABI 的前提下，新增版本化、可探测的独立 Waveform View
+  factory/capability。旧宿主在不识别新能力时继续使用现有结果工作区。
+- 定义并严格校验 `wave-preview/v1` 中性数据契约：timebase、lane、符号 segment、未知值与
+  provenance、稳定信号身份、便携源码链接和请求 generation。WaveWorkbench 不解析 RTL 来
+  重建这些事实。
+- 首版采用 generation-tagged 全量替换，并执行大小、字段、时间范围和过期 generation 门禁；
+  只有在全量替换、取消和 latest-wins 语义通过验证后才引入增量 diff。
+- Symbolic Preview 与 Simulated Result 使用相同网格、lane、值标签、光标、缩放和选中语言，
+  但必须持续显示模式及 provenance，禁止将推导值呈现为仿真结果。
+- 将硬编码浅色绘制改为语义化主题 token，覆盖背景、网格、信号、未知值、选择、诊断、
+  provenance、悬浮和焦点；独立应用与嵌入宿主均从同一 token 输入渲染。
+- 支持完整视图和紧凑只读预览两种密度；紧凑模式仅用于 ZeroSlack 侧栏缩略摘要，完整交互
+  画布在可调整尺寸的编辑区或固定 Dock 中打开。
+- 保留现有时间映射、范围选择、采样、搜索、缩放、Fit、键盘与无障碍语义；迁移期间通过
+  adapter 维持现有 Simulation Result，不进行一次性替换。
+- 自动化覆盖 ABI/capability 探测、畸形与过期 payload 拒绝、快速 generation 竞争、主题、
+  DPI、960/1440 px 布局、源码导航、嵌入销毁和现有结果工作区回归。跨仓测试必须动态加载
+  真实共享库并验证 ZeroSlack `wave-preview/v1` 往返。
+- ZeroSlack 私有 `WavePreviewCanvas` 仅在共享视图达到功能、主题、性能和契约等价后删除；
+  两仓分别审计、测试、提交和推送，正式 AppSuite 仅在用户明确要求时更新。
 
 ## ZeroSlack Wave Simulation S12.9：结果与 driver/source 双向导航
 

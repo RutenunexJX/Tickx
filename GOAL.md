@@ -1,6 +1,15 @@
 # Wave Workbench 长期目标
 
-更新时间：2026-08-19
+更新时间：2026-08-25
+
+## 后续计划目标（未开始）
+
+为 ZeroSlack Live Insight 提供独立、可嵌入、可主题化的 Waveform View，使 Symbolic Wave
+Preview 与 Simulated Result 复用 WaveWorkbench 的波形渲染和交互层。ZeroSlack 保留 RTL
+语义与符号推导所有权，并通过 `wave-preview/v1` 传递中性数据；编辑时不运行完整仿真。
+该工作不得破坏现有完整 Simulation Workspace v1 ABI，且须在功能等价后才移除 ZeroSlack
+私有预览画布。详细实施范围记录于 `PLAN.md` 的“ZeroSlack Live Insight：可复用
+Waveform View”。本节不重新开启下方已经完成的长期 Goal，也不声明已有实现。
 
 ## 目标
 
