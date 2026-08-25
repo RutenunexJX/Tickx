@@ -1,8 +1,21 @@
 # WaveWorkbench UI and Reusable Waveform View
 
-状态：WaveWorkbench 实现完成；ZeroSlack 跨仓往返验收在宿主接入阶段执行
+状态：completed；WaveWorkbench 与 ZeroSlack 的宿主接入及跨仓往返验收均已完成
 
 日期：2026-08-25
+
+## 本轮跨仓验收收口
+
+- WaveWorkbench 代码交付为已推送至 `origin/main` 的 `99d75ab`；Release、Debug 全量构建及
+  CTest `101/101` 均通过。
+- ZeroSlack 宿主接入提交 `86bfa7b1` 已推送至其 `origin/main`；最终 Release CTest
+  `99/99`、主会话关键复测 `14/14` 均通过。
+- ZeroSlack 验收真实动态加载
+  `E:\WaveWorkbench\WaveWorkbench\build\wavewidgets.dll`，确认
+  `wave-workbench.waveform-view/v1`、`wave-preview/v1`，并通过稳定 ready 状态 symbolic
+  screenshot、malformed/stale 拒绝、generation latest-wins、source navigation 与 host destroy
+  生命周期验证。
+- 本轮未执行 install、package 或应用族打包，未更新 `E:\PinloomRoot\AppPackage`。
 
 ## 组件边界
 

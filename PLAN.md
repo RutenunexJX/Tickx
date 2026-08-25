@@ -7,10 +7,19 @@
 
 ## ZeroSlack Live Insight：可复用 Waveform View
 
-状态：进行中
+状态：completed
 
 详细组件拆分、视觉壳、兼容边界和验收项见
-[`UI_IMPLEMENTATION_PLAN.md`](UI_IMPLEMENTATION_PLAN.md)。本轮不打包。
+[`UI_IMPLEMENTATION_PLAN.md`](UI_IMPLEMENTATION_PLAN.md)。
+
+- WaveWorkbench 代码交付为已推送至 `origin/main` 的 `99d75ab`；Release、Debug 全量构建及
+  CTest `101/101` 均通过。
+- ZeroSlack 宿主接入提交 `86bfa7b1` 已推送至其 `origin/main`；最终 Release CTest
+  `99/99`、主会话关键复测 `14/14` 均通过。
+- 跨仓门禁真实动态加载 `E:\WaveWorkbench\WaveWorkbench\build\wavewidgets.dll`，确认
+  `wave-workbench.waveform-view/v1`、`wave-preview/v1`，并覆盖稳定 ready 状态 symbolic
+  screenshot、malformed/stale 拒绝、generation latest-wins、source navigation 与 host destroy。
+- 本轮未执行 install、package 或 AppSuite 打包，未更新 `E:\PinloomRoot\AppPackage`。
 
 目标是由 WaveWorkbench 统一承担 ZeroSlack Symbolic Wave Preview 与正式 Simulated Result
 的波形渲染和交互。ZeroSlack 继续负责 SystemVerilog 语义分析与符号值推导；源码编辑不会

@@ -2,7 +2,7 @@
 
 更新时间：2026-08-25
 
-## 当前实施目标（进行中）
+## 当前实施目标（completed）
 
 为 ZeroSlack Live Insight 提供独立、可嵌入、可主题化的 Waveform View，使 Symbolic Wave
 Preview 与 Simulated Result 复用 WaveWorkbench 的波形渲染和交互层。ZeroSlack 保留 RTL
@@ -10,7 +10,16 @@ Preview 与 Simulated Result 复用 WaveWorkbench 的波形渲染和交互层。
 该工作不得破坏现有完整 Simulation Workspace v1 ABI，且须在功能等价后才移除 ZeroSlack
 私有预览画布。详细实施范围记录于 `PLAN.md` 的“ZeroSlack Live Insight：可复用
 Waveform View”和 [`UI_IMPLEMENTATION_PLAN.md`](UI_IMPLEMENTATION_PLAN.md)。本节作为新增
-实施目标，不改变下方既有长期 Goal 的完成记录；本轮不打包。
+实施目标，不改变下方既有长期 Goal 的完成记录。
+
+本轮跨仓验收已收口：WaveWorkbench `origin/main` 的代码交付为 `99d75ab`，Release、Debug
+全量构建及 CTest `101/101` 通过；ZeroSlack 宿主接入提交 `86bfa7b1` 已推送至其
+`origin/main`，最终 Release CTest `99/99`、主会话关键复测 `14/14` 通过。ZeroSlack
+真实动态加载 `E:\WaveWorkbench\WaveWorkbench\build\wavewidgets.dll`，确认
+`wave-workbench.waveform-view/v1`、`wave-preview/v1`，并通过稳定 ready 状态 symbolic
+screenshot、malformed/stale 拒绝、generation latest-wins、source navigation 与 host destroy
+生命周期验证。本轮未执行 install、package 或 AppSuite 打包，未更新
+`E:\PinloomRoot\AppPackage`。
 
 ## 目标
 
