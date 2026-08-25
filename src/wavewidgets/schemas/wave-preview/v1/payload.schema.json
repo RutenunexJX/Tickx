@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://waveworkbench.local/schemas/wave-preview/v1/payload.schema.json",
+  "title": "WaveWorkbench Wave Preview v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "generation", "mode", "timebase", "lanes"],
+  "properties": {
+    "contract": { "const": "wave-preview/v1" },
+    "generation": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "mode": { "enum": ["symbolic", "simulated"] },
+    "timebase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "start", "end"],
+      "properties": {
+        "unit": { "enum": ["tick", "fs", "ps", "ns", "us", "ms", "s"] },
+        "start": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        "end": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 }
+      }
+    },
+    "lanes": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "kind", "width", "provenance", "segments"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "kind": { "enum": ["bit", "bus", "clock"] },
+          "width": { "type": "integer", "minimum": 1, "maximum": 65536 },
+          "provenance": { "type": "string", "minLength": 1, "maxLength": 96 },
+          "source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file", "line"],
+            "properties": {
+              "file": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "line": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+              "column": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+              "semanticId": { "type": "string", "maxLength": 512 }
+            }
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["start", "end", "value"],
+              "properties": {
+                "start": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+                "end": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+                "value": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "unknown": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -163,6 +163,11 @@ if(WAVEWORKBENCH_ENABLE_WELLEN)
 endif()
 wave_enable_warnings(wavewidgets-abi-test)
 
+add_executable(waveform-view-ui-smoke waveform_view_ui_smoke.cpp)
+target_link_libraries(waveform-view-ui-smoke
+    PRIVATE wavewidgets Qt6::Core Qt6::Gui Qt6::Widgets)
+wave_enable_warnings(waveform-view-ui-smoke)
+
 add_test(NAME wave-core-tests COMMAND wave-tests)
 add_test(
     NAME wave-expected-actual-ui-smoke
@@ -191,6 +196,20 @@ add_test(
 )
 add_test(NAME wave-timeline-viewport-test COMMAND wave-timeline-viewport-test)
 add_test(NAME wavewidgets-abi-test COMMAND wavewidgets-abi-test)
+set(_waveform_view_scale_tests)
+set(_waveform_view_scales 1.00 1.25 1.50 2.00)
+foreach(_waveform_scale IN LISTS _waveform_view_scales)
+    string(REPLACE "." "" _waveform_scale_tag "${_waveform_scale}")
+    set(_waveform_scale_test
+        "waveform-view-ui-scale-${_waveform_scale_tag}")
+    add_test(
+        NAME ${_waveform_scale_test}
+        COMMAND waveform-view-ui-smoke
+                "${CMAKE_BINARY_DIR}/${_waveform_scale_test}-compact.png"
+                "${_waveform_scale}"
+    )
+    list(APPEND _waveform_view_scale_tests ${_waveform_scale_test})
+endforeach()
 add_test(NAME wave-app-smoke COMMAND wave-workbench --smoke-test)
 add_test(
     NAME wave-example-smoke
@@ -875,6 +894,14 @@ if(WIN32 AND EXISTS "C:/Windows/Fonts/segoeui.ttf")
     list(APPEND _wave_test_environment
         "QT_QPA_FONTDIR=${_wave_test_font_dir}")
 endif()
+foreach(_waveform_scale_test _waveform_scale IN ZIP_LISTS
+        _waveform_view_scale_tests _waveform_view_scales)
+    set_tests_properties(${_waveform_scale_test} PROPERTIES
+        ENVIRONMENT "${_wave_test_environment};QT_SCALE_FACTOR=${_waveform_scale}"
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+        TIMEOUT 20)
+endforeach()
 set_tests_properties(
     wave-core-tests wave-timeline-viewport-test wavewidgets-abi-test wave-app-smoke wave-example-smoke wave-simulation-result-window-smoke wave-simulation-controls-smoke wave-simulation-stop-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke wave-lane-removal-smoke wave-lane-reorder-smoke wave-lane-autoscroll-smoke wave-hidden-lane-smoke wave-group-header-smoke wave-group-creation-smoke wave-group-batch-smoke wave-group-membership-smoke wave-signal-header-smoke wave-canvas-add-lane-smoke wave-cursor-mode-smoke wave-wave-edit-smoke wave-wave-edit-autoscroll-smoke wave-new-project-smoke wave-user-journey-smoke wave-edit-menu-smoke wave-waveform-only-smoke wave-uri-smoke wave-scenario-switch-smoke wave-generate-smoke wave-compare-smoke
     wave-bridge-describe-smoke wave-bridge-signals-smoke wave-bridge-frame-smoke

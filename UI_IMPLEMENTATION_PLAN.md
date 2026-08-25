@@ -1,6 +1,6 @@
 # WaveWorkbench UI and Reusable Waveform View
 
-状态：进行中
+状态：WaveWorkbench 实现完成；ZeroSlack 跨仓往返验收在宿主接入阶段执行
 
 日期：2026-08-25
 
@@ -42,3 +42,23 @@
 - UI 自动化覆盖 light/dark、960x720、1440x900、100/125/150/200% scaling、键盘焦点和 splitter。
 - 现有全部配置测试及真实共享库的 ZeroSlack 跨仓契约测试通过。
 - 形成可复现截图证据，独立提交并推送；不打包。
+
+## 实施结果
+
+- 新增 `wave-workbench.waveform-view/v1` Qt 控件、C ABI 工厂与严格
+  `wave-preview/v1` 全量替换入口；既有 Simulation Workspace ABI 1 保持不变。
+- 新增版本化 JSON Schema、集成说明、system/light/dark semantic token、full/compact 密度、
+  source navigation、显式 presentation state 与 generation latest-wins 门禁。
+- compatible generation 更新保留 stable lane、cursor 和 viewport；过期、未知版本、超限与
+  畸形 payload 不替换当前数据。Fit 模式在窗口和 splitter 改变尺寸后持续重算，用户主动缩放后
+  才退出 Fit。
+- Simulation Result 主工具栏收敛为 Run、Run all、Stop、Compare、Checks；Scenario、Stub、
+  Clock、Source、Timing 与 Actual waveform 缩放进入分组 overflow。三个页面及 Actual 内部区域
+  继续使用可调整且不可完全折叠的 splitter。
+- 独立应用启用 Windows GUI subsystem；`objdump` 验证为 subsystem 2，不再随 GUI 启动显示
+  CMD 窗口。
+- 全量构建通过，CTest `101/101` 通过。新增 UI 自动化分别在 100%、125%、150%、200% 缩放下
+  覆盖 960x720 compact dark、1440x900 full light、键盘焦点、源码跳转和 splitter 调整。
+  截图输出为 `build/waveform-view-ui-scale-*-compact.png` 及对应 `-full.png`，已完成视觉检查，
+  未发现裁切、主题对比或高 DPI 可读性问题。
+- 未执行 install、package 或应用族打包。

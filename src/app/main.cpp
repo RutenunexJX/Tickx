@@ -3,6 +3,7 @@
 #include "suite_integration.h"
 #endif
 #include "wave_canvas.h"
+#include "waveform_theme.h"
 
 #include "wave/model.h"
 #include "wave/integration.h"
@@ -48,6 +49,7 @@
 #include <QSettings>
 #include <QSpinBox>
 #include <QStandardPaths>
+#include <QStyleHints>
 #include <QStatusBar>
 #include <QStringList>
 #include <QTimer>
@@ -68,6 +70,32 @@
 int main(int argc, char* argv[])
 {
     QApplication application(argc, argv);
+    const auto applyVisualTheme = [&application]() {
+        const auto scheme = QGuiApplication::styleHints()->colorScheme()
+                    == Qt::ColorScheme::Dark
+                ? wave::WaveformColorScheme::Dark
+                : wave::WaveformColorScheme::Light;
+        const wave::WaveformTheme theme = wave::waveformTheme(scheme);
+        QPalette palette = application.palette();
+        palette.setColor(QPalette::Window, theme.application);
+        palette.setColor(QPalette::WindowText, theme.text);
+        palette.setColor(QPalette::Base, theme.canvas);
+        palette.setColor(QPalette::AlternateBase, theme.raised);
+        palette.setColor(QPalette::Text, theme.text);
+        palette.setColor(QPalette::Button, theme.raised);
+        palette.setColor(QPalette::ButtonText, theme.text);
+        palette.setColor(QPalette::Highlight, theme.selection);
+        palette.setColor(QPalette::HighlightedText, theme.text);
+        application.setPalette(palette);
+        application.setStyleSheet(wave::waveApplicationStyleSheet(scheme));
+    };
+    applyVisualTheme();
+    QObject::connect(QGuiApplication::styleHints(),
+                     &QStyleHints::colorSchemeChanged,
+                     &application,
+                     [&applyVisualTheme](Qt::ColorScheme) {
+                         applyVisualTheme();
+                     });
     application.setWindowIcon(
         QIcon(QStringLiteral(":/branding/wave-workbench-icon.png")));
     if (QGuiApplication::platformName() == QStringLiteral("offscreen")) {

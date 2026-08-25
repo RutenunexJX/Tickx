@@ -1,6 +1,6 @@
 # Wave Workbench
 
-当前版本：`v0.11.0`
+当前版本：`v0.11.1`
 
 Wave Workbench 是用于 FPGA 数字时序设计与验证场景编排的独立桌面应用。工程中的
 `Project`、`Scenario`、`Lane`、`Segment`、`Event`、`Relation` 是唯一事实源；画布、
@@ -73,6 +73,12 @@ ZeroSlack 的正式 Wave Simulation 工作流通过版本化 `wavewidgets` C ABI
 可单独运行的工具。当前兼容 Module Manifest v1-v5；v2 可携带选中 `always` 的观察范围
 和内部信号 access path，v3 增加结构化输入 leaf 契约，v4 增加 unresolved dependency，
 v5 增加结果与源码导航元数据，并将构建或运行错误以源码文件、行、列回传 ZeroSlack。
+
+同一共享库还提供 `wave-workbench.waveform-view/v1` 轻量控件。宿主通过严格的
+`wave-preview/v1` payload 提交 Symbolic Preview 或 Simulated Result；控件支持 generation
+全量替换、稳定 lane/cursor 状态、源码跳转、full/compact 密度及 system/light/dark 主题，
+但不解析 RTL 或启动仿真。接口见
+[docs/wave-preview-v1.md](docs/wave-preview-v1.md)。
 
 ## 构建
 

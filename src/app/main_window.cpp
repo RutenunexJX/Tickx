@@ -71,6 +71,7 @@
 #include <QUuid>
 #include <QValidator>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
@@ -1273,11 +1274,9 @@ MainWindow::MainWindow(
             layout->setSpacing(0);
             auto* label = new QLabel(title, panel);
             label->setObjectName(objectName + QStringLiteral("Label"));
+            label->setProperty("waveSectionHeader", true);
             label->setMinimumHeight(24);
             label->setContentsMargins(10, 2, 10, 2);
-            label->setStyleSheet(QStringLiteral(
-                "font-weight:600;color:#39465a;background:#f3f6fa;"
-                "border-bottom:1px solid #d7dee8;"));
             layout->addWidget(label);
             layout->addWidget(content, 1);
             return panel;
@@ -1695,14 +1694,15 @@ MainWindow::MainWindow(
             this,
             &MainWindow::stopSimulation);
         stopSimulationAction_->setObjectName(QStringLiteral("StopSimulationAction"));
-        rerunSimulationAction_ = resultToolbar->addAction(
+        rerunSimulationAction_ = new QAction(
             themedIcon(
                 QStringLiteral("view-refresh"),
                 style(),
                 QStyle::SP_BrowserReload),
             tr("Rerun"),
-            this,
-            &MainWindow::rerunSimulation);
+            this);
+        connect(rerunSimulationAction_, &QAction::triggered,
+                this, &MainWindow::rerunSimulation);
         rerunSimulationAction_->setObjectName(QStringLiteral("RerunSimulationAction"));
         runSimulationCompareAction_ = resultToolbar->addAction(
             themedIcon(
@@ -1724,15 +1724,15 @@ MainWindow::MainWindow(
             &MainWindow::runSimulationChecks);
         runSimulationChecksAction_->setObjectName(
             QStringLiteral("RunSimulationChecksAction"));
-        resultToolbar->addSeparator();
-        simulationSourceAction_ = resultToolbar->addAction(
+        simulationSourceAction_ = new QAction(
             themedIcon(
                 QStringLiteral("go-jump-definition"),
                 style(),
                 QStyle::SP_ArrowForward),
             tr("Source"),
-            this,
-            &MainWindow::navigateActiveActualSignalToDeclaration);
+            this);
+        connect(simulationSourceAction_, &QAction::triggered,
+                this, &MainWindow::navigateActiveActualSignalToDeclaration);
         simulationSourceAction_->setObjectName(
             QStringLiteral("SimulationSourceNavigationAction"));
         simulationDriversButton_ = new QToolButton(resultToolbar);
@@ -1744,29 +1744,27 @@ MainWindow::MainWindow(
             Qt::ToolButtonTextBesideIcon);
         simulationDriversButton_->setMenu(
             new QMenu(simulationDriversButton_));
-        resultToolbar->addWidget(simulationDriversButton_);
-        resultToolbar->addSeparator();
-        createSimulationScenarioAction_ = resultToolbar->addAction(
+        createSimulationScenarioAction_ = new QAction(
             themedIcon(QStringLiteral("document-new"), style(), QStyle::SP_FileIcon),
             tr("New scenario"),
-            this,
-            &MainWindow::createSimulationScenario);
+            this);
+        connect(createSimulationScenarioAction_, &QAction::triggered,
+                this, &MainWindow::createSimulationScenario);
         createSimulationScenarioAction_->setObjectName(
             QStringLiteral("CreateSimulationScenarioAction"));
-        renameSimulationScenarioAction_ = resultToolbar->addAction(
-            tr("Rename scenario"),
-            this,
-            &MainWindow::renameSimulationScenario);
+        renameSimulationScenarioAction_ = new QAction(tr("Rename scenario"), this);
+        connect(renameSimulationScenarioAction_, &QAction::triggered,
+                this, &MainWindow::renameSimulationScenario);
         renameSimulationScenarioAction_->setObjectName(
             QStringLiteral("RenameSimulationScenarioAction"));
-        deleteSimulationScenarioAction_ = resultToolbar->addAction(
+        deleteSimulationScenarioAction_ = new QAction(
             themedIcon(QStringLiteral("edit-delete"), style(), QStyle::SP_TrashIcon),
             tr("Delete scenario"),
-            this,
-            &MainWindow::deleteSimulationScenario);
+            this);
+        connect(deleteSimulationScenarioAction_, &QAction::triggered,
+                this, &MainWindow::deleteSimulationScenario);
         deleteSimulationScenarioAction_->setObjectName(
             QStringLiteral("DeleteSimulationScenarioAction"));
-        resultToolbar->addSeparator();
         simulationStubButton_ = new QToolButton(resultToolbar);
         simulationStubButton_->setObjectName(
             QStringLiteral("SimulationStubDependenciesButton"));
@@ -1775,7 +1773,6 @@ MainWindow::MainWindow(
             Qt::ToolButtonTextBesideIcon);
         simulationStubButton_->setMenu(
             new QMenu(simulationStubButton_));
-        resultToolbar->addWidget(simulationStubButton_);
         simulationClockButton_ = new QToolButton(resultToolbar);
         simulationClockButton_->setObjectName(
             QStringLiteral("SimulationClockDomainsButton"));
@@ -1784,27 +1781,66 @@ MainWindow::MainWindow(
             Qt::ToolButtonTextBesideIcon);
         simulationClockButton_->setMenu(
             new QMenu(simulationClockButton_));
-        resultToolbar->addWidget(simulationClockButton_);
-        resultToolbar->addAction(asyncTimingAction_);
-        resultToolbar->addSeparator();
-        resultToolbar->addAction(
+        auto* zoomInAction = new QAction(
             themedIcon(QStringLiteral("zoom-in"), style(), QStyle::SP_ArrowUp),
             tr("Zoom in"),
-            compareTraceCanvas_,
-            &TraceCanvas::zoomIn);
-        resultToolbar->addAction(
+            this);
+        connect(zoomInAction, &QAction::triggered,
+                compareTraceCanvas_, &TraceCanvas::zoomIn);
+        auto* zoomOutAction = new QAction(
             themedIcon(QStringLiteral("zoom-out"), style(), QStyle::SP_ArrowDown),
             tr("Zoom out"),
-            compareTraceCanvas_,
-            &TraceCanvas::zoomOut);
-        resultToolbar->addAction(
+            this);
+        connect(zoomOutAction, &QAction::triggered,
+                compareTraceCanvas_, &TraceCanvas::zoomOut);
+        auto* fitTraceAction = new QAction(
             themedIcon(
                 QStringLiteral("zoom-fit-best"),
                 style(),
                 QStyle::SP_DesktopIcon),
             tr("Fit trace"),
-            compareTraceCanvas_,
-            &TraceCanvas::fitTrace);
+            this);
+        connect(fitTraceAction, &QAction::triggered,
+                compareTraceCanvas_, &TraceCanvas::fitTrace);
+
+        auto* overflowButton = new QToolButton(resultToolbar);
+        overflowButton->setObjectName(QStringLiteral("SimulationMoreButton"));
+        overflowButton->setText(tr("More"));
+        overflowButton->setPopupMode(QToolButton::InstantPopup);
+        overflowButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        auto* overflowMenu = new QMenu(overflowButton);
+        overflowMenu->setObjectName(QStringLiteral("SimulationMoreMenu"));
+        overflowMenu->addAction(rerunSimulationAction_);
+        overflowMenu->addSeparator();
+        overflowMenu->addSection(tr("Scenario"));
+        overflowMenu->addAction(createSimulationScenarioAction_);
+        overflowMenu->addAction(renameSimulationScenarioAction_);
+        overflowMenu->addAction(deleteSimulationScenarioAction_);
+        overflowMenu->addSeparator();
+        overflowMenu->addSection(tr("Navigation and setup"));
+        overflowMenu->addAction(simulationSourceAction_);
+        overflowMenu->addAction(asyncTimingAction_);
+
+        auto* nativeControls = new QWidget(overflowMenu);
+        nativeControls->setObjectName(QStringLiteral("SimulationMoreNativeControls"));
+        auto* nativeControlsLayout = new QHBoxLayout(nativeControls);
+        nativeControlsLayout->setContentsMargins(6, 4, 6, 4);
+        nativeControlsLayout->setSpacing(4);
+        nativeControlsLayout->addWidget(simulationDriversButton_);
+        nativeControlsLayout->addWidget(simulationStubButton_);
+        nativeControlsLayout->addWidget(simulationClockButton_);
+        auto* nativeControlsAction = new QWidgetAction(overflowMenu);
+        nativeControlsAction->setDefaultWidget(nativeControls);
+        overflowMenu->addAction(nativeControlsAction);
+
+        overflowMenu->addSeparator();
+        overflowMenu->addSection(tr("Actual waveform"));
+        overflowMenu->addAction(zoomInAction);
+        overflowMenu->addAction(zoomOutAction);
+        overflowMenu->addAction(fitTraceAction);
+        overflowButton->setMenu(overflowMenu);
+        resultToolbar->addSeparator();
+        resultToolbar->addWidget(overflowButton);
         auto* spacer = new QWidget(resultToolbar);
         spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         resultToolbar->addWidget(spacer);
@@ -2417,38 +2453,24 @@ void MainWindow::updateSimulationControls(const QString& detail)
     setProperty("simulationResultState", key);
 
     QString label;
-    QString foreground;
-    QString background;
     switch (state) {
     case SimulationSessionState::Ready:
         label = tr("Ready");
-        foreground = QStringLiteral("#435066");
-        background = QStringLiteral("#e9eef5");
         break;
     case SimulationSessionState::Compiling:
         label = tr("Compiling");
-        foreground = QStringLiteral("#1659a7");
-        background = QStringLiteral("#e3efff");
         break;
     case SimulationSessionState::Running:
         label = tr("Running");
-        foreground = QStringLiteral("#1659a7");
-        background = QStringLiteral("#e3efff");
         break;
     case SimulationSessionState::Current:
         label = tr("Current");
-        foreground = QStringLiteral("#126442");
-        background = QStringLiteral("#dff4e9");
         break;
     case SimulationSessionState::Stale:
         label = tr("Stale");
-        foreground = QStringLiteral("#815400");
-        background = QStringLiteral("#fff0c7");
         break;
     case SimulationSessionState::Failed:
         label = tr("Failed");
-        foreground = QStringLiteral("#a52222");
-        background = QStringLiteral("#fde7e7");
         break;
     }
 
@@ -2456,10 +2478,9 @@ void MainWindow::updateSimulationControls(const QString& detail)
         simulationStateLabel_->setText(label);
         simulationStateLabel_->setProperty("simulationState", key);
         simulationStateLabel_->setToolTip(simulationStateDetail_);
-        simulationStateLabel_->setStyleSheet(QStringLiteral(
-            "QLabel{color:%1;background:%2;border:1px solid %1;"
-            "border-radius:3px;font-weight:600;}")
-            .arg(foreground, background));
+        simulationStateLabel_->style()->unpolish(simulationStateLabel_);
+        simulationStateLabel_->style()->polish(simulationStateLabel_);
+        simulationStateLabel_->update();
     }
 
     const auto actions = simulationStateMachine_.actions();

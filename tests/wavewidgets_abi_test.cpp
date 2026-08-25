@@ -2,6 +2,8 @@
 #include "trace_canvas.h"
 #include "trace_signal_browser.h"
 #include "wave_canvas.h"
+#include "waveform_theme.h"
+#include "waveform_view.h"
 #include "wave/project_io.h"
 #include "wave/widgets.h"
 
@@ -10,8 +12,11 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QLineEdit>
+#include <QKeyEvent>
 #include <QMenu>
+#include <QSplitter>
 #include <QTableWidget>
+#include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -132,6 +137,49 @@ int main(int argc, char** argv)
                   && workspace->findChild<QWidget*>(
                       QStringLiteral("SimulationComparisonPanel")),
               "embedded workspace exposes comparison controls and results");
+        auto* resultToolbar = workspace->findChild<QToolBar*>(
+            QStringLiteral("SimulationResultToolbar"));
+        auto* moreButton = workspace->findChild<QToolButton*>(
+            QStringLiteral("SimulationMoreButton"));
+        auto* resultSplitter = workspace->findChild<QSplitter*>(
+            QStringLiteral("SimulationResultSplitter"));
+        auto* actualSplitter = workspace->findChild<QSplitter*>(
+            QStringLiteral("SimulationActualSplitter"));
+        check(resultToolbar && moreButton && moreButton->menu()
+                  && moreButton->menu()->objectName()
+                         == QStringLiteral("SimulationMoreMenu"),
+              "simulation result toolbar exposes a grouped overflow menu");
+        if (resultToolbar && moreButton && moreButton->menu()) {
+            const auto toolbarActions = resultToolbar->actions();
+            const auto onToolbar = [&toolbarActions](QAction* action) {
+                return action && toolbarActions.contains(action);
+            };
+            check(onToolbar(workspace->findChild<QAction*>(
+                      QStringLiteral("RunSimulationAction")))
+                      && onToolbar(workspace->findChild<QAction*>(
+                          QStringLiteral("RunAllSimulationScenariosAction")))
+                      && onToolbar(workspace->findChild<QAction*>(
+                          QStringLiteral("StopSimulationAction")))
+                      && onToolbar(workspace->findChild<QAction*>(
+                          QStringLiteral("RunSimulationCompareAction")))
+                      && onToolbar(workspace->findChild<QAction*>(
+                          QStringLiteral("RunSimulationChecksAction"))),
+                  "primary simulation actions remain directly visible");
+            check(!onToolbar(workspace->findChild<QAction*>(
+                      QStringLiteral("RerunSimulationAction")))
+                      && !onToolbar(workspace->findChild<QAction*>(
+                          QStringLiteral("CreateSimulationScenarioAction")))
+                      && !onToolbar(workspace->findChild<QAction*>(
+                          QStringLiteral("SimulationSourceNavigationAction")))
+                      && moreButton->menu()->actions().size() >= 10,
+                  "secondary simulation actions are confined to overflow");
+        }
+        check(resultSplitter && actualSplitter
+                  && !resultSplitter->childrenCollapsible()
+                  && !actualSplitter->childrenCollapsible()
+                  && resultSplitter->count() == 3
+                  && actualSplitter->count() == 2,
+              "simulation pages retain adjustable non-collapsing splitters");
         check(workspace->metaObject()->indexOfMethod(
                   "canRevealSourceObject(QString,QString,int,int,QString,QString)") >= 0
                   && workspace->metaObject()->indexOfMethod(
@@ -164,6 +212,212 @@ int main(int argc, char** argv)
         workspace->close();
         delete workspace;
     }
+
+    QWidget* waveformWidget = nullptr;
+    error.fill('\0');
+    const int waveformCreateResult = wavewidgets_create_waveform_view_v1(
+        &owner, &waveformWidget, error.data(), error.size());
+    check(waveformCreateResult == 0 && waveformWidget,
+          error.front() ? error.data() : "waveform-view/v1 is created");
+    auto* waveformView = qobject_cast<wave::WaveformView*>(waveformWidget);
+    if (waveformView) {
+        check(!waveformView->isWindow() && waveformView->parentWidget() == &owner,
+              "waveform view is an embeddable child widget");
+        check(waveformView->property("wavewidgets.contract").toString()
+                  == QString::fromLatin1(wave::kWaveformViewContract)
+                  && waveformView->property("wavewidgets.previewContract").toString()
+                         == QString::fromLatin1(wave::kWavePreviewPayloadContract),
+              "waveform view publishes stable widget and payload contracts");
+        check(waveformView->capabilities().contains(QStringLiteral("wave-preview/v1"))
+                  && waveformView->capabilities().contains(
+                      QStringLiteral("generation-replace/v1"))
+                  && waveformView->capabilities().contains(
+                      QStringLiteral("source-navigation/v1")),
+              "waveform view advertises replace, theme, and navigation capabilities");
+        check(waveformView->metaObject()->indexOfMethod(
+                  "replacePreviewPayload(QByteArray)") >= 0
+                  && waveformView->metaObject()->indexOfMethod(
+                      "setThemeName(QString)") >= 0
+                  && waveformView->metaObject()->indexOfSignal(
+                      "sourceNavigationRequested(QString,int,int,QString,QString)") >= 0,
+              "waveform view exposes its stable Qt meta-object contract");
+
+        const QByteArray firstPayload = R"JSON({
+          "contract":"wave-preview/v1",
+          "generation":7,
+          "mode":"symbolic",
+          "timebase":{"unit":"ns","start":0,"end":100},
+          "lanes":[
+            {"id":"top.clk","name":"clk","kind":"clock","width":1,
+             "provenance":"zeroslack-symbolic",
+             "source":{"file":"rtl/top.sv","line":8,"column":3,"semanticId":"module:top/signal:clk"},
+             "segments":[
+               {"start":0,"end":10,"value":"0"},
+               {"start":10,"end":20,"value":"1"},
+               {"start":20,"end":100,"value":"X","unknown":true}]},
+            {"id":"top.data","name":"data[7:0]","kind":"bus","width":8,
+             "provenance":"zeroslack-symbolic",
+             "source":{"file":"rtl/top.sv","line":12,"semanticId":"module:top/signal:data"},
+             "segments":[
+               {"start":0,"end":40,"value":"0x00"},
+               {"start":40,"end":100,"value":"0xA5"}]}
+          ]
+        })JSON";
+        error.fill('\0');
+        const int firstSetResult = wavewidgets_set_waveform_preview_v1(
+            waveformView,
+            firstPayload.constData(),
+            static_cast<std::size_t>(firstPayload.size()),
+            error.data(),
+            error.size());
+        check(firstSetResult == 0 && waveformView->previewGeneration() == 7
+                  && waveformView->previewMode() == QStringLiteral("symbolic")
+                  && waveformView->presentationState() == QStringLiteral("ready")
+                  && waveformView->lastError().isEmpty(),
+              error.front() ? error.data() : "valid symbolic payload is accepted");
+        check(waveformView->selectLane(QStringLiteral("top.data"))
+                  && waveformView->revealTick(55),
+              "stable lane selection and cursor navigation are accepted");
+        check(waveformView->setThemeName(QStringLiteral("dark"))
+                  && waveformView->themeName() == QStringLiteral("dark"),
+              "embedded waveform theme can be selected explicitly");
+        waveformView->setCompact(true);
+        check(waveformView->compact(),
+              "compact density can be selected for a sidebar host");
+
+        QString sourceFile;
+        QString semanticId;
+        QObject::connect(
+            waveformView,
+            &wave::WaveformView::sourceNavigationRequested,
+            [&sourceFile, &semanticId](const QString& file,
+                                      int,
+                                      int,
+                                      const QString& semantic,
+                                      const QString&) {
+                sourceFile = file;
+                semanticId = semantic;
+            });
+        QKeyEvent openSource(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QApplication::sendEvent(waveformView, &openSource);
+        check(sourceFile == QStringLiteral("rtl/top.sv")
+                  && semanticId == QStringLiteral("module:top/signal:data"),
+              "selected lane requests navigation through portable source identity");
+
+        const QByteArray replacement = R"JSON({
+          "contract":"wave-preview/v1","generation":8,"mode":"symbolic",
+          "timebase":{"unit":"ns","start":0,"end":100},
+          "lanes":[{"id":"top.data","name":"data[7:0]","kind":"bus","width":8,
+            "provenance":"zeroslack-symbolic","segments":[
+              {"start":0,"end":50,"value":"0x11"},
+              {"start":50,"end":100,"value":"0x22"}]}]
+        })JSON";
+        error.fill('\0');
+        check(wavewidgets_set_waveform_preview_v1(
+                  waveformView,
+                  replacement.constData(),
+                  static_cast<std::size_t>(replacement.size()),
+                  error.data(), error.size()) == 0
+                  && waveformView->previewGeneration() == 8,
+              "newer compatible generation replaces the complete payload");
+
+        error.fill('\0');
+        check(wavewidgets_set_waveform_preview_v1(
+                  waveformView,
+                  firstPayload.constData(),
+                  static_cast<std::size_t>(firstPayload.size()),
+                  error.data(), error.size()) == 4
+                  && waveformView->previewGeneration() == 8
+                  && QString::fromUtf8(error.data()).contains(
+                      QStringLiteral("Stale")),
+              "stale generation is rejected without replacing current data");
+
+        const QByteArray malformed = R"JSON({
+          "contract":"wave-preview/v1","generation":9,"mode":"symbolic",
+          "timebase":{"unit":"ns","start":0,"end":100},
+          "lanes":[{"id":"bad","name":"bad","kind":"bit","width":1,
+            "provenance":"test","segments":[
+              {"start":0,"end":60,"value":"0"},
+              {"start":50,"end":100,"value":"1"}]}]
+        })JSON";
+        error.fill('\0');
+        check(wavewidgets_set_waveform_preview_v1(
+                  waveformView,
+                  malformed.constData(),
+                  static_cast<std::size_t>(malformed.size()),
+                  error.data(), error.size()) == 4
+                  && waveformView->previewGeneration() == 8
+                  && QString::fromUtf8(error.data()).contains(
+                      QStringLiteral("overlaps")),
+              "overlapping segments are rejected without corrupting current data");
+
+        const QByteArray unknownContract = R"JSON({
+          "contract":"wave-preview/v2","generation":9,"mode":"symbolic",
+          "timebase":{"unit":"ns","start":0,"end":100},"lanes":[]
+        })JSON";
+        error.fill('\0');
+        check(wavewidgets_set_waveform_preview_v1(
+                  waveformView,
+                  unknownContract.constData(),
+                  static_cast<std::size_t>(unknownContract.size()),
+                  error.data(), error.size()) == 4
+                  && waveformView->previewGeneration() == 8
+                  && QString::fromUtf8(error.data()).contains(
+                      QStringLiteral("Unsupported")),
+              "unknown preview contract versions are rejected without replacement");
+
+        QByteArray oversizedPayload(8 * 1024 * 1024 + 1, ' ');
+        error.fill('\0');
+        check(wavewidgets_set_waveform_preview_v1(
+                  waveformView,
+                  oversizedPayload.constData(),
+                  static_cast<std::size_t>(oversizedPayload.size()),
+                  error.data(), error.size()) == 2
+                  && waveformView->previewGeneration() == 8
+                  && QString::fromUtf8(error.data()).contains(
+                      QStringLiteral("8 MiB")),
+              "oversized preview payloads are rejected before parsing");
+
+        waveformView->resize(960, 720);
+        waveformView->show();
+        application.processEvents();
+        check(!waveformView->grab().isNull(),
+              "waveform view renders at the compact 960 by 720 acceptance size");
+        waveformView->resize(1440, 900);
+        application.processEvents();
+        check(!waveformView->grab().isNull(),
+              "waveform view renders at the 1440 by 900 acceptance size");
+        waveformView->hide();
+
+        check(waveformView->setPresentationState(
+                  QStringLiteral("loading"), QStringLiteral("Updating preview"))
+                  && waveformView->presentationState()
+                         == QStringLiteral("loading")
+                  && waveformView->setPresentationState(
+                      QStringLiteral("ready"), QStringLiteral("Preview current"))
+                  && !waveformView->setPresentationState(
+                      QStringLiteral("unsupported")),
+              "presentation states are explicit and reject unknown values");
+
+        const auto lightTheme = wave::waveformTheme(wave::WaveformColorScheme::Light);
+        const auto darkTheme = wave::waveformTheme(wave::WaveformColorScheme::Dark);
+        check(lightTheme.canvas != darkTheme.canvas
+                  && lightTheme.gridMajor != darkTheme.gridMajor
+                  && lightTheme.unknown != darkTheme.unknown
+                  && wave::waveApplicationStyleSheet(wave::WaveformColorScheme::Light)
+                         != wave::waveApplicationStyleSheet(wave::WaveformColorScheme::Dark),
+              "light and dark semantic waveform tokens are distinct");
+    }
+    QWidget ordinaryWidget;
+    const QByteArray trivialPayload("{}");
+    error.fill('\0');
+    check(wavewidgets_set_waveform_preview_v1(
+              &ordinaryWidget,
+              trivialPayload.constData(),
+              static_cast<std::size_t>(trivialPayload.size()),
+              error.data(), error.size()) == 3,
+          "preview setter rejects widgets outside the waveform-view/v1 contract");
+    delete waveformWidget;
 
     wave::TraceIndex trace;
     trace.traceSignals = {

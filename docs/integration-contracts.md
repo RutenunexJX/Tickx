@@ -7,6 +7,25 @@ Workbench 或 Pinloom 的内部数据库。
 
 ## ZeroSlack
 
+### 嵌入轻量波形视图
+
+无需完整 Simulation Workspace 时，宿主通过 `wavewidgets` ABI 1 创建独立视图并提交严格的
+`wave-preview/v1` JSON：
+
+```cpp
+QWidget* view = nullptr;
+wavewidgets_create_waveform_view_v1(parent, &view, error, errorCapacity);
+wavewidgets_set_waveform_preview_v1(
+    view, payload.constData(), payload.size(), error, errorCapacity);
+```
+
+视图契约为 `wave-workbench.waveform-view/v1`。宿主应先探测
+`wavewidgets.capabilities` 中的 `wave-preview/v1`，并使用严格递增的 generation 做全量替换。
+视图只负责校验和呈现，不解析 RTL、不运行工具链、不重新推导符号波形。Symbolic Preview 与
+Simulated Result 的模式和 provenance 始终显式显示；源码跳转通过 Qt 信号返回宿主处理。
+完整字段、限制、错误保持语义和主题/密度接口见
+[wave-preview-v1.md](wave-preview-v1.md)。
+
 ### 导出工作区描述
 
 ```powershell

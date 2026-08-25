@@ -203,6 +203,10 @@ add_library(wavewidgets SHARED
     src/app/trace_canvas.h
     src/app/trace_signal_browser.cpp
     src/app/trace_signal_browser.h
+    src/app/waveform_theme.cpp
+    src/app/waveform_theme.h
+    src/app/waveform_view.cpp
+    src/app/waveform_view.h
     src/app/wave_canvas.cpp
     src/app/wave_canvas.h
     src/wavewidgets/src/widgets.cpp
@@ -234,7 +238,7 @@ set_target_properties(wavewidgets PROPERTIES
 )
 wave_enable_warnings(wavewidgets)
 
-add_executable(wave-workbench
+add_executable(wave-workbench WIN32
     src/app/main.cpp
     resources/wave-workbench.qrc
 )
@@ -337,6 +341,7 @@ install(
         "${CMAKE_SOURCE_DIR}/docs/simulation-runner.md"
         "${CMAKE_SOURCE_DIR}/docs/project-format.md"
         "${CMAKE_SOURCE_DIR}/docs/fst-reader.md"
+        "${CMAKE_SOURCE_DIR}/docs/wave-preview-v1.md"
     DESTINATION docs
     COMPONENT Portable
 )
@@ -354,6 +359,11 @@ install(
 install(
     DIRECTORY "${CMAKE_SOURCE_DIR}/src/waveintegration/schemas/stimulus/"
     DESTINATION schemas/stimulus
+    COMPONENT Portable
+)
+install(
+    DIRECTORY "${CMAKE_SOURCE_DIR}/src/wavewidgets/schemas/wave-preview/"
+    DESTINATION schemas/wave-preview
     COMPONENT Portable
 )
 install(

@@ -1,6 +1,7 @@
 #include "wave/widgets.h"
 
 #include "main_window.h"
+#include "waveform_view.h"
 #include "wave/project_io.h"
 
 #include <QByteArray>
@@ -139,5 +140,82 @@ int wavewidgets_create_simulation_workspace_v1(
     } catch (...) {
         writeError(QStringLiteral("The embedded workspace could not be created."), errorUtf8, errorCapacity);
         return 4;
+    }
+}
+
+int wavewidgets_create_waveform_view_v1(
+    QWidget* parent,
+    QWidget** view,
+    char* errorUtf8,
+    const std::size_t errorCapacity) noexcept
+{
+    if (view) *view = nullptr;
+    if (!view) {
+        writeError(QStringLiteral("A waveform view output pointer is required."),
+                   errorUtf8, errorCapacity);
+        return 1;
+    }
+    try {
+        auto* created = new wave::WaveformView(parent);
+        created->setProperty(
+            "wavewidgets.contract",
+            QString::fromLatin1(wave::kWaveformViewContract));
+        created->setProperty(
+            "wavewidgets.previewContract",
+            QString::fromLatin1(wave::kWavePreviewPayloadContract));
+        created->setProperty("wavewidgets.abiVersion", wave::kWaveWidgetsAbiVersion);
+        *view = created;
+        writeError({}, errorUtf8, errorCapacity);
+        return 0;
+    } catch (const std::exception& exception) {
+        writeError(QString::fromUtf8(exception.what()), errorUtf8, errorCapacity);
+        return 2;
+    } catch (...) {
+        writeError(QStringLiteral("The waveform view could not be created."),
+                   errorUtf8, errorCapacity);
+        return 3;
+    }
+}
+
+int wavewidgets_set_waveform_preview_v1(
+    QWidget* view,
+    const char* payloadUtf8,
+    const std::size_t payloadSize,
+    char* errorUtf8,
+    const std::size_t errorCapacity) noexcept
+{
+    if (!view || !payloadUtf8 || payloadSize == 0) {
+        writeError(QStringLiteral("A waveform view and non-empty payload are required."),
+                   errorUtf8, errorCapacity);
+        return 1;
+    }
+    if (payloadSize > 8U * 1024U * 1024U) {
+        writeError(QStringLiteral("wave-preview/v1 payload exceeds the 8 MiB limit."),
+                   errorUtf8, errorCapacity);
+        return 2;
+    }
+    auto* waveformView = qobject_cast<wave::WaveformView*>(view);
+    if (!waveformView
+        || view->property("wavewidgets.contract").toString()
+               != QString::fromLatin1(wave::kWaveformViewContract)) {
+        writeError(QStringLiteral("The target widget is not a waveform-view/v1 instance."),
+                   errorUtf8, errorCapacity);
+        return 3;
+    }
+    try {
+        const QByteArray payload(payloadUtf8, static_cast<qsizetype>(payloadSize));
+        if (!waveformView->replacePreviewPayload(payload)) {
+            writeError(waveformView->lastError(), errorUtf8, errorCapacity);
+            return 4;
+        }
+        writeError({}, errorUtf8, errorCapacity);
+        return 0;
+    } catch (const std::exception& exception) {
+        writeError(QString::fromUtf8(exception.what()), errorUtf8, errorCapacity);
+        return 5;
+    } catch (...) {
+        writeError(QStringLiteral("The waveform preview payload could not be applied."),
+                   errorUtf8, errorCapacity);
+        return 6;
     }
 }

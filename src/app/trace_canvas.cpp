@@ -1,5 +1,7 @@
 #include "trace_canvas.h"
 
+#include "waveform_theme.h"
+
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPaintEvent>
@@ -19,15 +21,17 @@ constexpr int kRulerHeight = 34;
 constexpr int kRowHeight = 44;
 constexpr int kScrollResolution = 1'000'000;
 
-QColor valueColor(const std::string& value)
+QColor valueColor(const WaveformTheme& theme,
+                  const std::string& value,
+                  const bool bus)
 {
     if (value.find('X') != std::string::npos || value.find('x') != std::string::npos) {
-        return QColor(239, 108, 115);
+        return theme.unknown;
     }
     if (value.find('Z') != std::string::npos || value.find('z') != std::string::npos) {
-        return QColor(255, 183, 77);
+        return theme.unknown;
     }
-    return QColor(38, 166, 154);
+    return bus ? theme.bus : theme.bit;
 }
 
 bool isHigh(const std::string& value)
@@ -323,15 +327,17 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
     Q_UNUSED(event)
     QPainter painter(viewport());
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.fillRect(viewport()->rect(), QColor(250, 251, 253));
-    painter.fillRect(QRect(0, 0, kNameWidth, viewport()->height()), QColor(240, 243, 247));
-    painter.fillRect(QRect(kNameWidth, 0, viewport()->width() - kNameWidth, kRulerHeight), QColor(247, 249, 252));
-    painter.setPen(QColor(180, 190, 202));
+    const WaveformColorScheme scheme = waveformColorScheme(palette());
+    const WaveformTheme theme = waveformTheme(scheme);
+    painter.fillRect(viewport()->rect(), theme.canvas);
+    painter.fillRect(QRect(0, 0, kNameWidth, viewport()->height()), theme.panel);
+    painter.fillRect(QRect(kNameWidth, 0, viewport()->width() - kNameWidth, kRulerHeight), theme.raised);
+    painter.setPen(theme.border);
     painter.drawLine(kNameWidth, 0, kNameWidth, viewport()->height());
     painter.drawLine(0, kRulerHeight, viewport()->width(), kRulerHeight);
 
     if (!trace_ || !project_) {
-        painter.setPen(QColor(100, 110, 125));
+        painter.setPen(theme.mutedText);
         painter.drawText(
             QRect(kNameWidth, kRulerHeight, viewport()->width() - kNameWidth, viewport()->height() - kRulerHeight),
             Qt::AlignCenter,
@@ -347,9 +353,9 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
     for (auto tick = firstGrid; tick <= end; ) {
         const auto x = tickToX(tick);
         if (x >= kNameWidth) {
-            painter.setPen(QColor(218, 225, 234));
+            painter.setPen(theme.gridMinor);
             painter.drawLine(QPointF(x, kRulerHeight), QPointF(x, viewport()->height()));
-            painter.setPen(QColor(80, 91, 107));
+            painter.setPen(theme.mutedText);
             painter.drawText(
                 QRectF(x + 3, 0, 110, kRulerHeight - 2),
                 Qt::AlignLeft | Qt::AlignVCenter,
@@ -359,7 +365,9 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
         tick += gridStep;
     }
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(198, 40, 40, 34));
+    QColor difference = theme.difference;
+    difference.setAlpha(40);
+    painter.setBrush(difference);
     for (const auto& [differenceStart, differenceEnd] : differenceRanges_) {
         if (differenceEnd < start || differenceStart > end) continue;
         const auto left = tickToX(std::max(start, differenceStart));
@@ -387,13 +395,15 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
         if (signal.id == activeSignalId_) {
             painter.fillRect(
                 QRect(0, top, viewport()->width(), kRowHeight),
-                QColor(226, 238, 255));
+                theme.selection);
         } else if ((row & 1) != 0) {
-            painter.fillRect(QRect(0, top, viewport()->width(), kRowHeight), QColor(247, 249, 252));
+            QColor alternate = theme.raised;
+            alternate.setAlpha(scheme == WaveformColorScheme::Dark ? 80 : 105);
+            painter.fillRect(QRect(0, top, viewport()->width(), kRowHeight), alternate);
         }
-        painter.setPen(QColor(222, 228, 236));
+        painter.setPen(theme.gridMinor);
         painter.drawLine(0, bottom, viewport()->width(), bottom);
-        painter.setPen(QColor(39, 50, 66));
+        painter.setPen(theme.text);
         auto name = QString::fromStdString(signal.fullName);
         if (const auto* lane = mappedLane(signal)) {
             name += tr("  →  %1").arg(QString::fromStdString(lane->name));
@@ -404,7 +414,7 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
             painter.fontMetrics().elidedText(name, Qt::ElideMiddle, kNameWidth - 18));
 
         if (!signal.transitionsLoaded) {
-            painter.setPen(QColor(112, 124, 140));
+            painter.setPen(theme.mutedText);
             painter.drawText(
                 QRect(kNameWidth + 12, top, 180, kRowHeight),
                 Qt::AlignLeft | Qt::AlignVCenter,
@@ -422,7 +432,7 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
                     ? std::min(end, transitions[index + 1].tick)
                     : end;
                 if (segmentEnd < segmentStart) continue;
-                const auto color = valueColor(transition.value);
+                const auto color = valueColor(theme, transition.value, false);
                 painter.setPen(QPen(color, 1.5));
                 if (isHigh(transition.value) || isLow(transition.value)) {
                     const auto y = isHigh(transition.value) ? top + 11 : bottom - 11;
@@ -461,7 +471,7 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
                 const auto left = tickToX(segmentStart);
                 const auto right = tickToX(segmentEnd);
                 const auto middle = top + kRowHeight / 2.0;
-                const auto color = valueColor(transition.value);
+                const auto color = valueColor(theme, transition.value, true);
                 painter.setPen(QPen(color, 1.4));
                 painter.setBrush(color.lighter(188));
                 QPolygonF polygon;
@@ -473,7 +483,7 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
                         << QPointF(left, middle);
                 painter.drawPolygon(polygon);
                 if (right - left > 34) {
-                    painter.setPen(QColor(35, 45, 58));
+                    painter.setPen(theme.text);
                     painter.drawText(
                         QRectF(left + 5, top + 7, right - left - 10, kRowHeight - 14),
                         Qt::AlignCenter,
