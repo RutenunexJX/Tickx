@@ -1159,9 +1159,11 @@ void selectLaneItem(QTreeWidget* tree, const QString& laneId)
 } // namespace
 
 MainWindow::ProjectFileRevision MainWindow::projectFileRevision(
-    const QString& path)
+    const QString& path,
+    QByteArray* contents)
 {
     ProjectFileRevision revision;
+    if (contents) contents->clear();
     if (path.isEmpty() || !QFileInfo::exists(path)) return revision;
 
     QFile file(path);
@@ -1169,14 +1171,16 @@ MainWindow::ProjectFileRevision MainWindow::projectFileRevision(
         revision.state = ProjectFileRevision::State::Unreadable;
         return revision;
     }
-
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    if (!hash.addData(&file)) {
+    auto snapshot = file.readAll();
+    if (file.error() != QFileDevice::NoError) {
         revision.state = ProjectFileRevision::State::Unreadable;
         return revision;
     }
     revision.state = ProjectFileRevision::State::Present;
-    revision.sha256 = hash.result();
+    revision.sha256 = QCryptographicHash::hash(
+        snapshot,
+        QCryptographicHash::Sha256);
+    if (contents) *contents = std::move(snapshot);
     return revision;
 }
 
@@ -1437,8 +1441,9 @@ void MainWindow::inspectExternalProjectFile()
         return;
     }
     const auto eventGeneration = externalProjectEventGeneration_;
-    const auto beforeLoad = projectFileRevision(projectFile_);
-    if (beforeLoad.state != ProjectFileRevision::State::Present) {
+    QByteArray snapshot;
+    const auto snapshotRevision = projectFileRevision(projectFile_, &snapshot);
+    if (snapshotRevision.state != ProjectFileRevision::State::Present) {
         configureProjectFileWatcher();
         if (transientProjectFileRetryCount_ < 3) {
             ++transientProjectFileRetryCount_;
@@ -1446,9 +1451,10 @@ void MainWindow::inspectExternalProjectFile()
             return;
         }
         PendingExternalProjectUpdate update;
-        update.revision = beforeLoad;
+        update.revision = snapshotRevision;
         update.eventGeneration = eventGeneration;
-        update.error = beforeLoad.state == ProjectFileRevision::State::Missing
+        update.error = snapshotRevision.state
+                == ProjectFileRevision::State::Missing
             ? tr("The project file is missing after an external replacement.")
             : tr("The externally replaced project file cannot be read.");
         pendingExternalProjectUpdate_ = std::move(update);
@@ -1456,9 +1462,13 @@ void MainWindow::inspectExternalProjectFile()
         return;
     }
 
-    const auto loaded = loadProjectFile(projectFile_);
-    const auto afterLoad = projectFileRevision(projectFile_);
-    if (!sameProjectFileRevision(beforeLoad, afterLoad)
+    auto loaded = deserializeProject(snapshot);
+    if (!loaded.ok() && !loaded.error.isEmpty()) {
+        loaded.error = QStringLiteral("%1: %2")
+                           .arg(projectFile_, loaded.error);
+    }
+    const auto currentRevision = projectFileRevision(projectFile_);
+    if (!sameProjectFileRevision(snapshotRevision, currentRevision)
         || eventGeneration != externalProjectEventGeneration_) {
         transientProjectFileRetryCount_ = 0;
         configureProjectFileWatcher();
@@ -1468,19 +1478,19 @@ void MainWindow::inspectExternalProjectFile()
     transientProjectFileRetryCount_ = 0;
     configureProjectFileWatcher();
 
-    if (sameProjectFileRevision(afterLoad, loadedProjectRevision_)) {
+    if (sameProjectFileRevision(snapshotRevision, loadedProjectRevision_)) {
         ignoredExternalProjectSha_.clear();
         clearExternalProjectConflict();
         return;
     }
     if (!ignoredExternalProjectSha_.isEmpty()
-        && ignoredExternalProjectSha_ == afterLoad.sha256) {
+        && ignoredExternalProjectSha_ == snapshotRevision.sha256) {
         clearExternalProjectConflict();
         return;
     }
 
     PendingExternalProjectUpdate update;
-    update.revision = afterLoad;
+    update.revision = snapshotRevision;
     update.eventGeneration = eventGeneration;
     update.warnings = loaded.warnings;
     update.migrated = loaded.migrated;

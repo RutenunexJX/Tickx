@@ -195,7 +195,8 @@ private:
     };
 
     [[nodiscard]] static ProjectFileRevision projectFileRevision(
-        const QString& path);
+        const QString& path,
+        QByteArray* contents = nullptr);
     [[nodiscard]] static bool sameProjectFileRevision(
         const ProjectFileRevision& left,
         const ProjectFileRevision& right) noexcept;
