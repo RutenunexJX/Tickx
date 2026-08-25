@@ -7,7 +7,10 @@
 
 ## ZeroSlack Live Insight：可复用 Waveform View
 
-状态：未开始
+状态：进行中
+
+详细组件拆分、视觉壳、兼容边界和验收项见
+[`UI_IMPLEMENTATION_PLAN.md`](UI_IMPLEMENTATION_PLAN.md)。本轮不打包。
 
 目标是由 WaveWorkbench 统一承担 ZeroSlack Symbolic Wave Preview 与正式 Simulated Result
 的波形渲染和交互。ZeroSlack 继续负责 SystemVerilog 语义分析与符号值推导；源码编辑不会
