@@ -35,11 +35,14 @@ class QCloseEvent;
 class QComboBox;
 class QEvent;
 class QCheckBox;
+class QFileSystemWatcher;
+class QFrame;
 class QPoint;
 class QLabel;
 class QLineEdit;
 class QMenu;
 class QProgressBar;
+class QPushButton;
 class QSplitter;
 class QTableWidget;
 class QTabWidget;
@@ -173,8 +176,48 @@ private:
         QByteArray sha256;
     };
 
+    struct ExternalProjectChangeSummary {
+        int operationCount{0};
+        int addedLaneCount{0};
+        int changedLaneCount{0};
+        int removedLaneCount{0};
+        QStringList highlightedLaneIds;
+    };
+
+    struct PendingExternalProjectUpdate {
+        ProjectFileRevision revision;
+        std::optional<Project> project;
+        QStringList warnings;
+        QString error;
+        ExternalProjectChangeSummary summary;
+        bool migrated{false};
+        std::uint64_t eventGeneration{0};
+    };
+
     [[nodiscard]] static ProjectFileRevision projectFileRevision(
         const QString& path);
+    [[nodiscard]] static bool sameProjectFileRevision(
+        const ProjectFileRevision& left,
+        const ProjectFileRevision& right) noexcept;
+    [[nodiscard]] static ExternalProjectChangeSummary
+    summarizeExternalProjectChange(
+        const Project& before,
+        const Project& after);
+    void initializeProjectFileMonitoring();
+    void resetProjectFileMonitoring();
+    void configureProjectFileWatcher();
+    void scheduleExternalProjectInspection(const QString& changedPath = {});
+    void inspectExternalProjectFile();
+    [[nodiscard]] bool hasActiveInlineEditor() const;
+    void tryApplyPendingExternalProjectUpdate();
+    void applyPendingExternalProjectUpdate(bool userRequested);
+    void showExternalProjectConflict();
+    void clearExternalProjectConflict();
+    void keepCurrentProjectVersion();
+    void reloadExternalProjectVersion();
+    void flashExternalUpdateLanes(const QStringList& laneIds);
+    [[nodiscard]] QString externalProjectUpdateSummary(
+        const ExternalProjectChangeSummary& summary) const;
     void createActions();
     void createToolBars();
     void populateScenarioSelector();
@@ -489,6 +532,21 @@ private:
     QString autosaveInFlightPath_;
     std::set<QString> discardedAutosavePaths_;
     bool autosavePending_{false};
+    QFileSystemWatcher* projectFileWatcher_{nullptr};
+    QTimer* projectFileDebounceTimer_{nullptr};
+    QTimer* pendingExternalRetryTimer_{nullptr};
+    QFrame* externalProjectConflictBar_{nullptr};
+    QLabel* externalProjectConflictLabel_{nullptr};
+    QPushButton* externalProjectReloadButton_{nullptr};
+    QPushButton* externalProjectKeepButton_{nullptr};
+    QPushButton* externalProjectSaveAsButton_{nullptr};
+    std::optional<PendingExternalProjectUpdate> pendingExternalProjectUpdate_;
+    QByteArray ignoredExternalProjectSha_;
+    std::uint64_t projectFileWatchGeneration_{0};
+    std::uint64_t externalProjectEventGeneration_{0};
+    std::uint64_t scheduledProjectFileWatchGeneration_{0};
+    std::uint64_t externalLaneHighlightGeneration_{0};
+    int transientProjectFileRetryCount_{0};
     bool reloadTraceAfterCurrent_{false};
     bool compareModeRequested_{false};
     bool simulationResultMode_{false};

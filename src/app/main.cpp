@@ -30,6 +30,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QFont>
 #include <QHelpEvent>
 #include <QIcon>
@@ -611,10 +612,324 @@ int main(int argc, char* argv[])
                     QStringLiteral("TimelineDurationEdit"));
                 auto* saveState = window.findChild<QLabel*>(
                     QStringLiteral("SaveStateLabel"));
-                if (!durationEdit || !saveState
+                auto* canvas = window.findChild<wave::WaveCanvas*>();
+                auto* fileWatcher = window.findChild<QFileSystemWatcher*>(
+                    QStringLiteral("ProjectFileWatcher"));
+                auto* conflictBar = window.findChild<QWidget*>(
+                    QStringLiteral("ExternalProjectConflictBar"));
+                auto* conflictLabel = window.findChild<QLabel*>(
+                    QStringLiteral("ExternalProjectConflictLabel"));
+                auto* reloadButton = window.findChild<QPushButton*>(
+                    QStringLiteral("ExternalProjectReloadButton"));
+                auto* keepButton = window.findChild<QPushButton*>(
+                    QStringLiteral("ExternalProjectKeepButton"));
+                auto* saveAsButton = window.findChild<QPushButton*>(
+                    QStringLiteral("ExternalProjectSaveAsButton"));
+                if (!durationEdit || !saveState || !canvas || !fileWatcher
+                    || !conflictBar || !conflictLabel || !reloadButton
+                    || !keepButton || !saveAsButton
                     || window.project().scenarios.empty()) {
                     fail(QStringLiteral(
                         "File-conflict smoke cannot find its editing controls"));
+                    return;
+                }
+
+                const auto waitFor = [](
+                                         const std::function<bool()>& predicate,
+                                         const int timeoutMs = 3'000) {
+                    if (predicate()) return true;
+                    QEventLoop loop;
+                    QTimer poll;
+                    QTimer timeout;
+                    poll.setInterval(20);
+                    timeout.setSingleShot(true);
+                    QObject::connect(
+                        &poll,
+                        &QTimer::timeout,
+                        &loop,
+                        [&loop, &predicate] {
+                            if (predicate()) loop.quit();
+                        });
+                    QObject::connect(
+                        &timeout,
+                        &QTimer::timeout,
+                        &loop,
+                        &QEventLoop::quit);
+                    poll.start();
+                    timeout.start(timeoutMs);
+                    loop.exec();
+                    return predicate();
+                };
+                const auto settle = [](const int durationMs) {
+                    QEventLoop loop;
+                    QTimer::singleShot(durationMs, &loop, &QEventLoop::quit);
+                    loop.exec();
+                };
+
+                const auto watchedProject =
+                    QFileInfo(fileConflictSmokePath).absoluteFilePath();
+                const auto watchedDirectory =
+                    QFileInfo(fileConflictSmokePath).absoluteDir().absolutePath();
+                if (!fileWatcher->files().contains(watchedProject)
+                    || !fileWatcher->directories().contains(watchedDirectory)) {
+                    fail(QStringLiteral(
+                        "Project file monitoring did not watch both the file and its parent directory"));
+                    return;
+                }
+
+                canvas->revealLocation(QStringLiteral("lane-data"), 100'000);
+                canvas->zoomIn();
+                canvas->zoomIn();
+                canvas->horizontalScrollBar()->setValue(
+                    canvas->horizontalScrollBar()->maximum() / 3);
+                canvas->verticalScrollBar()->setValue(
+                    canvas->verticalScrollBar()->maximum() / 2);
+                canvas->setFocus(Qt::OtherFocusReason);
+                QCoreApplication::processEvents();
+                const auto contextScenarioId =
+                    window.project().scenarios.front().id;
+                const auto contextLaneId = canvas->selectedLaneId();
+                const auto contextCursor = canvas->cursorTick();
+                const auto contextSpan = canvas->visibleTimeSpan();
+                const auto contextHorizontalScroll =
+                    canvas->horizontalScrollBar()->value();
+                const auto contextVerticalScroll =
+                    canvas->verticalScrollBar()->value();
+
+                auto cleanExternal = window.project();
+                cleanExternal.name = "File conflict clean B";
+                auto* cleanData = wave::findLane(
+                    cleanExternal.scenarios.front(),
+                    "lane-data");
+                if (!cleanData) {
+                    fail(QStringLiteral(
+                        "Clean external update cannot find lane-data"));
+                    return;
+                }
+                cleanData->color = "#ab47bc";
+                wave::Lane addedLane;
+                addedLane.id = "lane-external-added";
+                addedLane.name = "cli_added";
+                addedLane.kind = wave::LaneKind::Bit;
+                addedLane.color = "#ffd54f";
+                cleanExternal.scenarios.front().lanes.push_back(addedLane);
+                QString writeError;
+                if (!wave::saveProjectFileAtomic(
+                        cleanExternal,
+                        fileConflictSmokePath,
+                        &writeError)
+                    || !waitFor([&window] {
+                        return window.project().name
+                            == "File conflict clean B";
+                    })) {
+                    fail(QStringLiteral(
+                        "A clean parent-directory atomic replacement did not auto-reload: %1")
+                             .arg(writeError));
+                    return;
+                }
+                QCoreApplication::processEvents();
+                const auto cleanSummary = window.property(
+                    "wavewidgets.lastExternalUpdateSummary").toString();
+                const auto highlightedLanes = canvas->property(
+                    "wavewidgets.externalUpdateLaneIds").toStringList();
+                if (conflictBar->isVisibleTo(&window)
+                    || window.project().scenarios.front().id
+                        != contextScenarioId
+                    || canvas->selectedLaneId() != contextLaneId
+                    || canvas->cursorTick() != contextCursor
+                    || std::abs(canvas->visibleTimeSpan() - contextSpan) > 1
+                    || canvas->horizontalScrollBar()->value()
+                        != contextHorizontalScroll
+                    || canvas->verticalScrollBar()->value()
+                        != contextVerticalScroll
+                    || !cleanSummary.contains(
+                        QStringLiteral("2 operation(s)"))
+                    || !cleanSummary.contains(
+                        QStringLiteral("Lane +1 ~1 -0"))
+                    || !highlightedLanes.contains(
+                        QStringLiteral("lane-data"))
+                    || !highlightedLanes.contains(
+                        QStringLiteral("lane-external-added"))) {
+                    fail(QStringLiteral(
+                        "Clean external reload did not preserve waveform context or publish its Lane summary"));
+                    return;
+                }
+
+                const auto reloadCountAfterClean = window.property(
+                    "wavewidgets.externalReloadCount").toULongLong();
+                if (!QMetaObject::invokeMethod(
+                        &window,
+                        "saveProject",
+                        Qt::DirectConnection)) {
+                    fail(QStringLiteral(
+                        "Cannot invoke Save while checking watcher self-suppression"));
+                    return;
+                }
+                settle(550);
+                if (window.property(
+                        "wavewidgets.externalReloadCount").toULongLong()
+                        != reloadCountAfterClean
+                    || conflictBar->isVisibleTo(&window)) {
+                    fail(QStringLiteral(
+                        "The project watcher reloaded or conflicted with its own Save"));
+                    return;
+                }
+                if (!wave::saveProjectFileAtomic(
+                        window.project(),
+                        fileConflictSmokePath,
+                        &writeError)) {
+                    fail(QStringLiteral(
+                        "Cannot write the same-content external replacement: %1")
+                             .arg(writeError));
+                    return;
+                }
+                settle(550);
+                if (window.property(
+                        "wavewidgets.externalReloadCount").toULongLong()
+                        != reloadCountAfterClean
+                    || conflictBar->isVisibleTo(&window)) {
+                    fail(QStringLiteral(
+                        "A same-content atomic replacement triggered an external reload"));
+                    return;
+                }
+
+                auto consecutiveC = window.project();
+                consecutiveC.name = "File conflict consecutive C";
+                auto consecutiveD = consecutiveC;
+                consecutiveD.name = "File conflict consecutive D";
+                auto* consecutiveData = wave::findLane(
+                    consecutiveD.scenarios.front(),
+                    "lane-data");
+                if (!consecutiveData) {
+                    fail(QStringLiteral(
+                        "Consecutive external update cannot find lane-data"));
+                    return;
+                }
+                consecutiveData->color = "#7e57c2";
+                std::erase_if(
+                    consecutiveD.scenarios.front().lanes,
+                    [](const wave::Lane& lane) {
+                        return lane.id == "lane-external-added";
+                    });
+                if (!wave::saveProjectFileAtomic(
+                        consecutiveC,
+                        fileConflictSmokePath,
+                        &writeError)
+                    || !wave::saveProjectFileAtomic(
+                        consecutiveD,
+                        fileConflictSmokePath,
+                        &writeError)
+                    || !waitFor([&window] {
+                        return window.project().name
+                            == "File conflict consecutive D";
+                    })) {
+                    fail(QStringLiteral(
+                        "Consecutive atomic replacements did not apply the latest generation: %1")
+                             .arg(writeError));
+                    return;
+                }
+                if (window.property(
+                        "wavewidgets.externalReloadCount").toULongLong()
+                        != reloadCountAfterClean + 1
+                    || window.project().name
+                        == "File conflict consecutive C") {
+                    fail(QStringLiteral(
+                        "Consecutive external replacements were not debounced latest-wins"));
+                    return;
+                }
+
+                const auto validBeforeInvalid = window.project();
+                canvas->setFocus(Qt::OtherFocusReason);
+                QCoreApplication::processEvents();
+                auto* focusBeforeInvalid = QApplication::focusWidget();
+                QFile invalidExternal(fileConflictSmokePath);
+                if (!invalidExternal.open(
+                        QIODevice::WriteOnly | QIODevice::Truncate)
+                    || invalidExternal.write("{invalid external") < 0) {
+                    fail(QStringLiteral(
+                        "Cannot create the invalid external project fixture"));
+                    return;
+                }
+                invalidExternal.close();
+                if (!waitFor([&window, conflictBar] {
+                        return conflictBar->isVisibleTo(&window)
+                            && window.property(
+                                   "wavewidgets.externalConflictState")
+                                == QStringLiteral("invalid");
+                    })
+                    || window.project() != validBeforeInvalid
+                    || QApplication::focusWidget() != focusBeforeInvalid
+                    || !conflictLabel->text().contains(
+                        QStringLiteral("not valid"))
+                    || !reloadButton->isEnabled()
+                    || !keepButton->isEnabled()
+                    || !saveAsButton->isEnabled()) {
+                    fail(QStringLiteral(
+                        "Invalid external content did not stay non-modal and preserve the GUI model/focus"));
+                    return;
+                }
+                if (!wave::saveProjectFileAtomic(
+                        validBeforeInvalid,
+                        fileConflictSmokePath,
+                        &writeError)
+                    || !waitFor([conflictBar, &window] {
+                        return !conflictBar->isVisibleTo(&window);
+                    })) {
+                    fail(QStringLiteral(
+                        "Repairing invalid external content did not clear the conflict bar: %1")
+                             .arg(writeError));
+                    return;
+                }
+
+                canvas->beginLaneRename(
+                    QStringLiteral("lane-data"),
+                    QStringLiteral("data[7:0]"));
+                QCoreApplication::processEvents();
+                auto* laneRename = window.findChild<QLineEdit*>(
+                    QStringLiteral("LaneRenameEdit"));
+                auto activeEditorExternal = window.project();
+                activeEditorExternal.name = "File conflict editor E";
+                auto* editorData = wave::findLane(
+                    activeEditorExternal.scenarios.front(),
+                    "lane-data");
+                if (!laneRename || !laneRename->isVisibleTo(&window)
+                    || QApplication::focusWidget() != laneRename
+                    || !editorData) {
+                    fail(QStringLiteral(
+                        "Cannot establish an active inline editor for delayed reload"));
+                    return;
+                }
+                editorData->color = "#5c6bc0";
+                auto* editorFocus = QApplication::focusWidget();
+                if (!wave::saveProjectFileAtomic(
+                        activeEditorExternal,
+                        fileConflictSmokePath,
+                        &writeError)
+                    || !waitFor([conflictBar, &window] {
+                        return conflictBar->isVisibleTo(&window)
+                            && window.property(
+                                   "wavewidgets.externalConflictState")
+                                == QStringLiteral("editing");
+                    })
+                    || window.project().name
+                        == "File conflict editor E"
+                    || QApplication::focusWidget() != editorFocus) {
+                    fail(QStringLiteral(
+                        "Active inline editing did not delay external reload without stealing focus"));
+                    return;
+                }
+                QKeyEvent cancelLaneRename(
+                    QEvent::KeyPress,
+                    Qt::Key_Escape,
+                    Qt::NoModifier);
+                QCoreApplication::sendEvent(laneRename, &cancelLaneRename);
+                if (!waitFor([&window] {
+                        return window.project().name
+                            == "File conflict editor E";
+                    })
+                    || conflictBar->isVisibleTo(&window)) {
+                    fail(QStringLiteral(
+                        "A clean external update was not applied after the inline editor closed"));
                     return;
                 }
 
@@ -650,13 +965,39 @@ int main(int argc, char* argv[])
                 const auto externalDuration = baseDuration + 40'000;
                 externalProject.name = "File conflict B";
                 externalProject.scenarios.front().duration = externalDuration;
-                QString writeError;
                 if (!wave::saveProjectFileAtomic(
                         externalProject,
                         fileConflictSmokePath,
                         &writeError)) {
                     fail(QStringLiteral("Cannot write external version B: %1")
                              .arg(writeError));
+                    return;
+                }
+                if (!waitFor([conflictBar, &window] {
+                        return conflictBar->isVisibleTo(&window)
+                            && window.property(
+                                   "wavewidgets.externalConflictState")
+                                == QStringLiteral("dirty");
+                    })
+                    || window.project().name
+                        == "File conflict B"
+                    || window.project().scenarios.front().duration
+                        != localDuration
+                    || saveState->text()
+                        != QStringLiteral("Unsaved changes")) {
+                    fail(QStringLiteral(
+                        "Unsaved GUI changes were overwritten instead of receiving a non-modal conflict"));
+                    return;
+                }
+                keepButton->click();
+                QCoreApplication::processEvents();
+                if (conflictBar->isVisibleTo(&window)
+                    || window.project().scenarios.front().duration
+                        != localDuration
+                    || saveState->text()
+                        != QStringLiteral("Unsaved changes")) {
+                    fail(QStringLiteral(
+                        "Keep did not retain the dirty GUI version"));
                     return;
                 }
                 const auto snapshotPath =

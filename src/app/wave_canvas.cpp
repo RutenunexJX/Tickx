@@ -5712,6 +5712,8 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
     drawRuler(painter);
     const auto [visibleStart, visibleEnd] = visibleTickRange();
     const auto verticalOffset = verticalScrollBar()->value();
+    const auto externalUpdateLaneIds = property(
+        "wavewidgets.externalUpdateLaneIds").toStringList();
     for (const auto& layout : laneLayout_) {
         const auto screenTop = RulerHeight + layout.top - verticalOffset;
         if (screenTop + layout.height < RulerHeight || screenTop > viewport()->height()) {
@@ -5741,6 +5743,17 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
                 std::max(1, layout.height - 4));
             painter.fillRect(highlight, QColor(198, 40, 40, 42));
             painter.setPen(QPen(QColor(198, 40, 40, 150), 1));
+            painter.drawRect(highlight.adjusted(0, 0, -1, -1));
+        }
+        if (externalUpdateLaneIds.contains(
+                QString::fromStdString(lane.id))) {
+            const QRect highlight(
+                1,
+                screenTop + 1,
+                std::max(1, viewport()->width() - 2),
+                std::max(1, layout.height - 2));
+            painter.fillRect(highlight, QColor(255, 183, 77, 34));
+            painter.setPen(QPen(QColor(255, 183, 77, 190), 2));
             painter.drawRect(highlight.adjusted(0, 0, -1, -1));
         }
     }

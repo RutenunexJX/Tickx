@@ -31,6 +31,7 @@
 #include <QDockWidget>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileSystemWatcher>
 #include <QFrame>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -90,6 +91,9 @@ namespace wave {
 namespace {
 
 constexpr int ScenarioLocationMemoryDelayMs = 400;
+constexpr int ExternalProjectDebounceMs = 180;
+constexpr int ExternalProjectRetryMs = 200;
+constexpr int ExternalProjectHighlightMs = 1'800;
 constexpr std::size_t DefaultFstVisibleSignals = 32;
 
 QString simulationBatchStateLabel(const SimulationBatchScenarioState state)
@@ -1176,6 +1180,616 @@ MainWindow::ProjectFileRevision MainWindow::projectFileRevision(
     return revision;
 }
 
+bool MainWindow::sameProjectFileRevision(
+    const ProjectFileRevision& left,
+    const ProjectFileRevision& right) noexcept
+{
+    return left.state == right.state
+        && (left.state != ProjectFileRevision::State::Present
+            || left.sha256 == right.sha256);
+}
+
+MainWindow::ExternalProjectChangeSummary
+MainWindow::summarizeExternalProjectChange(
+    const Project& before,
+    const Project& after)
+{
+    ExternalProjectChangeSummary summary;
+    const auto scenarioById = [](const Project& project, const std::string& id)
+        -> const Scenario* {
+        if (id.empty()) return nullptr;
+        const Scenario* match = nullptr;
+        for (const auto& scenario : project.scenarios) {
+            if (scenario.id != id) continue;
+            if (match) return nullptr;
+            match = &scenario;
+        }
+        return match;
+    };
+    const auto laneIndex = [](const Scenario& scenario, const std::string& id)
+        -> std::optional<std::size_t> {
+        for (std::size_t index = 0; index < scenario.lanes.size(); ++index) {
+            if (scenario.lanes.at(index).id == id) return index;
+        }
+        return std::nullopt;
+    };
+    const auto rememberHighlight = [&summary](const std::string& laneId) {
+        const auto id = QString::fromStdString(laneId);
+        if (!id.isEmpty() && !summary.highlightedLaneIds.contains(id)) {
+            summary.highlightedLaneIds.push_back(id);
+        }
+    };
+
+    for (const auto& beforeScenario : before.scenarios) {
+        const auto* afterScenario = scenarioById(after, beforeScenario.id);
+        if (!afterScenario) {
+            summary.removedLaneCount += static_cast<int>(
+                beforeScenario.lanes.size());
+            continue;
+        }
+        for (std::size_t beforeIndex = 0;
+             beforeIndex < beforeScenario.lanes.size();
+             ++beforeIndex) {
+            const auto& lane = beforeScenario.lanes.at(beforeIndex);
+            const auto afterIndex = laneIndex(*afterScenario, lane.id);
+            if (!afterIndex) {
+                ++summary.removedLaneCount;
+                continue;
+            }
+            if (afterScenario->lanes.at(*afterIndex) != lane) {
+                ++summary.changedLaneCount;
+                rememberHighlight(lane.id);
+            }
+        }
+    }
+    for (const auto& afterScenario : after.scenarios) {
+        const auto* beforeScenario = scenarioById(before, afterScenario.id);
+        if (!beforeScenario) {
+            summary.addedLaneCount += static_cast<int>(
+                afterScenario.lanes.size());
+            for (const auto& lane : afterScenario.lanes) {
+                rememberHighlight(lane.id);
+            }
+            continue;
+        }
+        for (const auto& lane : afterScenario.lanes) {
+            if (laneIndex(*beforeScenario, lane.id)) continue;
+            ++summary.addedLaneCount;
+            rememberHighlight(lane.id);
+        }
+    }
+    summary.operationCount = summary.addedLaneCount
+        + summary.changedLaneCount
+        + summary.removedLaneCount;
+    if (summary.operationCount == 0 && before != after) {
+        summary.operationCount = 1;
+    }
+    return summary;
+}
+
+QString MainWindow::externalProjectUpdateSummary(
+    const ExternalProjectChangeSummary& summary) const
+{
+    return tr("External/CLI update · %1 operation(s) · Lane +%2 ~%3 -%4")
+        .arg(summary.operationCount)
+        .arg(summary.addedLaneCount)
+        .arg(summary.changedLaneCount)
+        .arg(summary.removedLaneCount);
+}
+
+void MainWindow::initializeProjectFileMonitoring()
+{
+    projectFileWatcher_ = new QFileSystemWatcher(this);
+    projectFileWatcher_->setObjectName(QStringLiteral("ProjectFileWatcher"));
+    connect(
+        projectFileWatcher_,
+        &QFileSystemWatcher::fileChanged,
+        this,
+        &MainWindow::scheduleExternalProjectInspection);
+    connect(
+        projectFileWatcher_,
+        &QFileSystemWatcher::directoryChanged,
+        this,
+        &MainWindow::scheduleExternalProjectInspection);
+
+    projectFileDebounceTimer_ = new QTimer(this);
+    projectFileDebounceTimer_->setObjectName(
+        QStringLiteral("ProjectFileDebounceTimer"));
+    projectFileDebounceTimer_->setSingleShot(true);
+    projectFileDebounceTimer_->setInterval(ExternalProjectDebounceMs);
+    connect(
+        projectFileDebounceTimer_,
+        &QTimer::timeout,
+        this,
+        &MainWindow::inspectExternalProjectFile);
+
+    pendingExternalRetryTimer_ = new QTimer(this);
+    pendingExternalRetryTimer_->setObjectName(
+        QStringLiteral("PendingExternalProjectRetryTimer"));
+    pendingExternalRetryTimer_->setSingleShot(true);
+    pendingExternalRetryTimer_->setInterval(ExternalProjectRetryMs);
+    connect(
+        pendingExternalRetryTimer_,
+        &QTimer::timeout,
+        this,
+        &MainWindow::tryApplyPendingExternalProjectUpdate);
+
+    externalProjectConflictBar_ = new QFrame(statusBar());
+    externalProjectConflictBar_->setObjectName(
+        QStringLiteral("ExternalProjectConflictBar"));
+    externalProjectConflictBar_->setFrameShape(QFrame::StyledPanel);
+    externalProjectConflictBar_->setStyleSheet(QStringLiteral(
+        "QFrame#ExternalProjectConflictBar {"
+        " background: rgba(107, 75, 20, 224);"
+        " border: 1px solid rgba(255, 190, 92, 180);"
+        " border-radius: 3px; }"));
+    auto* conflictLayout = new QHBoxLayout(externalProjectConflictBar_);
+    conflictLayout->setContentsMargins(8, 2, 4, 2);
+    conflictLayout->setSpacing(5);
+    externalProjectConflictLabel_ = new QLabel(externalProjectConflictBar_);
+    externalProjectConflictLabel_->setObjectName(
+        QStringLiteral("ExternalProjectConflictLabel"));
+    externalProjectConflictLabel_->setSizePolicy(
+        QSizePolicy::Expanding,
+        QSizePolicy::Preferred);
+    conflictLayout->addWidget(externalProjectConflictLabel_, 1);
+    externalProjectReloadButton_ = new QPushButton(
+        tr("Reload"), externalProjectConflictBar_);
+    externalProjectReloadButton_->setObjectName(
+        QStringLiteral("ExternalProjectReloadButton"));
+    externalProjectKeepButton_ = new QPushButton(
+        tr("Keep"), externalProjectConflictBar_);
+    externalProjectKeepButton_->setObjectName(
+        QStringLiteral("ExternalProjectKeepButton"));
+    externalProjectSaveAsButton_ = new QPushButton(
+        tr("Save As…"), externalProjectConflictBar_);
+    externalProjectSaveAsButton_->setObjectName(
+        QStringLiteral("ExternalProjectSaveAsButton"));
+    conflictLayout->addWidget(externalProjectReloadButton_);
+    conflictLayout->addWidget(externalProjectKeepButton_);
+    conflictLayout->addWidget(externalProjectSaveAsButton_);
+    connect(
+        externalProjectReloadButton_,
+        &QPushButton::clicked,
+        this,
+        &MainWindow::reloadExternalProjectVersion);
+    connect(
+        externalProjectKeepButton_,
+        &QPushButton::clicked,
+        this,
+        &MainWindow::keepCurrentProjectVersion);
+    connect(
+        externalProjectSaveAsButton_,
+        &QPushButton::clicked,
+        this,
+        &MainWindow::saveProjectAs);
+    statusBar()->addWidget(externalProjectConflictBar_, 1);
+    externalProjectConflictBar_->hide();
+    resetProjectFileMonitoring();
+}
+
+void MainWindow::configureProjectFileWatcher()
+{
+    if (!projectFileWatcher_) return;
+    ++projectFileWatchGeneration_;
+    const auto watchedFiles = projectFileWatcher_->files();
+    if (!watchedFiles.isEmpty()) {
+        static_cast<void>(projectFileWatcher_->removePaths(watchedFiles));
+    }
+    const auto watchedDirectories = projectFileWatcher_->directories();
+    if (!watchedDirectories.isEmpty()) {
+        static_cast<void>(
+            projectFileWatcher_->removePaths(watchedDirectories));
+    }
+
+    const auto path = normalizedProjectPath(projectFile_);
+    const auto directory = path.isEmpty()
+        ? QString{}
+        : QFileInfo(path).absoluteDir().absolutePath();
+    if (!directory.isEmpty() && QFileInfo(directory).isDir()) {
+        static_cast<void>(projectFileWatcher_->addPath(directory));
+    }
+    if (!path.isEmpty() && QFileInfo(path).isFile()) {
+        static_cast<void>(projectFileWatcher_->addPath(path));
+    }
+    setProperty("wavewidgets.watchedProjectFile", path);
+    setProperty("wavewidgets.watchedProjectDirectory", directory);
+    setProperty(
+        "wavewidgets.projectWatchGeneration",
+        QVariant::fromValue<qulonglong>(projectFileWatchGeneration_));
+}
+
+void MainWindow::resetProjectFileMonitoring()
+{
+    if (projectFileDebounceTimer_) projectFileDebounceTimer_->stop();
+    ignoredExternalProjectSha_.clear();
+    transientProjectFileRetryCount_ = 0;
+    ++externalProjectEventGeneration_;
+    clearExternalProjectConflict();
+    configureProjectFileWatcher();
+}
+
+void MainWindow::scheduleExternalProjectInspection(
+    const QString& changedPath)
+{
+    if (!projectFileWatcher_ || !projectFileDebounceTimer_
+        || projectFile_.isEmpty()) {
+        return;
+    }
+    if (!changedPath.isEmpty()) {
+        const auto projectPath = normalizedProjectPath(projectFile_);
+        const auto directory = QFileInfo(projectPath).absoluteDir().absolutePath();
+        if (!sameProjectPath(changedPath, projectPath)
+            && !sameProjectPath(changedPath, directory)) {
+            return;
+        }
+    }
+    ++externalProjectEventGeneration_;
+    scheduledProjectFileWatchGeneration_ = projectFileWatchGeneration_;
+    projectFileDebounceTimer_->start(ExternalProjectDebounceMs);
+}
+
+void MainWindow::inspectExternalProjectFile()
+{
+    if (projectFile_.isEmpty()
+        || scheduledProjectFileWatchGeneration_
+            != projectFileWatchGeneration_) {
+        return;
+    }
+    const auto eventGeneration = externalProjectEventGeneration_;
+    const auto beforeLoad = projectFileRevision(projectFile_);
+    if (beforeLoad.state != ProjectFileRevision::State::Present) {
+        configureProjectFileWatcher();
+        if (transientProjectFileRetryCount_ < 3) {
+            ++transientProjectFileRetryCount_;
+            scheduleExternalProjectInspection();
+            return;
+        }
+        PendingExternalProjectUpdate update;
+        update.revision = beforeLoad;
+        update.eventGeneration = eventGeneration;
+        update.error = beforeLoad.state == ProjectFileRevision::State::Missing
+            ? tr("The project file is missing after an external replacement.")
+            : tr("The externally replaced project file cannot be read.");
+        pendingExternalProjectUpdate_ = std::move(update);
+        showExternalProjectConflict();
+        return;
+    }
+
+    const auto loaded = loadProjectFile(projectFile_);
+    const auto afterLoad = projectFileRevision(projectFile_);
+    if (!sameProjectFileRevision(beforeLoad, afterLoad)
+        || eventGeneration != externalProjectEventGeneration_) {
+        transientProjectFileRetryCount_ = 0;
+        configureProjectFileWatcher();
+        scheduleExternalProjectInspection();
+        return;
+    }
+    transientProjectFileRetryCount_ = 0;
+    configureProjectFileWatcher();
+
+    if (sameProjectFileRevision(afterLoad, loadedProjectRevision_)) {
+        ignoredExternalProjectSha_.clear();
+        clearExternalProjectConflict();
+        return;
+    }
+    if (!ignoredExternalProjectSha_.isEmpty()
+        && ignoredExternalProjectSha_ == afterLoad.sha256) {
+        clearExternalProjectConflict();
+        return;
+    }
+
+    PendingExternalProjectUpdate update;
+    update.revision = afterLoad;
+    update.eventGeneration = eventGeneration;
+    update.warnings = loaded.warnings;
+    update.migrated = loaded.migrated;
+    if (!loaded.ok()) {
+        update.error = loaded.error;
+    } else {
+        update.summary = summarizeExternalProjectChange(
+            project_,
+            *loaded.project);
+        update.project = std::move(*loaded.project);
+    }
+    pendingExternalProjectUpdate_ = std::move(update);
+    tryApplyPendingExternalProjectUpdate();
+}
+
+bool MainWindow::hasActiveInlineEditor() const
+{
+    if (QApplication::activeModalWidget()) return true;
+    if (canvas_) {
+        if (canvas_->hasQuickLaneSetup() || canvas_->hasLaneRename()) {
+            return true;
+        }
+        const auto* busEditor = canvas_->busEditPaletteWidget();
+        if (busEditor && busEditor->isVisibleTo(this)) return true;
+        const auto* rangeEditor = canvas_->rangeEditPaletteWidget();
+        if (rangeEditor && rangeEditor->isVisibleTo(this)) return true;
+    }
+    for (const auto* editor : findChildren<QLineEdit*>()) {
+        if (editor->isVisibleTo(this)
+            && editor->isEnabled()
+            && !editor->isReadOnly()
+            && editor->isModified()) {
+            return true;
+        }
+    }
+    const auto* focused = focusWidget();
+    if (!focused || !focused->isVisibleTo(this) || !focused->isEnabled()) {
+        return false;
+    }
+    if (const auto* lineEdit = qobject_cast<const QLineEdit*>(focused)) {
+        return !lineEdit->isReadOnly();
+    }
+    if (qobject_cast<const QSpinBox*>(focused)) return true;
+    const auto* combo = qobject_cast<const QComboBox*>(focused);
+    return combo && combo->isEditable();
+}
+
+void MainWindow::tryApplyPendingExternalProjectUpdate()
+{
+    if (!pendingExternalProjectUpdate_) return;
+    if (!pendingExternalProjectUpdate_->project
+        || !pendingExternalProjectUpdate_->error.isEmpty()) {
+        showExternalProjectConflict();
+        return;
+    }
+    const auto currentRevision = projectFileRevision(projectFile_);
+    if (!sameProjectFileRevision(
+            currentRevision,
+            pendingExternalProjectUpdate_->revision)) {
+        scheduleExternalProjectInspection();
+        return;
+    }
+    if (dirty_ || hasActiveInlineEditor()) {
+        showExternalProjectConflict();
+        if (pendingExternalRetryTimer_) {
+            pendingExternalRetryTimer_->start(ExternalProjectRetryMs);
+        }
+        return;
+    }
+    applyPendingExternalProjectUpdate(false);
+}
+
+void MainWindow::showExternalProjectConflict()
+{
+    if (!pendingExternalProjectUpdate_ || !externalProjectConflictBar_
+        || !externalProjectConflictLabel_) {
+        return;
+    }
+    QString message;
+    QString state;
+    if (!pendingExternalProjectUpdate_->project
+        || !pendingExternalProjectUpdate_->error.isEmpty()) {
+        state = QStringLiteral("invalid");
+        message = tr("External/CLI update is not valid · %1")
+                      .arg(pendingExternalProjectUpdate_->error);
+    } else if (dirty_) {
+        state = QStringLiteral("dirty");
+        message = tr("%1 · local GUI changes are unsaved")
+                      .arg(externalProjectUpdateSummary(
+                          pendingExternalProjectUpdate_->summary));
+    } else {
+        state = QStringLiteral("editing");
+        message = tr("%1 · inline editing is active")
+                      .arg(externalProjectUpdateSummary(
+                          pendingExternalProjectUpdate_->summary));
+    }
+    externalProjectConflictLabel_->setText(message);
+    externalProjectConflictLabel_->setToolTip(message);
+    externalProjectReloadButton_->setEnabled(true);
+    externalProjectConflictBar_->show();
+    setProperty("wavewidgets.externalConflictState", state);
+}
+
+void MainWindow::clearExternalProjectConflict()
+{
+    if (pendingExternalRetryTimer_) pendingExternalRetryTimer_->stop();
+    pendingExternalProjectUpdate_.reset();
+    if (externalProjectConflictBar_) externalProjectConflictBar_->hide();
+    setProperty("wavewidgets.externalConflictState", QStringLiteral("none"));
+}
+
+void MainWindow::keepCurrentProjectVersion()
+{
+    if (!pendingExternalProjectUpdate_) return;
+    ignoredExternalProjectSha_ = pendingExternalProjectUpdate_->revision.sha256;
+    clearExternalProjectConflict();
+    statusBar()->showMessage(
+        tr("Keeping the current GUI version · the external file remains unchanged"),
+        8'000);
+}
+
+void MainWindow::reloadExternalProjectVersion()
+{
+    if (!pendingExternalProjectUpdate_) return;
+    if (!pendingExternalProjectUpdate_->project
+        || !pendingExternalProjectUpdate_->error.isEmpty()) {
+        transientProjectFileRetryCount_ = 0;
+        scheduleExternalProjectInspection();
+        return;
+    }
+    applyPendingExternalProjectUpdate(true);
+}
+
+void MainWindow::flashExternalUpdateLanes(const QStringList& laneIds)
+{
+    if (!canvas_) return;
+    ++externalLaneHighlightGeneration_;
+    const auto generation = externalLaneHighlightGeneration_;
+    canvas_->setProperty("wavewidgets.externalUpdateLaneIds", laneIds);
+    canvas_->viewport()->update();
+    QTimer::singleShot(
+        ExternalProjectHighlightMs,
+        canvas_,
+        [this, generation] {
+            if (!canvas_ || generation != externalLaneHighlightGeneration_) {
+                return;
+            }
+            canvas_->setProperty(
+                "wavewidgets.externalUpdateLaneIds",
+                QStringList{});
+            canvas_->viewport()->update();
+        });
+}
+
+void MainWindow::applyPendingExternalProjectUpdate(const bool userRequested)
+{
+    if (!pendingExternalProjectUpdate_
+        || !pendingExternalProjectUpdate_->project) {
+        return;
+    }
+    const auto currentRevision = projectFileRevision(projectFile_);
+    if (!sameProjectFileRevision(
+            currentRevision,
+            pendingExternalProjectUpdate_->revision)) {
+        scheduleExternalProjectInspection();
+        return;
+    }
+
+    auto update = std::move(*pendingExternalProjectUpdate_);
+    const auto scenarioIndexBefore = activeScenarioIndex_;
+    const auto scenarioIdBefore = activeScenario()
+        ? activeScenario()->id
+        : std::string{};
+    const auto selectedLaneIds = canvas_
+        ? canvas_->selectedLaneIds()
+        : QStringList{};
+    const auto selectedLaneId = canvas_
+        ? canvas_->selectedLaneId()
+        : QString{};
+    const auto laneHeaderSelection = canvas_
+        && canvas_->hasLaneHeaderSelection();
+    const auto cursorTick = canvas_ ? canvas_->cursorTick() : Tick{0};
+    const auto visibleSpan = canvas_ ? canvas_->visibleTimeSpan() : Tick{0};
+    const auto horizontalScroll = canvas_
+        ? canvas_->horizontalScrollBar()->value()
+        : 0;
+    const auto verticalScroll = canvas_
+        ? canvas_->verticalScrollBar()->value()
+        : 0;
+    auto* focusedBefore = focusWidget();
+    const auto discardedLocalChanges = userRequested && dirty_;
+
+    if (pendingExternalRetryTimer_) pendingExternalRetryTimer_->stop();
+    pendingExternalProjectUpdate_.reset();
+    ignoredExternalProjectSha_.clear();
+    if (externalProjectConflictBar_) externalProjectConflictBar_->hide();
+    setProperty("wavewidgets.externalConflictState", QStringLiteral("none"));
+
+    rememberActiveScenarioLocation();
+    if (autosaveTimer_) autosaveTimer_->stop();
+    ++autosaveGeneration_;
+    autosavePending_ = false;
+    const auto importRunning = traceWatcher_ && traceWatcher_->isRunning();
+    if (importRunning && traceCancelFlag_) {
+        traceCancelFlag_->store(true);
+        ++traceGeneration_;
+        reloadTraceAfterCurrent_ = true;
+    }
+    traceIndex_.reset();
+    activeTraceId_.clear();
+    traceVisibleSignalIds_.clear();
+    canvas_->clearDocumentContexts();
+    pendingQuickLaneId_.clear();
+    pendingQuickCommandSize_ = 0;
+    quickLaneDirtyBefore_ = false;
+    project_ = std::move(*update.project);
+    recoveryLoaded_ = false;
+    projectFile_ = normalizedProjectPath(projectFile_);
+    loadedProjectRevision_ = update.revision;
+
+    activeScenarioIndex_ = project_.scenarios.empty()
+        ? std::size_t{0}
+        : std::min(scenarioIndexBefore, project_.scenarios.size() - 1);
+    if (!scenarioIdBefore.empty()) {
+        const auto matchingScenario = std::find_if(
+            project_.scenarios.begin(),
+            project_.scenarios.end(),
+            [&scenarioIdBefore](const Scenario& scenario) {
+                return scenario.id == scenarioIdBefore;
+            });
+        if (matchingScenario != project_.scenarios.end()) {
+            activeScenarioIndex_ = static_cast<std::size_t>(std::distance(
+                project_.scenarios.begin(),
+                matchingScenario));
+        }
+    }
+    if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
+        rememberProjectPath(projectFile_);
+    }
+    commandStack_.clear();
+    resetEditTracking(!update.migrated);
+    canvas_->setDocument(&project_, activeScenario(), &commandStack_);
+    populateScenarioSelector();
+    rememberActiveScenario();
+    closeSignalFind(false);
+    closeGoToTime(false);
+
+    if (visibleSpan > 0) {
+        static_cast<void>(
+            canvas_->restoreVisibleTimeSpan(visibleSpan, cursorTick));
+    }
+    canvas_->goToTick(cursorTick);
+    if (!selectedLaneIds.isEmpty()) {
+        if (laneHeaderSelection || selectedLaneIds.size() > 1) {
+            canvas_->selectLaneHeaders(selectedLaneIds, selectedLaneId);
+        } else if (!selectedLaneId.isEmpty()) {
+            canvas_->revealLocation(selectedLaneId, cursorTick);
+        }
+    }
+
+    updateCommandActions();
+    updateWindowTitle();
+    refreshTraceViews();
+    if (compareTraceCanvas_) compareTraceCanvas_->hide();
+    invalidateCompareResult();
+    if (dirty_) scheduleAutosave();
+    if (discardedLocalChanges) {
+        isolateAbandonedRecoverySnapshotsAfterReload();
+    }
+    configureProjectFileWatcher();
+    flashExternalUpdateLanes(update.summary.highlightedLaneIds);
+
+    auto message = externalProjectUpdateSummary(update.summary)
+        + tr(" · waveform reloaded");
+    if (!update.warnings.isEmpty()) {
+        message += tr(" · %1").arg(update.warnings.join(QStringLiteral("; ")));
+    }
+    statusBar()->showMessage(message, 10'000);
+    setProperty("wavewidgets.lastExternalUpdateSummary", message);
+    const auto reloadCount = property(
+        "wavewidgets.externalReloadCount").toULongLong() + 1;
+    setProperty(
+        "wavewidgets.externalReloadCount",
+        QVariant::fromValue<qulonglong>(reloadCount));
+    setProperty(
+        "wavewidgets.externalReloadGeneration",
+        QVariant::fromValue<qulonglong>(update.eventGeneration));
+
+    QTimer::singleShot(
+        0,
+        this,
+        [this,
+         horizontalScroll,
+         verticalScroll,
+         focusedBefore,
+         userRequested] {
+            if (!canvas_) return;
+            canvas_->horizontalScrollBar()->setValue(horizontalScroll);
+            canvas_->verticalScrollBar()->setValue(verticalScroll);
+            rememberActiveScenarioLocation();
+            if (!userRequested
+                && focusedBefore
+                && focusedBefore->isVisibleTo(this)
+                && focusedBefore->isEnabled()) {
+                focusedBefore->setFocus(Qt::OtherFocusReason);
+            }
+        });
+}
+
 QString untitledRecoveryPath()
 {
     auto directory = qEnvironmentVariable("WAVEWORKBENCH_RECOVERY_DIR");
@@ -1917,6 +2531,7 @@ MainWindow::MainWindow(
         &QFutureWatcher<QPair<quint64, QString>>::finished,
         this,
         &MainWindow::finishAutosave);
+    initializeProjectFileMonitoring();
     pointerStatusLabel_ = new QLabel(this);
     pointerStatusLabel_->setObjectName(QStringLiteral("PointerStatusLabel"));
     pointerStatusLabel_->setMinimumWidth(210);
@@ -4841,6 +5456,7 @@ void MainWindow::newProject()
     project_ = std::move(replacement);
     activeScenarioIndex_ = 0;
     projectFile_.clear();
+    loadedProjectRevision_ = {};
     recoveryLoaded_ = false;
     commandStack_.clear();
     resetEditTracking(true);
@@ -4853,6 +5469,7 @@ void MainWindow::newProject()
     updateCommandActions();
     updateWindowTitle();
     invalidateCompareResult();
+    resetProjectFileMonitoring();
     statusBar()->showMessage(
         tr("Blank 200 ns waveform ready · add CLK, BIT or BUS"),
         5'000);
@@ -11792,6 +12409,7 @@ bool MainWindow::loadFromPath(const QString& path, const bool preferRecovery)
     refreshTraceViews();
     if (compareTraceCanvas_) compareTraceCanvas_->hide();
     invalidateCompareResult();
+    resetProjectFileMonitoring();
     if (dirty_) scheduleAutosave();
     return true;
 }
@@ -11870,6 +12488,7 @@ bool MainWindow::writeToPath(const QString& path)
     cleanCommandStateId_ = observedCommandStateId_;
     cleanExternalRevision_ = externalRevision_;
     dirty_ = false;
+    resetProjectFileMonitoring();
     if (autosaveTimer_) autosaveTimer_->stop();
     ++autosaveGeneration_;
     autosavePending_ = false;
