@@ -168,6 +168,12 @@ target_link_libraries(waveform-view-ui-smoke
     PRIVATE wavewidgets Qt6::Core Qt6::Gui Qt6::Widgets)
 wave_enable_warnings(waveform-view-ui-smoke)
 
+add_executable(wave-external-reload-ui-smoke external_reload_ui_smoke.cpp)
+target_link_libraries(wave-external-reload-ui-smoke
+    PRIVATE wavewidgets waveproject
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+wave_enable_warnings(wave-external-reload-ui-smoke)
+
 add_test(NAME wave-core-tests COMMAND wave-tests)
 add_test(
     NAME wave-expected-actual-ui-smoke
@@ -196,6 +202,8 @@ add_test(
 )
 add_test(NAME wave-timeline-viewport-test COMMAND wave-timeline-viewport-test)
 add_test(NAME wavewidgets-abi-test COMMAND wavewidgets-abi-test)
+add_test(NAME wave-external-reload-ui-smoke
+    COMMAND wave-external-reload-ui-smoke)
 set(_waveform_view_scale_tests)
 set(_waveform_view_scales 1.00 1.25 1.50 2.00)
 foreach(_waveform_scale IN LISTS _waveform_view_scales)
@@ -990,6 +998,12 @@ set_tests_properties(
     wave-portable-install-contract-smoke
     PROPERTIES
     ENVIRONMENT "${_wave_test_environment}"
+)
+set_tests_properties(wave-external-reload-ui-smoke PROPERTIES
+    ENVIRONMENT "${_wave_test_environment}"
+    ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+    TIMEOUT 30
 )
 foreach(_wave_gui_test IN ITEMS
     wave-app-smoke wave-example-smoke wave-simulation-result-window-smoke wave-simulation-controls-smoke wave-simulation-stop-smoke wave-autosave-smoke wave-file-conflict-smoke wave-lane-dialog-smoke
