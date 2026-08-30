@@ -11,15 +11,19 @@
 #include <QAction>
 #include <QDir>
 #include <QFileInfo>
+#include <QFrame>
+#include <QLabel>
 #include <QLineEdit>
 #include <QKeyEvent>
 #include <QMenu>
+#include <QPushButton>
 #include <QSplitter>
 #include <QTableWidget>
 #include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
+#include <QVBoxLayout>
 #include <QWidget>
 
 #include <array>
@@ -404,9 +408,114 @@ int main(int argc, char** argv)
         check(lightTheme.canvas != darkTheme.canvas
                   && lightTheme.gridMajor != darkTheme.gridMajor
                   && lightTheme.unknown != darkTheme.unknown
+                  && lightTheme.accent != lightTheme.accentSecondary
+                  && darkTheme.accent != darkTheme.accentSecondary
                   && wave::waveApplicationStyleSheet(wave::WaveformColorScheme::Light)
                          != wave::waveApplicationStyleSheet(wave::WaveformColorScheme::Dark),
               "light and dark semantic waveform tokens are distinct");
+
+        const auto metrics = wave::waveformMetrics();
+        check(metrics.spacingUnit == 4
+                  && metrics.controlHeight == 32
+                  && metrics.compactControlHeight == 28
+                  && metrics.radius == 6
+                  && metrics.panelHeaderHeight == 32
+                  && metrics.noticePadding == 8
+                  && metrics.focusRingWidth == 2
+                  && metrics.controlHeight % metrics.spacingUnit == 0
+                  && metrics.compactControlHeight % metrics.spacingUnit == 0
+                  && metrics.panelHeaderHeight % metrics.spacingUnit == 0,
+              "semantic geometry follows the shared four-pixel spacing grid");
+
+        const auto contrastAcceptable = [](const wave::WaveformTheme& theme) {
+            return wave::waveColorContrastRatio(theme.text, theme.canvas) >= 4.5
+                && wave::waveColorContrastRatio(theme.text, theme.raised) >= 4.5
+                && wave::waveColorContrastRatio(theme.mutedText, theme.canvas) >= 4.5
+                && wave::waveColorContrastRatio(
+                       theme.selectionText, theme.selection) >= 4.5
+                && wave::waveColorContrastRatio(theme.focus, theme.canvas) >= 3.0
+                && wave::waveColorContrastRatio(
+                       theme.success, theme.successSurface) >= 4.5
+                && wave::waveColorContrastRatio(
+                       theme.warning, theme.warningSurface) >= 4.5
+                && wave::waveColorContrastRatio(
+                       theme.error, theme.errorSurface) >= 4.5
+                && wave::waveColorContrastRatio(
+                       theme.information, theme.informationSurface) >= 4.5;
+        };
+        check(contrastAcceptable(lightTheme) && contrastAcceptable(darkTheme),
+              "light and dark semantic text, status, selection, and focus tokens meet contrast guards");
+
+        for (const auto scheme : {
+                 wave::WaveformColorScheme::Light,
+                 wave::WaveformColorScheme::Dark}) {
+            const auto style = wave::waveApplicationStyleSheet(scheme);
+            check(!style.contains(QLatin1Char('@'))
+                      && style.contains(QStringLiteral("waveSurface=\"canvas\""))
+                      && style.contains(QStringLiteral("wavePanel=\"floating\""))
+                      && style.contains(QStringLiteral("waveNotice=\"warning\""))
+                      && style.contains(QStringLiteral("waveState=\"empty\""))
+                      && style.contains(QStringLiteral("waveState=\"loading\""))
+                      && style.contains(QStringLiteral("waveState=\"error\""))
+                      && style.contains(QStringLiteral("min-height: 32px"))
+                      && style.contains(QStringLiteral("border: 2px solid")),
+                  "application stylesheet resolves semantic components, geometry, and focus ring tokens");
+        }
+
+        application.setStyleSheet(wave::waveApplicationStyleSheet(
+            wave::WaveformColorScheme::Dark));
+        QWidget semanticHost;
+        semanticHost.setObjectName(QStringLiteral("SemanticThemeContractHost"));
+        semanticHost.setProperty("waveSurface", QStringLiteral("panel"));
+        auto* semanticLayout = new QVBoxLayout(&semanticHost);
+        semanticLayout->setContentsMargins(8, 8, 8, 8);
+        semanticLayout->setSpacing(metrics.spacingUnit);
+        auto* semanticEdit = new QLineEdit(&semanticHost);
+        semanticEdit->setObjectName(QStringLiteral("SemanticFocusEdit"));
+        semanticEdit->setAccessibleName(QStringLiteral("Semantic focus editor"));
+        auto* semanticButton = new QPushButton(
+            QStringLiteral("Apply"), &semanticHost);
+        semanticButton->setObjectName(QStringLiteral("SemanticPrimaryButton"));
+        semanticButton->setProperty("waveRole", QStringLiteral("primary"));
+        auto* semanticNotice = new QFrame(&semanticHost);
+        semanticNotice->setObjectName(QStringLiteral("SemanticWarningNotice"));
+        semanticNotice->setProperty("waveNotice", QStringLiteral("warning"));
+        auto* semanticNoticeLayout = new QVBoxLayout(semanticNotice);
+        auto* semanticNoticeLabel = new QLabel(
+            QStringLiteral("External update pending"), semanticNotice);
+        semanticNoticeLabel->setProperty("waveState", QStringLiteral("warning"));
+        semanticNoticeLayout->addWidget(semanticNoticeLabel);
+        semanticLayout->addWidget(semanticEdit);
+        semanticLayout->addWidget(semanticButton);
+        semanticLayout->addWidget(semanticNotice);
+        semanticHost.resize(480, 240);
+        semanticHost.show();
+        semanticEdit->setFocus(Qt::OtherFocusReason);
+        application.processEvents();
+        check(semanticEdit->hasFocus()
+                  && semanticEdit->height() >= metrics.controlHeight
+                  && semanticButton->height() >= metrics.controlHeight
+                  && semanticNotice->property("waveNotice").toString()
+                         == QStringLiteral("warning")
+                  && semanticEdit->accessibleName()
+                         == QStringLiteral("Semantic focus editor"),
+              "semantic controls retain keyboard focus, accessible naming, and logical geometry");
+        semanticHost.hide();
+
+        const auto previousReducedMotion = qgetenv(
+            "WAVEWORKBENCH_REDUCED_MOTION");
+        qputenv("WAVEWORKBENCH_REDUCED_MOTION", QByteArrayLiteral("1"));
+        const auto reducedMotionEnabled = wave::waveReducedMotionEnabled();
+        qputenv("WAVEWORKBENCH_REDUCED_MOTION", QByteArrayLiteral("0"));
+        const auto reducedMotionDisabled = !wave::waveReducedMotionEnabled();
+        if (previousReducedMotion.isNull()) {
+            qunsetenv("WAVEWORKBENCH_REDUCED_MOTION");
+        } else {
+            qputenv("WAVEWORKBENCH_REDUCED_MOTION", previousReducedMotion);
+        }
+        check(reducedMotionEnabled && reducedMotionDisabled,
+              "reduced-motion preference has deterministic environment overrides");
+        application.setStyleSheet({});
     }
     QWidget ordinaryWidget;
     const QByteArray trivialPayload("{}");

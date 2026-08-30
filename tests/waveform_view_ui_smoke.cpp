@@ -83,12 +83,15 @@ int main(int argc, char** argv)
 
     QWidget host;
     host.setObjectName(QStringLiteral("WaveformViewUiSmokeHost"));
+    host.setProperty("waveSurface", QStringLiteral("panel"));
     auto* layout = new QHBoxLayout(&host);
     layout->setContentsMargins(0, 0, 0, 0);
     auto* splitter = new QSplitter(Qt::Horizontal, &host);
     splitter->setChildrenCollapsible(false);
     auto* rail = new QFrame(splitter);
     rail->setObjectName(QStringLiteral("PreviewNavigationRail"));
+    rail->setProperty("waveSurface", QStringLiteral("raised"));
+    rail->setAccessibleName(QStringLiteral("Preview navigation rail"));
     rail->setMinimumWidth(140);
     rail->setFrameShape(QFrame::StyledPanel);
 
@@ -143,6 +146,11 @@ int main(int argc, char** argv)
     splitter->setSizes({190, 770});
     host.show();
     application.processEvents();
+    if (host.property("waveSurface").toString() != QStringLiteral("panel")
+        || rail->property("waveSurface").toString() != QStringLiteral("raised")
+        || host.width() != 960 || host.height() != 720) {
+        return 13;
+    }
     const QList<int> firstSizes = splitter->sizes();
     splitter->setSizes({310, 650});
     application.processEvents();

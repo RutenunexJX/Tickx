@@ -77,6 +77,7 @@ int main(int argc, char* argv[])
                 ? wave::WaveformColorScheme::Dark
                 : wave::WaveformColorScheme::Light;
         const wave::WaveformTheme theme = wave::waveformTheme(scheme);
+        const wave::WaveformMetrics metrics = wave::waveformMetrics();
         QPalette palette = application.palette();
         palette.setColor(QPalette::Window, theme.application);
         palette.setColor(QPalette::WindowText, theme.text);
@@ -86,8 +87,34 @@ int main(int argc, char* argv[])
         palette.setColor(QPalette::Button, theme.raised);
         palette.setColor(QPalette::ButtonText, theme.text);
         palette.setColor(QPalette::Highlight, theme.selection);
-        palette.setColor(QPalette::HighlightedText, theme.text);
+        palette.setColor(QPalette::HighlightedText, theme.selectionText);
+        palette.setColor(QPalette::Link, theme.accentSecondary);
+        palette.setColor(QPalette::LinkVisited, theme.accent);
+        palette.setColor(QPalette::BrightText, theme.error);
+        palette.setColor(QPalette::ToolTipBase, theme.raised);
+        palette.setColor(QPalette::ToolTipText, theme.text);
+        palette.setColor(QPalette::PlaceholderText, theme.mutedText);
+        palette.setColor(QPalette::Disabled, QPalette::WindowText, theme.mutedText);
+        palette.setColor(QPalette::Disabled, QPalette::Text, theme.mutedText);
+        palette.setColor(QPalette::Disabled, QPalette::ButtonText, theme.mutedText);
         application.setPalette(palette);
+        application.setProperty(
+            "waveworkbench.colorScheme",
+            scheme == wave::WaveformColorScheme::Dark
+                ? QStringLiteral("dark")
+                : QStringLiteral("light"));
+        application.setProperty(
+            "waveworkbench.spacingUnit",
+            metrics.spacingUnit);
+        application.setProperty(
+            "waveworkbench.controlHeight",
+            metrics.controlHeight);
+        application.setProperty(
+            "waveworkbench.radius",
+            metrics.radius);
+        application.setProperty(
+            "waveworkbench.reducedMotion",
+            wave::waveReducedMotionEnabled());
         application.setStyleSheet(wave::waveApplicationStyleSheet(scheme));
     };
     applyVisualTheme();
@@ -5044,7 +5071,8 @@ int main(int argc, char* argv[])
                 if (!goToTimeToolbarAction->isVisible()
                     || !goToTimeEdit->hasFocus()
                     || goToTimeEdit->text() != QStringLiteral("not-a-time")
-                    || goToTimeEdit->styleSheet().isEmpty()
+                    || goToTimeEdit->property("waveState").toString()
+                        != QStringLiteral("error")
                     || canvas->cursorTick() != 0
                     || canvas->horizontalScrollBar()->value() != 0
                     || !window.statusBar()->currentMessage().contains(
@@ -5062,7 +5090,8 @@ int main(int argc, char* argv[])
                 goToTimeEdit->setText(QStringLiteral("1200 ns"));
                 sendKey(goToTimeEdit, Qt::Key_Return);
                 QCoreApplication::processEvents();
-                if (goToTimeEdit->styleSheet().isEmpty()
+                if (goToTimeEdit->property("waveState").toString()
+                        != QStringLiteral("error")
                     || canvas->cursorTick() != 0
                     || canvas->horizontalScrollBar()->value() != 0
                     || !window.statusBar()->currentMessage().contains(
@@ -5078,7 +5107,8 @@ int main(int argc, char* argv[])
                 goToTimeEdit->setText(QStringLiteral("1.5 tick"));
                 sendKey(goToTimeEdit, Qt::Key_Return);
                 QCoreApplication::processEvents();
-                if (goToTimeEdit->styleSheet().isEmpty()
+                if (goToTimeEdit->property("waveState").toString()
+                        != QStringLiteral("error")
                     || canvas->cursorTick() != 0
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Tick values must be integers"))
@@ -5093,7 +5123,8 @@ int main(int argc, char* argv[])
                 goToTimeEdit->setText(QStringLiteral("0.0005 ns"));
                 goToTimeGo->click();
                 QCoreApplication::processEvents();
-                if (goToTimeEdit->styleSheet().isEmpty()
+                if (goToTimeEdit->property("waveState").toString()
+                        != QStringLiteral("error")
                     || canvas->cursorTick() != 0
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("cannot be represented exactly"))
@@ -5111,7 +5142,7 @@ int main(int argc, char* argv[])
                 if (canvas->cursorTick() != 2'500
                     || goToTimeEdit->text() != QStringLiteral("2.5 ns")
                     || goToTimeEdit->selectedText() != QStringLiteral("2.5 ns")
-                    || !goToTimeEdit->styleSheet().isEmpty()
+                    || !goToTimeEdit->property("waveState").toString().isEmpty()
                     || canvas->selectedLaneId()
                         != QStringLiteral("lane-wave-edit-scroll")
                     || !window.statusBar()->currentMessage().contains(
@@ -5152,7 +5183,7 @@ int main(int argc, char* argv[])
                     || !goToTimeEdit->hasFocus()
                     || goToTimeEdit->text() != QStringLiteral("375 ns")
                     || goToTimeEdit->selectedText() != QStringLiteral("375 ns")
-                    || !goToTimeEdit->styleSheet().isEmpty()
+                    || !goToTimeEdit->property("waveState").toString().isEmpty()
                     || goToTimeRange->text() != QStringLiteral("0 ps–1 us")
                     || canvas->cursorTick() != 375'000
                     || absoluteTimeScroll <= 0
@@ -5317,7 +5348,8 @@ int main(int argc, char* argv[])
                 goToTimeEdit->setText(QStringLiteral("not-a-time"));
                 goToTimeGo->click();
                 QCoreApplication::processEvents();
-                if (goToTimeEdit->styleSheet().isEmpty()
+                if (goToTimeEdit->property("waveState").toString()
+                        != QStringLiteral("error")
                     || !goToTimeEdit->hasFocus()
                     || canvas->selectedTimeRange() != exactRange37
                     || canvas->selectedLaneIds() != exactRangeLanes
@@ -5334,7 +5366,8 @@ int main(int argc, char* argv[])
                 goToTimeEdit->setText(QStringLiteral("0 ns"));
                 goToTimeGo->click();
                 QCoreApplication::processEvents();
-                if (goToTimeEdit->styleSheet().isEmpty()
+                if (goToTimeEdit->property("waveState").toString()
+                        != QStringLiteral("error")
                     || !goToTimeEdit->hasFocus()
                     || canvas->selectedTimeRange() != exactRange37
                     || canvas->selectedLaneIds() != exactRangeLanes
@@ -5358,7 +5391,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedLaneIds() != exactRangeLanes
                     || canvas->cursorTick() != 50'000
                     || goToTimeEdit->text() != QStringLiteral("50 ns")
-                    || !goToTimeEdit->styleSheet().isEmpty()
+                    || !goToTimeEdit->property("waveState").toString().isEmpty()
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("cycle 5 on navigation clock"))
                     || scenario != originalScenario
@@ -5476,7 +5509,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedLaneIds() != exactRangeLanes
                     || canvas->cursorTick() != 75'500
                     || goToTimeEdit->text() != QStringLiteral("25.5 ns")
-                    || !goToTimeEdit->styleSheet().isEmpty()
+                    || !goToTimeEdit->property("waveState").toString().isEmpty()
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Range width set to 25.5 ns"))
                     || !window.statusBar()->currentMessage().contains(
@@ -5641,7 +5674,8 @@ int main(int argc, char* argv[])
                 goToTimeEdit->setText(QStringLiteral("0 ns"));
                 goToTimeGo->click();
                 QCoreApplication::processEvents();
-                if (goToTimeEdit->styleSheet().isEmpty()
+                if (goToTimeEdit->property("waveState").toString()
+                        != QStringLiteral("error")
                     || !goToTimeEdit->hasFocus()
                     || canvas->selectedTimeRange() != reverseWidthRange
                     || !window.statusBar()->currentMessage().contains(
@@ -5657,7 +5691,8 @@ int main(int argc, char* argv[])
                 goToTimeEdit->setText(QStringLiteral("100 ns"));
                 goToTimeGo->click();
                 QCoreApplication::processEvents();
-                if (goToTimeEdit->styleSheet().isEmpty()
+                if (goToTimeEdit->property("waveState").toString()
+                        != QStringLiteral("error")
                     || !goToTimeEdit->hasFocus()
                     || canvas->selectedTimeRange() != reverseWidthRange
                     || !window.statusBar()->currentMessage().contains(
@@ -9381,7 +9416,8 @@ int main(int argc, char* argv[])
                     || findResult->text() != QStringLiteral("0/0")
                     || findPrevious->isEnabled()
                     || findNext->isEnabled()
-                    || findEdit->styleSheet().isEmpty()
+                    || findEdit->property("waveState").toString()
+                        != QStringLiteral("error")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("No visible signal matches"))) {
                     fail(QStringLiteral(
@@ -9394,7 +9430,7 @@ int main(int argc, char* argv[])
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-19")
                     || findResult->text() != QStringLiteral("1/1")
-                    || !findEdit->styleSheet().isEmpty()
+                    || !findEdit->property("waveState").toString().isEmpty()
                     || !findPrevious->isEnabled()
                     || !findNext->isEnabled()
                     || canvas->verticalScrollBar()->value() <= 0
@@ -20587,7 +20623,8 @@ int main(int argc, char* argv[])
                     || busScope->text() != QStringLiteral("Beat")
                     || !busValue->isModified()
                     || busValue->selectedText() != busValue->text()
-                    || busValue->styleSheet().isEmpty()) {
+                    || busValue->property("waveState").toString()
+                        != QStringLiteral("error")) {
                     qCritical().noquote()
                         << "Bus scope change discarded or bypassed an invalid draft"
                         << "modelChanged=" << (scenario != beforeBusControls)
@@ -20595,7 +20632,8 @@ int main(int argc, char* argv[])
                         << "scope=" << busScope->text()
                         << "modified=" << busValue->isModified()
                         << "selected=" << busValue->selectedText()
-                        << "validationStyle=" << !busValue->styleSheet().isEmpty();
+                        << "validationState="
+                        << busValue->property("waveState").toString();
                     window.hide();
                     application.exit(4);
                     return;

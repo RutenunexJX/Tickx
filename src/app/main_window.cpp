@@ -11,6 +11,7 @@
 #include "trace_canvas.h"
 #include "trace_signal_browser.h"
 #include "wave_canvas.h"
+#include "waveform_theme.h"
 
 #include <QAction>
 #include <QApplication>
@@ -96,6 +97,25 @@ constexpr int ExternalProjectDebounceMs = 180;
 constexpr int ExternalProjectRetryMs = 200;
 constexpr int ExternalProjectHighlightMs = 1'800;
 constexpr std::size_t DefaultFstVisibleSignals = 32;
+
+void setSemanticProperty(
+    QWidget* widget,
+    const char* property,
+    const QString& value)
+{
+    if (!widget || widget->property(property).toString() == value) return;
+    widget->setProperty(property, value);
+    if (widget->style()) {
+        widget->style()->unpolish(widget);
+        widget->style()->polish(widget);
+    }
+    widget->update();
+}
+
+void setSemanticState(QWidget* widget, const QString& state)
+{
+    setSemanticProperty(widget, "waveState", state);
+}
 
 QString simulationBatchStateLabel(const SimulationBatchScenarioState state)
 {
@@ -294,7 +314,7 @@ std::optional<std::string> promptNewGroupName(
     error->setObjectName(QStringLiteral("GroupNameErrorLabel"));
     error->setAccessibleName(QObject::tr("Group name validation"));
     error->setMinimumHeight(error->fontMetrics().height());
-    error->setStyleSheet(QStringLiteral("color: #ef9a9a;"));
+    error->setProperty("waveState", QStringLiteral("error"));
     layout->addWidget(error);
 
     auto* buttons = new QDialogButtonBox(
@@ -555,7 +575,7 @@ std::optional<ExportOptions> requestExportOptions(
     auto* error = new QLabel;
     error->setObjectName(QStringLiteral("ExportOptionsError"));
     error->setWordWrap(true);
-    error->setStyleSheet(QStringLiteral("color: #ff9d9a;"));
+    error->setProperty("waveState", QStringLiteral("error"));
     error->hide();
     layout->addRow(error);
     auto* buttons = new QDialogButtonBox(
@@ -964,7 +984,7 @@ std::optional<Lane> promptLaneProperties(
     auto* error = new QLabel;
     error->setObjectName(QStringLiteral("LanePropertiesError"));
     error->setWordWrap(true);
-    error->setStyleSheet(QStringLiteral("color: #ff9d9a;"));
+    error->setProperty("waveState", QStringLiteral("error"));
     error->hide();
     layout->addRow(error);
     auto* buttons = new QDialogButtonBox(
@@ -1323,14 +1343,11 @@ void MainWindow::initializeProjectFileMonitoring()
     externalProjectConflictBar_->setObjectName(
         QStringLiteral("ExternalProjectConflictBar"));
     externalProjectConflictBar_->setFrameShape(QFrame::StyledPanel);
-    externalProjectConflictBar_->setStyleSheet(QStringLiteral(
-        "QFrame#ExternalProjectConflictBar {"
-        " background: rgba(107, 75, 20, 224);"
-        " border: 1px solid rgba(255, 190, 92, 180);"
-        " border-radius: 3px; }"));
+    externalProjectConflictBar_->setProperty(
+        "waveNotice", QStringLiteral("warning"));
     auto* conflictLayout = new QHBoxLayout(externalProjectConflictBar_);
-    conflictLayout->setContentsMargins(8, 2, 4, 2);
-    conflictLayout->setSpacing(5);
+    conflictLayout->setContentsMargins(8, 4, 4, 4);
+    conflictLayout->setSpacing(4);
     externalProjectConflictLabel_ = new QLabel(externalProjectConflictBar_);
     externalProjectConflictLabel_->setObjectName(
         QStringLiteral("ExternalProjectConflictLabel"));
@@ -1342,14 +1359,22 @@ void MainWindow::initializeProjectFileMonitoring()
         tr("Reload"), externalProjectConflictBar_);
     externalProjectReloadButton_->setObjectName(
         QStringLiteral("ExternalProjectReloadButton"));
+    externalProjectReloadButton_->setProperty(
+        "waveRole", QStringLiteral("primary"));
+    externalProjectReloadButton_->setProperty(
+        "waveDensity", QStringLiteral("compact"));
     externalProjectKeepButton_ = new QPushButton(
         tr("Keep"), externalProjectConflictBar_);
     externalProjectKeepButton_->setObjectName(
         QStringLiteral("ExternalProjectKeepButton"));
+    externalProjectKeepButton_->setProperty(
+        "waveDensity", QStringLiteral("compact"));
     externalProjectSaveAsButton_ = new QPushButton(
         tr("Save As…"), externalProjectConflictBar_);
     externalProjectSaveAsButton_->setObjectName(
         QStringLiteral("ExternalProjectSaveAsButton"));
+    externalProjectSaveAsButton_->setProperty(
+        "waveDensity", QStringLiteral("compact"));
     conflictLayout->addWidget(externalProjectReloadButton_);
     conflictLayout->addWidget(externalProjectKeepButton_);
     conflictLayout->addWidget(externalProjectSaveAsButton_);
@@ -1590,6 +1615,14 @@ void MainWindow::showExternalProjectConflict()
     }
     externalProjectConflictLabel_->setText(message);
     externalProjectConflictLabel_->setToolTip(message);
+    const auto semanticState = state == QStringLiteral("invalid")
+        ? QStringLiteral("error")
+        : QStringLiteral("warning");
+    setSemanticProperty(
+        externalProjectConflictBar_,
+        "waveNotice",
+        semanticState);
+    setSemanticState(externalProjectConflictLabel_, semanticState);
     externalProjectReloadButton_->setEnabled(true);
     externalProjectConflictBar_->show();
     setProperty("wavewidgets.externalConflictState", state);
@@ -1633,7 +1666,7 @@ void MainWindow::flashExternalUpdateLanes(const QStringList& laneIds)
     canvas_->setProperty("wavewidgets.externalUpdateLaneIds", laneIds);
     canvas_->viewport()->update();
     QTimer::singleShot(
-        ExternalProjectHighlightMs,
+        waveReducedMotionEnabled() ? 0 : ExternalProjectHighlightMs,
         canvas_,
         [this, generation] {
             if (!canvas_ || generation != externalLaneHighlightGeneration_) {
@@ -1917,8 +1950,9 @@ MainWindow::MainWindow(
             auto* label = new QLabel(title, panel);
             label->setObjectName(objectName + QStringLiteral("Label"));
             label->setProperty("waveSectionHeader", true);
-            label->setMinimumHeight(24);
-            label->setContentsMargins(10, 2, 10, 2);
+            label->setProperty("waveRole", QStringLiteral("panelHeader"));
+            label->setMinimumHeight(waveformMetrics().panelHeaderHeight);
+            label->setContentsMargins(8, 0, 8, 0);
             layout->addWidget(label);
             layout->addWidget(content, 1);
             return panel;
@@ -4359,7 +4393,7 @@ void MainWindow::activateSignalFindMatch(
     signalFindMatchIndex_ = index;
     signalFindResultLabel_->setText(
         tr("%1/%2").arg(index + 1).arg(matches.size()));
-    signalFindEdit_->setStyleSheet({});
+    setSemanticState(signalFindEdit_, {});
     if (signalFindPreviousButton_) signalFindPreviousButton_->setEnabled(true);
     if (signalFindNextButton_) signalFindNextButton_->setEnabled(true);
 
@@ -4381,7 +4415,7 @@ void MainWindow::updateSignalFind()
     if (query.isEmpty()) {
         signalFindMatchIndex_ = -1;
         signalFindResultLabel_->setText(QStringLiteral("0/0"));
-        signalFindEdit_->setStyleSheet({});
+        setSemanticState(signalFindEdit_, {});
         if (signalFindPreviousButton_) signalFindPreviousButton_->setEnabled(false);
         if (signalFindNextButton_) signalFindNextButton_->setEnabled(false);
         statusBar()->showMessage(
@@ -4393,8 +4427,7 @@ void MainWindow::updateSignalFind()
     if (matches.isEmpty()) {
         signalFindMatchIndex_ = -1;
         signalFindResultLabel_->setText(QStringLiteral("0/0"));
-        signalFindEdit_->setStyleSheet(
-            QStringLiteral("QLineEdit { border: 1px solid #c96d6d; }"));
+        setSemanticState(signalFindEdit_, QStringLiteral("error"));
         if (signalFindPreviousButton_) signalFindPreviousButton_->setEnabled(false);
         if (signalFindNextButton_) signalFindNextButton_->setEnabled(false);
         statusBar()->showMessage(
@@ -4466,7 +4499,7 @@ void MainWindow::showGoToTime()
         rangeEditPaletteAction_->setVisible(false);
     }
     goToTimeWidgetAction_->setVisible(true);
-    goToTimeEdit_->setStyleSheet({});
+    setSemanticState(goToTimeEdit_, {});
     syncGoToTimeEditor(true);
     goToTimeEdit_->setFocus(Qt::ShortcutFocusReason);
     goToTimeEdit_->selectAll();
@@ -4666,8 +4699,7 @@ void MainWindow::submitGoToTime()
               cycle,
               error);
     const auto showError = [this](const QString& message) {
-        goToTimeEdit_->setStyleSheet(
-            QStringLiteral("QLineEdit { border: 1px solid #c96d6d; }"));
+        setSemanticState(goToTimeEdit_, QStringLiteral("error"));
         goToTimeEdit_->setFocus(Qt::OtherFocusReason);
         statusBar()->showMessage(message, 6'000);
     };
@@ -4750,7 +4782,7 @@ void MainWindow::submitGoToTime()
                           .arg(format(*tick)));
             return;
         }
-        goToTimeEdit_->setStyleSheet({});
+        setSemanticState(goToTimeEdit_, {});
         syncGoToTimeEditor(true);
         goToTimeEdit_->setFocus(Qt::OtherFocusReason);
         goToTimeEdit_->selectAll();
@@ -4788,7 +4820,7 @@ void MainWindow::submitGoToTime()
 
     canvas_->goToTick(*tick);
     rememberActiveScenarioLocation();
-    goToTimeEdit_->setStyleSheet({});
+    setSemanticState(goToTimeEdit_, {});
     {
         const QSignalBlocker blocker(goToTimeEdit_);
         goToTimeEdit_->setText(format(*tick));
@@ -7483,7 +7515,7 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         auto* error = new QLabel;
         error->setObjectName(QStringLiteral("QuickLaneParameterError"));
         error->setWordWrap(true);
-        error->setStyleSheet(QStringLiteral("color: #ff9d9a;"));
+        error->setProperty("waveState", QStringLiteral("error"));
         error->hide();
         layout->addRow(error);
         auto* buttons = new QDialogButtonBox(
@@ -7701,7 +7733,7 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         auto* error = new QLabel;
         error->setObjectName(QStringLiteral("QuickLaneParameterError"));
         error->setWordWrap(true);
-        error->setStyleSheet(QStringLiteral("color: #ff9d9a;"));
+        error->setProperty("waveState", QStringLiteral("error"));
         error->hide();
         layout->addRow(error);
         auto* buttons = new QDialogButtonBox(
@@ -9329,7 +9361,7 @@ void MainWindow::runCompare()
         if (compareSummary_) {
             compareSummary_->setText(message);
             compareSummary_->setToolTip(message);
-            compareSummary_->setStyleSheet(QStringLiteral("color:#815400;font-weight:600"));
+            setSemanticState(compareSummary_, QStringLiteral("warning"));
         }
         setProperty("wavewidgets.comparisonStatus", QStringLiteral("unavailable"));
         setProperty("wavewidgets.compareDifferenceCount", 0);
@@ -9577,7 +9609,7 @@ std::optional<SimulationCheckDefinition> MainWindow::promptSimulationCheck(
            "Each target edge satisfies at most one source edge."),
         &dialog);
     semantics->setWordWrap(true);
-    semantics->setStyleSheet(QStringLiteral("color:#596579"));
+    semantics->setProperty("waveRole", QStringLiteral("muted"));
     layout->addWidget(semantics);
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -9836,8 +9868,8 @@ void MainWindow::runSimulationChecks()
         if (simulationCheckSummary_) {
             simulationCheckSummary_->setText(message);
             simulationCheckSummary_->setToolTip(message);
-            simulationCheckSummary_->setStyleSheet(
-                QStringLiteral("color:#815400;font-weight:600"));
+            setSemanticState(
+                simulationCheckSummary_, QStringLiteral("warning"));
         }
         setProperty("wavewidgets.checkStatus", QStringLiteral("unavailable"));
         setProperty("wavewidgets.checkFailureCount", 0);
@@ -11644,12 +11676,7 @@ void MainWindow::createToolBars()
     waveTargetLabel_->setMinimumWidth(190);
     waveTargetLabel_->setMaximumWidth(440);
     waveTargetLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    waveTargetLabel_->setStyleSheet(QStringLiteral(
-        "QLabel#WaveTargetLabel {"
-        " color: #edf2f8; background: #2d3949;"
-        " border: 1px solid #65758b; border-radius: 4px;"
-        " padding: 3px 8px;"
-        "}"));
+    waveTargetLabel_->setProperty("waveRole", QStringLiteral("fixedBar"));
     waveTargetAction_ = editBar->addWidget(waveTargetLabel_);
     waveTargetAction_->setObjectName(QStringLiteral("WaveTargetToolbarAction"));
     editBar->addSeparator();
@@ -11811,7 +11838,7 @@ void MainWindow::createToolBars()
     goToTimeWidgetAction_->setVisible(false);
     connect(goToTimeEdit_, &QLineEdit::textChanged, this, [this] {
         if (!goToTimeWidgetAction_ || !goToTimeWidgetAction_->isVisible()) return;
-        goToTimeEdit_->setStyleSheet({});
+        setSemanticState(goToTimeEdit_, {});
         statusBar()->showMessage(
             goToTimeEditsRange_
                 ? goToTimeEditsRangeWidth_
@@ -12561,7 +12588,7 @@ void MainWindow::populateCompareTable()
     if (!compareResult_) {
         compareSummary_->setText(tr("Run compare to calculate differences"));
         compareSummary_->setToolTip({});
-        compareSummary_->setStyleSheet({});
+        setSemanticState(compareSummary_, QStringLiteral("empty"));
         return;
     }
     const auto* scenario = activeScenario();
@@ -12619,7 +12646,7 @@ void MainWindow::populateCompareTable()
             tr("Match · %1 tolerated edge intervals · %2 diagnostics")
                 .arg(compareResult_->toleratedEdgeCount)
                 .arg(diagnosticCount));
-        compareSummary_->setStyleSheet(QStringLiteral("color:#16845b;font-weight:600"));
+        setSemanticState(compareSummary_, QStringLiteral("success"));
     } else {
         compareSummary_->setText(
             tr("%1 differences · first %2 · offset %3 · %4 diagnostics")
@@ -12632,7 +12659,7 @@ void MainWindow::populateCompareTable()
                 .arg(QString::fromStdString(
                     formatTick(compareResult_->traceOffset, project_.timeBase)))
                 .arg(diagnosticCount));
-        compareSummary_->setStyleSheet(QStringLiteral("color:#c62828;font-weight:600"));
+        setSemanticState(compareSummary_, QStringLiteral("error"));
     }
 }
 
@@ -12643,14 +12670,14 @@ void MainWindow::populateSimulationCheckTable()
     const auto* scenario = activeScenario();
     if (!scenario) {
         simulationCheckSummary_->setText(tr("No active scenario"));
+        setSemanticState(simulationCheckSummary_, QStringLiteral("empty"));
         return;
     }
     const auto loaded = loadSimulationChecks(*scenario);
     if (!loaded.ok()) {
         simulationCheckSummary_->setText(loaded.error);
         simulationCheckSummary_->setToolTip(loaded.error);
-        simulationCheckSummary_->setStyleSheet(
-            QStringLiteral("color:#a52222;font-weight:600"));
+        setSemanticState(simulationCheckSummary_, QStringLiteral("error"));
         return;
     }
     const auto laneName = [scenario](const std::string& laneId) {
@@ -12774,14 +12801,13 @@ void MainWindow::populateSimulationCheckTable()
             loaded.checks.empty()
                 ? tr("No checks defined")
                 : tr("%1 check(s) · run to evaluate").arg(loaded.checks.size()));
-        simulationCheckSummary_->setStyleSheet({});
+        setSemanticState(simulationCheckSummary_, QStringLiteral("empty"));
     } else if (simulationCheckResult_->allPassed()) {
         simulationCheckSummary_->setText(
             tr("%1 passed · %2 disabled")
                 .arg(simulationCheckResult_->passedCount)
                 .arg(simulationCheckResult_->disabledCount));
-        simulationCheckSummary_->setStyleSheet(
-            QStringLiteral("color:#16845b;font-weight:600"));
+        setSemanticState(simulationCheckSummary_, QStringLiteral("success"));
     } else {
         simulationCheckSummary_->setText(
             tr("%1 passed · %2 failed · %3 unavailable · %4 disabled")
@@ -12789,8 +12815,7 @@ void MainWindow::populateSimulationCheckTable()
                 .arg(simulationCheckResult_->failedCount)
                 .arg(simulationCheckResult_->unavailableCount)
                 .arg(simulationCheckResult_->disabledCount));
-        simulationCheckSummary_->setStyleSheet(
-            QStringLiteral("color:#c62828;font-weight:600"));
+        setSemanticState(simulationCheckSummary_, QStringLiteral("error"));
     }
 }
 
@@ -12803,7 +12828,7 @@ void MainWindow::invalidateCompareResult()
     if (compareSummary_) {
         compareSummary_->setText(tr("Trace or scenario changed; run compare again"));
         compareSummary_->setToolTip({});
-        compareSummary_->setStyleSheet({});
+        setSemanticState(compareSummary_, QStringLiteral("warning"));
     }
     if (traceCanvas_) traceCanvas_->setDifferenceRanges({});
     if (compareTraceCanvas_) compareTraceCanvas_->setDifferenceRanges({});
@@ -12835,23 +12860,24 @@ void MainWindow::updateWindowTitle()
     if (!saveStateLabel_) return;
 
     QString state;
-    QString color;
+    QString semanticState;
     if (recoveryLoaded_) {
         state = tr("Recovery loaded · Save required");
-        color = QStringLiteral("#ffca65");
+        semanticState = QStringLiteral("warning");
     } else if (projectFile_.isEmpty()) {
         state = dirty_ ? tr("Not saved · changes") : tr("Not saved");
-        color = QStringLiteral("#c4cfdd");
+        semanticState = dirty_
+            ? QStringLiteral("warning")
+            : QStringLiteral("empty");
     } else if (dirty_) {
         state = tr("Unsaved changes");
-        color = QStringLiteral("#ffca65");
+        semanticState = QStringLiteral("warning");
     } else {
         state = tr("Saved");
-        color = QStringLiteral("#8dd69a");
+        semanticState = QStringLiteral("success");
     }
     saveStateLabel_->setText(state);
-    saveStateLabel_->setStyleSheet(
-        QStringLiteral("QLabel { color: %1; padding: 2px 8px; }").arg(color));
+    setSemanticState(saveStateLabel_, semanticState);
     saveStateLabel_->setToolTip(
         projectFile_.isEmpty()
             ? tr("This waveform has not been saved to a file.")

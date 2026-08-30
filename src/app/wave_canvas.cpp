@@ -1,4 +1,5 @@
 #include "wave_canvas.h"
+#include "waveform_theme.h"
 
 #include "wave/timeline_viewport.h"
 
@@ -52,15 +53,6 @@
 namespace wave {
 namespace {
 
-const QColor kBackground(32, 39, 49);
-const QColor kHeaderBackground(42, 51, 65);
-const QColor kRulerBackground(37, 45, 57);
-const QColor kGridMajor(91, 105, 124);
-const QColor kGridMinor(57, 68, 84);
-const QColor kTextPrimary(235, 239, 245);
-const QColor kTextSecondary(177, 187, 202);
-const QColor kSelection(68, 138, 255, 62);
-const QColor kUndefined(239, 83, 80);
 const QColor kMovableCursor(79, 195, 247);
 const QColor kTemporaryCursor(186, 104, 200);
 const QColor kLockedCursor(255, 202, 40);
@@ -68,6 +60,34 @@ const QColor kSelectedLockedCursor(102, 187, 106);
 const QString kRangeMimeType = QStringLiteral("application/x-wave-workbench-range+json");
 constexpr std::string_view kBusPresetExtension = "waveWorkbench.busPreset";
 constexpr int kSoftSnapRadiusPixels = 7;
+
+const WaveformTheme& canvasTheme()
+{
+    static const auto light = waveformTheme(WaveformColorScheme::Light);
+    static const auto dark = waveformTheme(WaveformColorScheme::Dark);
+    return waveformColorScheme(QApplication::palette())
+            == WaveformColorScheme::Dark
+        ? dark
+        : light;
+}
+
+QColor canvasSelectionColor()
+{
+    auto selection = canvasTheme().selection;
+    selection.setAlpha(96);
+    return selection;
+}
+
+void setSemanticState(QWidget* widget, const QString& state)
+{
+    if (!widget || widget->property("waveState").toString() == state) return;
+    widget->setProperty("waveState", state);
+    if (widget->style()) {
+        widget->style()->unpolish(widget);
+        widget->style()->polish(widget);
+    }
+    widget->update();
+}
 
 std::string busPresetValue(const std::string_view presetId, const std::uint32_t width)
 {
@@ -366,16 +386,8 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         button->setAccessibleName(quickLabels.at(index));
         button->setAutoRaise(true);
         button->setCursor(Qt::PointingHandCursor);
-        button->setStyleSheet(QStringLiteral(
-            "QToolButton {"
-            " color: #edf1f7; background: #344052;"
-            " border: 1px solid #59677c; border-radius: 5px;"
-            " font-weight: 600;"
-            "}"
-            "QToolButton:hover, QToolButton:focus {"
-            " background: #43536a; border-color: #7eb5ff;"
-            "}"
-            "QToolButton:pressed { background: #315f91; }"));
+        button->setProperty("waveRole", QStringLiteral("primary"));
+        button->setProperty("waveDensity", QStringLiteral("compact"));
         button->hide();
         addLaneButtons_.at(index) = button;
         connect(button, &QToolButton::clicked, this, [this, kind = quickKinds.at(index)] {
@@ -393,16 +405,10 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         tr("Restore every hidden signal or group as one undoable edit"));
     showHiddenLanesButton_->setAccessibleName(tr("Show hidden items"));
     showHiddenLanesButton_->setCursor(Qt::PointingHandCursor);
-    showHiddenLanesButton_->setStyleSheet(QStringLiteral(
-        "QToolButton {"
-        " color: #e7f1ff; background: #2f4d69;"
-        " border: 1px solid #6e9cc5; border-radius: 5px;"
-        " font-weight: 600; padding: 3px 10px;"
-        "}"
-        "QToolButton:hover, QToolButton:focus {"
-        " background: #3c6285; border-color: #9acbfa;"
-        "}"
-        "QToolButton:pressed { background: #29445d; }"));
+    showHiddenLanesButton_->setProperty(
+        "waveRole", QStringLiteral("primary"));
+    showHiddenLanesButton_->setProperty(
+        "waveDensity", QStringLiteral("compact"));
     showHiddenLanesButton_->hide();
     connect(showHiddenLanesButton_, &QToolButton::clicked, this, [this] {
         emit showHiddenLanesRequested();
@@ -411,22 +417,11 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     quickLaneSetupPanel_ = new QFrame(viewport());
     quickLaneSetupPanel_->setObjectName(QStringLiteral("QuickLaneSetupPanel"));
     quickLaneSetupPanel_->setAttribute(Qt::WA_StyledBackground, true);
-    quickLaneSetupPanel_->setStyleSheet(QStringLiteral(
-        "QFrame#QuickLaneSetupPanel {"
-        " background: rgba(45, 56, 72, 248);"
-        " border: 1px solid #7eb5ff; border-radius: 6px;"
-        "}"
-        "QFrame#QuickLaneSetupPanel QLabel { color: #e9eff7; }"
-        "QFrame#QuickLaneSetupPanel QLineEdit,"
-        "QFrame#QuickLaneSetupPanel QComboBox {"
-        " color: #f4f7fb; background: #222b38;"
-        " border: 1px solid #65768e; border-radius: 4px; padding: 3px 6px;"
-        "}"
-        "QFrame#QuickLaneSetupPanel QLineEdit:focus,"
-        "QFrame#QuickLaneSetupPanel QComboBox:focus { border-color: #8fc3ff; }"));
+    quickLaneSetupPanel_->setProperty(
+        "wavePanel", QStringLiteral("floating"));
     auto* quickLayout = new QHBoxLayout(quickLaneSetupPanel_);
-    quickLayout->setContentsMargins(8, 5, 8, 5);
-    quickLayout->setSpacing(6);
+    quickLayout->setContentsMargins(8, 4, 8, 4);
+    quickLayout->setSpacing(4);
     auto* quickPrompt = new QLabel(tr("New signal"), quickLaneSetupPanel_);
     quickPrompt->setObjectName(QStringLiteral("QuickLaneSetupPrompt"));
     quickLayout->addWidget(quickPrompt);
@@ -445,14 +440,14 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     quickLayout->addWidget(quickLaneClockCombo_);
     quickLaneErrorLabel_ = new QLabel(quickLaneSetupPanel_);
     quickLaneErrorLabel_->setObjectName(QStringLiteral("QuickLaneSetupError"));
-    quickLaneErrorLabel_->setStyleSheet(QStringLiteral("color: #ff9b98;"));
+    quickLaneErrorLabel_->setProperty("waveState", QStringLiteral("error"));
     quickLaneErrorLabel_->setMaximumWidth(230);
     quickLayout->addWidget(quickLaneErrorLabel_);
     auto* quickHint = new QLabel(
         tr("Enter or click the next target to apply · Esc to cancel"),
         quickLaneSetupPanel_);
     quickHint->setObjectName(QStringLiteral("QuickLaneSetupHint"));
-    quickHint->setStyleSheet(QStringLiteral("color: #aebbd0;"));
+    quickHint->setProperty("waveRole", QStringLiteral("muted"));
     quickLayout->addWidget(quickHint);
     for (auto* editor : {quickLaneNameEdit_, quickLaneParameterEdit_}) {
         editor->installEventFilter(this);
@@ -465,33 +460,24 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     laneRenameEdit_->setAccessibleName(tr("Signal name"));
     laneRenameEdit_->setPlaceholderText(tr("Signal name"));
     laneRenameEdit_->setToolTip(tr("Enter or click elsewhere to apply · Esc to cancel"));
-    laneRenameEdit_->setStyleSheet(QStringLiteral(
-        "QLineEdit { color: #f4f7fb; background: #222b38;"
-        " border: 1px solid #8fc3ff; border-radius: 4px; padding: 3px 6px;"
-        " font-weight: 600; }"));
+    laneRenameEdit_->setProperty("waveDensity", QStringLiteral("compact"));
     laneRenameEdit_->installEventFilter(this);
     connect(laneRenameEdit_, &QLineEdit::textEdited, this, [this] {
-        laneRenameEdit_->setStyleSheet(QStringLiteral(
-            "QLineEdit { color: #f4f7fb; background: #222b38;"
-            " border: 1px solid #8fc3ff; border-radius: 4px; padding: 3px 6px;"
-            " font-weight: 600; }"));
+        setSemanticState(laneRenameEdit_, {});
         laneRenameEdit_->setToolTip(tr("Enter or click elsewhere to apply · Esc to cancel"));
     });
     laneRenameEdit_->hide();
 
     durationLabel_ = new QLabel(tr("End"), viewport());
     durationLabel_->setObjectName(QStringLiteral("TimelineDurationLabel"));
-    durationLabel_->setStyleSheet(QStringLiteral("color: #b9c6d8; background: transparent;"));
+    durationLabel_->setProperty("waveRole", QStringLiteral("muted"));
     durationEdit_ = new QLineEdit(viewport());
     durationEdit_->setObjectName(QStringLiteral("TimelineDurationEdit"));
     durationEdit_->setAccessibleName(tr("Timeline end"));
     durationEdit_->setToolTip(
         tr("Edit the timeline end, for example 500 ns or 500.5 ns, then press Enter"));
     durationEdit_->setAlignment(Qt::AlignCenter);
-    durationEdit_->setStyleSheet(QStringLiteral(
-        "QLineEdit { color: #edf2f8; background: #2d3949;"
-        " border: 1px solid #65758b; border-radius: 4px; padding: 2px 5px; }"
-        "QLineEdit:focus { border-color: #8fc3ff; }"));
+    durationEdit_->setProperty("waveDensity", QStringLiteral("compact"));
     durationEdit_->installEventFilter(this);
     connect(durationEdit_, &QLineEdit::editingFinished, this, [this] {
         durationEditMouseFocusOut_ = false;
@@ -503,54 +489,23 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     busPresetPalette_->setObjectName(QStringLiteral("BusPresetPalette"));
     busPresetPalette_->setFrameShape(QFrame::StyledPanel);
     busPresetPalette_->setAttribute(Qt::WA_StyledBackground, true);
-    busPresetPalette_->setStyleSheet(QStringLiteral(
-        "QFrame#BusPresetPalette {"
-        " background: #2d3949; border: 1px solid #78aef0; border-radius: 7px;"
-        "}"
-        "QFrame#BusPresetPalette QLabel { color: #e4ecf7; font-weight: 600; }"
-        "QFrame#BusPresetPalette QLineEdit, QFrame#BusPresetPalette QComboBox {"
-        " color: #f3f6fa; background: #263241;"
-        " border: 1px solid #7588a2; border-radius: 4px; padding: 3px 6px;"
-        "}"
-        "QFrame#BusPresetPalette QLineEdit:focus { border-color: #8dc0ff; }"
-        "QFrame#BusPresetPalette QLineEdit[relationRisk=\"true\"] {"
-        " color: #fff3e0; background: #4f3c25; border-color: #ffb74d;"
-        "}"
-        "QFrame#BusPresetPalette QLineEdit[noEffect=\"true\"] {"
-        " color: #aeb8c6; background: #303b49; border-color: #5d6a7c;"
-        "}"
-        "QFrame#BusPresetPalette QLineEdit[invalidDraft=\"true\"] {"
-        " color: #fff1f1; background: #4b2d35; border-color: #ef7773;"
-        "}"
-        "QFrame#BusPresetPalette QToolButton {"
-        " color: #f3f6fa; background: #46566c;"
-        " border: 1px solid #6f8099; border-radius: 4px; padding: 3px 5px;"
-        "}"
-        "QFrame#BusPresetPalette QToolButton:hover {"
-        " background: #56708f; border-color: #8dc0ff;"
-        "}"
-        "QFrame#BusPresetPalette QToolButton[relationRisk=\"true\"] {"
-        " color: #fff3e0; background: #5a4528; border-color: #ffb74d;"
-        "}"
-        "QFrame#BusPresetPalette QToolButton[relationRisk=\"true\"]:hover {"
-        " background: #735a31; border-color: #ffd180;"
-        "}"
-        "QFrame#BusPresetPalette QToolButton:disabled {"
-        " color: #8894a5; background: #374352; border-color: #526074;"
-        "}"));
+    busPresetPalette_->setProperty(
+        "wavePanel", QStringLiteral("floating"));
     auto* presetLayout = new QVBoxLayout(busPresetPalette_);
-    presetLayout->setContentsMargins(7, 5, 7, 5);
+    presetLayout->setContentsMargins(8, 4, 8, 4);
     presetLayout->setSpacing(4);
     auto* presetHeaderLayout = new QHBoxLayout;
     presetHeaderLayout->setContentsMargins(0, 0, 0, 0);
     presetHeaderLayout->setSpacing(4);
     auto* presetControlLayout = new QHBoxLayout;
     presetControlLayout->setContentsMargins(0, 0, 0, 0);
-    presetControlLayout->setSpacing(5);
+    presetControlLayout->setSpacing(4);
     presetLayout->addLayout(presetHeaderLayout);
     presetLayout->addLayout(presetControlLayout);
     busPresetContextLabel_ = new QLabel(tr("Bus · Beat"), busPresetPalette_);
     busPresetContextLabel_->setObjectName(QStringLiteral("BusPresetContextLabel"));
+    busPresetContextLabel_->setProperty(
+        "waveRole", QStringLiteral("accent"));
     busPresetContextLabel_->setMinimumWidth(180);
     busPresetContextLabel_->setMaximumWidth(390);
     presetHeaderLayout->addWidget(busPresetContextLabel_, 1);
@@ -735,54 +690,15 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeEditPalette_->setObjectName(QStringLiteral("RangeEditPalette"));
     rangeEditPalette_->setFrameShape(QFrame::StyledPanel);
     rangeEditPalette_->setAttribute(Qt::WA_StyledBackground, true);
-    rangeEditPalette_->setStyleSheet(QStringLiteral(
-        "QFrame#RangeEditPalette {"
-        " background: rgba(45, 57, 73, 246);"
-        " border: 1px solid #78aef0; border-radius: 7px;"
-        "}"
-        "QFrame#RangeEditPalette QLabel { color: #e4ecf7; font-weight: 600; }"
-        "QLabel#RangeEditContextLabel {"
-        " border-bottom: 1px dotted #8dc0ff;"
-        "}"
-        "QLabel#RangeEditContextLabel:hover { background: #35465d; }"
-        "QFrame#RangeEditPalette QLineEdit {"
-        " color: #f3f6fa; background: #263241;"
-        " border: 1px solid #7588a2; border-radius: 4px; padding: 3px 6px;"
-        "}"
-        "QFrame#RangeEditPalette QLineEdit[loadedExisting=\"true\"] {"
-        " color: #c4d1e2; background: #2b3746; border-style: dashed;"
-        "}"
-        "QFrame#RangeEditPalette QLineEdit:focus { border-color: #8dc0ff; }"
-        "QFrame#RangeEditPalette QLineEdit[relationRisk=\"true\"] {"
-        " color: #fff3e0; background: #4f3c25; border-color: #ffb74d;"
-        "}"
-        "QFrame#RangeEditPalette QLineEdit[noEffect=\"true\"] {"
-        " color: #aeb8c6; background: #303b49; border-color: #5d6a7c;"
-        "}"
-        "QFrame#RangeEditPalette QLineEdit[invalidDraft=\"true\"] {"
-        " color: #fff1f1; background: #4b2d35; border-color: #ef7773;"
-        "}"
-        "QFrame#RangeEditPalette QToolButton {"
-        " color: #f3f6fa; background: #46566c;"
-        " border: 1px solid #6f8099; border-radius: 4px; padding: 3px 7px;"
-        "}"
-        "QFrame#RangeEditPalette QToolButton:hover {"
-        " background: #56708f; border-color: #8dc0ff;"
-        "}"
-        "QFrame#RangeEditPalette QToolButton[relationRisk=\"true\"] {"
-        " color: #fff3e0; background: #5a4528; border-color: #ffb74d;"
-        "}"
-        "QFrame#RangeEditPalette QToolButton[relationRisk=\"true\"]:hover {"
-        " background: #735a31; border-color: #ffd180;"
-        "}"
-        "QFrame#RangeEditPalette QToolButton:disabled {"
-        " color: #8894a5; background: #374352; border-color: #526074;"
-        "}"));
+    rangeEditPalette_->setProperty(
+        "wavePanel", QStringLiteral("floating"));
     auto* rangeLayout = new QHBoxLayout(rangeEditPalette_);
-    rangeLayout->setContentsMargins(5, 4, 5, 4);
-    rangeLayout->setSpacing(3);
+    rangeLayout->setContentsMargins(4, 4, 4, 4);
+    rangeLayout->setSpacing(4);
     rangeEditContextLabel_ = new QLabel(tr("Selected range"), rangeEditPalette_);
     rangeEditContextLabel_->setObjectName(QStringLiteral("RangeEditContextLabel"));
+    rangeEditContextLabel_->setProperty(
+        "waveRole", QStringLiteral("accent"));
     rangeEditContextLabel_->setMinimumWidth(100);
     rangeEditContextLabel_->setMaximumWidth(130);
     rangeEditContextLabel_->setAccessibleName(
@@ -904,7 +820,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
                 rangeSequenceTextSpans_ =
                     rangeSequenceBaseline_->spans;
                 busRangeSequencePreview_.reset();
-                rangeValueEdit_->setStyleSheet({});
+                setSemanticState(rangeValueEdit_, {});
                 rangeValueEdit_->style()->unpolish(
                     rangeValueEdit_);
                 rangeValueEdit_->style()->polish(
@@ -1228,7 +1144,7 @@ void WaveCanvas::invalidateRangeSequenceHistoryContext()
         rangeValueEdit_->clear();
         rangeValueEdit_->setModified(false);
         rangeValueEdit_->setProperty("loadedExisting", false);
-        rangeValueEdit_->setStyleSheet({});
+        setSemanticState(rangeValueEdit_, {});
         rangeValueEdit_->setToolTip({});
     }
     busRangeSequencePreview_.reset();
@@ -1725,10 +1641,7 @@ void WaveCanvas::beginLaneRename(const QString& laneId, const QString& name)
     laneRenameEdit_->setText(name);
     laneRenameEdit_->setModified(false);
     laneRenameEdit_->setToolTip(tr("Enter or click elsewhere to apply · Esc to cancel"));
-    laneRenameEdit_->setStyleSheet(QStringLiteral(
-        "QLineEdit { color: #f4f7fb; background: #222b38;"
-        " border: 1px solid #8fc3ff; border-radius: 4px; padding: 3px 6px;"
-        " font-weight: 600; }"));
+    setSemanticState(laneRenameEdit_, {});
     laneRenameEdit_->show();
     positionLaneRename();
     laneRenameEdit_->raise();
@@ -1764,10 +1677,7 @@ void WaveCanvas::finishLaneRename()
 void WaveCanvas::showLaneRenameError(const QString& message)
 {
     if (!hasLaneRename()) return;
-    laneRenameEdit_->setStyleSheet(QStringLiteral(
-        "QLineEdit { color: #fff1f1; background: #4b2d35;"
-        " border: 1px solid #ef7773; border-radius: 4px; padding: 3px 6px;"
-        " font-weight: 600; }"));
+    setSemanticState(laneRenameEdit_, QStringLiteral("error"));
     laneRenameEdit_->setToolTip(message);
     laneRenameEdit_->setFocus(Qt::OtherFocusReason);
     laneRenameEdit_->selectAll();
@@ -1845,9 +1755,7 @@ void WaveCanvas::showQuickLaneSetupError(
 void WaveCanvas::showDurationEditError(const QString& message)
 {
     if (!durationEdit_) return;
-    durationEdit_->setStyleSheet(QStringLiteral(
-        "QLineEdit { color: #fff2f2; background: #452d34;"
-        " border: 1px solid #ef7773; border-radius: 4px; padding: 2px 5px; }"));
+    setSemanticState(durationEdit_, QStringLiteral("error"));
     durationEdit_->setToolTip(message);
     durationEdit_->setModified(true);
     durationEdit_->setFocus(Qt::OtherFocusReason);
@@ -2087,7 +1995,7 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
                 clearRangeSequenceCaretTarget();
                 clearRangeSequenceBaseline();
                 clearRangeSequenceAnchor();
-                rangeValueEdit_->setStyleSheet({});
+                setSemanticState(rangeValueEdit_, {});
                 showRangeEditPalette();
                 rangeValueEdit_->setFocus(Qt::OtherFocusReason);
                 emit statusMessage(
@@ -2249,10 +2157,7 @@ void WaveCanvas::syncDurationEditor()
     durationEdit_->setModified(false);
     durationEdit_->setToolTip(
         tr("Edit the timeline end, for example 500 ns or 500.5 ns, then press Enter"));
-    durationEdit_->setStyleSheet(QStringLiteral(
-        "QLineEdit { color: #edf2f8; background: #2d3949;"
-        " border: 1px solid #65758b; border-radius: 4px; padding: 2px 5px; }"
-        "QLineEdit:focus { border-color: #8fc3ff; }"));
+    setSemanticState(durationEdit_, {});
 }
 
 void WaveCanvas::setDocument(
@@ -5833,10 +5738,10 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
     Q_UNUSED(event)
     QPainter painter(viewport());
     painter.setRenderHint(QPainter::Antialiasing, false);
-    painter.fillRect(viewport()->rect(), kBackground);
+    painter.fillRect(viewport()->rect(), canvasTheme().canvas);
 
     if (!project_ || !scenario_) {
-        painter.setPen(kTextSecondary);
+        painter.setPen(canvasTheme().mutedText);
         painter.drawText(viewport()->rect(), Qt::AlignCenter, tr("No scenario loaded"));
         return;
     }
@@ -6089,7 +5994,7 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
                 : y + iterator->height;
             painter.fillRect(
                 QRect(QPoint(left, top), QPoint(std::max(left + 1, right), bottom)),
-                kSelection);
+                canvasSelectionColor());
             painter.setPen(QColor(111, 168, 255));
             painter.drawRect(
                 QRect(QPoint(left, top), QPoint(std::max(left + 1, right), bottom - 1)));
@@ -6134,8 +6039,8 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
 
     drawLaneReorderOverlay(painter);
 
-    painter.fillRect(QRect(0, 0, headerWidth_, RulerHeight), kHeaderBackground);
-    painter.setPen(kTextPrimary);
+    painter.fillRect(QRect(0, 0, headerWidth_, RulerHeight), canvasTheme().panel);
+    painter.setPen(canvasTheme().text);
     QFont titleFont = painter.font();
     titleFont.setBold(true);
     painter.setFont(titleFont);
@@ -6143,7 +6048,7 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
         QRect(14, 0, headerWidth_ - 20, RulerHeight),
         Qt::AlignVCenter | Qt::AlignLeft,
         tr("Signals"));
-    painter.setPen(kGridMajor);
+    painter.setPen(canvasTheme().gridMajor);
     painter.drawLine(headerWidth_ - 1, 0, headerWidth_ - 1, viewport()->height());
     lastPaintViewGeneration_ = viewGeneration_;
     setProperty(
@@ -9287,7 +9192,7 @@ void WaveCanvas::clearBusEditTarget()
     if (!preflight.state.modelChanges) {
         if (busValueEdit_) {
             busValueEdit_->setModified(false);
-            busValueEdit_->setStyleSheet({});
+            setSemanticState(busValueEdit_, {});
         }
         updateBusEditActionStates();
         emit statusMessage(preflight.state.summary);
@@ -9302,7 +9207,7 @@ void WaveCanvas::clearBusEditTarget()
     const auto historySelectionBefore = historySelectionSnapshot();
     if (busValueEdit_) {
         busValueEdit_->setModified(false);
-        busValueEdit_->setStyleSheet({});
+        setSemanticState(busValueEdit_, {});
     }
 
     const auto relationCountBefore = scenario_->relations.size();
@@ -9714,7 +9619,7 @@ void WaveCanvas::showBusPresetPalette(
             + tr("\nCtrl+Up/Down cycles this signal's recent values")
             + tr("\nCtrl+Enter applies and keeps the current target open")
             + tr("\nClicking another target applies this draft and continues there"));
-        busValueEdit_->setStyleSheet({});
+        setSemanticState(busValueEdit_, {});
     }
     positionBusPresetPalette();
     updateBusEditActionStates();
@@ -9924,7 +9829,7 @@ bool WaveCanvas::cycleEnumEditorSymbol(const bool forward)
     const auto symbol = symbols.at(index);
     busValueEdit_->setText(symbol);
     busValueEdit_->setModified(true);
-    busValueEdit_->setStyleSheet({});
+    setSemanticState(busValueEdit_, {});
     busValueEdit_->setFocus(Qt::OtherFocusReason);
     busValueEdit_->selectAll();
     updateBusEditActionStates();
@@ -10103,7 +10008,7 @@ bool WaveCanvas::stepBusEditorValue(const bool upward)
 
     busValueEdit_->setText(QString::fromStdString(display));
     busValueEdit_->setModified(true);
-    busValueEdit_->setStyleSheet({});
+    setSemanticState(busValueEdit_, {});
     busValueEdit_->setFocus(Qt::OtherFocusReason);
     busValueEdit_->selectAll();
     updateBusEditActionStates();
@@ -10144,7 +10049,7 @@ bool WaveCanvas::cycleBusRecentValue(const bool forward)
     const auto value = values.at(index);
     busValueEdit_->setText(value);
     busValueEdit_->setModified(true);
-    busValueEdit_->setStyleSheet({});
+    setSemanticState(busValueEdit_, {});
     busValueEdit_->setFocus(Qt::OtherFocusReason);
     busValueEdit_->selectAll();
     if (busRecentValuesCombo_) {
@@ -11901,7 +11806,7 @@ void WaveCanvas::loadCurrentRangeSequence()
         rangeValueEdit_);
     rangeValueEdit_->style()->polish(
         rangeValueEdit_);
-    rangeValueEdit_->setStyleSheet({});
+    setSemanticState(rangeValueEdit_, {});
     rangeValueEdit_->setToolTip(
         seed.summary
         + tr("\nCurrent values are loaded but unchanged; edit the text, then press Enter")
@@ -11955,7 +11860,7 @@ bool WaveCanvas::restoreRangeSequenceBaseline()
     rangeValueEdit_->setProperty(
         "loadedExisting",
         true);
-    rangeValueEdit_->setStyleSheet({});
+    setSemanticState(rangeValueEdit_, {});
     rangeValueEdit_->style()->unpolish(
         rangeValueEdit_);
     rangeValueEdit_->style()->polish(
@@ -14305,7 +14210,7 @@ void WaveCanvas::showRangeEditPalette()
             busRangeSequencePreview_.reset();
             rangeValueEdit_->clear();
             rangeValueEdit_->setModified(false);
-            rangeValueEdit_->setStyleSheet({});
+            setSemanticState(rangeValueEdit_, {});
             rangeValueEdit_->setToolTip({});
             setDraftProperty("relationRisk", false);
             setDraftProperty("noEffect", false);
@@ -14397,7 +14302,7 @@ void WaveCanvas::showRangeEditPalette()
                         && assessment.projection
                         ? assessment.projection
                         : std::nullopt;
-                    rangeValueEdit_->setStyleSheet({});
+                    setSemanticState(rangeValueEdit_, {});
                     rangeValueEdit_->setToolTip(
                         assessment.summary
                         + (assessment.valid
@@ -14440,7 +14345,7 @@ void WaveCanvas::showRangeEditPalette()
                         if (!sequenceAssessment.valid) {
                             clearRangeSequenceCaretTarget();
                         }
-                        rangeValueEdit_->setStyleSheet({});
+                        setSemanticState(rangeValueEdit_, {});
                         rangeValueEdit_->setToolTip(
                             sequenceAssessment.summary
                             + (sequenceAssessment.valid
@@ -14469,7 +14374,7 @@ void WaveCanvas::showRangeEditPalette()
                         setDraftProperty(
                             "invalidDraft",
                             !availability.valid);
-                        rangeValueEdit_->setStyleSheet({});
+                        setSemanticState(rangeValueEdit_, {});
                         rangeValueEdit_->setToolTip(
                             availability.toolTip
                             + (availability.valid
@@ -14496,7 +14401,7 @@ void WaveCanvas::showRangeEditPalette()
                             : tr("Type one shared symbol/value or a beat sequence; use value*N for repeats and / for per-signal mappings · symbols: %1")
                                   .arg(enumSymbols.join(QStringLiteral(", ")))
                         : tr("Type one value for the whole Bus range, or a beat sequence; use value*N for repeats and / for per-signal mappings"));
-                rangeValueEdit_->setStyleSheet({});
+                setSemanticState(rangeValueEdit_, {});
                 if (rangeValueEdit_->property(
                         "loadedExisting").toBool()
                     && sequenceSeed.available) {
@@ -14599,7 +14504,7 @@ void WaveCanvas::clearExplicitRangeSelection(const bool clearLanes)
     clearRangeSequenceCaretTarget();
     if (rangeValueEdit_) {
         rangeValueEdit_->setModified(false);
-        rangeValueEdit_->setStyleSheet({});
+        setSemanticState(rangeValueEdit_, {});
     }
     bitPatternPreview_.reset();
     busRangeSequencePreview_.reset();
@@ -14660,9 +14565,7 @@ bool WaveCanvas::applyExplicitRangeValue(
                 }
             }
             if (rangeValueEdit_ && rangeValueEdit_->isVisible()) {
-                rangeValueEdit_->setStyleSheet(QStringLiteral(
-                    "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
-                    "border-radius: 4px; padding: 3px 6px;"));
+                setSemanticState(rangeValueEdit_, QStringLiteral("error"));
                 rangeValueEdit_->setToolTip(message);
                 rangeValueEdit_->setModified(true);
             }
@@ -14682,7 +14585,7 @@ bool WaveCanvas::applyExplicitRangeValue(
     if (valuePreflight.valid && !valuePreflight.enabled) {
         if (rangeValueEdit_) {
             rangeValueEdit_->setModified(false);
-            rangeValueEdit_->setStyleSheet({});
+            setSemanticState(rangeValueEdit_, {});
         }
         showRangeEditPalette();
         auto reason = valuePreflight.toolTip;
@@ -14711,7 +14614,7 @@ bool WaveCanvas::applyExplicitRangeValue(
     cursorTick_ = start;
     if (rangeValueEdit_) {
         rangeValueEdit_->setModified(false);
-        rangeValueEdit_->setStyleSheet({});
+        setSemanticState(rangeValueEdit_, {});
         rangeValueEdit_->setToolTip({});
     }
     if (changed) {
@@ -14926,9 +14829,7 @@ bool WaveCanvas::submitBitPattern()
     const auto assessment =
         assessBitPatternDraft(rangeValueEdit_->text());
     const auto reject = [this](const QString& reason) {
-        rangeValueEdit_->setStyleSheet(QStringLiteral(
-            "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
-            "border-radius: 4px; padding: 3px 6px;"));
+        setSemanticState(rangeValueEdit_, QStringLiteral("error"));
         rangeValueEdit_->setToolTip(reason);
         rangeValueEdit_->setAccessibleDescription(reason);
         rangeValueEdit_->setModified(true);
@@ -14966,7 +14867,7 @@ bool WaveCanvas::submitBitPattern()
         bitPatternPreview_.reset();
         rangeValueEdit_->clear();
         rangeValueEdit_->setModified(false);
-        rangeValueEdit_->setStyleSheet({});
+        setSemanticState(rangeValueEdit_, {});
         rangeValueEdit_->clearFocus();
         showRangeEditPalette();
         viewport()->setFocus(Qt::OtherFocusReason);
@@ -14998,7 +14899,7 @@ bool WaveCanvas::submitBitPattern()
         bitPatternPreview_.reset();
         rangeValueEdit_->clear();
         rangeValueEdit_->setModified(false);
-        rangeValueEdit_->setStyleSheet({});
+        setSemanticState(rangeValueEdit_, {});
         showRangeEditPalette();
         viewport()->setFocus(Qt::OtherFocusReason);
         emit statusMessage(
@@ -15031,7 +14932,7 @@ bool WaveCanvas::submitBitPattern()
     bitPatternPreview_.reset();
     rangeValueEdit_->clear();
     rangeValueEdit_->setModified(false);
-    rangeValueEdit_->setStyleSheet({});
+    setSemanticState(rangeValueEdit_, {});
     rangeValueEdit_->setToolTip({});
     rangeValueEdit_->clearFocus();
     rememberHistorySelectionTransition(
@@ -15137,9 +15038,7 @@ bool WaveCanvas::submitBusRangeSequence()
             rangeValueEdit_->text());
     const auto reject = [this](const QString& reason) {
         busRangeSequencePreview_.reset();
-        rangeValueEdit_->setStyleSheet(QStringLiteral(
-            "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
-            "border-radius: 4px; padding: 3px 6px;"));
+        setSemanticState(rangeValueEdit_, QStringLiteral("error"));
         rangeValueEdit_->setToolTip(reason);
         rangeValueEdit_->setAccessibleDescription(reason);
         rangeValueEdit_->setModified(true);
@@ -15187,7 +15086,7 @@ bool WaveCanvas::submitBusRangeSequence()
         clearRangeSequenceCaretTarget();
         rangeValueEdit_->clear();
         rangeValueEdit_->setModified(false);
-        rangeValueEdit_->setStyleSheet({});
+        setSemanticState(rangeValueEdit_, {});
         rangeValueEdit_->clearFocus();
         showRangeEditPalette();
         viewport()->setFocus(Qt::OtherFocusReason);
@@ -15223,7 +15122,7 @@ bool WaveCanvas::submitBusRangeSequence()
         clearRangeSequenceCaretTarget();
         rangeValueEdit_->clear();
         rangeValueEdit_->setModified(false);
-        rangeValueEdit_->setStyleSheet({});
+        setSemanticState(rangeValueEdit_, {});
         showRangeEditPalette();
         viewport()->setFocus(Qt::OtherFocusReason);
         emit statusMessage(
@@ -15260,7 +15159,7 @@ bool WaveCanvas::submitBusRangeSequence()
     clearRangeSequenceCaretTarget();
     rangeValueEdit_->clear();
     rangeValueEdit_->setModified(false);
-    rangeValueEdit_->setStyleSheet({});
+    setSemanticState(rangeValueEdit_, {});
     rangeValueEdit_->setToolTip({});
     rangeValueEdit_->clearFocus();
     rememberHistorySelectionTransition(
@@ -15407,9 +15306,7 @@ void WaveCanvas::submitRangeValue()
                         .arg(symbols.join(QStringLiteral(", "))));
             }
         }
-        rangeValueEdit_->setStyleSheet(QStringLiteral(
-            "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
-            "border-radius: 4px; padding: 3px 6px;"));
+        setSemanticState(rangeValueEdit_, QStringLiteral("error"));
         rangeValueEdit_->setToolTip(message);
         rangeValueEdit_->setModified(true);
         refocusRangeValue();
@@ -15453,9 +15350,7 @@ void WaveCanvas::submitBusSequence(
         if (message.isEmpty()) {
             message = tr("Sequence is not valid for this target");
         }
-        busValueEdit_->setStyleSheet(QStringLiteral(
-            "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
-            "border-radius: 4px; padding: 3px 6px;"));
+        setSemanticState(busValueEdit_, QStringLiteral("error"));
         busValueEdit_->setToolTip(message);
         busValueEdit_->setAccessibleDescription(message);
         busValueEdit_->setModified(true);
@@ -15647,9 +15542,7 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
                                  .arg(lane->kind == LaneKind::Enum
                                          ? tr("Enum")
                                          : tr("Bus"));
-        busValueEdit_->setStyleSheet(QStringLiteral(
-            "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
-            "border-radius: 4px; padding: 3px 6px;"));
+        setSemanticState(busValueEdit_, QStringLiteral("error"));
         busValueEdit_->setToolTip(message);
         busValueEdit_->setModified(true);
         if (scenario_->duration > 0) {
@@ -15693,9 +15586,7 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
             message.append(
                 tr(" · symbols: %1").arg(symbols.join(QStringLiteral(", "))));
         }
-        busValueEdit_->setStyleSheet(QStringLiteral(
-            "color: #fff1f1; background: #4b2d35; border: 1px solid #ef7773;"
-            "border-radius: 4px; padding: 3px 6px;"));
+        setSemanticState(busValueEdit_, QStringLiteral("error"));
         busValueEdit_->setToolTip(message);
         busValueEdit_->setModified(true);
         selectedLaneId_ = lane->id;
@@ -15821,7 +15712,7 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
         rememberBusValue(laneId, QString::fromStdString(validation.normalizedValue));
         busValueEdit_->setText(QString::fromStdString(validation.normalizedValue));
         busValueEdit_->setModified(false);
-        busValueEdit_->setStyleSheet({});
+        setSemanticState(busValueEdit_, {});
         if (stayAfterCommit) {
             if (const auto* refreshedLane = findLane(*scenario_, laneId)) {
                 showBusPresetPalette(
@@ -16058,7 +15949,7 @@ void WaveCanvas::applyBusPreset(
     if (busValueEdit_ && busPresetLaneId_ == laneId) {
         busValueEdit_->setText(QString::fromStdString(validation.normalizedValue));
         busValueEdit_->setModified(false);
-        busValueEdit_->setStyleSheet({});
+        setSemanticState(busValueEdit_, {});
         if (busScopeButton_) {
             busScopeButton_->setEnabled(true);
             if (busEditScope_ == BusEditScope::Beat) {
@@ -18282,7 +18173,7 @@ void WaveCanvas::drawLaneReorderOverlay(QPainter& painter)
         auto font = painter.font();
         font.setBold(true);
         painter.setFont(font);
-        painter.setPen(kTextPrimary);
+        painter.setPen(canvasTheme().text);
         const auto dragCount = laneDragIds_.empty()
             ? std::size_t{1}
             : laneDragIds_.size();
@@ -18342,7 +18233,7 @@ void WaveCanvas::drawLaneReorderOverlay(QPainter& painter)
         painter.setPen(QPen(accent, 1.5));
         painter.setBrush(QColor(20, 28, 40, 232));
         painter.drawRoundedRect(labelRect, 5, 5);
-        painter.setPen(kTextPrimary);
+        painter.setPen(canvasTheme().text);
         painter.drawText(labelRect, Qt::AlignCenter, text);
     }
     painter.restore();
@@ -21781,7 +21672,7 @@ QPoint WaveCanvas::eventPoint(const Event& event) const
 
 void WaveCanvas::drawRuler(QPainter& painter)
 {
-    painter.fillRect(QRect(headerWidth_, 0, waveViewportWidth(), RulerHeight), kRulerBackground);
+    painter.fillRect(QRect(headerWidth_, 0, waveViewportWidth(), RulerHeight), canvasTheme().raised);
     painter.setClipRect(QRect(headerWidth_, 0, waveViewportWidth(), viewport()->height()));
     const auto [visibleStart, visibleEnd] = visibleTickRange();
     const auto major = majorTickStep();
@@ -21794,14 +21685,14 @@ void WaveCanvas::drawRuler(QPainter& painter)
     for (auto tick = first; tick <= visibleEnd;) {
         const auto x = xAtTick(tick);
         const auto isMajor = tick % major == 0;
-        painter.setPen(isMajor ? kGridMajor : kGridMinor);
+        painter.setPen(isMajor ? canvasTheme().gridMajor : canvasTheme().gridMinor);
         painter.drawLine(
             x,
             isMajor ? RulerHeight - 13 : RulerHeight - 7,
             x,
             viewport()->height());
         if (isMajor && tick >= 0) {
-            painter.setPen(kTextSecondary);
+            painter.setPen(canvasTheme().mutedText);
             painter.drawText(
                 QRect(x + 5, 2, 130, RulerHeight - 12),
                 Qt::AlignLeft | Qt::AlignVCenter,
@@ -21811,7 +21702,7 @@ void WaveCanvas::drawRuler(QPainter& painter)
         tick += minor;
     }
     painter.setClipping(false);
-    painter.setPen(kGridMajor);
+    painter.setPen(canvasTheme().gridMajor);
     painter.drawLine(headerWidth_, RulerHeight - 1, viewport()->width(), RulerHeight - 1);
 }
 
@@ -21839,7 +21730,7 @@ void WaveCanvas::drawLane(
             ? QColor(63, 80, 104)
             : groupHeader
                 ? QColor(38, 50, 67)
-                : kHeaderBackground);
+                : canvasTheme().panel);
     if (groupHeader) {
         painter.fillRect(waveformRect, QColor(86, 111, 142, 24));
     }
@@ -21871,7 +21762,7 @@ void WaveCanvas::drawLane(
             }
         }
     }
-    painter.setPen(kTextPrimary);
+    painter.setPen(canvasTheme().text);
     QFont nameFont = painter.font();
     nameFont.setBold(selected || groupHeader);
     painter.setFont(nameFont);
@@ -21915,7 +21806,7 @@ void WaveCanvas::drawLane(
     detailFont.setBold(false);
     detailFont.setPointSizeF(std::max(7.0, detailFont.pointSizeF() - 1.5));
     painter.setFont(detailFont);
-    painter.setPen(kTextSecondary);
+    painter.setPen(canvasTheme().mutedText);
     auto detail = laneKindLabel(lane.kind);
     if (groupHeader) {
         const auto memberCount = visibleGroupMemberCount(lane.id);
@@ -21959,7 +21850,7 @@ void WaveCanvas::drawLane(
         break;
     }
     painter.restore();
-    painter.setPen(kGridMinor);
+    painter.setPen(canvasTheme().gridMinor);
     painter.drawLine(0, rowRect.bottom(), viewport()->width(), rowRect.bottom());
 }
 
@@ -21985,7 +21876,7 @@ void WaveCanvas::drawAddLaneRow(QPainter& painter)
         title.setBold(true);
         title.setPointSizeF(title.pointSizeF() + 2.0);
         painter.setFont(title);
-        painter.setPen(kTextPrimary);
+        painter.setPen(canvasTheme().text);
         painter.drawText(
             QRect(headerWidth_ + 24, buttonsTop - 70, waveViewportWidth() - 48, 28),
             Qt::AlignCenter,
@@ -21999,7 +21890,7 @@ void WaveCanvas::drawAddLaneRow(QPainter& painter)
         detail.setBold(false);
         detail.setPointSizeF(std::max(8.0, detail.pointSizeF() - 1.0));
         painter.setFont(detail);
-        painter.setPen(kTextSecondary);
+        painter.setPen(canvasTheme().mutedText);
         painter.drawText(
             QRect(headerWidth_ + 24, buttonsTop - 40, waveViewportWidth() - 48, 24),
             Qt::AlignCenter,
@@ -22012,14 +21903,14 @@ void WaveCanvas::drawAddLaneRow(QPainter& painter)
     painter.fillRect(row, QColor(35, 43, 55));
     painter.fillRect(
         QRect(0, row.top(), headerWidth_, row.height()),
-        kHeaderBackground);
-    painter.setPen(QPen(kGridMinor, 1.0, Qt::DashLine));
+        canvasTheme().panel);
+    painter.setPen(QPen(canvasTheme().gridMinor, 1.0, Qt::DashLine));
     painter.drawLine(
         headerWidth_ + 14,
         row.center().y(),
         viewport()->width() - 14,
         row.center().y());
-    painter.setPen(kGridMinor);
+    painter.setPen(canvasTheme().gridMinor);
     painter.drawLine(0, row.top(), viewport()->width(), row.top());
     painter.drawLine(0, row.bottom(), viewport()->width(), row.bottom());
 }
@@ -22034,7 +21925,7 @@ void WaveCanvas::drawClock(
 {
     const auto* clock = project_ ? findClock(*project_, lane.clockDomainId) : nullptr;
     if (!clock || !clock->isValid()) {
-        painter.setPen(kUndefined);
+        painter.setPen(canvasTheme().error);
         painter.drawText(rect.adjusted(12, 0, -8, 0), Qt::AlignVCenter, tr("Unresolved clock domain"));
         return;
     }
@@ -22066,7 +21957,7 @@ void WaveCanvas::drawClock(
                 QRect(left, rect.top() + 1, std::max(1, right - left), rect.height() - 2),
                 gated ? QColor(61, 49, 25) : QColor(68, 31, 40));
             painter.setPen(QPen(
-                gated ? QColor(255, 183, 77) : kUndefined,
+                gated ? canvasTheme().warning : canvasTheme().error,
                 2.0,
                 preview || !gated ? Qt::DashLine : Qt::SolidLine));
             const auto y = gated ? lowY : (highY + lowY) / 2;
@@ -22086,7 +21977,7 @@ void WaveCanvas::drawClock(
                     label);
             }
             painter.setPen(QPen(
-                gated ? QColor(255, 183, 77) : kUndefined,
+                gated ? canvasTheme().warning : canvasTheme().error,
                 1.0,
                 Qt::DashLine));
             painter.drawLine(left, rect.top() + 2, left, rect.bottom() - 2);
@@ -22100,7 +21991,7 @@ void WaveCanvas::drawClock(
             1.0,
             preview ? Qt::DashLine : Qt::SolidLine));
         painter.drawLine(rect.left(), (highY + lowY) / 2, rect.right(), (highY + lowY) / 2);
-        painter.setPen(kTextSecondary);
+        painter.setPen(canvasTheme().mutedText);
         painter.drawText(rect.adjusted(8, 0, -8, 0), Qt::AlignVCenter, tr("clock density"));
         drawOverrides();
         return;
@@ -22153,13 +22044,13 @@ void WaveCanvas::drawBitSegments(
         const auto value = rawValue == 'x' ? 'X' : rawValue == 'z' ? 'Z' : rawValue;
         if (value == 'X' || value == 'Z') {
             painter.save();
-            QColor fill = value == 'Z' ? QColor(171, 110, 191) : kUndefined;
+            QColor fill = value == 'Z' ? canvasTheme().accent : canvasTheme().error;
             fill.setAlpha(35);
             painter.fillRect(
                 QRect(left, highY, std::max(1, right - left), lowY - highY),
                 fill);
             painter.setPen(QPen(
-                value == 'Z' ? QColor(171, 110, 191) : kUndefined,
+                value == 'Z' ? canvasTheme().accent : canvasTheme().error,
                 1.25,
                 Qt::DashLine));
             painter.drawLine(left, (highY + lowY) / 2, right, (highY + lowY) / 2);
@@ -22223,7 +22114,7 @@ void WaveCanvas::drawBusSegments(
         const auto left = xAtTick(start);
         const auto right = xAtTick(end);
         if (right <= left) return;
-        const auto color = highImpedance ? QColor(171, 110, 191) : kUndefined;
+        const auto color = highImpedance ? canvasTheme().accent : canvasTheme().error;
         auto fill = color;
         fill.setAlpha(24);
         painter.fillRect(QRect(left, top, std::max(1, right - left), bottom - top), fill);
@@ -22327,7 +22218,7 @@ void WaveCanvas::drawBusSegments(
             preview ? Qt::DashLine : Qt::SolidLine));
         painter.drawPath(path);
         if (right - left > 28) {
-            painter.setPen(kTextPrimary);
+            painter.setPen(canvasTheme().text);
             painter.drawText(
                 QRect(left + bevel + 4, top, right - left - 2 * bevel - 8, bottom - top),
                 Qt::AlignCenter,
@@ -22661,7 +22552,7 @@ void WaveCanvas::drawRangeTransferWaveformPreview(
                 const auto mode = clockOverrideModeFromString(segment.value);
                 if (!mode) continue;
                 const auto gated = *mode == ClockOverrideMode::Gated;
-                auto fill = gated ? QColor(255, 183, 77) : kUndefined;
+                auto fill = gated ? canvasTheme().warning : canvasTheme().error;
                 fill.setAlpha(42);
                 painter.fillRect(
                     QRect(
@@ -23494,7 +23385,7 @@ void WaveCanvas::drawWaveEditTransitionPreview(QPainter& painter)
         havePrevious = true;
     }
     const auto x = xAtTick(drawCurrent_);
-    painter.setBrush(kBackground);
+    painter.setBrush(canvasTheme().canvas);
     painter.drawPolygon(QPolygon{
         QPoint(x, y + 6),
         QPoint(x + 6, y + 12),
@@ -23674,7 +23565,7 @@ void WaveCanvas::drawScenarioOverlays(
         painter.setBrush(color);
         painter.drawPolygon(QPolygonF{QPointF(targetPoint), leftWing, rightWing});
         if (selected) {
-            painter.setBrush(kBackground);
+            painter.setBrush(canvasTheme().canvas);
             painter.setPen(QPen(color, 2.0));
             painter.drawEllipse(sourcePoint, 6, 6);
             painter.drawEllipse(targetPoint, 6, 6);
@@ -23689,7 +23580,7 @@ void WaveCanvas::drawScenarioOverlays(
                 (sourcePoint.x() + targetPoint.x()) / 2,
                 (sourcePoint.y() + targetPoint.y()) / 2);
             painter.setBrush(color);
-            painter.setPen(QPen(kBackground, 1.5));
+            painter.setPen(QPen(canvasTheme().canvas, 1.5));
             painter.drawEllipse(midpoint, 8, 8);
             painter.setPen(QPen(QColor(61, 39, 10), 1.8));
             painter.drawLine(
@@ -23736,7 +23627,7 @@ void WaveCanvas::drawScenarioOverlays(
             QPoint(point.x(), point.y() + 6),
             QPoint(point.x() - 6, point.y()),
         };
-        painter.setPen(QPen(kBackground, 1.0));
+        painter.setPen(QPen(canvasTheme().canvas, 1.0));
         painter.setBrush(color);
         painter.drawPolygon(marker);
         eventHitRegions_.push_back({
