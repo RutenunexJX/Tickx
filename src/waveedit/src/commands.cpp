@@ -4183,6 +4183,61 @@ std::string RemoveMarkerCommand::description() const
     return "Remove marker";
 }
 
+RemoveMarkersCommand::RemoveMarkersCommand(
+    Scenario& scenario,
+    std::vector<std::string> markerIds)
+    : scenario_(&scenario)
+    , markerIds_(std::move(markerIds))
+{
+    if (markerIds_.empty()) {
+        throw std::invalid_argument("marker selection is empty");
+    }
+    auto uniqueIds = markerIds_;
+    std::sort(uniqueIds.begin(), uniqueIds.end());
+    if (std::adjacent_find(uniqueIds.begin(), uniqueIds.end())
+        != uniqueIds.end()) {
+        throw std::invalid_argument("marker selection contains duplicate IDs");
+    }
+}
+
+void RemoveMarkersCommand::redo()
+{
+    snapshotRedo(*scenario_, before_, after_, [this] {
+        for (const auto& markerId : markerIds_) {
+            if (!std::any_of(
+                    scenario_->markers.begin(),
+                    scenario_->markers.end(),
+                    [&markerId](const Marker& marker) {
+                        return marker.id == markerId;
+                    })) {
+                throw std::invalid_argument("marker does not exist");
+            }
+        }
+        std::erase_if(
+            scenario_->markers,
+            [this](const Marker& marker) {
+                return std::find(
+                           markerIds_.begin(),
+                           markerIds_.end(),
+                           marker.id)
+                    != markerIds_.end();
+            });
+    });
+}
+
+void RemoveMarkersCommand::undo()
+{
+    if (!before_) {
+        throw std::runtime_error("marker command has not been executed");
+    }
+    *scenario_ = *before_;
+}
+
+std::string RemoveMarkersCommand::description() const
+{
+    return "Remove markers";
+}
+
 RemoveMarkerAtIndexCommand::RemoveMarkerAtIndexCommand(
     Scenario& scenario,
     const std::size_t markerIndex,
@@ -4533,6 +4588,61 @@ void RemoveRelationCommand::undo()
 std::string RemoveRelationCommand::description() const
 {
     return "Remove relation";
+}
+
+RemoveRelationsCommand::RemoveRelationsCommand(
+    Scenario& scenario,
+    std::vector<std::string> relationIds)
+    : scenario_(&scenario)
+    , relationIds_(std::move(relationIds))
+{
+    if (relationIds_.empty()) {
+        throw std::invalid_argument("relation selection is empty");
+    }
+    auto uniqueIds = relationIds_;
+    std::sort(uniqueIds.begin(), uniqueIds.end());
+    if (std::adjacent_find(uniqueIds.begin(), uniqueIds.end())
+        != uniqueIds.end()) {
+        throw std::invalid_argument("relation selection contains duplicate IDs");
+    }
+}
+
+void RemoveRelationsCommand::redo()
+{
+    snapshotRedo(*scenario_, before_, after_, [this] {
+        for (const auto& relationId : relationIds_) {
+            if (!std::any_of(
+                    scenario_->relations.begin(),
+                    scenario_->relations.end(),
+                    [&relationId](const Relation& relation) {
+                        return relation.id == relationId;
+                    })) {
+                throw std::invalid_argument("relation does not exist");
+            }
+        }
+        std::erase_if(
+            scenario_->relations,
+            [this](const Relation& relation) {
+                return std::find(
+                           relationIds_.begin(),
+                           relationIds_.end(),
+                           relation.id)
+                    != relationIds_.end();
+            });
+    });
+}
+
+void RemoveRelationsCommand::undo()
+{
+    if (!before_) {
+        throw std::runtime_error("relation command has not been executed");
+    }
+    *scenario_ = *before_;
+}
+
+std::string RemoveRelationsCommand::description() const
+{
+    return "Remove relations";
 }
 
 RemoveRelationAtIndexCommand::RemoveRelationAtIndexCommand(

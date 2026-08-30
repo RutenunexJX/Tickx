@@ -77,6 +77,7 @@ public:
     [[nodiscard]] const Project& project() const noexcept;
     void requestCompareMode();
     void revealLocation(const QString& laneId, Tick tick);
+    void revealMarker(const QString& markerId);
     void openLanePropertiesPreview(const QString& laneId);
     void openEditMenuPreview();
     Q_INVOKABLE bool canRevealSourceObject(
@@ -134,6 +135,7 @@ private slots:
     void eventCellChanged(int row, int column);
     void revealSelectedEvent();
     void selectEventRow(const QString& eventId);
+    void selectRelationRow(const QString& relationId);
     void revealValidationIssue(int row, int column);
     void relationCellChanged(int row, int column);
     void removeSelectedRelation();

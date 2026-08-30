@@ -44,6 +44,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -1042,10 +1043,12 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeEditPalette_->adjustSize();
 
     connect(horizontalScrollBar(), &QScrollBar::valueChanged, this, [this] {
+        ++viewGeneration_;
         positionBusPresetPalette();
         viewport()->update();
     });
     connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
+        ++viewGeneration_;
         updateAddLaneButtonGeometry();
         positionQuickLaneSetup();
         positionLaneRename();
@@ -1139,7 +1142,7 @@ bool WaveCanvas::setGroupCollapsed(
         selectedLaneId_ = group->id;
         selectedLaneIds_ = {group->id};
         laneHeaderSelectionActive_ = false;
-        selectedMarkerId_.clear();
+        clearMarkerSelection();
         cursorInteraction_ = CursorInteraction::None;
         lockedMarkerOriginalRange_.reset();
     }
@@ -2299,7 +2302,8 @@ void WaveCanvas::setDocument(
     movableCursorTick_.reset();
     clearWaveEditState();
     temporaryCursorTick_.reset();
-    selectedMarkerId_.clear();
+    clearMarkerSelection();
+    clearRelationSelection();
     cursorInteraction_ = CursorInteraction::None;
     laneHeaderPressed_ = false;
     laneHeaderDragging_ = false;
@@ -2453,7 +2457,10 @@ void WaveCanvas::setTool(const Tool tool)
     if (previousTool == Tool::Marker && tool != Tool::Marker) {
         movableCursorTick_.reset();
         temporaryCursorTick_.reset();
-        selectedMarkerId_.clear();
+        clearMarkerSelection();
+    }
+    if (previousTool == Tool::Relation && tool != Tool::Relation) {
+        clearRelationSelection();
     }
     if (previousTool == Tool::WaveEdit && tool != Tool::WaveEdit) {
         clearWaveEditState();
@@ -2724,6 +2731,26 @@ std::optional<Tick> WaveCanvas::temporaryCursorTick() const noexcept
 QString WaveCanvas::selectedMarkerId() const
 {
     return QString::fromStdString(selectedMarkerId_);
+}
+
+QStringList WaveCanvas::selectedMarkerIds() const
+{
+    QStringList markerIds;
+    markerIds.reserve(static_cast<qsizetype>(selectedMarkerIds_.size()));
+    for (const auto& markerId : selectedMarkerIds_) {
+        markerIds.push_back(QString::fromStdString(markerId));
+    }
+    return markerIds;
+}
+
+QStringList WaveCanvas::selectedRelationIds() const
+{
+    QStringList relationIds;
+    relationIds.reserve(static_cast<qsizetype>(selectedRelationIds_.size()));
+    for (const auto& relationId : selectedRelationIds_) {
+        relationIds.push_back(QString::fromStdString(relationId));
+    }
+    return relationIds;
 }
 
 std::optional<std::pair<Tick, Tick>> WaveCanvas::selectedTimeRange() const noexcept
@@ -3350,8 +3377,39 @@ void WaveCanvas::refreshModel()
             }
         }
     }
+    if (scenario_) {
+        std::erase_if(
+            selectedMarkerIds_,
+            [this](const std::string& markerId) {
+                return !markerById(markerId);
+            });
+    } else {
+        selectedMarkerIds_.clear();
+    }
     if (!selectedMarkerId_.empty() && !markerById(selectedMarkerId_)) {
-        selectedMarkerId_.clear();
+        selectedMarkerId_ = selectedMarkerIds_.empty()
+            ? std::string{}
+            : selectedMarkerIds_.back();
+    }
+    if (!selectedMarkerId_.empty()
+        && !markerSelected(selectedMarkerId_)) {
+        selectedMarkerIds_.push_back(selectedMarkerId_);
+    }
+    if (scenario_) {
+        std::erase_if(
+            selectedRelationIds_,
+            [this](const std::string& relationId) {
+                return !relationById(relationId);
+            });
+        if (!activeRelationId_.empty()
+            && !relationById(activeRelationId_)) {
+            activeRelationId_ = selectedRelationIds_.empty()
+                ? std::string{}
+                : selectedRelationIds_.back();
+            relationInteraction_ = RelationInteraction::None;
+        }
+    } else {
+        clearRelationSelection();
     }
     if (!selectedSegmentId_.empty()
         && !segmentById(selectedSegmentLaneId_, selectedSegmentId_)) {
@@ -3439,6 +3497,25 @@ void WaveCanvas::revealLocation(const QString& laneId, const qint64 tick)
     viewport()->update();
 }
 
+void WaveCanvas::revealMarker(const QString& markerId)
+{
+    if (!scenario_) return;
+    const auto* marker = markerById(markerId.toStdString());
+    if (!marker) return;
+    clearWaveEditState();
+    selectOnlyMarker(marker->id);
+    cursorInteraction_ = CursorInteraction::None;
+    lockedMarkerOriginalRange_.reset();
+    cursorTick_ = marker->start;
+    ensureCursorVisible(cursorTick_);
+    emit statusMessage(
+        tr("Selected %1 · %2 · drag or arrow keys to move · Delete to remove")
+            .arg(QString::fromStdString(marker->name))
+            .arg(markerLocationText(*marker)));
+    viewport()->setFocus(Qt::OtherFocusReason);
+    viewport()->update();
+}
+
 void WaveCanvas::revealLane(const QString& laneId)
 {
     if (!scenario_) return;
@@ -3453,7 +3530,7 @@ void WaveCanvas::revealLane(const QString& laneId)
     if (tool_ == Tool::WaveEdit) {
         clearWaveEditState();
     } else if (tool_ == Tool::Marker) {
-        selectedMarkerId_.clear();
+        clearMarkerSelection();
         cursorInteraction_ = CursorInteraction::None;
         lockedMarkerOriginalRange_.reset();
     }
@@ -3503,7 +3580,7 @@ void WaveCanvas::selectLaneHeaders(
 
     clearWaveEditState();
     hideBusPresetPalette();
-    selectedMarkerId_.clear();
+    clearMarkerSelection();
     cursorInteraction_ = CursorInteraction::None;
     lockedMarkerOriginalRange_.reset();
     selectedLaneIds_ = std::move(ordered);
@@ -4571,7 +4648,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
         const auto lockedMarkerDeselected =
             tool_ == Tool::Marker && !selectedMarkerId_.empty();
         if (tool_ == Tool::Marker) {
-            selectedMarkerId_.clear();
+            clearMarkerSelection();
             cursorInteraction_ = CursorInteraction::None;
             lockedMarkerOriginalRange_.reset();
         }
@@ -5596,6 +5673,27 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
         return;
     }
 
+    if (tool_ == Tool::Relation && scenario_) {
+        if ((event->key() == Qt::Key_Delete
+             || event->key() == Qt::Key_Backspace)
+            && !selectedRelationIds_.empty()) {
+            removeSelectedRelations();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Escape) {
+            drawing_ = false;
+            activeEventId_.clear();
+            clearRelationSelection();
+            viewport()->update();
+            emit relationModeExitRequested();
+            event->accept();
+            return;
+        }
+        QAbstractScrollArea::keyPressEvent(event);
+        return;
+    }
+
     if (tool_ != Tool::Marker || !scenario_) {
         QAbstractScrollArea::keyPressEvent(event);
         return;
@@ -5636,7 +5734,7 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
         cursorInteraction_ = CursorInteraction::None;
         lockedMarkerOriginalRange_.reset();
         temporaryCursorTick_.reset();
-        selectedMarkerId_.clear();
+        clearMarkerSelection();
         viewport()->update();
         emit measureModeExitRequested();
         event->accept();
@@ -5714,11 +5812,15 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
     const auto verticalOffset = verticalScrollBar()->value();
     const auto externalUpdateLaneIds = property(
         "wavewidgets.externalUpdateLaneIds").toStringList();
-    for (const auto& layout : laneLayout_) {
+    const auto [firstVisibleLane, lastVisibleLane] =
+        visibleLaneLayoutRange();
+    std::size_t renderedLaneCount = 0;
+    for (auto layoutIndex = firstVisibleLane;
+         layoutIndex < lastVisibleLane;
+         ++layoutIndex) {
+        const auto& layout = laneLayout_[layoutIndex];
         const auto screenTop = RulerHeight + layout.top - verticalOffset;
-        if (screenTop + layout.height < RulerHeight || screenTop > viewport()->height()) {
-            continue;
-        }
+        ++renderedLaneCount;
         drawLane(
             painter,
             scenario_->lanes.at(layout.laneIndex),
@@ -5757,6 +5859,9 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
             painter.drawRect(highlight.adjusted(0, 0, -1, -1));
         }
     }
+    setProperty(
+        "wavewidgets.renderedLaneCount",
+        static_cast<qulonglong>(renderedLaneCount));
     const auto rangeTransferActive =
         drawing_
         && waveEditInteraction_ == WaveEditInteraction::MoveRange;
@@ -6006,6 +6111,16 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
         tr("Signals"));
     painter.setPen(kGridMajor);
     painter.drawLine(headerWidth_ - 1, 0, headerWidth_ - 1, viewport()->height());
+    lastPaintViewGeneration_ = viewGeneration_;
+    setProperty(
+        "wavewidgets.modelGeneration",
+        static_cast<qulonglong>(modelGeneration_));
+    setProperty(
+        "wavewidgets.viewGeneration",
+        static_cast<qulonglong>(viewGeneration_));
+    setProperty(
+        "wavewidgets.lastPaintViewGeneration",
+        static_cast<qulonglong>(lastPaintViewGeneration_));
 }
 
 void WaveCanvas::resizeEvent(QResizeEvent* event)
@@ -6330,7 +6445,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         const auto lockedMarkerDeselected =
             tool_ == Tool::Marker && !selectedMarkerId_.empty();
         if (tool_ == Tool::Marker) {
-            selectedMarkerId_.clear();
+            clearMarkerSelection();
             cursorInteraction_ = CursorInteraction::None;
             lockedMarkerOriginalRange_.reset();
         }
@@ -6694,7 +6809,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         if (event->modifiers().testFlag(Qt::ShiftModifier)) {
             drawing_ = false;
             cursorInteraction_ = CursorInteraction::None;
-            selectedMarkerId_.clear();
+            clearMarkerSelection();
             lockedMarkerOriginalRange_.reset();
             if (movableCursorTick_) {
                 temporaryCursorTick_ = drawStart_;
@@ -6708,16 +6823,56 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             return;
         }
 
-        if (const auto* marker = markerAtPosition(position)) {
-            selectedMarkerId_ = marker->id;
-            cursorInteraction_ = CursorInteraction::MoveLocked;
-            lockedMarkerOriginalRange_ = std::pair{marker->start, marker->end};
+        const auto markerHit = markerHitAtPosition(position);
+        if (markerHit.marker) {
+            const auto& markerId = markerHit.marker->id;
+            if (event->modifiers().testFlag(Qt::ControlModifier)) {
+                drawing_ = false;
+                cursorInteraction_ = CursorInteraction::None;
+                lockedMarkerOriginalRange_.reset();
+                const auto selected = std::find(
+                    selectedMarkerIds_.begin(),
+                    selectedMarkerIds_.end(),
+                    markerId);
+                if (selected == selectedMarkerIds_.end()) {
+                    selectedMarkerIds_.push_back(markerId);
+                    selectedMarkerId_ = markerId;
+                } else {
+                    selectedMarkerIds_.erase(selected);
+                    selectedMarkerId_ = selectedMarkerIds_.empty()
+                        ? std::string{}
+                        : selectedMarkerIds_.back();
+                }
+                emit statusMessage(
+                    selectedMarkerIds_.empty()
+                        ? tr("Locked cursor selection cleared")
+                        : tr("Selected %1 locked cursor(s) · Ctrl+click extends selection · Delete removes all")
+                              .arg(static_cast<qulonglong>(
+                                  selectedMarkerIds_.size())));
+                viewport()->update();
+                return;
+            }
+            selectOnlyMarker(markerId);
+            cursorInteraction_ = markerHit.boundary
+                    == SegmentBoundary::Start
+                ? CursorInteraction::ResizeLockedStart
+                : markerHit.boundary == SegmentBoundary::End
+                    ? CursorInteraction::ResizeLockedEnd
+                    : CursorInteraction::MoveLocked;
+            lockedMarkerOriginalRange_ = std::pair{
+                markerHit.marker->start,
+                markerHit.marker->end,
+            };
             temporaryCursorTick_.reset();
+            viewport()->setCursor(
+                markerHit.boundary == SegmentBoundary::None
+                    ? Qt::SizeAllCursor
+                    : Qt::SplitHCursor);
             viewport()->update();
             return;
         }
 
-        selectedMarkerId_.clear();
+        clearMarkerSelection();
         lockedMarkerOriginalRange_.reset();
         temporaryCursorTick_.reset();
         if (event->modifiers().testFlag(Qt::ControlModifier)) {
@@ -6731,14 +6886,73 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
     }
 
     if (tool_ == Tool::Relation) {
-        const auto* hitEvent = eventAtPosition(position);
-        if (!hitEvent) {
-            QToolTip::showText(
-                event->globalPosition().toPoint(),
-                tr("Start from a visible event marker"),
-                viewport());
+        const auto relationHit = relationHitAtPosition(position);
+        if (relationHit.relation) {
+            const auto& relationId = relationHit.relation->id;
+            if (event->modifiers().testFlag(Qt::ControlModifier)
+                && relationHit.endpoint == RelationEndpoint::None) {
+                const auto selected = std::find(
+                    selectedRelationIds_.begin(),
+                    selectedRelationIds_.end(),
+                    relationId);
+                if (selected == selectedRelationIds_.end()) {
+                    selectedRelationIds_.push_back(relationId);
+                    activeRelationId_ = relationId;
+                } else {
+                    selectedRelationIds_.erase(selected);
+                    activeRelationId_ = selectedRelationIds_.empty()
+                        ? std::string{}
+                        : selectedRelationIds_.back();
+                }
+                relationInteraction_ = RelationInteraction::None;
+                drawing_ = false;
+                emit statusMessage(
+                    selectedRelationIds_.empty()
+                        ? tr("Relation selection cleared")
+                        : tr("Selected %1 relations · Delete removes all as one edit")
+                              .arg(static_cast<qulonglong>(
+                                  selectedRelationIds_.size())));
+                viewport()->update();
+                return;
+            }
+            selectOnlyRelation(relationId);
+            emit relationSelected(QString::fromStdString(relationId));
+            if (relationHit.endpoint == RelationEndpoint::None) {
+                relationInteraction_ = RelationInteraction::None;
+                drawing_ = false;
+                emit statusMessage(
+                    tr("Relation selected · drag either endpoint to retarget · Delete removes"));
+                viewport()->update();
+                return;
+            }
+            relationInteraction_ = relationHit.endpoint
+                    == RelationEndpoint::Source
+                ? RelationInteraction::RetargetSource
+                : RelationInteraction::RetargetTarget;
+            activeEventId_ = relationHit.endpoint
+                    == RelationEndpoint::Source
+                ? relationHit.relation->targetEventId
+                : relationHit.relation->sourceEventId;
+            drawing_ = true;
+            interactionCurrent_ = position;
+            viewport()->setCursor(Qt::CrossCursor);
+            emit statusMessage(
+                relationHit.endpoint == RelationEndpoint::Source
+                    ? tr("Retarget relation source · release on a different event")
+                    : tr("Retarget relation target · release on a different event"));
+            viewport()->update();
             return;
         }
+        const auto* hitEvent = eventAtPosition(position);
+        if (!hitEvent) {
+            clearRelationSelection();
+            emit statusMessage(
+                tr("Relation selection cleared · drag from an event marker to create"));
+            viewport()->update();
+            return;
+        }
+        clearRelationSelection();
+        relationInteraction_ = RelationInteraction::Create;
         drawing_ = true;
         activeEventId_ = hitEvent->id;
         drawLaneId_ = hitEvent->laneId;
@@ -7416,7 +7630,27 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
         viewport()->update();
     }
 
-    if (tool_ == Tool::Marker) {
+    if (tool_ == Tool::Relation) {
+        if (!drawing_) {
+            const auto relationHit = relationHitAtPosition(position);
+            if (relationHit.relation) {
+                viewport()->setCursor(
+                    relationHit.endpoint == RelationEndpoint::None
+                        ? Qt::PointingHandCursor
+                        : Qt::SizeAllCursor);
+            } else if (eventAtPosition(position)) {
+                viewport()->setCursor(Qt::CrossCursor);
+            } else {
+                viewport()->setCursor(defaultCursorShape());
+            }
+        }
+        emit statusMessage(
+            drawing_
+                ? relationInteraction_ == RelationInteraction::Create
+                    ? tr("Create relation · release on another event marker")
+                    : tr("Retarget relation · release on another event marker")
+                : tr("Relation edit · click a line, drag an endpoint, or drag between events"));
+    } else if (tool_ == Tool::Marker) {
         emit statusMessage(
             movableCursorTick_
                 ? cursorMeasurementText()
@@ -7780,9 +8014,12 @@ void WaveCanvas::wheelEvent(QWheelEvent* event)
 void WaveCanvas::rebuildLaneLayout()
 {
     laneLayout_.clear();
+    laneLayoutIndexById_.clear();
     sanitizeCollapsedGroups();
     rebuildSnapIndex();
     if (!scenario_) {
+        rebuildOverlayIndexes();
+        ++modelGeneration_;
         updateScrollBars();
         return;
     }
@@ -7791,9 +8028,12 @@ void WaveCanvas::rebuildLaneLayout()
         const auto& lane = scenario_->lanes[index];
         if (!isLaneDisplayed(lane)) continue;
         const auto height = std::clamp(lane.height, 30, 240);
+        laneLayoutIndexById_.insert_or_assign(lane.id, laneLayout_.size());
         laneLayout_.push_back({index, top, height});
         top += height;
     }
+    rebuildOverlayIndexes();
+    ++modelGeneration_;
     updateScrollBars();
 }
 
@@ -7835,8 +8075,74 @@ void WaveCanvas::rebuildSnapIndex()
 
 }
 
+void WaveCanvas::rebuildOverlayIndexes()
+{
+    markerOverlayIndex_.clear();
+    relationOverlayIndex_.clear();
+    eventOverlayIndex_.clear();
+    indexedMarkerCount_ = scenario_ ? scenario_->markers.size() : 0;
+    indexedRelationCount_ = scenario_ ? scenario_->relations.size() : 0;
+    indexedEventCount_ = scenario_ ? scenario_->events.size() : 0;
+    if (!scenario_) return;
+
+    markerOverlayIndex_.reserve(scenario_->markers.size());
+    for (std::size_t index = 0; index < scenario_->markers.size(); ++index) {
+        const auto& marker = scenario_->markers[index];
+        const auto start = std::min(marker.start, marker.end);
+        const auto end = std::max(marker.start, marker.end);
+        markerOverlayIndex_.push_back({index, start, end, end});
+    }
+
+    std::unordered_map<std::string, const Event*> eventsById;
+    eventsById.reserve(scenario_->events.size());
+    for (const auto& event : scenario_->events) {
+        eventsById.insert_or_assign(event.id, &event);
+    }
+    relationOverlayIndex_.reserve(scenario_->relations.size());
+    for (std::size_t index = 0; index < scenario_->relations.size(); ++index) {
+        const auto& relation = scenario_->relations[index];
+        const auto source = eventsById.find(relation.sourceEventId);
+        const auto target = eventsById.find(relation.targetEventId);
+        if (source == eventsById.end() || target == eventsById.end()) continue;
+        const auto start = std::min(source->second->tick, target->second->tick);
+        const auto end = std::max(source->second->tick, target->second->tick);
+        relationOverlayIndex_.push_back({index, start, end, end});
+    }
+
+    const auto finalizeTimedIndex = [](auto& index) {
+        std::sort(
+            index.begin(),
+            index.end(),
+            [](const TimedOverlayIndex& left,
+               const TimedOverlayIndex& right) {
+                return std::tie(left.start, left.end, left.modelIndex)
+                    < std::tie(right.start, right.end, right.modelIndex);
+            });
+        auto maximumEnd = std::numeric_limits<Tick>::lowest();
+        for (auto& entry : index) {
+            maximumEnd = std::max(maximumEnd, entry.end);
+            entry.prefixMaximumEnd = maximumEnd;
+        }
+    };
+    finalizeTimedIndex(markerOverlayIndex_);
+    finalizeTimedIndex(relationOverlayIndex_);
+
+    eventOverlayIndex_.resize(scenario_->events.size());
+    std::iota(eventOverlayIndex_.begin(), eventOverlayIndex_.end(), 0);
+    std::sort(
+        eventOverlayIndex_.begin(),
+        eventOverlayIndex_.end(),
+        [this](const std::size_t left, const std::size_t right) {
+            const auto& leftEvent = scenario_->events[left];
+            const auto& rightEvent = scenario_->events[right];
+            return std::tie(leftEvent.tick, leftEvent.id)
+                < std::tie(rightEvent.tick, rightEvent.id);
+        });
+}
+
 void WaveCanvas::updateScrollBars()
 {
+    ++viewGeneration_;
     const auto horizontalMaximum = static_cast<int>(std::clamp(
         contentWidth() - static_cast<double>(waveViewportWidth()),
         0.0,
@@ -18117,6 +18423,119 @@ const Lane* WaveCanvas::laneAtY(const int y) const
     return layout && scenario_ ? &scenario_->lanes.at(layout->laneIndex) : nullptr;
 }
 
+void WaveCanvas::clearMarkerSelection()
+{
+    selectedMarkerId_.clear();
+    selectedMarkerIds_.clear();
+}
+
+void WaveCanvas::selectOnlyMarker(const std::string& markerId)
+{
+    selectedMarkerId_ = markerId;
+    selectedMarkerIds_ = markerId.empty()
+        ? std::vector<std::string>{}
+        : std::vector<std::string>{markerId};
+}
+
+bool WaveCanvas::markerSelected(const std::string& markerId) const noexcept
+{
+    return std::find(
+               selectedMarkerIds_.begin(),
+               selectedMarkerIds_.end(),
+               markerId)
+        != selectedMarkerIds_.end();
+}
+
+Relation* WaveCanvas::relationById(const std::string& relationId)
+{
+    if (!scenario_) return nullptr;
+    const auto relation = std::find_if(
+        scenario_->relations.begin(),
+        scenario_->relations.end(),
+        [&relationId](const Relation& candidate) {
+            return candidate.id == relationId;
+        });
+    return relation == scenario_->relations.end() ? nullptr : &*relation;
+}
+
+const Relation* WaveCanvas::relationById(
+    const std::string& relationId) const
+{
+    if (!scenario_) return nullptr;
+    const auto relation = std::find_if(
+        scenario_->relations.begin(),
+        scenario_->relations.end(),
+        [&relationId](const Relation& candidate) {
+            return candidate.id == relationId;
+        });
+    return relation == scenario_->relations.end() ? nullptr : &*relation;
+}
+
+void WaveCanvas::clearRelationSelection()
+{
+    selectedRelationIds_.clear();
+    activeRelationId_.clear();
+    relationInteraction_ = RelationInteraction::None;
+}
+
+void WaveCanvas::selectOnlyRelation(const std::string& relationId)
+{
+    selectedRelationIds_ = relationId.empty()
+        ? std::vector<std::string>{}
+        : std::vector<std::string>{relationId};
+    activeRelationId_ = relationId;
+}
+
+bool WaveCanvas::isRelationSelected(
+    const std::string& relationId) const noexcept
+{
+    return std::find(
+               selectedRelationIds_.begin(),
+               selectedRelationIds_.end(),
+               relationId)
+        != selectedRelationIds_.end();
+}
+
+WaveCanvas::RelationHit WaveCanvas::relationHitAtPosition(
+    const QPoint& position) const
+{
+    if (!scenario_) return {};
+    constexpr double LineHitRadius = 6.0;
+    for (auto iterator = relationHitRegions_.rbegin();
+         iterator != relationHitRegions_.rend();
+         ++iterator) {
+        const auto* relation = relationById(iterator->relationId);
+        if (!relation) continue;
+        if (iterator->sourceHandle.contains(position)) {
+            return {relation, RelationEndpoint::Source};
+        }
+        if (iterator->targetHandle.contains(position)) {
+            return {relation, RelationEndpoint::Target};
+        }
+        const auto first = iterator->line.p1();
+        const auto second = iterator->line.p2();
+        const auto dx = second.x() - first.x();
+        const auto dy = second.y() - first.y();
+        const auto lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared <= 0.0) continue;
+        const auto projection = std::clamp(
+            ((position.x() - first.x()) * dx
+             + (position.y() - first.y()) * dy)
+                / lengthSquared,
+            0.0,
+            1.0);
+        const auto nearestX = first.x() + projection * dx;
+        const auto nearestY = first.y() + projection * dy;
+        if (std::hypot(
+                position.x() - nearestX,
+                position.y() - nearestY)
+            <= LineHitRadius) {
+            return {relation, RelationEndpoint::None};
+        }
+    }
+    return {};
+}
+
 Marker* WaveCanvas::markerById(const std::string& markerId)
 {
     if (!scenario_) return nullptr;
@@ -18812,12 +19231,13 @@ Tick WaveCanvas::constrainedTransitionTick(
     return upper >= lower ? std::clamp(requested, lower, upper) : event.tick;
 }
 
-const Marker* WaveCanvas::markerAtPosition(const QPoint& position) const
+WaveCanvas::MarkerHit WaveCanvas::markerHitAtPosition(
+    const QPoint& position) const
 {
     if (!scenario_
         || position.x() < headerWidth_
         || position.y() < RulerHeight) {
-        return nullptr;
+        return {};
     }
 
     constexpr int HitRadius = 7;
@@ -18827,27 +19247,54 @@ const Marker* WaveCanvas::markerAtPosition(const QPoint& position) const
         const auto [start, end] = markerDisplayRange(*marker);
         const auto left = xAtTick(start);
         const auto right = xAtTick(end);
-        if (std::abs(position.x() - left) <= HitRadius
-            || (start != end && std::abs(position.x() - right) <= HitRadius)
+        const auto startHit = std::abs(position.x() - left) <= HitRadius;
+        const auto endHit = start != end
+            && std::abs(position.x() - right) <= HitRadius;
+        if (startHit
+            || endHit
             || (start != end
                 && position.y() <= RulerHeight + 24
                 && position.x() >= std::min(left, right)
                 && position.x() <= std::max(left, right))) {
-            return &*marker;
+            return {
+                &*marker,
+                start != end && startHit
+                    ? SegmentBoundary::Start
+                    : endHit
+                        ? SegmentBoundary::End
+                        : SegmentBoundary::None,
+            };
         }
     }
-    return nullptr;
+    return {};
 }
 
 std::pair<Tick, Tick> WaveCanvas::markerDisplayRange(const Marker& marker) const
 {
-    if (cursorInteraction_ != CursorInteraction::MoveLocked
+    if ((cursorInteraction_ != CursorInteraction::MoveLocked
+         && cursorInteraction_ != CursorInteraction::ResizeLockedStart
+         && cursorInteraction_ != CursorInteraction::ResizeLockedEnd)
         || marker.id != selectedMarkerId_
         || !lockedMarkerOriginalRange_
         || !scenario_) {
         return {marker.start, marker.end};
     }
     const auto [originalStart, originalEnd] = *lockedMarkerOriginalRange_;
+    if (cursorInteraction_ == CursorInteraction::ResizeLockedStart) {
+        return {
+            std::clamp<Tick>(drawCurrent_, 0, originalEnd),
+            originalEnd,
+        };
+    }
+    if (cursorInteraction_ == CursorInteraction::ResizeLockedEnd) {
+        return {
+            originalStart,
+            std::clamp<Tick>(
+                drawCurrent_,
+                originalStart,
+                scenario_->duration),
+        };
+    }
     const auto requested = drawCurrent_ - drawStart_;
     const auto offset = std::clamp(
         requested,
@@ -19462,32 +19909,93 @@ void WaveCanvas::ensureCursorVisible(const Tick tick)
 
 void WaveCanvas::removeSelectedMarker()
 {
-    if (!scenario_ || !commandStack_ || selectedMarkerId_.empty()) return;
-    const auto* marker = markerById(selectedMarkerId_);
-    if (!marker) {
-        selectedMarkerId_.clear();
+    if (!scenario_ || !commandStack_ || selectedMarkerIds_.empty()) return;
+    std::vector<std::string> markerIds;
+    markerIds.reserve(selectedMarkerIds_.size());
+    QStringList markerNames;
+    QString markerLocation;
+    for (const auto& markerId : selectedMarkerIds_) {
+        const auto* marker = markerById(markerId);
+        if (!marker) continue;
+        markerIds.push_back(markerId);
+        markerNames.push_back(QString::fromStdString(marker->name));
+        if (selectedMarkerIds_.size() == 1) {
+            markerLocation = markerLocationText(*marker);
+        }
+    }
+    if (markerIds.size() != selectedMarkerIds_.size()) {
+        clearMarkerSelection();
         emit statusMessage(tr("The selected locked cursor no longer exists."));
         viewport()->update();
         return;
     }
-    const auto markerName = QString::fromStdString(marker->name);
-    const auto location = markerLocationText(*marker);
     try {
-        commandStack_->execute(std::make_unique<RemoveMarkerCommand>(
-            *scenario_,
-            selectedMarkerId_));
+        if (markerIds.size() == 1) {
+            commandStack_->execute(std::make_unique<RemoveMarkerCommand>(
+                *scenario_,
+                markerIds.front()));
+        } else {
+            commandStack_->execute(std::make_unique<RemoveMarkersCommand>(
+                *scenario_,
+                markerIds));
+        }
     } catch (const std::exception& exception) {
         emit statusMessage(QString::fromUtf8(exception.what()));
         return;
     }
-    selectedMarkerId_.clear();
+    clearMarkerSelection();
     emit modelEdited();
     emit commandAvailabilityChanged();
     refreshModel();
     emit statusMessage(
-        tr("Deleted %1 · %2 · Ctrl+Z to undo")
-            .arg(markerName)
-            .arg(location));
+        markerIds.size() == 1
+            ? tr("Deleted %1 · %2 · Ctrl+Z to undo")
+                  .arg(markerNames.front())
+                  .arg(markerLocation)
+            : tr("Deleted %1 locked cursors as one edit · Ctrl+Z to undo")
+                  .arg(static_cast<qulonglong>(markerIds.size())));
+}
+
+void WaveCanvas::removeSelectedRelations()
+{
+    if (!scenario_ || !commandStack_ || selectedRelationIds_.empty()) return;
+    const auto relationIds = selectedRelationIds_;
+    if (!std::all_of(
+            relationIds.begin(),
+            relationIds.end(),
+            [this](const std::string& relationId) {
+                return relationById(relationId) != nullptr;
+            })) {
+        clearRelationSelection();
+        emit statusMessage(tr("A selected relation no longer exists."));
+        viewport()->update();
+        return;
+    }
+    try {
+        if (relationIds.size() == 1) {
+            commandStack_->execute(std::make_unique<RemoveRelationCommand>(
+                *scenario_,
+                relationIds.front()));
+        } else {
+            commandStack_->execute(std::make_unique<RemoveRelationsCommand>(
+                *scenario_,
+                relationIds));
+        }
+    } catch (const std::exception& exception) {
+        emit statusMessage(QString::fromUtf8(exception.what()));
+        return;
+    }
+    clearRelationSelection();
+    activeEventId_.clear();
+    emit modelEdited();
+    emit commandAvailabilityChanged();
+    refreshModel();
+    emit relationSelected({});
+    emit statusMessage(
+        relationIds.size() == 1
+            ? tr("Deleted relation · Ctrl+Z to undo")
+            : tr("Deleted %1 relations as one edit · Ctrl+Z to undo")
+                  .arg(static_cast<qulonglong>(relationIds.size())));
 }
 
 void WaveCanvas::moveSelectedMarkerBy(const Tick delta)
@@ -19495,7 +20003,7 @@ void WaveCanvas::moveSelectedMarkerBy(const Tick delta)
     if (!scenario_ || !commandStack_ || selectedMarkerId_.empty()) return;
     const auto* marker = markerById(selectedMarkerId_);
     if (!marker) {
-        selectedMarkerId_.clear();
+        clearMarkerSelection();
         emit statusMessage(tr("The selected locked cursor no longer exists."));
         viewport()->update();
         return;
@@ -19612,6 +20120,59 @@ std::pair<Tick, Tick> WaveCanvas::visibleTickRange() const
     return {
         std::max<Tick>(0, start - std::min(start, padding)),
         std::min<Tick>(scenario_->duration, end + padding),
+    };
+}
+
+std::pair<std::size_t, std::size_t>
+WaveCanvas::visibleLaneLayoutRange() const
+{
+    if (laneLayout_.empty()) return {0, 0};
+    const auto visibleTop = verticalScrollBar()->value();
+    const auto visibleBottom = visibleTop
+        + std::max(0, viewport()->height() - RulerHeight);
+    const auto first = std::lower_bound(
+        laneLayout_.begin(),
+        laneLayout_.end(),
+        visibleTop,
+        [](const LaneLayout& layout, const int top) {
+            return layout.top + layout.height < top;
+        });
+    const auto last = std::upper_bound(
+        first,
+        laneLayout_.end(),
+        visibleBottom,
+        [](const int bottom, const LaneLayout& layout) {
+            return bottom < layout.top;
+        });
+    return {
+        static_cast<std::size_t>(first - laneLayout_.begin()),
+        static_cast<std::size_t>(last - laneLayout_.begin()),
+    };
+}
+
+std::pair<std::size_t, std::size_t>
+WaveCanvas::visibleOverlayRange(
+    const std::vector<TimedOverlayIndex>& index,
+    const Tick visibleStart,
+    const Tick visibleEnd) const
+{
+    const auto last = std::upper_bound(
+        index.begin(),
+        index.end(),
+        visibleEnd,
+        [](const Tick end, const TimedOverlayIndex& entry) {
+            return end < entry.start;
+        });
+    const auto first = std::lower_bound(
+        index.begin(),
+        last,
+        visibleStart,
+        [](const TimedOverlayIndex& entry, const Tick start) {
+            return entry.prefixMaximumEnd < start;
+        });
+    return {
+        static_cast<std::size_t>(first - index.begin()),
+        static_cast<std::size_t>(last - index.begin()),
     };
 }
 
@@ -20820,10 +21381,12 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
         return;
     }
 
-    if (interaction == CursorInteraction::MoveLocked) {
+    if (interaction == CursorInteraction::MoveLocked
+        || interaction == CursorInteraction::ResizeLockedStart
+        || interaction == CursorInteraction::ResizeLockedEnd) {
         const auto* marker = markerById(selectedMarkerId_);
         if (!marker || !lockedMarkerOriginalRange_) {
-            selectedMarkerId_.clear();
+            clearMarkerSelection();
             lockedMarkerOriginalRange_.reset();
             emit statusMessage(tr("The selected locked cursor no longer exists."));
             viewport()->update();
@@ -20835,15 +21398,29 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
         original.end = originalEnd;
         const auto markerName = QString::fromStdString(marker->name);
         const auto previousLocation = markerLocationText(original);
-        const auto requested = drawCurrent_ - drawStart_;
-        const auto offset = std::clamp(
-            requested,
-            -originalStart,
-            scenario_->duration - originalEnd);
-        if (offset != 0) {
-            auto replacement = *marker;
+        auto replacement = *marker;
+        if (interaction == CursorInteraction::MoveLocked) {
+            const auto requested = drawCurrent_ - drawStart_;
+            const auto offset = std::clamp(
+                requested,
+                -originalStart,
+                scenario_->duration - originalEnd);
             replacement.start = originalStart + offset;
             replacement.end = originalEnd + offset;
+        } else if (interaction == CursorInteraction::ResizeLockedStart) {
+            replacement.start = std::clamp<Tick>(
+                drawCurrent_,
+                0,
+                originalEnd);
+        } else {
+            replacement.end = std::clamp<Tick>(
+                drawCurrent_,
+                originalStart,
+                scenario_->duration);
+        }
+        const auto changed = replacement.start != originalStart
+            || replacement.end != originalEnd;
+        if (changed) {
             const auto replacementLocation = markerLocationText(replacement);
             try {
                 commandStack_->execute(std::make_unique<ChangeMarkerCommand>(
@@ -20856,7 +21433,7 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
                     QString::fromUtf8(exception.what()),
                     viewport());
                 emit statusMessage(
-                    tr("Locked cursor not moved · %1")
+                    tr("Locked cursor not changed · %1")
                         .arg(QString::fromUtf8(exception.what())));
                 lockedMarkerOriginalRange_.reset();
                 viewport()->update();
@@ -20867,13 +21444,15 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
             emit commandAvailabilityChanged();
             refreshModel();
             emit statusMessage(
-                tr("Moved %1 · %2 → %3 · Ctrl+Z to undo")
+                (interaction == CursorInteraction::MoveLocked
+                     ? tr("Moved %1 · %2 → %3 · Ctrl+Z to undo")
+                     : tr("Adjusted %1 · %2 → %3 · Ctrl+Z to undo"))
                     .arg(markerName)
                     .arg(previousLocation)
                     .arg(replacementLocation));
-        } else if (requested == 0) {
+        } else if (drawCurrent_ == drawStart_) {
             emit statusMessage(
-                tr("Selected %1 · %2 · drag or arrow keys to move · Delete to remove")
+                tr("Selected %1 · %2 · drag body to move, drag edge to resize · Delete to remove")
                     .arg(markerName)
                     .arg(previousLocation));
         } else {
@@ -20914,7 +21493,7 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
         viewport()->update();
         return;
     }
-    selectedMarkerId_ = marker.id;
+    selectOnlyMarker(marker.id);
     cursorTick_ = drawCurrent_;
     emit modelEdited();
     emit commandAvailabilityChanged();
@@ -20928,14 +21507,95 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
 void WaveCanvas::commitRelation(const QPoint& releasePosition)
 {
     drawing_ = false;
-    if (!scenario_ || !commandStack_ || activeEventId_.empty()) return;
+    const auto interaction = relationInteraction_;
+    relationInteraction_ = RelationInteraction::None;
+    if (!scenario_ || !commandStack_ || activeEventId_.empty()) {
+        activeEventId_.clear();
+        return;
+    }
+    const auto* droppedEvent = eventAtPosition(releasePosition);
+    if (interaction == RelationInteraction::RetargetSource
+        || interaction == RelationInteraction::RetargetTarget) {
+        const auto relationId = activeRelationId_;
+        const auto* relation = relationById(relationId);
+        if (!relation || !droppedEvent) {
+            QToolTip::showText(
+                viewport()->mapToGlobal(releasePosition),
+                tr("Release on a visible event marker"),
+                viewport());
+            activeEventId_.clear();
+            viewport()->update();
+            return;
+        }
+        auto replacement = *relation;
+        const auto previousEventId = interaction
+                == RelationInteraction::RetargetSource
+            ? replacement.sourceEventId
+            : replacement.targetEventId;
+        if (interaction == RelationInteraction::RetargetSource) {
+            if (droppedEvent->id == replacement.targetEventId) {
+                QToolTip::showText(
+                    viewport()->mapToGlobal(releasePosition),
+                    tr("A relation requires two different events"),
+                    viewport());
+                activeEventId_.clear();
+                viewport()->update();
+                return;
+            }
+            replacement.sourceEventId = droppedEvent->id;
+        } else {
+            if (droppedEvent->id == replacement.sourceEventId) {
+                QToolTip::showText(
+                    viewport()->mapToGlobal(releasePosition),
+                    tr("A relation requires two different events"),
+                    viewport());
+                activeEventId_.clear();
+                viewport()->update();
+                return;
+            }
+            replacement.targetEventId = droppedEvent->id;
+        }
+        activeEventId_.clear();
+        if (droppedEvent->id == previousEventId) {
+            emit statusMessage(tr("Relation endpoint unchanged"));
+            viewport()->update();
+            return;
+        }
+        try {
+            commandStack_->execute(std::make_unique<ChangeRelationCommand>(
+                *scenario_,
+                relationId,
+                std::move(replacement)));
+        } catch (const std::exception& exception) {
+            QToolTip::showText(
+                viewport()->mapToGlobal(releasePosition),
+                QString::fromUtf8(exception.what()),
+                viewport());
+            viewport()->update();
+            return;
+        }
+        selectOnlyRelation(relationId);
+        emit modelEdited();
+        emit commandAvailabilityChanged();
+        refreshModel();
+        emit relationSelected(QString::fromStdString(relationId));
+        emit statusMessage(
+            tr("Retargeted relation endpoint · Ctrl+Z to undo"));
+        viewport()->update();
+        return;
+    }
+
     const auto* source = findEvent(*scenario_, activeEventId_);
-    const auto* target = eventAtPosition(releasePosition);
-    if (!source || !target || source->id == target->id) {
+    const auto* target = droppedEvent;
+    if (interaction != RelationInteraction::Create
+        || !source
+        || !target
+        || source->id == target->id) {
         QToolTip::showText(
             viewport()->mapToGlobal(releasePosition),
             tr("Finish on a different visible event marker"),
             viewport());
+        activeEventId_.clear();
         viewport()->update();
         return;
     }
@@ -20968,8 +21628,12 @@ void WaveCanvas::commitRelation(const QPoint& releasePosition)
         return;
     }
     activeEventId_.clear();
+    selectOnlyRelation(relation.id);
     emit modelEdited();
     emit commandAvailabilityChanged();
+    refreshModel();
+    emit relationSelected(QString::fromStdString(relation.id));
+    emit statusMessage(tr("Created relation · Ctrl+Z to undo"));
     viewport()->update();
 }
 
@@ -21041,16 +21705,15 @@ const Event* WaveCanvas::eventAtPosition(const QPoint& position) const
 QPoint WaveCanvas::eventPoint(const Event& event) const
 {
     if (!scenario_) return {};
-    const auto layout = std::find_if(
-        laneLayout_.begin(),
-        laneLayout_.end(),
-        [this, &event](const LaneLayout& candidate) {
-            return scenario_->lanes.at(candidate.laneIndex).id == event.laneId;
-        });
-    if (layout == laneLayout_.end()) return {};
+    const auto layoutIndex = laneLayoutIndexById_.find(event.laneId);
+    if (layoutIndex == laneLayoutIndexById_.end()
+        || layoutIndex->second >= laneLayout_.size()) {
+        return {};
+    }
+    const auto& layout = laneLayout_[layoutIndex->second];
     return {
         xAtTick(event.tick),
-        RulerHeight + layout->top - verticalScrollBar()->value() + layout->height / 2,
+        RulerHeight + layout.top - verticalScrollBar()->value() + layout.height / 2,
     };
 }
 
@@ -22787,17 +23450,35 @@ void WaveCanvas::drawScenarioOverlays(
     const std::vector<std::string>* relationRemovalIds)
 {
     if (!scenario_) return;
+    if (indexedMarkerCount_ != scenario_->markers.size()
+        || indexedRelationCount_ != scenario_->relations.size()
+        || indexedEventCount_ != scenario_->events.size()) {
+        rebuildOverlayIndexes();
+    }
     eventHitRegions_.clear();
+    relationHitRegions_.clear();
+    std::size_t renderedMarkerCount = 0;
+    std::size_t renderedRelationCount = 0;
+    std::size_t renderedEventCount = 0;
     painter.save();
     painter.setClipRect(QRect(headerWidth_, RulerHeight, waveViewportWidth(), viewport()->height() - RulerHeight));
 
-    for (const auto& marker : scenario_->markers) {
+    const auto [firstMarker, lastMarker] = visibleOverlayRange(
+        markerOverlayIndex_,
+        visibleStart,
+        visibleEnd);
+    for (auto markerPosition = firstMarker;
+         markerPosition < lastMarker;
+         ++markerPosition) {
+        const auto& marker = scenario_->markers.at(
+            markerOverlayIndex_[markerPosition].modelIndex);
         const auto [start, end] = markerDisplayRange(marker);
         if (end < visibleStart || start > visibleEnd) continue;
+        ++renderedMarkerCount;
         const auto left = xAtTick(start);
         const auto right = xAtTick(end);
         const auto selected = tool_ == Tool::Marker
-            && marker.id == selectedMarkerId_;
+            && markerSelected(marker.id);
         QColor color = selected
             ? kSelectedLockedCursor
             : marker.kind == MarkerKind::Error
@@ -22841,7 +23522,15 @@ void WaveCanvas::drawScenarioOverlays(
 
     painter.setRenderHint(QPainter::Antialiasing, true);
 
-    for (const auto& relation : scenario_->relations) {
+    const auto [firstRelation, lastRelation] = visibleOverlayRange(
+        relationOverlayIndex_,
+        visibleStart,
+        visibleEnd);
+    for (auto relationPosition = firstRelation;
+         relationPosition < lastRelation;
+         ++relationPosition) {
+        const auto& relation = scenario_->relations.at(
+            relationOverlayIndex_[relationPosition].modelIndex);
         const auto willBeRemoved =
             relationRemovalIds
             && std::find(
@@ -22860,7 +23549,18 @@ void WaveCanvas::drawScenarioOverlays(
         const auto sourcePoint = eventPoint(*source);
         const auto targetPoint = eventPoint(*target);
         if (sourcePoint.isNull() || targetPoint.isNull()) continue;
-        const QColor color = willBeRemoved
+        if ((sourcePoint.y() < RulerHeight
+             && targetPoint.y() < RulerHeight)
+            || (sourcePoint.y() > viewport()->height()
+                && targetPoint.y() > viewport()->height())) {
+            continue;
+        }
+        ++renderedRelationCount;
+        const auto selected = tool_ == Tool::Relation
+            && isRelationSelected(relation.id);
+        const QColor color = selected
+            ? QColor(102, 187, 106)
+            : willBeRemoved
             ? QColor(255, 183, 77)
             : relation.severity == Severity::Error
                 ? QColor(239, 108, 115)
@@ -22877,10 +23577,27 @@ void WaveCanvas::drawScenarioOverlays(
         }
         painter.setPen(QPen(
             color,
-            willBeRemoved ? 2.5 : 1.5,
+            selected ? 3.0 : willBeRemoved ? 2.5 : 1.5,
             willBeRemoved ? Qt::DashLine : Qt::SolidLine,
             Qt::RoundCap));
         painter.drawLine(sourcePoint, targetPoint);
+        if (tool_ == Tool::Relation) {
+            constexpr int HandleRadius = 7;
+            relationHitRegions_.push_back({
+                relation.id,
+                QLineF(sourcePoint, targetPoint),
+                QRect(
+                    sourcePoint.x() - HandleRadius,
+                    sourcePoint.y() - HandleRadius,
+                    HandleRadius * 2 + 1,
+                    HandleRadius * 2 + 1),
+                QRect(
+                    targetPoint.x() - HandleRadius,
+                    targetPoint.y() - HandleRadius,
+                    HandleRadius * 2 + 1,
+                    HandleRadius * 2 + 1),
+            });
+        }
         const auto angle = std::atan2(
             static_cast<double>(targetPoint.y() - sourcePoint.y()),
             static_cast<double>(targetPoint.x() - sourcePoint.x()));
@@ -22894,6 +23611,12 @@ void WaveCanvas::drawScenarioOverlays(
             targetPoint.y() - arrowLength * std::sin(angle + arrowSpread));
         painter.setBrush(color);
         painter.drawPolygon(QPolygonF{QPointF(targetPoint), leftWing, rightWing});
+        if (selected) {
+            painter.setBrush(kBackground);
+            painter.setPen(QPen(color, 2.0));
+            painter.drawEllipse(sourcePoint, 6, 6);
+            painter.drawEllipse(targetPoint, 6, 6);
+        }
         if (willBeRemoved) {
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(color, 2.0));
@@ -22916,12 +23639,32 @@ void WaveCanvas::drawScenarioOverlays(
         }
     }
 
-    for (const auto& event : scenario_->events) {
-        if (event.tick < visibleStart || event.tick > visibleEnd || event.laneId.empty()) {
+    const auto firstEvent = std::lower_bound(
+        eventOverlayIndex_.begin(),
+        eventOverlayIndex_.end(),
+        visibleStart,
+        [this](const std::size_t index, const Tick tick) {
+            return scenario_->events[index].tick < tick;
+        });
+    const auto lastEvent = std::upper_bound(
+        firstEvent,
+        eventOverlayIndex_.end(),
+        visibleEnd,
+        [this](const Tick tick, const std::size_t index) {
+            return tick < scenario_->events[index].tick;
+        });
+    for (auto eventPosition = firstEvent;
+         eventPosition != lastEvent;
+         ++eventPosition) {
+        const auto& event = scenario_->events.at(*eventPosition);
+        if (event.laneId.empty()) continue;
+        const auto point = eventPoint(event);
+        if (point.isNull()
+            || point.y() < RulerHeight
+            || point.y() > viewport()->height()) {
             continue;
         }
-        const auto point = eventPoint(event);
-        if (point.isNull()) continue;
+        ++renderedEventCount;
         const QColor color = event.action == EventAction::Expect
             ? QColor(255, 183, 77)
             : QColor(126, 200, 255);
@@ -22942,6 +23685,15 @@ void WaveCanvas::drawScenarioOverlays(
     drawCursorOverlays(painter, visibleStart, visibleEnd);
 
     painter.restore();
+    setProperty(
+        "wavewidgets.renderedMarkerCount",
+        static_cast<qulonglong>(renderedMarkerCount));
+    setProperty(
+        "wavewidgets.renderedRelationCount",
+        static_cast<qulonglong>(renderedRelationCount));
+    setProperty(
+        "wavewidgets.renderedEventCount",
+        static_cast<qulonglong>(renderedEventCount));
 }
 
 void WaveCanvas::drawCursorOverlays(

@@ -46,6 +46,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QInputDialog>
+#include <QItemSelectionModel>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRandomGenerator>
@@ -2188,6 +2189,13 @@ MainWindow::MainWindow(
         updateSegmentActions();
         statusBar()->showMessage(tr("Direct waveform editing active"), 3'000);
     });
+    connect(canvas_, &WaveCanvas::relationModeExitRequested, this, [this] {
+        if (relationAction_) relationAction_->setChecked(false);
+        canvas_->setTool(WaveCanvas::Tool::WaveEdit);
+        updateWaveContext();
+        updateSegmentActions();
+        statusBar()->showMessage(tr("Direct waveform editing active"), 3'000);
+    });
     connect(
         canvas_,
         &WaveCanvas::duplicateLaneRequested,
@@ -2210,6 +2218,11 @@ MainWindow::MainWindow(
     connect(canvas_, &WaveCanvas::modelEdited, this, &MainWindow::markEdited);
     connect(canvas_, &WaveCanvas::commandAvailabilityChanged, this, &MainWindow::updateCommandActions);
     connect(canvas_, &WaveCanvas::eventSelected, this, &MainWindow::selectEventRow);
+    connect(
+        canvas_,
+        &WaveCanvas::relationSelected,
+        this,
+        &MainWindow::selectRelationRow);
     connect(canvas_, &WaveCanvas::statusMessage, this, [this](const QString& message) {
         updateWaveContext();
         scheduleActiveScenarioLocationMemory();
@@ -4199,6 +4212,15 @@ void MainWindow::revealLocation(const QString& laneId, const Tick tick)
     }
 }
 
+void MainWindow::revealMarker(const QString& markerId)
+{
+    if (markerId.isEmpty() || !canvas_) return;
+    if (markerAction_ && !markerAction_->isChecked()) {
+        markerAction_->setChecked(true);
+    }
+    canvas_->revealMarker(markerId);
+}
+
 void MainWindow::openLanePropertiesPreview(const QString& laneId)
 {
     editLaneById(laneId);
@@ -4245,6 +4267,9 @@ void MainWindow::showSignalFind()
     if (!commitPendingEdits()) return;
     if (markerAction_ && markerAction_->isChecked()) {
         markerAction_->setChecked(false);
+    }
+    if (relationAction_ && relationAction_->isChecked()) {
+        relationAction_->setChecked(false);
     }
     closeGoToTime(false);
 
@@ -4411,6 +4436,9 @@ void MainWindow::showGoToTime()
         && markerAction_
         && markerAction_->isChecked()) {
         markerAction_->setChecked(false);
+    }
+    if (relationAction_ && relationAction_->isChecked()) {
+        relationAction_->setChecked(false);
     }
     canvas_->dismissInlineValueEditor();
     closeSignalFind(false);
@@ -5476,6 +5504,7 @@ void MainWindow::newProject()
     closeGoToTime(false);
     canvas_->setTool(WaveCanvas::Tool::WaveEdit);
     if (markerAction_) markerAction_->setChecked(false);
+    if (relationAction_) relationAction_->setChecked(false);
     updateCommandActions();
     updateWindowTitle();
     invalidateCompareResult();
@@ -8521,6 +8550,22 @@ void MainWindow::selectEventRow(const QString& eventId)
     }
 }
 
+void MainWindow::selectRelationRow(const QString& relationId)
+{
+    if (!relationTable_) return;
+    populateRelationTable();
+    if (relationId.isEmpty()) return;
+    for (int row = 0; row < relationTable_->rowCount(); ++row) {
+        const auto* item = relationTable_->item(row, 0);
+        if (item
+            && item->data(Qt::UserRole + 2).toString() == relationId) {
+            relationTable_->selectRow(row);
+            relationTable_->scrollToItem(item);
+            return;
+        }
+    }
+}
+
 void MainWindow::revealValidationIssue(const int row, const int column)
 {
     Q_UNUSED(column)
@@ -8622,24 +8667,49 @@ void MainWindow::relationCellChanged(const int row, const int column)
 void MainWindow::removeSelectedRelation()
 {
     if (!commitPendingEdits()) return;
-    const auto row = relationTable_->currentRow();
     auto* scenario = activeScenario();
-    if (!scenario || row < 0 || !relationTable_->item(row, 0)) return;
-    const auto relationId = relationTable_->item(row, 0)
-                                ->data(Qt::UserRole + 2)
-                                .toString()
-                                .toStdString();
-    if (relationId.empty()) return;
+    if (!scenario || !relationTable_ || !relationTable_->selectionModel()) {
+        return;
+    }
+    std::vector<std::string> relationIds;
+    const auto selectedRows = relationTable_->selectionModel()->selectedRows(0);
+    relationIds.reserve(static_cast<std::size_t>(selectedRows.size()));
+    for (const auto& selectedRow : selectedRows) {
+        const auto* item = relationTable_->item(selectedRow.row(), 0);
+        if (!item) continue;
+        const auto relationId = item->data(Qt::UserRole + 2)
+                                    .toString()
+                                    .toStdString();
+        if (!relationId.empty()) relationIds.push_back(relationId);
+    }
+    std::sort(relationIds.begin(), relationIds.end());
+    relationIds.erase(
+        std::unique(relationIds.begin(), relationIds.end()),
+        relationIds.end());
+    if (relationIds.empty()) return;
     try {
-        commandStack_.execute(std::make_unique<RemoveRelationCommand>(
-            *scenario,
-            relationId));
+        if (relationIds.size() == 1) {
+            commandStack_.execute(std::make_unique<RemoveRelationCommand>(
+                *scenario,
+                relationIds.front()));
+        } else {
+            commandStack_.execute(std::make_unique<RemoveRelationsCommand>(
+                *scenario,
+                relationIds));
+        }
     } catch (const std::exception& exception) {
         QMessageBox::warning(this, tr("Cannot remove relation"), QString::fromUtf8(exception.what()));
         return;
     }
     canvas_->refreshModel();
+    populateRelationTable();
     markEdited();
+    statusBar()->showMessage(
+        relationIds.size() == 1
+            ? tr("Removed relation · Ctrl+Z to undo")
+            : tr("Removed %1 relations as one edit · Ctrl+Z to undo")
+                  .arg(static_cast<qulonglong>(relationIds.size())),
+        5'000);
 }
 
 void MainWindow::exportArtifacts()
@@ -11103,6 +11173,10 @@ void MainWindow::createToolBars()
             return;
         }
         if (checked) {
+            if (relationAction_ && relationAction_->isChecked()) {
+                const QSignalBlocker blocker(relationAction_);
+                relationAction_->setChecked(false);
+            }
             closeSignalFind(false);
             closeGoToTime(false);
         }
@@ -11112,6 +11186,52 @@ void MainWindow::createToolBars()
         statusBar()->showMessage(
             checked
                 ? tr("Measure: click or drag · Ctrl locks · Shift compares · Esc exits")
+                : tr("Direct waveform editing active"),
+            5'000);
+    });
+
+    relationAction_ = new QAction(
+        themedIcon(
+            QStringLiteral("insert-link"),
+            style(),
+            QStyle::SP_ArrowRight),
+        tr("Edit relations"),
+        this);
+    editMenu_->addAction(relationAction_);
+    relationAction_->setObjectName(QStringLiteral("RelationToolAction"));
+    relationAction_->setCheckable(true);
+    relationAction_->setShortcut(
+        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
+    relationAction_->setToolTip(
+        tr("Create, select, retarget, or delete event relations; Esc exits"));
+    connect(relationAction_, &QAction::toggled, this, [this](const bool checked) {
+        if (checked && !canvas_->commitPendingInlineEdits()) {
+            const QSignalBlocker blocker(relationAction_);
+            relationAction_->setChecked(false);
+            return;
+        }
+        if (checked) {
+            if (markerAction_ && markerAction_->isChecked()) {
+                const QSignalBlocker blocker(markerAction_);
+                markerAction_->setChecked(false);
+            }
+            closeSignalFind(false);
+            closeGoToTime(false);
+            if (showRelationsAction_ && !showRelationsAction_->isChecked()) {
+                showRelationsAction_->setChecked(true);
+            } else {
+                canvas_->setRelationsVisible(true);
+            }
+        }
+        canvas_->setTool(
+            checked
+                ? WaveCanvas::Tool::Relation
+                : WaveCanvas::Tool::WaveEdit);
+        updateWaveContext();
+        updateSegmentActions();
+        statusBar()->showMessage(
+            checked
+                ? tr("Relations: drag between events · click a line · drag an endpoint · Delete removes · Esc exits")
                 : tr("Direct waveform editing active"),
             5'000);
     });
@@ -11555,6 +11675,7 @@ void MainWindow::createDocks()
     bottomTabs->addTab(eventPanel, tr("Events"));
 
     relationTable_ = new QTableWidget;
+    relationTable_->setObjectName(QStringLiteral("RelationTable"));
     relationTable_->setColumnCount(8);
     relationTable_->setHorizontalHeaderLabels({
         tr("Source"),
@@ -11568,6 +11689,7 @@ void MainWindow::createDocks()
     });
     relationTable_->horizontalHeader()->setStretchLastSection(true);
     relationTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    relationTable_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     connect(
         relationTable_,
         &QTableWidget::cellChanged,

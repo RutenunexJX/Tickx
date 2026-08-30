@@ -429,21 +429,63 @@ PinloomEntry makePinloomEntry(
 LaunchRequestResult parseWaveWorkbenchUri(const QUrl& uri)
 {
     LaunchRequestResult result;
-    if (!uri.isValid() || uri.scheme().compare(QStringLiteral("waveworkbench"), Qt::CaseInsensitive) != 0) {
-        result.error = QStringLiteral("URI scheme must be waveworkbench");
+    if (!uri.isValid()) {
+        result.error = QStringLiteral("URI is not valid");
         return result;
     }
-    const auto action = uri.host().toLower();
-    if (action != QStringLiteral("open") && action != QStringLiteral("compare")) {
-        result.error = QStringLiteral("URI action must be open or compare");
-        return result;
-    }
+
+    const auto scheme = uri.scheme().toLower();
     const QUrlQuery query(uri);
     LaunchRequest request;
-    request.projectPath = query.queryItemValue(QStringLiteral("project"));
-    request.scenarioId = query.queryItemValue(QStringLiteral("scenario"));
-    request.laneId = query.queryItemValue(QStringLiteral("lane"));
-    request.compareMode = action == QStringLiteral("compare")
+    if (scheme == QStringLiteral("waveworkbench")) {
+        const auto action = uri.host().toLower();
+        if (action != QStringLiteral("open")
+            && action != QStringLiteral("compare")) {
+            result.error = QStringLiteral("URI action must be open or compare");
+            return result;
+        }
+        request.scenarioId = query.queryItemValue(
+            QStringLiteral("scenario"),
+            QUrl::FullyDecoded);
+        request.compareMode = action == QStringLiteral("compare");
+    } else if (scheme == QStringLiteral("wave")) {
+        if (uri.host().compare(
+                QStringLiteral("scenario"),
+                Qt::CaseInsensitive)
+            != 0) {
+            result.error = QStringLiteral(
+                "wave URI host must be scenario");
+            return result;
+        }
+        auto scenarioId = uri.path(QUrl::FullyDecoded);
+        while (scenarioId.startsWith(QLatin1Char('/'))) {
+            scenarioId.remove(0, 1);
+        }
+        while (scenarioId.endsWith(QLatin1Char('/'))) {
+            scenarioId.chop(1);
+        }
+        if (scenarioId.isEmpty() || scenarioId.contains(QLatin1Char('/'))) {
+            result.error = QStringLiteral(
+                "wave://scenario URI must contain exactly one stable scenario ID");
+            return result;
+        }
+        request.scenarioId = scenarioId;
+    } else {
+        result.error = QStringLiteral(
+            "URI scheme must be waveworkbench or wave");
+        return result;
+    }
+
+    request.projectPath = query.queryItemValue(
+        QStringLiteral("project"),
+        QUrl::FullyDecoded);
+    request.laneId = query.queryItemValue(
+        QStringLiteral("lane"),
+        QUrl::FullyDecoded);
+    request.markerId = query.queryItemValue(
+        QStringLiteral("marker"),
+        QUrl::FullyDecoded);
+    request.compareMode = request.compareMode
         || query.queryItemValue(QStringLiteral("mode")).compare(
                QStringLiteral("compare"),
                Qt::CaseInsensitive)

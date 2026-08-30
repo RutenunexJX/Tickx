@@ -1025,6 +1025,23 @@ private:
     std::optional<Scenario> after_;
 };
 
+class RemoveMarkersCommand final : public EditCommand {
+public:
+    RemoveMarkersCommand(
+        Scenario& scenario,
+        std::vector<std::string> markerIds);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::vector<std::string> markerIds_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
 class RemoveMarkerAtIndexCommand final : public EditCommand {
 public:
     RemoveMarkerAtIndexCommand(
@@ -1131,6 +1148,23 @@ public:
 private:
     Scenario* scenario_;
     std::string relationId_;
+    std::optional<Scenario> before_;
+    std::optional<Scenario> after_;
+};
+
+class RemoveRelationsCommand final : public EditCommand {
+public:
+    RemoveRelationsCommand(
+        Scenario& scenario,
+        std::vector<std::string> relationIds);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+
+private:
+    Scenario* scenario_;
+    std::vector<std::string> relationIds_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
 };

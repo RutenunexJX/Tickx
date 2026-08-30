@@ -6,6 +6,7 @@
 #include "wave/model.h"
 
 #include <QAbstractScrollArea>
+#include <QLineF>
 #include <QPoint>
 #include <QRect>
 #include <QString>
@@ -146,6 +147,8 @@ public:
     [[nodiscard]] std::optional<Tick> movableCursorTick() const noexcept;
     [[nodiscard]] std::optional<Tick> temporaryCursorTick() const noexcept;
     [[nodiscard]] QString selectedMarkerId() const;
+    [[nodiscard]] QStringList selectedMarkerIds() const;
+    [[nodiscard]] QStringList selectedRelationIds() const;
     [[nodiscard]] std::optional<std::pair<Tick, Tick>> selectedTimeRange() const noexcept;
     [[nodiscard]] bool hasExplicitRangeSelection() const noexcept;
     [[nodiscard]] QString selectedSegmentLaneId() const;
@@ -257,6 +260,7 @@ public slots:
     void fitSelection();
     void refreshModel();
     void revealLocation(const QString& laneId, qint64 tick);
+    void revealMarker(const QString& markerId);
     void revealLane(const QString& laneId);
     void selectLaneHeaders(
         const QStringList& laneIds,
@@ -290,6 +294,7 @@ signals:
     void statusMessage(const QString& message);
     void pointerStatusMessage(const QString& message);
     void eventSelected(const QString& eventId);
+    void relationSelected(const QString& relationId);
     void quickLaneSetupAccepted(
         const QString& laneId,
         const QString& name,
@@ -299,6 +304,7 @@ signals:
     void laneRenameAccepted(const QString& laneId, const QString& name);
     void durationEditRequested(const QString& value);
     void measureModeExitRequested();
+    void relationModeExitRequested();
     void busEditPaletteVisibilityChanged(bool visible);
     void rangeEditPaletteVisibilityChanged(bool visible);
     void exactRangeTimeEditRequested();
@@ -332,16 +338,55 @@ private:
         QRect rect;
     };
 
+    struct RelationHitRegion {
+        std::string relationId;
+        QLineF line;
+        QRect sourceHandle;
+        QRect targetHandle;
+    };
+
+    enum class RelationEndpoint {
+        None,
+        Source,
+        Target,
+    };
+
+    struct RelationHit {
+        const Relation* relation{nullptr};
+        RelationEndpoint endpoint{RelationEndpoint::None};
+    };
+
+    enum class RelationInteraction {
+        None,
+        Create,
+        RetargetSource,
+        RetargetTarget,
+    };
+
+    struct TimedOverlayIndex {
+        std::size_t modelIndex{0};
+        Tick start{0};
+        Tick end{0};
+        Tick prefixMaximumEnd{0};
+    };
+
     enum class CursorInteraction {
         None,
         MoveActive,
         CreateLocked,
         MoveLocked,
+        ResizeLockedStart,
+        ResizeLockedEnd,
     };
     enum class SegmentBoundary {
         None,
         Start,
         End,
+    };
+
+    struct MarkerHit {
+        const Marker* marker{nullptr};
+        SegmentBoundary boundary{SegmentBoundary::None};
     };
     enum class BusEditScope {
         Beat,
@@ -873,10 +918,13 @@ private:
     [[nodiscard]] const Lane* laneAtY(int y) const;
     [[nodiscard]] Marker* markerById(const std::string& markerId);
     [[nodiscard]] const Marker* markerById(const std::string& markerId) const;
-    [[nodiscard]] const Marker* markerAtPosition(const QPoint& position) const;
+    [[nodiscard]] MarkerHit markerHitAtPosition(const QPoint& position) const;
     [[nodiscard]] std::pair<Tick, Tick> markerDisplayRange(const Marker& marker) const;
     [[nodiscard]] QString markerLocationText(const Marker& marker) const;
     [[nodiscard]] std::string nextLockedMarkerName(bool interval) const;
+    void clearMarkerSelection();
+    void selectOnlyMarker(const std::string& markerId);
+    [[nodiscard]] bool markerSelected(const std::string& markerId) const noexcept;
     [[nodiscard]] Tick cursorKeyboardStep() const;
     [[nodiscard]] std::optional<std::pair<Tick, Tick>>
     explicitRangeAnchorAndActive() const noexcept;
@@ -939,16 +987,34 @@ private:
     void editSegmentAt(const QPoint& position);
     void ensureCursorVisible(Tick tick);
     void removeSelectedMarker();
+    void removeSelectedRelations();
     void moveSelectedMarkerBy(Tick delta);
     [[nodiscard]] Tick snappedTick(Tick input, const Lane* lane) const;
     [[nodiscard]] Tick majorTickStep() const;
     [[nodiscard]] std::pair<Tick, Tick> visibleTickRange() const;
+    [[nodiscard]] std::pair<std::size_t, std::size_t>
+    visibleLaneLayoutRange() const;
+    [[nodiscard]] std::pair<std::size_t, std::size_t>
+    visibleOverlayRange(
+        const std::vector<TimedOverlayIndex>& index,
+        Tick visibleStart,
+        Tick visibleEnd) const;
     void commitDraw(const QPoint& releasePosition);
     void commitMarker(const QPoint& releasePosition);
     void commitRelation(const QPoint& releasePosition);
     void commitTransition(const QPoint& releasePosition);
     [[nodiscard]] const Event* eventAtPosition(const QPoint& position) const;
     [[nodiscard]] QPoint eventPoint(const Event& event) const;
+    [[nodiscard]] RelationHit relationHitAtPosition(
+        const QPoint& position) const;
+    [[nodiscard]] Relation* relationById(const std::string& relationId);
+    [[nodiscard]] const Relation* relationById(
+        const std::string& relationId) const;
+    void clearRelationSelection();
+    void selectOnlyRelation(const std::string& relationId);
+    [[nodiscard]] bool isRelationSelected(
+        const std::string& relationId) const noexcept;
+    void rebuildOverlayIndexes();
 
     void drawRuler(class QPainter& painter);
     void drawAddLaneRow(class QPainter& painter);
@@ -1096,14 +1162,25 @@ private:
     QPoint rangeSequenceTokenPressPosition_;
     bool explicitRangeSelection_{false};
     std::vector<LaneLayout> laneLayout_;
+    std::map<std::string, std::size_t> laneLayoutIndexById_;
+    std::vector<TimedOverlayIndex> markerOverlayIndex_;
+    std::vector<TimedOverlayIndex> relationOverlayIndex_;
+    std::vector<std::size_t> eventOverlayIndex_;
+    std::size_t indexedMarkerCount_{0};
+    std::size_t indexedRelationCount_{0};
+    std::size_t indexedEventCount_{0};
     std::vector<DifferenceRange> differenceRanges_;
     std::set<std::string> collapsedGroupIds_;
     std::vector<Tick> signalEdgeIndex_;
     std::optional<Tick> movableCursorTick_;
     std::optional<Tick> temporaryCursorTick_;
     std::string selectedMarkerId_;
+    std::vector<std::string> selectedMarkerIds_;
     CursorInteraction cursorInteraction_{CursorInteraction::None};
     std::optional<std::pair<Tick, Tick>> lockedMarkerOriginalRange_;
+    std::vector<std::string> selectedRelationIds_;
+    std::string activeRelationId_;
+    RelationInteraction relationInteraction_{RelationInteraction::None};
     Tool tool_{Tool::WaveEdit};
     double pixelsPerTick_{0.003};
     std::string selectedLaneId_;
@@ -1163,6 +1240,10 @@ private:
     std::string activeEventId_;
     QPoint interactionCurrent_;
     std::vector<EventHitRegion> eventHitRegions_;
+    std::vector<RelationHitRegion> relationHitRegions_;
+    std::uint64_t modelGeneration_{0};
+    std::uint64_t viewGeneration_{0};
+    std::uint64_t lastPaintViewGeneration_{0};
     bool fitPending_{false};
     std::optional<std::pair<Tick, Tick>> pendingVisibleTimeSpanRestore_;
     bool pendingVisibleTimeSpanRestoreScheduled_{false};

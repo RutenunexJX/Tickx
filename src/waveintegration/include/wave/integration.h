@@ -81,6 +81,7 @@ struct LaunchRequest {
     QString projectPath;
     QString scenarioId;
     QString laneId;
+    QString markerId;
     std::optional<Tick> tick;
     bool compareMode{false};
 };

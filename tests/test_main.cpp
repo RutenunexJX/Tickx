@@ -4450,6 +4450,93 @@ void testMarkersRelationsAndValidation()
         "marker removal redo did not remove the marker");
     expect(stack.undo(), "marker removal final restore failed");
 
+    auto markerBatchScenario = scenario;
+    if (markerBatchScenario.markers.size() < 2) {
+        auto secondMarker = markerBatchScenario.markers.front();
+        secondMarker.id = "marker-batch-second";
+        secondMarker.name = "Batch second";
+        secondMarker.start = 20'000;
+        secondMarker.end = 20'000;
+        secondMarker.kind = wave::MarkerKind::Point;
+        markerBatchScenario.markers.push_back(std::move(secondMarker));
+    }
+    const auto markerBatchBefore = markerBatchScenario;
+    expect(
+        markerBatchScenario.markers.size() >= 2,
+        "batch marker removal fixture requires two markers");
+    const std::vector<std::string> markerBatchIds{
+        markerBatchScenario.markers.front().id,
+        markerBatchScenario.markers.back().id,
+    };
+    wave::CommandStack markerBatchStack;
+    expect(
+        markerBatchStack.execute(
+            std::make_unique<wave::RemoveMarkersCommand>(
+                markerBatchScenario,
+                markerBatchIds)),
+        "batch marker removal reported no effect");
+    expectEqual(
+        markerBatchScenario.markers.size(),
+        markerBatchBefore.markers.size() - markerBatchIds.size(),
+        "batch marker removal changed the wrong count");
+    const auto markerBatchAfter = markerBatchScenario;
+    expect(
+        markerBatchStack.size() == 1 && markerBatchStack.undo(),
+        "batch marker removal was not one undoable command");
+    expectEqual(
+        markerBatchScenario,
+        markerBatchBefore,
+        "batch marker removal undo was not exact");
+    expect(
+        markerBatchStack.redo(),
+        "batch marker removal redo failed");
+    expectEqual(
+        markerBatchScenario,
+        markerBatchAfter,
+        "batch marker removal redo was not exact");
+
+    auto relationBatchScenario = scenario;
+    expect(
+        !relationBatchScenario.relations.empty(),
+        "batch relation removal fixture is missing its base relation");
+    auto additionalRelation = relationBatchScenario.relations.front();
+    additionalRelation.id = "relation-batch-second";
+    std::swap(
+        additionalRelation.sourceEventId,
+        additionalRelation.targetEventId);
+    relationBatchScenario.relations.push_back(additionalRelation);
+    const auto relationBatchBefore = relationBatchScenario;
+    const std::vector<std::string> relationBatchIds{
+        relationBatchScenario.relations.front().id,
+        relationBatchScenario.relations.back().id,
+    };
+    wave::CommandStack relationBatchStack;
+    expect(
+        relationBatchStack.execute(
+            std::make_unique<wave::RemoveRelationsCommand>(
+                relationBatchScenario,
+                relationBatchIds)),
+        "batch relation removal reported no effect");
+    expectEqual(
+        relationBatchScenario.relations.size(),
+        relationBatchBefore.relations.size() - relationBatchIds.size(),
+        "batch relation removal changed the wrong count");
+    const auto relationBatchAfter = relationBatchScenario;
+    expect(
+        relationBatchStack.size() == 1 && relationBatchStack.undo(),
+        "batch relation removal was not one undoable command");
+    expectEqual(
+        relationBatchScenario,
+        relationBatchBefore,
+        "batch relation removal undo was not exact");
+    expect(
+        relationBatchStack.redo(),
+        "batch relation removal redo failed");
+    expectEqual(
+        relationBatchScenario,
+        relationBatchAfter,
+        "batch relation removal redo was not exact");
+
     auto recoveryScenario = scenario;
     const auto recoveryMarker = std::find_if(
         recoveryScenario.markers.begin(),
@@ -5764,6 +5851,45 @@ void testCrossApplicationContracts()
     expect(launch.request->compareMode, "compare URI did not select Compare mode");
     expectEqual(launch.request->tick, std::optional<wave::Tick>{80'000}, "URI tick is incorrect");
     expectEqual(launch.request->laneId, QStringLiteral("lane-request"), "URI lane ID is incorrect");
+
+    QUrl scenarioUri(QStringLiteral(
+        "wave://scenario/scenario-handshake"));
+    QUrlQuery scenarioQuery;
+    scenarioQuery.addQueryItem(
+        QStringLiteral("project"),
+        QStringLiteral("C:/Project Folder/project.wave.json"));
+    scenarioQuery.addQueryItem(
+        QStringLiteral("lane"),
+        QStringLiteral("lane-data"));
+    scenarioQuery.addQueryItem(
+        QStringLiteral("marker"),
+        QStringLiteral("marker-transfer"));
+    scenarioUri.setQuery(scenarioQuery);
+    const auto scenarioLaunch = wave::parseWaveWorkbenchUri(scenarioUri);
+    expect(scenarioLaunch.ok(), scenarioLaunch.error.toStdString());
+    expectEqual(
+        scenarioLaunch.request->scenarioId,
+        QStringLiteral("scenario-handshake"),
+        "wave scenario URI stable ID is incorrect");
+    expectEqual(
+        scenarioLaunch.request->laneId,
+        QStringLiteral("lane-data"),
+        "wave scenario URI lane ID is incorrect");
+    expectEqual(
+        scenarioLaunch.request->markerId,
+        QStringLiteral("marker-transfer"),
+        "wave scenario URI marker ID is incorrect");
+    expect(
+        !scenarioLaunch.request->compareMode,
+        "wave scenario URI unexpectedly selected Compare mode");
+
+    const auto invalidScenarioUri = wave::parseWaveWorkbenchUri(
+        QUrl(QStringLiteral("wave://scenario/")));
+    expect(
+        !invalidScenarioUri.ok()
+            && invalidScenarioUri.error.contains(
+                QStringLiteral("stable scenario ID")),
+        "wave scenario URI accepted a missing stable ID");
 }
 
 void testZeroSlackModuleManifestImport()

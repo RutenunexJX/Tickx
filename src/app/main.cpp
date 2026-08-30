@@ -282,7 +282,12 @@ int main(int argc, char* argv[])
             uriText = argument.mid(QStringLiteral("--uri=").size());
         } else if (argument.startsWith(QStringLiteral("--autosave-smoke="))) {
             autosaveSmokePath = argument.mid(QStringLiteral("--autosave-smoke=").size());
-        } else if (argument.startsWith(QStringLiteral("waveworkbench://"), Qt::CaseInsensitive)) {
+        } else if (argument.startsWith(
+                       QStringLiteral("waveworkbench://"),
+                       Qt::CaseInsensitive)
+                   || argument.startsWith(
+                       QStringLiteral("wave://"),
+                       Qt::CaseInsensitive)) {
             uriText = argument;
         } else if (!argument.startsWith(QLatin1Char('-'))) {
             projectPath = argument;
@@ -432,6 +437,66 @@ int main(int argc, char* argv[])
             }
             initialScenarioIndex = static_cast<std::size_t>(
                 std::distance(project.scenarios.begin(), selected));
+        }
+        if (launchRequest && !project.scenarios.empty()) {
+            const auto targetScenarioIndex = initialScenarioIndex.value_or(0);
+            const auto& targetScenario = project.scenarios.at(
+                std::min(targetScenarioIndex, project.scenarios.size() - 1));
+            const auto rejectTarget = [smokeTest](const QString& message) {
+                if (smokeTest) {
+                    qCritical().noquote() << message;
+                } else {
+                    QMessageBox::critical(
+                        nullptr,
+                        QObject::tr("Invalid Wave Workbench URI"),
+                        message);
+                }
+            };
+            if (!launchRequest->laneId.isEmpty()) {
+                const auto laneId = launchRequest->laneId.toStdString();
+                const auto laneMatches = std::count_if(
+                    targetScenario.lanes.begin(),
+                    targetScenario.lanes.end(),
+                    [&laneId](const wave::Lane& lane) {
+                        return lane.id == laneId;
+                    });
+                if (laneMatches != 1) {
+                    rejectTarget(
+                        laneMatches == 0
+                            ? QObject::tr(
+                                  "The URI lane ID does not exist in the selected scenario.")
+                            : QObject::tr(
+                                  "The URI lane ID is duplicated in the selected scenario."));
+                    return 2;
+                }
+            }
+            if (!launchRequest->markerId.isEmpty()) {
+                const auto markerId = launchRequest->markerId.toStdString();
+                const auto markerMatches = std::count_if(
+                    targetScenario.markers.begin(),
+                    targetScenario.markers.end(),
+                    [&markerId](const wave::Marker& marker) {
+                        return marker.id == markerId;
+                    });
+                const auto marker = std::find_if(
+                    targetScenario.markers.begin(),
+                    targetScenario.markers.end(),
+                    [&markerId](const wave::Marker& candidate) {
+                        return candidate.id == markerId;
+                    });
+                if (markerMatches != 1) {
+                    rejectTarget(
+                        markerMatches == 0
+                            ? QObject::tr(
+                                  "The URI marker ID does not exist in the selected scenario.")
+                            : QObject::tr(
+                                  "The URI marker ID is duplicated in the selected scenario."));
+                    return 2;
+                }
+                if (!launchRequest->tick) {
+                    launchRequest->tick = marker->start;
+                }
+            }
         }
     }
     if (!autosaveSmokePath.isEmpty()) {
@@ -592,8 +657,14 @@ int main(int argc, char* argv[])
     });
 #endif
     if (compareMode) window.requestCompareMode();
-    if (launchRequest && launchRequest->tick) {
-        window.revealLocation(launchRequest->laneId, *launchRequest->tick);
+    if (launchRequest
+        && (launchRequest->tick || !launchRequest->laneId.isEmpty())) {
+        window.revealLocation(
+            launchRequest->laneId,
+            launchRequest->tick.value_or(0));
+    }
+    if (launchRequest && !launchRequest->markerId.isEmpty()) {
+        window.revealMarker(launchRequest->markerId);
     }
     if (fileConflictSmoke) {
         QTimer::singleShot(
@@ -19119,6 +19190,46 @@ int main(int argc, char* argv[])
                     return marker == markers.end() ? nullptr : &*marker;
                 };
                 auto* range = rangeById();
+                const auto rangeOriginalStart = range ? range->start : wave::Tick{0};
+                const auto rangeOriginalEnd = range ? range->end : wave::Tick{0};
+                drag(
+                    QPoint(markerX(rangeOriginalEnd), point3.y()),
+                    point3);
+                range = rangeById();
+                const auto resizedEnd = range ? range->end : wave::Tick{0};
+                const auto resizeStatus = window.statusBar()->currentMessage();
+                if (!range
+                    || range->start != rangeOriginalStart
+                    || range->end <= rangeOriginalEnd
+                    || !resizeStatus.contains(QStringLiteral("Adjusted"))
+                    || !resizeStatus.contains(QStringLiteral("Ctrl+Z"))) {
+                    qCritical().noquote()
+                        << "Locked range end drag did not resize as one edit"
+                        << resizeStatus;
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || !(range = rangeById())
+                    || range->start != rangeOriginalStart
+                    || range->end != rangeOriginalEnd) {
+                    qCritical().noquote()
+                        << "Locked range resize Undo was not exact";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || !(range = rangeById())
+                    || range->start != rangeOriginalStart
+                    || range->end != resizedEnd) {
+                    qCritical().noquote()
+                        << "Locked range resize Redo was not exact";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
                 auto boundaryMoves = 0;
                 while (range && range->start > 0 && boundaryMoves < 100) {
                     sendKey(Qt::Key_Left);
@@ -19277,6 +19388,65 @@ int main(int argc, char* argv[])
                             return;
                         }
                     }
+                }
+
+                const auto replacementMarker = *replacement;
+                const auto beforeBatchDeleteCount = uniqueMarkers.size();
+                click(QPoint(
+                    markerX(survivingMarker.start),
+                    point3.y()));
+                click(
+                    QPoint(markerX(replacementMarker.start), point3.y()),
+                    Qt::ControlModifier);
+                const auto selectedMarkerIds = canvas->selectedMarkerIds();
+                if (selectedMarkerIds.size() != 2
+                    || !selectedMarkerIds.contains(
+                        QString::fromStdString(survivingMarker.id))
+                    || !selectedMarkerIds.contains(
+                        QString::fromStdString(replacementMarker.id))) {
+                    qCritical().noquote()
+                        << "Ctrl+click did not create a two-marker selection";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                sendKey(Qt::Key_Delete);
+                if (window.project().scenarios.front().markers.size()
+                        != beforeBatchDeleteCount - 2
+                    || !window.statusBar()->currentMessage().contains(
+                        QStringLiteral("as one edit"))) {
+                    qCritical().noquote()
+                        << "Multi-marker Delete was not atomic";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || window.project().scenarios.front().markers.size()
+                        != beforeBatchDeleteCount) {
+                    qCritical().noquote()
+                        << "Multi-marker Delete Undo was not exact";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "redo", Qt::DirectConnection)
+                    || window.project().scenarios.front().markers.size()
+                        != beforeBatchDeleteCount - 2) {
+                    qCritical().noquote()
+                        << "Multi-marker Delete Redo was not exact";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(&window, "undo", Qt::DirectConnection)
+                    || window.project().scenarios.front().markers.size()
+                        != beforeBatchDeleteCount) {
+                    qCritical().noquote()
+                        << "Multi-marker restoration before final view failed";
+                    window.hide();
+                    application.exit(4);
+                    return;
                 }
 
                 drag(point4, point3);
@@ -34794,7 +34964,26 @@ int main(int argc, char* argv[])
             QTimer::singleShot(350, &application, saveScreenshot);
         }
     } else if (smokeTest) {
-        QTimer::singleShot(250, &application, [&application, &window] {
+        QTimer::singleShot(250, &application, [
+            &application,
+            &window,
+            launchRequest] {
+            if (launchRequest) {
+                auto* canvas = window.findChild<wave::WaveCanvas*>();
+                if (!canvas
+                    || (!launchRequest->laneId.isEmpty()
+                        && canvas->selectedLaneId()
+                            != launchRequest->laneId)
+                    || (!launchRequest->markerId.isEmpty()
+                        && canvas->selectedMarkerId()
+                            != launchRequest->markerId)) {
+                    qCritical().noquote()
+                        << "URI target was not selected in the waveform canvas";
+                    window.hide();
+                    application.exit(4);
+                    return;
+                }
+            }
             window.hide();
             application.exit(0);
         });
