@@ -403,6 +403,436 @@ std::uint64_t CommandStack::stateId() const noexcept
     return stateIds_[cursor_];
 }
 
+std::optional<std::uint64_t> CommandStack::undoTargetStateId() const noexcept
+{
+    return canUndo()
+        ? std::optional<std::uint64_t>{stateIds_[cursor_ - 1]}
+        : std::nullopt;
+}
+
+std::optional<std::uint64_t> CommandStack::redoTargetStateId() const noexcept
+{
+    return canRedo()
+        ? std::optional<std::uint64_t>{stateIds_[cursor_ + 1]}
+        : std::nullopt;
+}
+
+namespace {
+
+std::string trimmedScenarioName(const std::string_view value)
+{
+    auto begin = value.begin();
+    auto end = value.end();
+    while (begin != end
+           && std::isspace(static_cast<unsigned char>(*begin)) != 0) {
+        ++begin;
+    }
+    while (end != begin
+           && std::isspace(static_cast<unsigned char>(*std::prev(end))) != 0) {
+        --end;
+    }
+    return {begin, end};
+}
+
+std::string foldedScenarioName(const std::string_view value)
+{
+    auto result = trimmedScenarioName(value);
+    std::transform(
+        result.begin(),
+        result.end(),
+        result.begin(),
+        [](const unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+    return result;
+}
+
+std::size_t requiredScenarioIndex(
+    const Project& project,
+    const std::string_view scenarioId)
+{
+    const auto index = scenarioIndexByStableId(project, scenarioId);
+    if (!index) {
+        throw std::invalid_argument(
+            "scenario stable ID does not resolve to exactly one scenario");
+    }
+    return *index;
+}
+
+Scenario duplicateScenarioValue(
+    const Project& project,
+    const std::string_view sourceScenarioId,
+    std::string duplicateScenarioId,
+    std::string duplicateName)
+{
+    const auto sourceIndex = requiredScenarioIndex(project, sourceScenarioId);
+    auto duplicate = project.scenarios.at(sourceIndex);
+    duplicate.id = std::move(duplicateScenarioId);
+    duplicate.name = duplicateName.empty()
+        ? nextScenarioDuplicateName(project, project.scenarios.at(sourceIndex))
+        : trimmedScenarioName(duplicateName);
+    return duplicate;
+}
+
+std::size_t duplicateScenarioInsertionIndex(
+    const Project& project,
+    const std::string_view sourceScenarioId,
+    const std::optional<std::size_t> requested)
+{
+    if (requested) return *requested;
+    return requiredScenarioIndex(project, sourceScenarioId) + 1;
+}
+
+void moveScenarioToIndex(
+    Project& project,
+    const std::string_view scenarioId,
+    const std::size_t destinationIndex)
+{
+    if (destinationIndex >= project.scenarios.size()) {
+        throw std::invalid_argument(
+            "scenario destination index is outside the project");
+    }
+    const auto sourceIndex = requiredScenarioIndex(project, scenarioId);
+    if (sourceIndex == destinationIndex) return;
+    auto begin = project.scenarios.begin();
+    if (sourceIndex < destinationIndex) {
+        std::rotate(
+            begin + static_cast<std::ptrdiff_t>(sourceIndex),
+            begin + static_cast<std::ptrdiff_t>(sourceIndex + 1),
+            begin + static_cast<std::ptrdiff_t>(destinationIndex + 1));
+    } else {
+        std::rotate(
+            begin + static_cast<std::ptrdiff_t>(destinationIndex),
+            begin + static_cast<std::ptrdiff_t>(sourceIndex),
+            begin + static_cast<std::ptrdiff_t>(sourceIndex + 1));
+    }
+}
+
+} // namespace
+
+std::optional<std::size_t> scenarioIndexByStableId(
+    const Project& project,
+    const std::string_view scenarioId) noexcept
+{
+    if (scenarioId.empty()) return std::nullopt;
+    std::optional<std::size_t> result;
+    for (std::size_t index = 0; index < project.scenarios.size(); ++index) {
+        if (project.scenarios.at(index).id != scenarioId) continue;
+        if (result) return std::nullopt;
+        result = index;
+    }
+    return result;
+}
+
+bool scenarioNameAvailable(
+    const Project& project,
+    const std::string_view name,
+    const std::string_view ignoredScenarioId)
+{
+    const auto folded = foldedScenarioName(name);
+    if (folded.empty()) return false;
+    return std::none_of(
+        project.scenarios.begin(),
+        project.scenarios.end(),
+        [&folded, ignoredScenarioId](const Scenario& scenario) {
+            return scenario.id != ignoredScenarioId
+                && foldedScenarioName(scenario.name) == folded;
+        });
+}
+
+std::string nextScenarioName(
+    const Project& project,
+    const std::string_view baseName)
+{
+    auto base = trimmedScenarioName(baseName);
+    if (base.empty()) base = "Scenario";
+    if (scenarioNameAvailable(project, base)) return base;
+    for (std::size_t suffix = 2;; ++suffix) {
+        auto candidate = base + " " + std::to_string(suffix);
+        if (scenarioNameAvailable(project, candidate)) return candidate;
+    }
+}
+
+std::string nextScenarioDuplicateName(
+    const Project& project,
+    const Scenario& source)
+{
+    auto base = trimmedScenarioName(source.name);
+    if (base.empty()) base = "Scenario";
+    const auto first = base + " Copy";
+    if (scenarioNameAvailable(project, first)) return first;
+    for (std::size_t suffix = 2;; ++suffix) {
+        auto candidate = first + " " + std::to_string(suffix);
+        if (scenarioNameAvailable(project, candidate)) return candidate;
+    }
+}
+
+CreateScenarioCommand::CreateScenarioCommand(
+    Project& project,
+    Scenario scenario,
+    const std::optional<std::size_t> insertionIndex)
+    : project_(&project)
+    , scenario_(std::move(scenario))
+    , scenarioId_(scenario_.id)
+    , insertionIndex_(insertionIndex.value_or(project.scenarios.size()))
+{
+    if (scenarioId_.empty()) {
+        throw std::invalid_argument("scenario stable ID must not be empty");
+    }
+    if (scenario_.duration <= 0) {
+        throw std::invalid_argument("scenario duration must be positive");
+    }
+    scenario_.name = trimmedScenarioName(scenario_.name);
+    if (!scenarioNameAvailable(project, scenario_.name)) {
+        throw std::invalid_argument(
+            "scenario name must be non-empty and unique");
+    }
+    if (scenarioIndexByStableId(project, scenarioId_)) {
+        throw std::invalid_argument("scenario stable ID is already in use");
+    }
+    if (insertionIndex_ > project.scenarios.size()) {
+        throw std::invalid_argument(
+            "scenario insertion index is outside the project");
+    }
+}
+
+void CreateScenarioCommand::redo()
+{
+    if (scenarioIndexByStableId(*project_, scenarioId_)) {
+        throw std::runtime_error("scenario already exists before create");
+    }
+    if (insertionIndex_ > project_->scenarios.size()) {
+        throw std::runtime_error(
+            "scenario insertion index is no longer available");
+    }
+    project_->scenarios.insert(
+        project_->scenarios.begin()
+            + static_cast<std::ptrdiff_t>(insertionIndex_),
+        std::move(scenario_));
+    inserted_ = true;
+}
+
+void CreateScenarioCommand::undo()
+{
+    if (!inserted_) {
+        throw std::runtime_error("scenario create command has not been executed");
+    }
+    const auto index = requiredScenarioIndex(*project_, scenarioId_);
+    scenario_ = std::move(project_->scenarios.at(index));
+    project_->scenarios.erase(
+        project_->scenarios.begin() + static_cast<std::ptrdiff_t>(index));
+    inserted_ = false;
+}
+
+std::string CreateScenarioCommand::description() const
+{
+    return "Create scenario";
+}
+
+const std::string& CreateScenarioCommand::scenarioId() const noexcept
+{
+    return scenarioId_;
+}
+
+std::size_t CreateScenarioCommand::insertionIndex() const noexcept
+{
+    return insertionIndex_;
+}
+
+DuplicateScenarioCommand::DuplicateScenarioCommand(
+    Project& project,
+    std::string sourceScenarioId,
+    std::string duplicateScenarioId,
+    std::string duplicateName,
+    const std::optional<std::size_t> insertionIndex)
+    : createCommand_(
+          project,
+          duplicateScenarioValue(
+              project,
+              sourceScenarioId,
+              std::move(duplicateScenarioId),
+              std::move(duplicateName)),
+          duplicateScenarioInsertionIndex(
+              project, sourceScenarioId, insertionIndex))
+{
+}
+
+void DuplicateScenarioCommand::redo()
+{
+    createCommand_.redo();
+}
+
+void DuplicateScenarioCommand::undo()
+{
+    createCommand_.undo();
+}
+
+std::string DuplicateScenarioCommand::description() const
+{
+    return "Duplicate scenario";
+}
+
+const std::string& DuplicateScenarioCommand::scenarioId() const noexcept
+{
+    return createCommand_.scenarioId();
+}
+
+std::size_t DuplicateScenarioCommand::insertionIndex() const noexcept
+{
+    return createCommand_.insertionIndex();
+}
+
+RenameScenarioCommand::RenameScenarioCommand(
+    Project& project,
+    std::string scenarioId,
+    std::string name)
+    : project_(&project)
+    , scenarioId_(std::move(scenarioId))
+    , before_(project.scenarios.at(
+          requiredScenarioIndex(project, scenarioId_)).name)
+    , after_(trimmedScenarioName(name))
+{
+    if (!scenarioNameAvailable(project, after_, scenarioId_)) {
+        throw std::invalid_argument(
+            "scenario name must be non-empty and unique");
+    }
+}
+
+void RenameScenarioCommand::redo()
+{
+    project_->scenarios.at(
+        requiredScenarioIndex(*project_, scenarioId_)).name = after_;
+}
+
+void RenameScenarioCommand::undo()
+{
+    project_->scenarios.at(
+        requiredScenarioIndex(*project_, scenarioId_)).name = before_;
+}
+
+std::string RenameScenarioCommand::description() const
+{
+    return "Rename scenario";
+}
+
+bool RenameScenarioCommand::hasEffect() const noexcept
+{
+    return before_ != after_;
+}
+
+DeleteScenarioCommand::DeleteScenarioCommand(
+    Project& project,
+    std::string scenarioId)
+    : project_(&project)
+    , scenarioId_(std::move(scenarioId))
+    , removalIndex_(requiredScenarioIndex(project, scenarioId_))
+{
+    if (project.scenarios.size() <= 1) {
+        throw std::invalid_argument("the last scenario cannot be deleted");
+    }
+}
+
+void DeleteScenarioCommand::redo()
+{
+    if (project_->scenarios.size() <= 1) {
+        throw std::runtime_error("the last scenario cannot be deleted");
+    }
+    const auto index = requiredScenarioIndex(*project_, scenarioId_);
+    removalIndex_ = index;
+    if (removed_) {
+        *removed_ = std::move(project_->scenarios.at(index));
+    } else {
+        removed_.emplace(std::move(project_->scenarios.at(index)));
+    }
+    project_->scenarios.erase(
+        project_->scenarios.begin() + static_cast<std::ptrdiff_t>(index));
+    deleted_ = true;
+}
+
+void DeleteScenarioCommand::undo()
+{
+    if (!deleted_ || !removed_) {
+        throw std::runtime_error("scenario delete command has not been executed");
+    }
+    if (scenarioIndexByStableId(*project_, scenarioId_)) {
+        throw std::runtime_error("deleted scenario ID was reused before undo");
+    }
+    if (removalIndex_ > project_->scenarios.size()) {
+        throw std::runtime_error(
+            "scenario removal position is no longer available");
+    }
+    project_->scenarios.insert(
+        project_->scenarios.begin()
+            + static_cast<std::ptrdiff_t>(removalIndex_),
+        std::move(*removed_));
+    deleted_ = false;
+}
+
+std::string DeleteScenarioCommand::description() const
+{
+    return "Delete scenario";
+}
+
+const std::string& DeleteScenarioCommand::scenarioId() const noexcept
+{
+    return scenarioId_;
+}
+
+std::size_t DeleteScenarioCommand::removalIndex() const noexcept
+{
+    return removalIndex_;
+}
+
+ReorderScenarioCommand::ReorderScenarioCommand(
+    Project& project,
+    std::string scenarioId,
+    const std::size_t destinationIndex)
+    : project_(&project)
+    , scenarioId_(std::move(scenarioId))
+    , sourceIndex_(requiredScenarioIndex(project, scenarioId_))
+    , destinationIndex_(destinationIndex)
+{
+    if (destinationIndex_ >= project.scenarios.size()) {
+        throw std::invalid_argument(
+            "scenario destination index is outside the project");
+    }
+}
+
+void ReorderScenarioCommand::redo()
+{
+    moveScenarioToIndex(*project_, scenarioId_, destinationIndex_);
+}
+
+void ReorderScenarioCommand::undo()
+{
+    moveScenarioToIndex(*project_, scenarioId_, sourceIndex_);
+}
+
+std::string ReorderScenarioCommand::description() const
+{
+    return "Reorder scenario";
+}
+
+bool ReorderScenarioCommand::hasEffect() const noexcept
+{
+    return sourceIndex_ != destinationIndex_;
+}
+
+const std::string& ReorderScenarioCommand::scenarioId() const noexcept
+{
+    return scenarioId_;
+}
+
+std::size_t ReorderScenarioCommand::sourceIndex() const noexcept
+{
+    return sourceIndex_;
+}
+
+std::size_t ReorderScenarioCommand::destinationIndex() const noexcept
+{
+    return destinationIndex_;
+}
+
 ChangeScenarioDurationCommand::ChangeScenarioDurationCommand(
     Scenario& scenario,
     const Tick duration)

@@ -69,6 +69,11 @@
     },
     "operation": {
       "oneOf": [
+        { "$ref": "#/$defs/create-scenario" },
+        { "$ref": "#/$defs/duplicate-scenario" },
+        { "$ref": "#/$defs/rename-scenario" },
+        { "$ref": "#/$defs/delete-scenario" },
+        { "$ref": "#/$defs/reorder-scenario" },
         { "$ref": "#/$defs/add-group" },
         { "$ref": "#/$defs/update-group" },
         { "$ref": "#/$defs/move-group" },
@@ -103,6 +108,56 @@
         { "$ref": "#/$defs/update-marker" },
         { "$ref": "#/$defs/delete-marker" }
       ]
+    },
+    "create-scenario": {
+      "type": "object",
+      "required": ["op", "name"],
+      "properties": {
+        "op": { "const": "create-scenario" },
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "durationTick": { "$ref": "#/$defs/positiveInteger" },
+        "duration": { "$ref": "#/$defs/nonEmptyString" },
+        "insertionIndex": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "additionalProperties": false
+    },
+    "duplicate-scenario": {
+      "type": "object",
+      "required": ["op"],
+      "properties": {
+        "op": { "const": "duplicate-scenario" },
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "insertionIndex": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "additionalProperties": false
+    },
+    "rename-scenario": {
+      "type": "object",
+      "required": ["op", "name"],
+      "properties": {
+        "op": { "const": "rename-scenario" },
+        "name": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "delete-scenario": {
+      "type": "object",
+      "required": ["op"],
+      "properties": {
+        "op": { "const": "delete-scenario" }
+      },
+      "additionalProperties": false
+    },
+    "reorder-scenario": {
+      "type": "object",
+      "required": ["op", "destinationIndex"],
+      "properties": {
+        "op": { "const": "reorder-scenario" },
+        "destinationIndex": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "additionalProperties": false
     },
     "add-group": {
       "type": "object",

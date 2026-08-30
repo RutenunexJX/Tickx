@@ -196,6 +196,12 @@ private:
         std::uint64_t eventGeneration{0};
     };
 
+    struct ScenarioHistoryTransition {
+        std::uint64_t beforeStateId{0};
+        std::string beforeActiveScenarioId;
+        std::string afterActiveScenarioId;
+    };
+
     [[nodiscard]] static ProjectFileRevision projectFileRevision(
         const QString& path,
         QByteArray* contents = nullptr);
@@ -224,6 +230,22 @@ private:
     void createActions();
     void createToolBars();
     void populateScenarioSelector();
+    void createScenario();
+    void duplicateScenario();
+    void renameScenario();
+    void deleteScenario();
+    void moveScenarioEarlier();
+    void moveScenarioLater();
+    void showScenarioSelectorContextMenu(const QPoint& position);
+    bool executeScenarioLifecycleCommand(
+        std::unique_ptr<EditCommand> command,
+        const std::string& beforeActiveScenarioId,
+        const std::string& afterActiveScenarioId,
+        const QString& completionMessage,
+        bool copyViewContext = false);
+    bool restoreScenarioAfterLifecycle(
+        const std::string& preferredScenarioId);
+    void updateScenarioLifecycleActions();
     bool switchActiveScenario(std::size_t index, bool announce = true);
     void switchAdjacentScenario(bool forward);
     bool selectScenarioForHistoryState(std::uint64_t stateId);
@@ -388,7 +410,9 @@ private:
     CommandStack commandStack_;
     std::optional<std::uint64_t> cleanCommandStateId_;
     std::uint64_t observedCommandStateId_{0};
-    std::map<std::uint64_t, std::size_t> commandScenarioIndices_;
+    std::map<std::uint64_t, std::string> commandScenarioIds_;
+    std::map<std::uint64_t, ScenarioHistoryTransition>
+        scenarioHistoryTransitions_;
     std::uint64_t externalRevision_{0};
     std::uint64_t cleanExternalRevision_{0};
     WaveCanvas* canvas_{nullptr};
@@ -436,6 +460,12 @@ private:
     QAction* redoAction_{nullptr};
     QAction* previousScenarioAction_{nullptr};
     QAction* nextScenarioAction_{nullptr};
+    QAction* createScenarioAction_{nullptr};
+    QAction* duplicateScenarioAction_{nullptr};
+    QAction* renameScenarioAction_{nullptr};
+    QAction* deleteScenarioAction_{nullptr};
+    QAction* moveScenarioEarlierAction_{nullptr};
+    QAction* moveScenarioLaterAction_{nullptr};
     QAction* cutRangeAction_{nullptr};
     QAction* duplicateLaneAction_{nullptr};
     QAction* hideLaneAction_{nullptr};

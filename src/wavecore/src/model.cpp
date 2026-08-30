@@ -15,6 +15,14 @@
 namespace wave {
 namespace {
 
+std::shared_ptr<ScenarioAddressState> makeScenarioAddressState(
+    Scenario* scenario)
+{
+    auto state = std::make_shared<ScenarioAddressState>();
+    state->current = scenario;
+    return state;
+}
+
 std::string lowerCopy(const std::string_view text)
 {
     std::string result(text);
@@ -283,6 +291,190 @@ std::optional<Enum> enumFromString(
 }
 
 } // namespace
+
+ScenarioRef::ScenarioRef(std::nullptr_t) noexcept
+{
+}
+
+ScenarioRef::ScenarioRef(Scenario* scenario) noexcept
+    : state_(scenario ? scenario->addressState_ : nullptr)
+{
+}
+
+ScenarioRef::ScenarioRef(Scenario& scenario) noexcept
+    : ScenarioRef(&scenario)
+{
+}
+
+ScenarioRef& ScenarioRef::operator=(Scenario* scenario) noexcept
+{
+    state_ = scenario ? scenario->addressState_ : nullptr;
+    return *this;
+}
+
+ScenarioRef& ScenarioRef::operator=(std::nullptr_t) noexcept
+{
+    state_.reset();
+    return *this;
+}
+
+Scenario* ScenarioRef::get() const noexcept
+{
+    return state_ ? state_->current : nullptr;
+}
+
+ScenarioRef::operator bool() const noexcept
+{
+    return get() != nullptr;
+}
+
+ScenarioRef::operator Scenario*() const noexcept
+{
+    return get();
+}
+
+Scenario& ScenarioRef::operator*() const
+{
+    auto* scenario = get();
+    if (!scenario) {
+        throw std::runtime_error("scenario reference is no longer available");
+    }
+    return *scenario;
+}
+
+Scenario* ScenarioRef::operator->() const noexcept
+{
+    return get();
+}
+
+bool ScenarioRef::operator==(const Scenario* scenario) const noexcept
+{
+    return get() == scenario;
+}
+
+bool ScenarioRef::operator!=(const Scenario* scenario) const noexcept
+{
+    return get() != scenario;
+}
+
+bool ScenarioRef::operator==(std::nullptr_t) const noexcept
+{
+    return get() == nullptr;
+}
+
+bool ScenarioRef::operator!=(std::nullptr_t) const noexcept
+{
+    return get() != nullptr;
+}
+
+Scenario::Scenario()
+    : addressState_(makeScenarioAddressState(this))
+{
+}
+
+Scenario::Scenario(
+    std::string stableId,
+    std::string displayName,
+    const Tick scenarioDuration,
+    std::vector<Lane> scenarioLanes,
+    std::vector<Event> scenarioEvents,
+    std::vector<Relation> scenarioRelations,
+    std::vector<Marker> scenarioMarkers,
+    JsonExtensions scenarioExtensions)
+    : id(std::move(stableId))
+    , name(std::move(displayName))
+    , duration(scenarioDuration)
+    , lanes(std::move(scenarioLanes))
+    , events(std::move(scenarioEvents))
+    , relations(std::move(scenarioRelations))
+    , markers(std::move(scenarioMarkers))
+    , extensions(std::move(scenarioExtensions))
+    , addressState_(makeScenarioAddressState(this))
+{
+}
+
+Scenario::Scenario(const Scenario& other)
+    : id(other.id)
+    , name(other.name)
+    , duration(other.duration)
+    , lanes(other.lanes)
+    , events(other.events)
+    , relations(other.relations)
+    , markers(other.markers)
+    , extensions(other.extensions)
+    , addressState_(makeScenarioAddressState(this))
+{
+}
+
+Scenario::Scenario(Scenario&& other) noexcept
+    : id(std::move(other.id))
+    , name(std::move(other.name))
+    , duration(other.duration)
+    , lanes(std::move(other.lanes))
+    , events(std::move(other.events))
+    , relations(std::move(other.relations))
+    , markers(std::move(other.markers))
+    , extensions(std::move(other.extensions))
+    , addressState_(std::move(other.addressState_))
+{
+    if (!addressState_) addressState_ = makeScenarioAddressState(this);
+    addressState_->current = this;
+    other.addressState_ = makeScenarioAddressState(&other);
+}
+
+Scenario& Scenario::operator=(const Scenario& other)
+{
+    if (this == &other) return *this;
+    id = other.id;
+    name = other.name;
+    duration = other.duration;
+    lanes = other.lanes;
+    events = other.events;
+    relations = other.relations;
+    markers = other.markers;
+    extensions = other.extensions;
+    return *this;
+}
+
+Scenario& Scenario::operator=(Scenario&& other) noexcept
+{
+    if (this == &other) return *this;
+    if (addressState_ && addressState_->current == this) {
+        addressState_->current = nullptr;
+    }
+    id = std::move(other.id);
+    name = std::move(other.name);
+    duration = other.duration;
+    lanes = std::move(other.lanes);
+    events = std::move(other.events);
+    relations = std::move(other.relations);
+    markers = std::move(other.markers);
+    extensions = std::move(other.extensions);
+    addressState_ = std::move(other.addressState_);
+    if (!addressState_) addressState_ = makeScenarioAddressState(this);
+    addressState_->current = this;
+    other.addressState_ = makeScenarioAddressState(&other);
+    return *this;
+}
+
+Scenario::~Scenario()
+{
+    if (addressState_ && addressState_->current == this) {
+        addressState_->current = nullptr;
+    }
+}
+
+bool Scenario::operator==(const Scenario& other) const
+{
+    return id == other.id
+        && name == other.name
+        && duration == other.duration
+        && lanes == other.lanes
+        && events == other.events
+        && relations == other.relations
+        && markers == other.markers
+        && extensions == other.extensions;
+}
 
 std::string makeStableId(const std::string_view prefix)
 {

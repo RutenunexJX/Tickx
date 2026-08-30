@@ -74,8 +74,8 @@ foreach(operation_index RANGE 0 ${operation_last})
 endforeach()
 if(NOT identity_validation
    OR NOT identity_repair
-   OR NOT operation_count EQUAL 33
-   OR NOT operation_length EQUAL 33
+   OR NOT operation_count EQUAL 38
+   OR NOT operation_length EQUAL 38
    OR NOT has_repair_trace_identity)
     message(FATAL_ERROR "capabilities omit Imported Trace identity repair")
 endif()

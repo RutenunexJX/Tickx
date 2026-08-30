@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -137,6 +138,36 @@ struct Marker {
     [[nodiscard]] bool operator==(const Marker&) const = default;
 };
 
+struct Scenario;
+
+struct ScenarioAddressState {
+    Scenario* current{nullptr};
+};
+
+class ScenarioRef {
+public:
+    ScenarioRef() noexcept = default;
+    ScenarioRef(std::nullptr_t) noexcept;
+    explicit ScenarioRef(Scenario* scenario) noexcept;
+    explicit ScenarioRef(Scenario& scenario) noexcept;
+
+    ScenarioRef& operator=(Scenario* scenario) noexcept;
+    ScenarioRef& operator=(std::nullptr_t) noexcept;
+
+    [[nodiscard]] Scenario* get() const noexcept;
+    [[nodiscard]] explicit operator bool() const noexcept;
+    [[nodiscard]] operator Scenario*() const noexcept;
+    [[nodiscard]] Scenario& operator*() const;
+    [[nodiscard]] Scenario* operator->() const noexcept;
+    [[nodiscard]] bool operator==(const Scenario* scenario) const noexcept;
+    [[nodiscard]] bool operator!=(const Scenario* scenario) const noexcept;
+    [[nodiscard]] bool operator==(std::nullptr_t) const noexcept;
+    [[nodiscard]] bool operator!=(std::nullptr_t) const noexcept;
+
+private:
+    std::shared_ptr<ScenarioAddressState> state_;
+};
+
 struct Scenario {
     std::string id;
     std::string name;
@@ -147,7 +178,27 @@ struct Scenario {
     std::vector<Marker> markers;
     JsonExtensions extensions;
 
-    [[nodiscard]] bool operator==(const Scenario&) const = default;
+    Scenario();
+    Scenario(
+        std::string stableId,
+        std::string displayName,
+        Tick scenarioDuration,
+        std::vector<Lane> scenarioLanes,
+        std::vector<Event> scenarioEvents,
+        std::vector<Relation> scenarioRelations,
+        std::vector<Marker> scenarioMarkers,
+        JsonExtensions scenarioExtensions = {});
+    Scenario(const Scenario& other);
+    Scenario(Scenario&& other) noexcept;
+    Scenario& operator=(const Scenario& other);
+    Scenario& operator=(Scenario&& other) noexcept;
+    ~Scenario();
+
+    [[nodiscard]] bool operator==(const Scenario& other) const;
+
+private:
+    friend class ScenarioRef;
+    std::shared_ptr<ScenarioAddressState> addressState_;
 };
 
 struct ImportedTrace {

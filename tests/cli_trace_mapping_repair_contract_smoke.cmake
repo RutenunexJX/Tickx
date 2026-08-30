@@ -61,8 +61,8 @@ endforeach()
 if(NOT mapping_validation
    OR NOT mapping_repair
    OR NOT trace_reference
-   OR NOT operation_count EQUAL 33
-   OR NOT operation_length EQUAL 33
+   OR NOT operation_count EQUAL 38
+   OR NOT operation_length EQUAL 38
    OR NOT has_repair_trace_mapping)
     message(FATAL_ERROR "capabilities omit Trace mapping repair")
 endif()

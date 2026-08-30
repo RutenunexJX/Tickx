@@ -30,8 +30,8 @@ foreach(operation_index RANGE 0 ${operation_last})
         set(has_duplicate_signal TRUE)
     endif()
 endforeach()
-if(NOT operation_count EQUAL 33
-   OR NOT operation_length EQUAL 33
+if(NOT operation_count EQUAL 38
+   OR NOT operation_length EQUAL 38
    OR NOT has_duplicate_signal)
     message(FATAL_ERROR "duplicate-signal is missing from capabilities")
 endif()

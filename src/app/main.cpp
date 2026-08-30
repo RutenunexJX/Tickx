@@ -1690,6 +1690,18 @@ int main(int argc, char* argv[])
                     QStringLiteral("PreviousWaveformAction"));
                 auto* nextWaveformAction = window.findChild<QAction*>(
                     QStringLiteral("NextWaveformAction"));
+                auto* createScenarioAction = window.findChild<QAction*>(
+                    QStringLiteral("CreateScenarioAction"));
+                auto* duplicateScenarioAction = window.findChild<QAction*>(
+                    QStringLiteral("DuplicateScenarioAction"));
+                auto* renameScenarioAction = window.findChild<QAction*>(
+                    QStringLiteral("RenameScenarioAction"));
+                auto* deleteScenarioAction = window.findChild<QAction*>(
+                    QStringLiteral("DeleteScenarioAction"));
+                auto* moveScenarioEarlierAction = window.findChild<QAction*>(
+                    QStringLiteral("MoveScenarioEarlierAction"));
+                auto* moveScenarioLaterAction = window.findChild<QAction*>(
+                    QStringLiteral("MoveScenarioLaterAction"));
                 auto* durationEdit = window.findChild<QLineEdit*>(
                     QStringLiteral("TimelineDurationEdit"));
                 auto* saveState = window.findChild<QLabel*>(
@@ -1697,10 +1709,14 @@ int main(int argc, char* argv[])
                 if (!selector || !selectorAction || !selectorLabel || !canvas
                     || !undoAction || !redoAction
                     || !previousWaveformAction || !nextWaveformAction
+                    || !createScenarioAction || !duplicateScenarioAction
+                    || !renameScenarioAction || !deleteScenarioAction
+                    || !moveScenarioEarlierAction || !moveScenarioLaterAction
                     || !durationEdit || !saveState
                     || !selectorLabel->isVisible()
                     || !selector->isVisible() || !selectorAction->isVisible()
                     || selector->count() != 2 || selector->currentIndex() != 1
+                    || selector->contextMenuPolicy() != Qt::CustomContextMenu
                     || selector->itemData(0).toULongLong() != 0
                     || selector->itemData(1).toULongLong() != 1
                     || !selector->toolTip().contains(QStringLiteral("2 waveforms"))
@@ -1873,6 +1889,204 @@ int main(int argc, char* argv[])
                     || !window.windowTitle().contains(QStringLiteral(" *"))) {
                     fail(QStringLiteral(
                         "Second Redo did not follow and restore the second waveform edit"));
+                    return;
+                }
+
+                const auto responseScenarioId =
+                    window.project().scenarios.at(1).id;
+                const auto responseContextLane = canvas->selectedLaneId();
+                const auto responseContextCursor = canvas->cursorTick();
+                const auto responseContextSpan = canvas->visibleTimeSpan();
+                const auto responseContextHorizontal =
+                    canvas->horizontalScrollBar()->value();
+                QStringList responseMarkerIds;
+                QStringList responseRelationIds;
+                if (!window.project().scenarios.at(1).markers.empty()) {
+                    responseMarkerIds.append(QString::fromStdString(
+                        window.project().scenarios.at(1).markers.front().id));
+                }
+                if (!window.project().scenarios.at(1).relations.empty()) {
+                    responseRelationIds.append(QString::fromStdString(
+                        window.project().scenarios.at(1).relations.front().id));
+                }
+                canvas->restoreStableObjectSelections(
+                    responseMarkerIds,
+                    responseRelationIds);
+
+                bool createDialogHandled = false;
+                QTimer::singleShot(0, &window, [&createDialogHandled] {
+                    auto* dialog = qobject_cast<QDialog*>(
+                        QApplication::activeModalWidget());
+                    auto* edit = dialog
+                        ? dialog->findChild<QLineEdit*>()
+                        : nullptr;
+                    if (!dialog || !edit) return;
+                    edit->setText(QStringLiteral("Created lifecycle"));
+                    createDialogHandled = true;
+                    dialog->accept();
+                });
+                createScenarioAction->trigger();
+                QCoreApplication::processEvents();
+                if (!createDialogHandled
+                    || window.project().scenarios.size() != 3
+                    || selector->currentIndex() != 2
+                    || window.project().scenarios.at(2).name
+                        != "Created lifecycle"
+                    || window.project().scenarios.at(2).id.empty()
+                    || !window.project().scenarios.at(2).lanes.empty()
+                    || window.project().scenarios.at(2).duration
+                        != editedB.duration
+                    || moveScenarioLaterAction->isEnabled()
+                    || !deleteScenarioAction->isEnabled()) {
+                    fail(QStringLiteral(
+                        "Create Scenario did not produce a stable blank one-step edit"));
+                    return;
+                }
+                const auto createdScenarioId =
+                    window.project().scenarios.at(2).id;
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+                if (window.project().scenarios.size() != 2
+                    || selector->currentIndex() != 1
+                    || window.project().scenarios.at(1) != editedB
+                    || canvas->selectedLaneId() != responseContextLane
+                    || canvas->cursorTick() != responseContextCursor
+                    || canvas->selectedMarkerIds() != responseMarkerIds
+                    || canvas->selectedRelationIds() != responseRelationIds) {
+                    fail(QStringLiteral(
+                        "Create Scenario undo did not restore the exact source context"));
+                    return;
+                }
+                redoAction->trigger();
+                QCoreApplication::processEvents();
+                if (window.project().scenarios.size() != 3
+                    || window.project().scenarios.at(2).id
+                        != createdScenarioId) {
+                    fail(QStringLiteral(
+                        "Create Scenario redo did not restore its stable ID"));
+                    return;
+                }
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+
+                duplicateScenarioAction->trigger();
+                QCoreApplication::processEvents();
+                if (window.project().scenarios.size() != 3
+                    || selector->currentIndex() != 2
+                    || window.project().scenarios.at(2).id
+                        == responseScenarioId
+                    || window.project().scenarios.at(2).name
+                        != editedB.name + " Copy"
+                    || window.project().scenarios.at(2).lanes
+                        != editedB.lanes
+                    || window.project().scenarios.at(2).events
+                        != editedB.events
+                    || window.project().scenarios.at(2).markers
+                        != editedB.markers
+                    || window.project().scenarios.at(2).relations
+                        != editedB.relations
+                    || canvas->selectedLaneId() != responseContextLane
+                    || canvas->cursorTick() != responseContextCursor
+                    || canvas->visibleTimeSpan() != responseContextSpan
+                    || canvas->horizontalScrollBar()->value()
+                        != responseContextHorizontal
+                    || canvas->selectedMarkerIds() != responseMarkerIds
+                    || canvas->selectedRelationIds() != responseRelationIds) {
+                    fail(QStringLiteral(
+                        "Duplicate Scenario did not preserve content, stable context, and deterministic naming"));
+                    return;
+                }
+                const auto duplicateScenarioId =
+                    window.project().scenarios.at(2).id;
+
+                moveScenarioEarlierAction->trigger();
+                QCoreApplication::processEvents();
+                if (selector->currentIndex() != 1
+                    || window.project().scenarios.at(1).id
+                        != duplicateScenarioId
+                    || window.project().scenarios.at(2).id
+                        != responseScenarioId
+                    || canvas->selectedLaneId() != responseContextLane
+                    || canvas->cursorTick() != responseContextCursor) {
+                    fail(QStringLiteral(
+                        "Reorder Scenario did not retain stable selection and viewport context"));
+                    return;
+                }
+
+                bool renameDialogHandled = false;
+                QTimer::singleShot(0, &window, [&renameDialogHandled] {
+                    auto* dialog = qobject_cast<QDialog*>(
+                        QApplication::activeModalWidget());
+                    auto* edit = dialog
+                        ? dialog->findChild<QLineEdit*>()
+                        : nullptr;
+                    if (!dialog || !edit) return;
+                    edit->setText(QStringLiteral("Renamed lifecycle copy"));
+                    renameDialogHandled = true;
+                    dialog->accept();
+                });
+                renameScenarioAction->trigger();
+                QCoreApplication::processEvents();
+                if (!renameDialogHandled
+                    || window.project().scenarios.at(1).id
+                        != duplicateScenarioId
+                    || window.project().scenarios.at(1).name
+                        != "Renamed lifecycle copy") {
+                    fail(QStringLiteral(
+                        "Rename Scenario changed identity or failed its one-step edit"));
+                    return;
+                }
+
+                bool deleteConfirmed = false;
+                QTimer::singleShot(0, &window, [&deleteConfirmed] {
+                    auto* box = qobject_cast<QMessageBox*>(
+                        QApplication::activeModalWidget());
+                    auto* yes = box ? box->button(QMessageBox::Yes) : nullptr;
+                    if (!yes) return;
+                    deleteConfirmed = true;
+                    yes->click();
+                });
+                deleteScenarioAction->trigger();
+                QCoreApplication::processEvents();
+                if (!deleteConfirmed
+                    || window.project().scenarios.size() != 2
+                    || selector->currentIndex() != 1
+                    || window.project().scenarios.at(1).id
+                        != responseScenarioId
+                    || canvas->selectedLaneId() != responseContextLane
+                    || canvas->cursorTick() != responseContextCursor
+                    || canvas->selectedMarkerIds() != responseMarkerIds
+                    || canvas->selectedRelationIds() != responseRelationIds) {
+                    fail(QStringLiteral(
+                        "Delete Scenario did not use confirmation and deterministic next fallback"));
+                    return;
+                }
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+                if (window.project().scenarios.size() != 3
+                    || selector->currentIndex() != 1
+                    || window.project().scenarios.at(1).id
+                        != duplicateScenarioId
+                    || window.project().scenarios.at(1).name
+                        != "Renamed lifecycle copy"
+                    || canvas->selectedMarkerIds() != responseMarkerIds
+                    || canvas->selectedRelationIds() != responseRelationIds) {
+                    fail(QStringLiteral(
+                        "Delete Scenario undo did not restore exact content, order, and context"));
+                    return;
+                }
+                undoAction->trigger();
+                undoAction->trigger();
+                undoAction->trigger();
+                QCoreApplication::processEvents();
+                if (window.project().scenarios.size() != 2
+                    || selector->currentIndex() != 1
+                    || window.project().scenarios.at(0) != editedA
+                    || window.project().scenarios.at(1) != editedB
+                    || canvas->selectedLaneId() != responseContextLane
+                    || canvas->cursorTick() != responseContextCursor) {
+                    fail(QStringLiteral(
+                        "Scenario lifecycle Undo chain did not restore the pre-lifecycle project"));
                     return;
                 }
 

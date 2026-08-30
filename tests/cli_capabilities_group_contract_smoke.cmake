@@ -60,6 +60,11 @@ endforeach()
 set(has_update_group FALSE)
 set(has_move_group FALSE)
 set(has_delete_group FALSE)
+set(has_create_scenario FALSE)
+set(has_duplicate_scenario FALSE)
+set(has_rename_scenario FALSE)
+set(has_delete_scenario FALSE)
+set(has_reorder_scenario FALSE)
 math(EXPR operation_last "${operation_length} - 1")
 foreach(operation_index RANGE 0 ${operation_last})
     string(JSON operation_name
@@ -70,14 +75,24 @@ foreach(operation_index RANGE 0 ${operation_last})
         set(has_move_group TRUE)
     elseif(operation_name STREQUAL "delete-group")
         set(has_delete_group TRUE)
+    elseif(operation_name STREQUAL "create-scenario")
+        set(has_create_scenario TRUE)
+    elseif(operation_name STREQUAL "duplicate-scenario")
+        set(has_duplicate_scenario TRUE)
+    elseif(operation_name STREQUAL "rename-scenario")
+        set(has_rename_scenario TRUE)
+    elseif(operation_name STREQUAL "delete-scenario")
+        set(has_delete_scenario TRUE)
+    elseif(operation_name STREQUAL "reorder-scenario")
+        set(has_reorder_scenario TRUE)
     endif()
 endforeach()
 if(NOT capabilities_schema STREQUAL "wave-workbench.capabilities/v1"
    OR NOT report_schema STREQUAL "wave-workbench.cli/v1"
    OR NOT batch_schema STREQUAL "wave-workbench.operations/v1"
    OR NOT command_count EQUAL 11
-   OR NOT operation_count EQUAL 33
-   OR NOT operation_length EQUAL 33
+   OR NOT operation_count EQUAL 38
+   OR NOT operation_length EQUAL 38
    OR NOT batch_atomic
    OR NOT relation_selector_length EQUAL 1
    OR NOT marker_selector_length EQUAL 2
@@ -90,7 +105,12 @@ if(NOT capabilities_schema STREQUAL "wave-workbench.capabilities/v1"
    OR NOT has_relations
    OR NOT has_update_group
    OR NOT has_move_group
-   OR NOT has_delete_group)
+   OR NOT has_delete_group
+   OR NOT has_create_scenario
+   OR NOT has_duplicate_scenario
+   OR NOT has_rename_scenario
+   OR NOT has_delete_scenario
+   OR NOT has_reorder_scenario)
     message(FATAL_ERROR "capabilities returned an incomplete contract")
 endif()
 

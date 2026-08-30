@@ -18,6 +18,8 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <string>
+#include <string_view>
 #include <vector>
 
 class QContextMenuEvent;
@@ -109,6 +111,9 @@ public:
     void setDocument(Project* project, Scenario* scenario, CommandStack* commandStack);
     void clearDocumentContexts();
     [[nodiscard]] bool hasDocumentContext(const Scenario* scenario) const noexcept;
+    bool cloneDocumentContext(
+        std::string_view sourceScenarioId,
+        std::string_view targetScenarioId);
     void setTool(Tool tool);
 
     [[nodiscard]] Tool tool() const noexcept;
@@ -261,6 +266,9 @@ public slots:
     void refreshModel();
     void revealLocation(const QString& laneId, qint64 tick);
     void revealMarker(const QString& markerId);
+    void restoreStableObjectSelections(
+        const QStringList& markerIds,
+        const QStringList& relationIds);
     void revealLane(const QString& laneId);
     void selectLaneHeaders(
         const QStringList& laneIds,
@@ -656,6 +664,8 @@ private:
 
     struct DocumentContext {
         HistorySelectionSnapshot selection;
+        std::vector<std::string> selectedMarkerIds;
+        std::vector<std::string> selectedRelationIds;
         std::map<
             std::pair<std::uint64_t, std::uint64_t>,
             HistorySelectionSnapshot>
@@ -1080,7 +1090,7 @@ private:
     void drawLaneReorderOverlay(class QPainter& painter);
 
     Project* project_{nullptr};
-    Scenario* scenario_{nullptr};
+    ScenarioRef scenario_;
     CommandStack* commandStack_{nullptr};
     std::array<QToolButton*, 3> addLaneButtons_{};
     QToolButton* showHiddenLanesButton_{nullptr};
@@ -1267,7 +1277,7 @@ private:
         historySelectionTransitions_;
     std::optional<std::pair<std::uint64_t, HistorySelectionSnapshot>>
         pendingCommandSelectionTransition_;
-    std::map<const Scenario*, DocumentContext> documentContexts_;
+    std::map<std::string, DocumentContext> documentContexts_;
 };
 
 } // namespace wave

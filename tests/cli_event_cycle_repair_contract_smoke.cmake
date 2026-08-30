@@ -58,8 +58,8 @@ foreach(operation_index RANGE 0 ${operation_last})
     endif()
 endforeach()
 if(NOT cycle_capability
-   OR NOT operation_count EQUAL 33
-   OR NOT operation_length EQUAL 33
+   OR NOT operation_count EQUAL 38
+   OR NOT operation_length EQUAL 38
    OR NOT has_clear_event_cycle)
     message(FATAL_ERROR "capabilities omit Event cycle repair")
 endif()

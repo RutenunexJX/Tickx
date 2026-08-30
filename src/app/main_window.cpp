@@ -1671,6 +1671,12 @@ void MainWindow::applyPendingExternalProjectUpdate(const bool userRequested)
     const auto selectedLaneId = canvas_
         ? canvas_->selectedLaneId()
         : QString{};
+    const auto selectedMarkerIds = canvas_
+        ? canvas_->selectedMarkerIds()
+        : QStringList{};
+    const auto selectedRelationIds = canvas_
+        ? canvas_->selectedRelationIds()
+        : QStringList{};
     const auto laneHeaderSelection = canvas_
         && canvas_->hasLaneHeaderSelection();
     const auto cursorTick = canvas_ ? canvas_->cursorTick() : Tick{0};
@@ -1703,7 +1709,7 @@ void MainWindow::applyPendingExternalProjectUpdate(const bool userRequested)
     traceIndex_.reset();
     activeTraceId_.clear();
     traceVisibleSignalIds_.clear();
-    canvas_->clearDocumentContexts();
+    canvas_->setDocument(nullptr, nullptr, &commandStack_);
     pendingQuickLaneId_.clear();
     pendingQuickCommandSize_ = 0;
     quickLaneDirtyBefore_ = false;
@@ -1715,6 +1721,7 @@ void MainWindow::applyPendingExternalProjectUpdate(const bool userRequested)
     activeScenarioIndex_ = project_.scenarios.empty()
         ? std::size_t{0}
         : std::min(scenarioIndexBefore, project_.scenarios.size() - 1);
+    auto activeScenarioRemoved = !scenarioIdBefore.empty();
     if (!scenarioIdBefore.empty()) {
         const auto matchingScenario = std::find_if(
             project_.scenarios.begin(),
@@ -1726,6 +1733,7 @@ void MainWindow::applyPendingExternalProjectUpdate(const bool userRequested)
             activeScenarioIndex_ = static_cast<std::size_t>(std::distance(
                 project_.scenarios.begin(),
                 matchingScenario));
+            activeScenarioRemoved = false;
         }
     }
     if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
@@ -1751,6 +1759,9 @@ void MainWindow::applyPendingExternalProjectUpdate(const bool userRequested)
             canvas_->revealLocation(selectedLaneId, cursorTick);
         }
     }
+    canvas_->restoreStableObjectSelections(
+        selectedMarkerIds,
+        selectedRelationIds);
 
     updateCommandActions();
     updateWindowTitle();
@@ -1766,6 +1777,12 @@ void MainWindow::applyPendingExternalProjectUpdate(const bool userRequested)
 
     auto message = externalProjectUpdateSummary(update.summary)
         + tr(" · waveform reloaded");
+    if (activeScenarioRemoved) {
+        message += tr(" · scenario ID %1 was removed; selected waveform %2 by nearest-index fallback")
+                       .arg(
+                           QString::fromStdString(scenarioIdBefore),
+                           activeScenarioLabel());
+    }
     if (!update.warnings.isEmpty()) {
         message += tr(" · %1").arg(update.warnings.join(QStringLiteral("; ")));
     }
@@ -5110,18 +5127,33 @@ void MainWindow::undo()
     const auto description =
         QString::fromStdString(commandStack_.undoDescription());
     const auto historyStateBefore = commandStack_.stateId();
-    const auto changedWaveform =
-        selectScenarioForHistoryState(historyStateBefore);
+    const auto lifecycle = scenarioHistoryTransitions_.find(
+        historyStateBefore);
+    const auto lifecycleUndo = lifecycle != scenarioHistoryTransitions_.end()
+        && commandStack_.undoTargetStateId()
+            == std::optional<std::uint64_t>{lifecycle->second.beforeStateId};
+    auto changedWaveform = false;
+    if (lifecycleUndo) {
+        rememberActiveScenarioLocation();
+        canvas_->setDocument(&project_, nullptr, &commandStack_);
+    } else {
+        changedWaveform = selectScenarioForHistoryState(historyStateBefore);
+    }
     if (commandStack_.undo()) {
         invalidateCompareResult();
         observedCommandStateId_ = commandStack_.stateId();
+        if (lifecycleUndo) {
+            changedWaveform = restoreScenarioAfterLifecycle(
+                lifecycle->second.beforeActiveScenarioId);
+        }
         const auto cleanupFailure = synchronizeDirtyState();
         canvas_->invalidateRangeSequenceHistoryContext();
         canvas_->refreshModel();
-        const auto restoredSelection =
-            canvas_->restoreSelectionForHistoryTransition(
-                historyStateBefore,
-                commandStack_.stateId());
+        const auto restoredSelection = lifecycleUndo
+            ? QString{}
+            : canvas_->restoreSelectionForHistoryTransition(
+                  historyStateBefore,
+                  commandStack_.stateId());
         updateCommandActions();
         updateWindowTitle();
         auto message = dirty_
@@ -5160,18 +5192,31 @@ void MainWindow::redo()
     const auto description =
         QString::fromStdString(commandStack_.redoDescription());
     const auto historyStateBefore = commandStack_.stateId();
+    const auto redoTargetStateId = commandStack_.redoTargetStateId();
+    const auto lifecycle = redoTargetStateId
+        ? scenarioHistoryTransitions_.find(*redoTargetStateId)
+        : scenarioHistoryTransitions_.end();
+    const auto lifecycleRedo = lifecycle != scenarioHistoryTransitions_.end()
+        && lifecycle->second.beforeStateId == historyStateBefore;
+    if (lifecycleRedo) {
+        rememberActiveScenarioLocation();
+        canvas_->setDocument(&project_, nullptr, &commandStack_);
+    }
     if (commandStack_.redo()) {
         invalidateCompareResult();
         observedCommandStateId_ = commandStack_.stateId();
-        const auto changedWaveform =
-            selectScenarioForHistoryState(observedCommandStateId_);
+        const auto changedWaveform = lifecycleRedo
+            ? restoreScenarioAfterLifecycle(
+                  lifecycle->second.afterActiveScenarioId)
+            : selectScenarioForHistoryState(observedCommandStateId_);
         const auto cleanupFailure = synchronizeDirtyState();
         canvas_->invalidateRangeSequenceHistoryContext();
         canvas_->refreshModel();
-        const auto restoredSelection =
-            canvas_->restoreSelectionForHistoryTransition(
-                historyStateBefore,
-                commandStack_.stateId());
+        const auto restoredSelection = lifecycleRedo
+            ? QString{}
+            : canvas_->restoreSelectionForHistoryTransition(
+                  historyStateBefore,
+                  commandStack_.stateId());
         updateCommandActions();
         updateWindowTitle();
         auto message = dirty_
@@ -5209,7 +5254,9 @@ void MainWindow::markEdited()
     if (currentStateId == observedCommandStateId_) {
         ++externalRevision_;
     } else {
-        commandScenarioIndices_[currentStateId] = activeScenarioIndex_;
+        if (const auto* scenario = activeScenario()) {
+            commandScenarioIds_[currentStateId] = scenario->id;
+        }
     }
     observedCommandStateId_ = currentStateId;
     (void)synchronizeDirtyState();
@@ -5244,7 +5291,8 @@ QString MainWindow::synchronizeDirtyState()
 void MainWindow::resetEditTracking(const bool clean)
 {
     observedCommandStateId_ = commandStack_.stateId();
-    commandScenarioIndices_.clear();
+    commandScenarioIds_.clear();
+    scenarioHistoryTransitions_.clear();
     externalRevision_ = 0;
     cleanExternalRevision_ = 0;
     if (clean) {
@@ -10248,6 +10296,67 @@ void MainWindow::createActions()
         &QAction::triggered,
         this,
         [this] { switchAdjacentScenario(true); });
+
+    auto* scenarioMenu = editMenu_->addMenu(tr("&Scenario"));
+    scenarioMenu->setObjectName(QStringLiteral("ScenarioMenu"));
+    scenarioMenu->setToolTipsVisible(true);
+    createScenarioAction_ = scenarioMenu->addAction(tr("&Create scenario…"));
+    createScenarioAction_->setObjectName(QStringLiteral("CreateScenarioAction"));
+    createScenarioAction_->setToolTip(
+        tr("Create a blank scenario with a stable ID and matching timeline duration"));
+    connect(
+        createScenarioAction_,
+        &QAction::triggered,
+        this,
+        &MainWindow::createScenario);
+    duplicateScenarioAction_ = scenarioMenu->addAction(tr("&Duplicate scenario"));
+    duplicateScenarioAction_->setObjectName(
+        QStringLiteral("DuplicateScenarioAction"));
+    duplicateScenarioAction_->setShortcut(
+        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D));
+    duplicateScenarioAction_->setToolTip(
+        tr("Duplicate the current scenario with a new stable ID and deterministic name"));
+    connect(
+        duplicateScenarioAction_,
+        &QAction::triggered,
+        this,
+        &MainWindow::duplicateScenario);
+    renameScenarioAction_ = scenarioMenu->addAction(tr("&Rename scenario…"));
+    renameScenarioAction_->setObjectName(QStringLiteral("RenameScenarioAction"));
+    connect(
+        renameScenarioAction_,
+        &QAction::triggered,
+        this,
+        &MainWindow::renameScenario);
+    deleteScenarioAction_ = scenarioMenu->addAction(tr("&Delete scenario…"));
+    deleteScenarioAction_->setObjectName(QStringLiteral("DeleteScenarioAction"));
+    deleteScenarioAction_->setToolTip(
+        tr("Delete the current scenario after confirmation; the last scenario is protected"));
+    connect(
+        deleteScenarioAction_,
+        &QAction::triggered,
+        this,
+        &MainWindow::deleteScenario);
+    scenarioMenu->addSeparator();
+    moveScenarioEarlierAction_ = scenarioMenu->addAction(
+        tr("Move scenario &earlier"));
+    moveScenarioEarlierAction_->setObjectName(
+        QStringLiteral("MoveScenarioEarlierAction"));
+    connect(
+        moveScenarioEarlierAction_,
+        &QAction::triggered,
+        this,
+        &MainWindow::moveScenarioEarlier);
+    moveScenarioLaterAction_ = scenarioMenu->addAction(
+        tr("Move scenario &later"));
+    moveScenarioLaterAction_->setObjectName(
+        QStringLiteral("MoveScenarioLaterAction"));
+    connect(
+        moveScenarioLaterAction_,
+        &QAction::triggered,
+        this,
+        &MainWindow::moveScenarioLater);
+    updateScenarioLifecycleActions();
     editMenu_->addSeparator();
     cutRangeAction_ = editMenu_->addAction(tr("Cu&t range"));
     cutRangeAction_->setObjectName(QStringLiteral("CutRangeAction"));
@@ -11016,7 +11125,274 @@ void MainWindow::populateScenarioSelector()
                   .arg(static_cast<qulonglong>(project_.scenarios.size()))
             : tr("This project contains one waveform"));
     updateScenarioNavigationActions();
+    updateScenarioLifecycleActions();
     updateSimulationScenarioActions();
+}
+
+bool MainWindow::executeScenarioLifecycleCommand(
+    std::unique_ptr<EditCommand> command,
+    const std::string& beforeActiveScenarioId,
+    const std::string& afterActiveScenarioId,
+    const QString& completionMessage,
+    const bool copyViewContext)
+{
+    if (!command || !commitPendingEdits()) return false;
+    if (!pendingQuickLaneId_.isEmpty()) {
+        statusBar()->showMessage(
+            tr("Finish or cancel the current signal before changing scenarios."),
+            5'000);
+        return false;
+    }
+
+    rememberActiveScenarioLocation();
+    const auto beforeStateId = commandStack_.stateId();
+    canvas_->setDocument(&project_, nullptr, &commandStack_);
+    try {
+        if (!commandStack_.execute(std::move(command))) {
+            static_cast<void>(
+                restoreScenarioAfterLifecycle(beforeActiveScenarioId));
+            return false;
+        }
+    } catch (const std::exception& exception) {
+        static_cast<void>(
+            restoreScenarioAfterLifecycle(beforeActiveScenarioId));
+        QMessageBox::warning(
+            this,
+            tr("Scenario edit"),
+            QString::fromUtf8(exception.what()));
+        return false;
+    }
+
+    const auto afterStateId = commandStack_.stateId();
+    scenarioHistoryTransitions_[afterStateId] = {
+        beforeStateId,
+        beforeActiveScenarioId,
+        afterActiveScenarioId,
+    };
+    if (copyViewContext) {
+        static_cast<void>(canvas_->cloneDocumentContext(
+            beforeActiveScenarioId,
+            afterActiveScenarioId));
+    }
+    static_cast<void>(restoreScenarioAfterLifecycle(afterActiveScenarioId));
+    markEdited();
+    statusBar()->showMessage(
+        completionMessage + tr(" · Ctrl+Z to undo"),
+        5'000);
+    return true;
+}
+
+bool MainWindow::restoreScenarioAfterLifecycle(
+    const std::string& preferredScenarioId)
+{
+    if (project_.scenarios.empty()) {
+        activeScenarioIndex_ = 0;
+        canvas_->setDocument(&project_, nullptr, &commandStack_);
+        populateScenarioSelector();
+        return false;
+    }
+    const auto preferred = scenarioIndexByStableId(
+        project_, preferredScenarioId);
+    activeScenarioIndex_ = preferred.value_or(std::size_t{0});
+    populateScenarioSelector();
+    canvas_->setDocument(&project_, activeScenario(), &commandStack_);
+    refreshTraceViews();
+    invalidateCompareResult();
+    rememberActiveScenario();
+    updateCommandActions();
+    updateWindowTitle();
+    return preferred.has_value();
+}
+
+void MainWindow::createScenario()
+{
+    const auto* source = activeScenario();
+    if (!source || simulationResultMode_) return;
+    bool accepted = false;
+    const auto suggested = QString::fromStdString(
+        nextScenarioName(project_));
+    const auto name = QInputDialog::getText(
+        this,
+        tr("Create scenario"),
+        tr("Scenario name"),
+        QLineEdit::Normal,
+        suggested,
+        &accepted).trimmed();
+    if (!accepted) return;
+    if (!scenarioNameAvailable(project_, name.toStdString())) {
+        QMessageBox::warning(
+            this,
+            tr("Create scenario"),
+            tr("Scenario names must be non-empty and unique."));
+        return;
+    }
+
+    Scenario scenario;
+    scenario.id = makeStableId("scenario");
+    scenario.name = name.toStdString();
+    scenario.duration = source->duration;
+    const auto beforeId = source->id;
+    const auto afterId = scenario.id;
+    static_cast<void>(executeScenarioLifecycleCommand(
+        std::make_unique<CreateScenarioCommand>(
+            project_,
+            std::move(scenario),
+            activeScenarioIndex_ + 1),
+        beforeId,
+        afterId,
+        tr("Created scenario %1").arg(name)));
+}
+
+void MainWindow::duplicateScenario()
+{
+    const auto* source = activeScenario();
+    if (!source || simulationResultMode_) return;
+    const auto beforeId = source->id;
+    const auto duplicateId = makeStableId("scenario");
+    const auto duplicateName = nextScenarioDuplicateName(project_, *source);
+    static_cast<void>(executeScenarioLifecycleCommand(
+        std::make_unique<DuplicateScenarioCommand>(
+            project_,
+            beforeId,
+            duplicateId,
+            duplicateName),
+        beforeId,
+        duplicateId,
+        tr("Duplicated scenario as %1")
+            .arg(QString::fromStdString(duplicateName)),
+        true));
+}
+
+void MainWindow::renameScenario()
+{
+    const auto* scenario = activeScenario();
+    if (!scenario || simulationResultMode_) return;
+    bool accepted = false;
+    const auto name = QInputDialog::getText(
+        this,
+        tr("Rename scenario"),
+        tr("Scenario name"),
+        QLineEdit::Normal,
+        QString::fromStdString(scenario->name),
+        &accepted).trimmed();
+    if (!accepted || name == QString::fromStdString(scenario->name)) return;
+    if (!scenarioNameAvailable(
+            project_, name.toStdString(), scenario->id)) {
+        QMessageBox::warning(
+            this,
+            tr("Rename scenario"),
+            tr("Scenario names must be non-empty and unique."));
+        return;
+    }
+    const auto scenarioId = scenario->id;
+    static_cast<void>(executeScenarioLifecycleCommand(
+        std::make_unique<RenameScenarioCommand>(
+            project_, scenarioId, name.toStdString()),
+        scenarioId,
+        scenarioId,
+        tr("Renamed scenario to %1").arg(name)));
+}
+
+void MainWindow::deleteScenario()
+{
+    const auto* scenario = activeScenario();
+    if (!scenario || simulationResultMode_ || project_.scenarios.size() <= 1) {
+        return;
+    }
+    const auto scenarioId = scenario->id;
+    const auto scenarioName = QString::fromStdString(scenario->name);
+    if (QMessageBox::question(
+            this,
+            tr("Delete scenario"),
+            tr("Delete scenario '%1'? This removes its lanes, markers, and relations.")
+                .arg(scenarioName)) != QMessageBox::Yes) {
+        return;
+    }
+    const auto fallbackIndex = activeScenarioIndex_ + 1 < project_.scenarios.size()
+        ? activeScenarioIndex_ + 1
+        : activeScenarioIndex_ - 1;
+    const auto fallbackId = project_.scenarios.at(fallbackIndex).id;
+    static_cast<void>(executeScenarioLifecycleCommand(
+        std::make_unique<DeleteScenarioCommand>(project_, scenarioId),
+        scenarioId,
+        fallbackId,
+        tr("Deleted scenario %1; selected %2")
+            .arg(
+                scenarioName,
+                QString::fromStdString(
+                    project_.scenarios.at(fallbackIndex).name))));
+}
+
+void MainWindow::moveScenarioEarlier()
+{
+    const auto* scenario = activeScenario();
+    if (!scenario || simulationResultMode_ || activeScenarioIndex_ == 0) return;
+    const auto scenarioId = scenario->id;
+    static_cast<void>(executeScenarioLifecycleCommand(
+        std::make_unique<ReorderScenarioCommand>(
+            project_, scenarioId, activeScenarioIndex_ - 1),
+        scenarioId,
+        scenarioId,
+        tr("Moved scenario earlier")));
+}
+
+void MainWindow::moveScenarioLater()
+{
+    const auto* scenario = activeScenario();
+    if (!scenario || simulationResultMode_
+        || activeScenarioIndex_ + 1 >= project_.scenarios.size()) {
+        return;
+    }
+    const auto scenarioId = scenario->id;
+    static_cast<void>(executeScenarioLifecycleCommand(
+        std::make_unique<ReorderScenarioCommand>(
+            project_, scenarioId, activeScenarioIndex_ + 1),
+        scenarioId,
+        scenarioId,
+        tr("Moved scenario later")));
+}
+
+void MainWindow::showScenarioSelectorContextMenu(const QPoint& position)
+{
+    if (!scenarioSelector_) return;
+    updateScenarioLifecycleActions();
+    QMenu menu(this);
+    menu.setObjectName(QStringLiteral("ScenarioSelectorContextMenu"));
+    menu.addAction(createScenarioAction_);
+    menu.addAction(duplicateScenarioAction_);
+    menu.addAction(renameScenarioAction_);
+    menu.addAction(deleteScenarioAction_);
+    menu.addSeparator();
+    menu.addAction(moveScenarioEarlierAction_);
+    menu.addAction(moveScenarioLaterAction_);
+    menu.exec(scenarioSelector_->mapToGlobal(position));
+}
+
+void MainWindow::updateScenarioLifecycleActions()
+{
+    const auto available = !simulationResultMode_ && activeScenario();
+    if (createScenarioAction_) createScenarioAction_->setEnabled(available);
+    if (duplicateScenarioAction_) {
+        duplicateScenarioAction_->setEnabled(available);
+    }
+    if (renameScenarioAction_) renameScenarioAction_->setEnabled(available);
+    if (deleteScenarioAction_) {
+        deleteScenarioAction_->setEnabled(
+            available && project_.scenarios.size() > 1);
+        deleteScenarioAction_->setToolTip(
+            project_.scenarios.size() <= 1
+                ? tr("The last scenario cannot be deleted")
+                : tr("Delete the current scenario after confirmation"));
+    }
+    if (moveScenarioEarlierAction_) {
+        moveScenarioEarlierAction_->setEnabled(
+            available && activeScenarioIndex_ > 0);
+    }
+    if (moveScenarioLaterAction_) {
+        moveScenarioLaterAction_->setEnabled(
+            available
+            && activeScenarioIndex_ + 1 < project_.scenarios.size());
+    }
 }
 
 bool MainWindow::switchActiveScenario(
@@ -11105,12 +11481,13 @@ void MainWindow::updateScenarioNavigationActions()
 
 bool MainWindow::selectScenarioForHistoryState(const std::uint64_t stateId)
 {
-    const auto owner = commandScenarioIndices_.find(stateId);
-    if (owner == commandScenarioIndices_.end()
-        || owner->second == activeScenarioIndex_) {
+    const auto owner = commandScenarioIds_.find(stateId);
+    if (owner == commandScenarioIds_.end()) {
         return false;
     }
-    return switchActiveScenario(owner->second, false);
+    const auto index = scenarioIndexByStableId(project_, owner->second);
+    if (!index || *index == activeScenarioIndex_) return false;
+    return switchActiveScenario(*index, false);
 }
 
 void MainWindow::createToolBars()
@@ -11141,6 +11518,7 @@ void MainWindow::createToolBars()
     scenarioSelector_->setSizeAdjustPolicy(
         QComboBox::AdjustToMinimumContentsLengthWithIcon);
     scenarioSelector_->setMinimumContentsLength(16);
+    scenarioSelector_->setContextMenuPolicy(Qt::CustomContextMenu);
     scenarioSelectorAction_ = editBar->addWidget(scenarioSelector_);
     scenarioSelectorAction_->setObjectName(
         QStringLiteral("WaveformSelectorToolbarAction"));
@@ -11153,6 +11531,11 @@ void MainWindow::createToolBars()
             const auto index = scenarioSelector_->itemData(row).toULongLong();
             switchActiveScenario(static_cast<std::size_t>(index));
         });
+    connect(
+        scenarioSelector_,
+        &QWidget::customContextMenuRequested,
+        this,
+        &MainWindow::showScenarioSelectorContextMenu);
     scenarioSelectorSeparatorAction_ = editBar->addSeparator();
     scenarioSelectorSeparatorAction_->setObjectName(
         QStringLiteral("WaveformSelectorSeparatorAction"));

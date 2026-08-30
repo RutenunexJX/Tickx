@@ -58,8 +58,8 @@ foreach(operation_index RANGE 0 ${operation_last})
     endif()
 endforeach()
 if(NOT clock_capability
-   OR NOT operation_count EQUAL 33
-   OR NOT operation_length EQUAL 33
+   OR NOT operation_count EQUAL 38
+   OR NOT operation_length EQUAL 38
    OR NOT has_repair_event_clock)
     message(FATAL_ERROR "capabilities omit Event ClockDomain repair")
 endif()

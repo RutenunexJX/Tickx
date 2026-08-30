@@ -32,6 +32,11 @@ set(pinloom_implicit_output "${OUTPUT}-pinloom-implicit.json")
 set(pinloom_output "${OUTPUT}-pinloom.json")
 set(missing_signals "${OUTPUT}-missing-signals.json")
 set(missing_artifact_dir "${OUTPUT}-missing-artifacts")
+set(lifecycle_operations "${OUTPUT}-lifecycle-operations.json")
+set(lifecycle_invalid_operations "${OUTPUT}-lifecycle-invalid-operations.json")
+set(lifecycle_result "${OUTPUT}-lifecycle-result.wave.json")
+set(lifecycle_invalid_result "${OUTPUT}-lifecycle-invalid-result.wave.json")
+set(lifecycle_last_result "${OUTPUT}-lifecycle-last-result.wave.json")
 
 file(REMOVE
     "${multi_project}"
@@ -43,7 +48,12 @@ file(REMOVE
     "${bridge_implicit_output}"
     "${pinloom_implicit_output}"
     "${pinloom_output}"
-    "${missing_signals}")
+    "${missing_signals}"
+    "${lifecycle_operations}"
+    "${lifecycle_invalid_operations}"
+    "${lifecycle_result}"
+    "${lifecycle_invalid_result}"
+    "${lifecycle_last_result}")
 file(REMOVE_RECURSE
     "${compare_implicit_dir}"
     "${compare_id_dir}"
@@ -466,6 +476,141 @@ string(JSON pinloom_scenario_id
 if(NOT pinloom_scenario_id STREQUAL "scenario-alternative")
     message(FATAL_ERROR
         "Pinloom entry used the wrong Scenario")
+endif()
+
+file(WRITE "${lifecycle_operations}" [=[
+{
+  "schema": "wave-workbench.operations/v1",
+  "scenarioId": "scenario-alternative",
+  "operations": [
+    {"op": "duplicate-scenario", "id": "scenario-cli-copy"},
+    {"op": "rename-scenario", "name": "CLI lifecycle copy"},
+    {"op": "reorder-scenario", "destinationIndex": 0},
+    {"op": "create-scenario", "id": "scenario-cli-created", "name": "CLI created", "durationTick": 123456},
+    {"op": "delete-scenario"}
+  ]
+}
+]=])
+file(SHA256 "${multi_project}" lifecycle_source_sha)
+execute_process(
+    COMMAND "${WAVE_CLI}" apply
+            "${multi_project}" "${lifecycle_operations}"
+            --dry-run --pretty
+    RESULT_VARIABLE lifecycle_dry_code
+    OUTPUT_VARIABLE lifecycle_dry_json
+    ERROR_VARIABLE lifecycle_dry_error
+)
+if(NOT lifecycle_dry_code EQUAL 0
+   OR EXISTS "${lifecycle_result}")
+    message(FATAL_ERROR
+        "Scenario lifecycle dry-run failed: ${lifecycle_dry_error}")
+endif()
+string(JSON lifecycle_dry_source_sha
+       GET "${lifecycle_dry_json}" sourceSha256)
+string(JSON lifecycle_dry_count
+       GET "${lifecycle_dry_json}" operationCount)
+string(JSON lifecycle_dry_written
+       GET "${lifecycle_dry_json}" written)
+if(NOT lifecycle_dry_source_sha STREQUAL lifecycle_source_sha
+   OR NOT lifecycle_dry_count EQUAL 5
+   OR lifecycle_dry_written)
+    message(FATAL_ERROR
+        "Scenario lifecycle dry-run omitted source SHA or operation evidence")
+endif()
+
+execute_process(
+    COMMAND "${WAVE_CLI}" apply
+            "${multi_project}" "${lifecycle_operations}"
+            "--output=${lifecycle_result}" --pretty
+    RESULT_VARIABLE lifecycle_code
+    OUTPUT_VARIABLE lifecycle_json
+    ERROR_VARIABLE lifecycle_error
+)
+if(NOT lifecycle_code EQUAL 0
+   OR NOT EXISTS "${lifecycle_result}")
+    message(FATAL_ERROR
+        "Scenario lifecycle apply failed: ${lifecycle_error}")
+endif()
+file(READ "${lifecycle_result}" lifecycle_project_json)
+string(JSON lifecycle_scenario_count
+       LENGTH "${lifecycle_project_json}" scenarios)
+string(JSON lifecycle_first_id
+       GET "${lifecycle_project_json}" scenarios 0 id)
+string(JSON lifecycle_first_name
+       GET "${lifecycle_project_json}" scenarios 0 name)
+string(JSON lifecycle_report_scenario
+       GET "${lifecycle_json}" scenarioId)
+string(JSON lifecycle_created_index
+       ERROR_VARIABLE lifecycle_created_error
+       GET "${lifecycle_project_json}" scenarios 1 id)
+if(NOT lifecycle_scenario_count EQUAL 3
+   OR NOT lifecycle_first_id STREQUAL "scenario-cli-copy"
+   OR NOT lifecycle_first_name STREQUAL "CLI lifecycle copy"
+   OR NOT lifecycle_report_scenario STREQUAL "scenario-handshake")
+    message(FATAL_ERROR
+        "Scenario lifecycle result did not preserve deterministic selection and order")
+endif()
+string(FIND "${lifecycle_project_json}" "scenario-cli-created" lifecycle_created_position)
+if(NOT lifecycle_created_position EQUAL -1)
+    message(FATAL_ERROR
+        "Deleted Scenario stable ID remained in the lifecycle output")
+endif()
+
+file(WRITE "${lifecycle_invalid_operations}" [=[
+{
+  "schema": "wave-workbench.operations/v1",
+  "scenarioId": "scenario-alternative",
+  "operations": [
+    {"op": "duplicate-scenario", "id": "scenario-partial"},
+    {"op": "delete-scenario", "unexpected": true}
+  ]
+}
+]=])
+execute_process(
+    COMMAND "${WAVE_CLI}" apply
+            "${multi_project}" "${lifecycle_invalid_operations}"
+            "--output=${lifecycle_invalid_result}" --pretty
+    RESULT_VARIABLE lifecycle_invalid_code
+    OUTPUT_VARIABLE lifecycle_invalid_stdout
+    ERROR_VARIABLE lifecycle_invalid_json
+)
+if(NOT lifecycle_invalid_code EQUAL 4
+   OR EXISTS "${lifecycle_invalid_result}")
+    message(FATAL_ERROR
+        "Rejected Scenario lifecycle batch produced a partial output")
+endif()
+string(JSON lifecycle_failed_operation
+       GET "${lifecycle_invalid_json}" error operation)
+if(NOT lifecycle_failed_operation EQUAL 1)
+    message(FATAL_ERROR
+        "Scenario lifecycle diagnostics omitted the failing operation index")
+endif()
+
+file(WRITE "${lifecycle_invalid_operations}" [=[
+{
+  "schema": "wave-workbench.operations/v1",
+  "operations": [{"op": "delete-scenario"}]
+}
+]=])
+execute_process(
+    COMMAND "${WAVE_CLI}" apply
+            "${PROJECT}" "${lifecycle_invalid_operations}"
+            "--output=${lifecycle_last_result}" --pretty
+    RESULT_VARIABLE lifecycle_last_code
+    OUTPUT_VARIABLE lifecycle_last_stdout
+    ERROR_VARIABLE lifecycle_last_json
+)
+if(NOT lifecycle_last_code EQUAL 4
+   OR EXISTS "${lifecycle_last_result}"
+   OR NOT lifecycle_last_json MATCHES "last Scenario")
+    message(FATAL_ERROR
+        "wave-cli did not protect the last Scenario atomically")
+endif()
+
+file(SHA256 "${multi_project}" lifecycle_source_sha_after)
+if(NOT lifecycle_source_sha STREQUAL lifecycle_source_sha_after)
+    message(FATAL_ERROR
+        "Scenario lifecycle apply modified its source without --in-place")
 endif()
 
 file(SHA256 "${PROJECT}" source_sha_after)

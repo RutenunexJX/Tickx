@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -38,12 +39,127 @@ public:
     [[nodiscard]] std::string redoDescription() const;
     [[nodiscard]] std::size_t size() const noexcept;
     [[nodiscard]] std::uint64_t stateId() const noexcept;
+    [[nodiscard]] std::optional<std::uint64_t> undoTargetStateId() const noexcept;
+    [[nodiscard]] std::optional<std::uint64_t> redoTargetStateId() const noexcept;
 
 private:
     std::vector<std::unique_ptr<EditCommand>> commands_;
     std::vector<std::uint64_t> stateIds_{0};
     std::size_t cursor_{0};
     std::uint64_t nextStateId_{1};
+};
+
+[[nodiscard]] std::optional<std::size_t> scenarioIndexByStableId(
+    const Project& project,
+    std::string_view scenarioId) noexcept;
+[[nodiscard]] bool scenarioNameAvailable(
+    const Project& project,
+    std::string_view name,
+    std::string_view ignoredScenarioId = {});
+[[nodiscard]] std::string nextScenarioName(
+    const Project& project,
+    std::string_view baseName = "Scenario");
+[[nodiscard]] std::string nextScenarioDuplicateName(
+    const Project& project,
+    const Scenario& source);
+
+class CreateScenarioCommand final : public EditCommand {
+public:
+    CreateScenarioCommand(
+        Project& project,
+        Scenario scenario,
+        std::optional<std::size_t> insertionIndex = std::nullopt);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] const std::string& scenarioId() const noexcept;
+    [[nodiscard]] std::size_t insertionIndex() const noexcept;
+
+private:
+    Project* project_;
+    Scenario scenario_;
+    std::string scenarioId_;
+    std::size_t insertionIndex_;
+    bool inserted_{false};
+};
+
+class DuplicateScenarioCommand final : public EditCommand {
+public:
+    DuplicateScenarioCommand(
+        Project& project,
+        std::string sourceScenarioId,
+        std::string duplicateScenarioId,
+        std::string duplicateName = {},
+        std::optional<std::size_t> insertionIndex = std::nullopt);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] const std::string& scenarioId() const noexcept;
+    [[nodiscard]] std::size_t insertionIndex() const noexcept;
+
+private:
+    CreateScenarioCommand createCommand_;
+};
+
+class RenameScenarioCommand final : public EditCommand {
+public:
+    RenameScenarioCommand(
+        Project& project,
+        std::string scenarioId,
+        std::string name);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+
+private:
+    Project* project_;
+    std::string scenarioId_;
+    std::string before_;
+    std::string after_;
+};
+
+class DeleteScenarioCommand final : public EditCommand {
+public:
+    DeleteScenarioCommand(Project& project, std::string scenarioId);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] const std::string& scenarioId() const noexcept;
+    [[nodiscard]] std::size_t removalIndex() const noexcept;
+
+private:
+    Project* project_;
+    std::string scenarioId_;
+    std::size_t removalIndex_;
+    std::optional<Scenario> removed_;
+    bool deleted_{false};
+};
+
+class ReorderScenarioCommand final : public EditCommand {
+public:
+    ReorderScenarioCommand(
+        Project& project,
+        std::string scenarioId,
+        std::size_t destinationIndex);
+
+    void redo() override;
+    void undo() override;
+    [[nodiscard]] std::string description() const override;
+    [[nodiscard]] bool hasEffect() const noexcept override;
+    [[nodiscard]] const std::string& scenarioId() const noexcept;
+    [[nodiscard]] std::size_t sourceIndex() const noexcept;
+    [[nodiscard]] std::size_t destinationIndex() const noexcept;
+
+private:
+    Project* project_;
+    std::string scenarioId_;
+    std::size_t sourceIndex_;
+    std::size_t destinationIndex_;
 };
 
 class ChangeScenarioDurationCommand final : public EditCommand {
@@ -55,7 +171,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     Tick before_;
     Tick after_;
 };
@@ -81,7 +197,7 @@ public:
     [[nodiscard]] const ScenarioTruncationSummary& summary() const noexcept;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     Scenario before_;
     Scenario after_;
     ScenarioTruncationSummary summary_;
@@ -103,7 +219,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     Tick start_;
     Tick end_;
@@ -159,7 +275,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     std::vector<LaneSequenceStep> steps_;
     Scenario before_;
@@ -178,7 +294,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<LaneSequenceAssignment> assignments_;
     Scenario before_;
     Scenario after_;
@@ -204,7 +320,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     Tick start_;
     Tick end_;
     std::vector<LaneRangeAssignment> assignments_;
@@ -226,7 +342,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     Tick start_;
     Tick end_;
     std::vector<std::string> laneIds_;
@@ -248,7 +364,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     Tick start_;
     Tick end_;
@@ -273,7 +389,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     std::string segmentId_;
     Tick start_;
@@ -299,7 +415,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     std::string value_;
     JsonExtensions extensions_;
@@ -321,7 +437,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     std::vector<std::pair<Tick, Tick>> beatRanges_;
     std::optional<Scenario> before_;
@@ -347,7 +463,7 @@ public:
 
 private:
     Project* project_{nullptr};
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     Lane lane_;
     std::optional<ClockDomain> clockDomain_;
     std::size_t insertionIndex_{0};
@@ -365,7 +481,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     std::vector<Lane> before_;
     std::vector<Lane> after_;
@@ -383,7 +499,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<std::string> laneIds_;
     std::vector<Lane> before_;
     std::vector<Lane> after_;
@@ -425,7 +541,7 @@ public:
 
 private:
     Project* project_;
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<Lane> beforeLanes_;
     std::vector<Lane> afterLanes_;
     std::vector<ClockDomain> beforeClockDomains_;
@@ -451,7 +567,7 @@ private:
     };
 
     Project* project_;
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     Scenario beforeScenario_;
     Scenario afterScenario_;
@@ -478,7 +594,7 @@ private:
     };
 
     Project* project_;
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<std::string> laneIds_;
     Scenario beforeScenario_;
     Scenario afterScenario_;
@@ -565,7 +681,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     std::size_t beforeIndex_;
     std::size_t afterIndex_;
@@ -585,7 +701,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<std::string> laneIds_;
     std::vector<Lane> before_;
     std::vector<Lane> after_;
@@ -604,7 +720,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     std::string groupId_;
     std::vector<Lane> before_;
@@ -624,7 +740,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<std::string> laneIds_;
     std::string groupId_;
     std::vector<Lane> before_;
@@ -645,7 +761,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     Lane before_;
     Lane after_;
@@ -665,7 +781,7 @@ public:
 
 private:
     const Project* project_;
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -683,7 +799,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -699,7 +815,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     bool wasVisible_{false};
     bool hidesGroup_{false};
@@ -722,7 +838,7 @@ private:
         bool visible{false};
     };
 
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<Visibility> before_;
 };
 
@@ -736,7 +852,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string laneId_;
     bool wasVisible_{true};
     bool showsGroup_{false};
@@ -752,7 +868,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<std::string> laneIds_;
 };
 
@@ -817,7 +933,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<CopiedLaneRange> lanes_;
     Tick source_;
     Tick destination_;
@@ -842,7 +958,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<CopiedLaneRange> lanes_;
     Tick destination_;
     Tick duration_;
@@ -860,7 +976,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     Event event_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -875,7 +991,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string eventId_;
     Event replacement_;
     std::optional<Scenario> before_;
@@ -896,7 +1012,7 @@ public:
 
 private:
     const Project* project_;
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string eventId_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -914,7 +1030,7 @@ public:
     [[nodiscard]] bool hasEffect() const noexcept override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string eventId_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -934,7 +1050,7 @@ public:
 
 private:
     const Project* project_;
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string eventId_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -949,7 +1065,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string eventId_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -964,7 +1080,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     Marker marker_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -982,7 +1098,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string markerId_;
     Marker replacement_;
     std::optional<Scenario> before_;
@@ -1002,7 +1118,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::size_t markerIndex_;
     Marker expected_;
     Marker replacement_;
@@ -1019,7 +1135,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string markerId_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -1036,7 +1152,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<std::string> markerIds_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -1054,7 +1170,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::size_t markerIndex_;
     Marker expected_;
     std::optional<Scenario> before_;
@@ -1070,7 +1186,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     Relation relation_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -1088,7 +1204,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string relationId_;
     Relation replacement_;
     std::optional<Scenario> before_;
@@ -1110,7 +1226,7 @@ public:
 
 private:
     const Project* project_;
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string relationId_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -1129,7 +1245,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::size_t relationIndex_;
     Relation expected_;
     Relation replacement_;
@@ -1146,7 +1262,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::string relationId_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -1163,7 +1279,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::vector<std::string> relationIds_;
     std::optional<Scenario> before_;
     std::optional<Scenario> after_;
@@ -1181,7 +1297,7 @@ public:
     [[nodiscard]] std::string description() const override;
 
 private:
-    Scenario* scenario_;
+    ScenarioRef scenario_;
     std::size_t relationIndex_;
     Relation expected_;
     std::optional<Scenario> before_;

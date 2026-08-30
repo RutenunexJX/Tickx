@@ -583,20 +583,6 @@ const Scenario* selectedScenario(
     return iterator == project.scenarios.end() ? nullptr : &*iterator;
 }
 
-Scenario* selectedScenario(
-    Project& project,
-    const std::optional<std::string>& scenarioId)
-{
-    if (!scenarioId) return nullptr;
-    const auto iterator = std::find_if(
-        project.scenarios.begin(),
-        project.scenarios.end(),
-        [&scenarioId](const Scenario& scenario) {
-            return scenario.id == *scenarioId;
-        });
-    return iterator == project.scenarios.end() ? nullptr : &*iterator;
-}
-
 template<typename Item>
 std::optional<std::string> resolveNamedSelector(
     const std::vector<Item>& items,
@@ -10618,6 +10604,349 @@ bool applyRepairLaneGroup(
     return true;
 }
 
+std::optional<std::size_t> scenarioInsertionIndex(
+    const Project& project,
+    const QJsonObject& operation,
+    const std::size_t fallback,
+    QString& error)
+{
+    if (!operation.contains(QStringLiteral("insertionIndex"))) {
+        return fallback;
+    }
+    const auto value = integerField(
+        operation, QStringLiteral("insertionIndex"), true, error);
+    if (!value) return std::nullopt;
+    if (*value < 0
+        || static_cast<std::uint64_t>(*value) > project.scenarios.size()) {
+        error = QStringLiteral(
+            "Field 'insertionIndex' is outside the scenario list.");
+        return std::nullopt;
+    }
+    return static_cast<std::size_t>(*value);
+}
+
+std::string generatedScenarioId(
+    const Project& project,
+    const std::string_view seed)
+{
+    return deterministicStableId(
+        "scenario",
+        project.id + ":" + std::string(seed),
+        [&project](const std::string& candidate) {
+            return scenarioIndexByStableId(project, candidate).has_value();
+        });
+}
+
+bool applyCreateScenario(
+    Project& project,
+    std::string& activeScenarioId,
+    CommandStack& stack,
+    const QJsonObject& operation,
+    QJsonObject& result,
+    QString& error)
+{
+    if (!containsOnly(
+            operation,
+            {QStringLiteral("op"),
+             QStringLiteral("id"),
+             QStringLiteral("name"),
+             QStringLiteral("durationTick"),
+             QStringLiteral("duration"),
+             QStringLiteral("insertionIndex")},
+            error)) {
+        return false;
+    }
+    const auto name = requiredString(
+        operation, QStringLiteral("name"), error);
+    if (!name) return false;
+    if (!scenarioNameAvailable(project, *name)) {
+        error = QStringLiteral(
+            "Scenario name '%1' is empty or already in use.")
+                    .arg(QString::fromStdString(*name));
+        return false;
+    }
+    const auto activeIndex = scenarioIndexByStableId(
+        project, activeScenarioId);
+    if (!activeIndex) {
+        error = QStringLiteral("The active Scenario no longer exists.");
+        return false;
+    }
+
+    Scenario scenario;
+    scenario.name = *name;
+    scenario.id = operation.contains(QStringLiteral("id"))
+        ? operation.value(QStringLiteral("id")).toString().trimmed().toStdString()
+        : generatedScenarioId(project, *name);
+    if (scenario.id.empty()) {
+        error = QStringLiteral("Field 'id' must be a non-empty string.");
+        return false;
+    }
+    if (scenarioIndexByStableId(project, scenario.id)) {
+        error = QStringLiteral("Scenario ID '%1' already exists.")
+                    .arg(QString::fromStdString(scenario.id));
+        return false;
+    }
+    scenario.duration = project.scenarios.at(*activeIndex).duration;
+    const auto hasDurationTick = operation.contains(
+        QStringLiteral("durationTick"));
+    const auto hasDuration = operation.contains(QStringLiteral("duration"));
+    if (hasDurationTick || hasDuration) {
+        const auto duration = automationTickField(
+            project,
+            operation,
+            QStringLiteral("durationTick"),
+            QStringLiteral("duration"),
+            std::nullopt,
+            error,
+            false);
+        if (!duration) return false;
+        scenario.duration = *duration;
+    }
+    if (scenario.duration <= 0) {
+        error = QStringLiteral("Scenario duration must be positive.");
+        return false;
+    }
+    const auto insertionIndex = scenarioInsertionIndex(
+        project, operation, *activeIndex + 1, error);
+    if (!insertionIndex) return false;
+    const auto createdId = scenario.id;
+    const auto changed = stack.execute(
+        std::make_unique<CreateScenarioCommand>(
+            project, std::move(scenario), *insertionIndex));
+    activeScenarioId = createdId;
+    result.insert(QStringLiteral("changed"), changed);
+    result.insert(
+        QStringLiteral("scenarioId"),
+        QString::fromStdString(createdId));
+    result.insert(
+        QStringLiteral("name"),
+        QString::fromStdString(*name));
+    result.insert(
+        QStringLiteral("destinationIndex"),
+        static_cast<qint64>(*insertionIndex));
+    result.insert(
+        QStringLiteral("durationTick"),
+        integerValue(project.scenarios.at(
+            *scenarioIndexByStableId(project, createdId)).duration));
+    result.insert(QStringLiteral("selected"), true);
+    return true;
+}
+
+bool applyDuplicateScenario(
+    Project& project,
+    std::string& activeScenarioId,
+    CommandStack& stack,
+    const QJsonObject& operation,
+    QJsonObject& result,
+    QString& error)
+{
+    if (!containsOnly(
+            operation,
+            {QStringLiteral("op"),
+             QStringLiteral("id"),
+             QStringLiteral("name"),
+             QStringLiteral("insertionIndex")},
+            error)) {
+        return false;
+    }
+    const auto sourceIndex = scenarioIndexByStableId(
+        project, activeScenarioId);
+    if (!sourceIndex) {
+        error = QStringLiteral("The active Scenario no longer exists.");
+        return false;
+    }
+    const auto& source = project.scenarios.at(*sourceIndex);
+    const auto sourceId = source.id;
+    auto name = operation.contains(QStringLiteral("name"))
+        ? operation.value(QStringLiteral("name")).toString().trimmed().toStdString()
+        : nextScenarioDuplicateName(project, source);
+    if (!scenarioNameAvailable(project, name)) {
+        error = QStringLiteral(
+            "Scenario name '%1' is empty or already in use.")
+                    .arg(QString::fromStdString(name));
+        return false;
+    }
+    auto duplicateId = operation.contains(QStringLiteral("id"))
+        ? operation.value(QStringLiteral("id")).toString().trimmed().toStdString()
+        : generatedScenarioId(
+              project, sourceId + ":" + name);
+    if (duplicateId.empty()) {
+        error = QStringLiteral("Field 'id' must be a non-empty string.");
+        return false;
+    }
+    if (scenarioIndexByStableId(project, duplicateId)) {
+        error = QStringLiteral("Scenario ID '%1' already exists.")
+                    .arg(QString::fromStdString(duplicateId));
+        return false;
+    }
+    const auto insertionIndex = scenarioInsertionIndex(
+        project, operation, *sourceIndex + 1, error);
+    if (!insertionIndex) return false;
+    const auto changed = stack.execute(
+        std::make_unique<DuplicateScenarioCommand>(
+            project,
+            sourceId,
+            duplicateId,
+            name,
+            *insertionIndex));
+    activeScenarioId = duplicateId;
+    const auto& duplicate = project.scenarios.at(
+        *scenarioIndexByStableId(project, duplicateId));
+    result.insert(QStringLiteral("changed"), changed);
+    result.insert(
+        QStringLiteral("sourceScenarioId"),
+        QString::fromStdString(sourceId));
+    result.insert(
+        QStringLiteral("scenarioId"),
+        QString::fromStdString(duplicateId));
+    result.insert(QStringLiteral("name"), QString::fromStdString(name));
+    result.insert(
+        QStringLiteral("destinationIndex"),
+        static_cast<qint64>(*insertionIndex));
+    result.insert(
+        QStringLiteral("copiedLaneCount"),
+        static_cast<qint64>(duplicate.lanes.size()));
+    result.insert(
+        QStringLiteral("copiedMarkerCount"),
+        static_cast<qint64>(duplicate.markers.size()));
+    result.insert(
+        QStringLiteral("copiedRelationCount"),
+        static_cast<qint64>(duplicate.relations.size()));
+    result.insert(QStringLiteral("selected"), true);
+    return true;
+}
+
+bool applyRenameScenario(
+    Project& project,
+    const std::string& activeScenarioId,
+    CommandStack& stack,
+    const QJsonObject& operation,
+    QJsonObject& result,
+    QString& error)
+{
+    if (!containsOnly(
+            operation,
+            {QStringLiteral("op"), QStringLiteral("name")},
+            error)) {
+        return false;
+    }
+    const auto name = requiredString(
+        operation, QStringLiteral("name"), error);
+    if (!name) return false;
+    if (!scenarioNameAvailable(project, *name, activeScenarioId)) {
+        error = QStringLiteral(
+            "Scenario name '%1' is empty or already in use.")
+                    .arg(QString::fromStdString(*name));
+        return false;
+    }
+    const auto changed = stack.execute(
+        std::make_unique<RenameScenarioCommand>(
+            project, activeScenarioId, *name));
+    result.insert(QStringLiteral("changed"), changed);
+    result.insert(
+        QStringLiteral("scenarioId"),
+        QString::fromStdString(activeScenarioId));
+    result.insert(QStringLiteral("name"), QString::fromStdString(*name));
+    return true;
+}
+
+bool applyDeleteScenario(
+    Project& project,
+    std::string& activeScenarioId,
+    CommandStack& stack,
+    const QJsonObject& operation,
+    QJsonObject& result,
+    QString& error)
+{
+    if (!containsOnly(
+            operation,
+            {QStringLiteral("op")},
+            error)) {
+        return false;
+    }
+    if (project.scenarios.size() <= 1) {
+        error = QStringLiteral("The last Scenario cannot be deleted.");
+        return false;
+    }
+    const auto sourceIndex = scenarioIndexByStableId(
+        project, activeScenarioId);
+    if (!sourceIndex) {
+        error = QStringLiteral("The active Scenario no longer exists.");
+        return false;
+    }
+    const auto removedId = activeScenarioId;
+    const auto removedName = project.scenarios.at(*sourceIndex).name;
+    const auto fallbackIndex = *sourceIndex + 1 < project.scenarios.size()
+        ? *sourceIndex + 1
+        : *sourceIndex - 1;
+    const auto fallbackId = project.scenarios.at(fallbackIndex).id;
+    const auto changed = stack.execute(
+        std::make_unique<DeleteScenarioCommand>(project, removedId));
+    activeScenarioId = fallbackId;
+    result.insert(QStringLiteral("changed"), changed);
+    result.insert(
+        QStringLiteral("removedScenarioId"),
+        QString::fromStdString(removedId));
+    result.insert(
+        QStringLiteral("removedName"),
+        QString::fromStdString(removedName));
+    result.insert(
+        QStringLiteral("selectedScenarioId"),
+        QString::fromStdString(fallbackId));
+    result.insert(
+        QStringLiteral("fallbackPolicy"),
+        QStringLiteral("next-else-previous"));
+    return true;
+}
+
+bool applyReorderScenario(
+    Project& project,
+    const std::string& activeScenarioId,
+    CommandStack& stack,
+    const QJsonObject& operation,
+    QJsonObject& result,
+    QString& error)
+{
+    if (!containsOnly(
+            operation,
+            {QStringLiteral("op"), QStringLiteral("destinationIndex")},
+            error)) {
+        return false;
+    }
+    const auto destination = integerField(
+        operation, QStringLiteral("destinationIndex"), true, error);
+    if (!destination) return false;
+    if (*destination < 0
+        || static_cast<std::uint64_t>(*destination)
+            >= project.scenarios.size()) {
+        error = QStringLiteral(
+            "Field 'destinationIndex' is outside the scenario list.");
+        return false;
+    }
+    const auto sourceIndex = scenarioIndexByStableId(
+        project, activeScenarioId);
+    if (!sourceIndex) {
+        error = QStringLiteral("The active Scenario no longer exists.");
+        return false;
+    }
+    const auto changed = stack.execute(
+        std::make_unique<ReorderScenarioCommand>(
+            project,
+            activeScenarioId,
+            static_cast<std::size_t>(*destination)));
+    result.insert(QStringLiteral("changed"), changed);
+    result.insert(
+        QStringLiteral("scenarioId"),
+        QString::fromStdString(activeScenarioId));
+    result.insert(
+        QStringLiteral("beforeIndex"),
+        static_cast<qint64>(*sourceIndex));
+    result.insert(
+        QStringLiteral("destinationIndex"),
+        *destination);
+    return true;
+}
+
 } // namespace
 
 AutomationDocument describeAutomationCapabilities()
@@ -10664,6 +10993,22 @@ AutomationDocument describeAutomationCapabilities()
         bool mutatesProject;
     };
     constexpr std::array operationCapabilities{
+        OperationCapability{
+            "create-scenario", "scenario", "op,name",
+            "id,durationTick,duration,insertionIndex",
+            false, false, true},
+        OperationCapability{
+            "duplicate-scenario", "scenario", "op",
+            "id,name,insertionIndex", false, false, true},
+        OperationCapability{
+            "rename-scenario", "scenario", "op,name", "",
+            true, false, true},
+        OperationCapability{
+            "delete-scenario", "scenario", "op", "",
+            false, true, true},
+        OperationCapability{
+            "reorder-scenario", "scenario", "op,destinationIndex", "",
+            true, false, true},
         OperationCapability{
             "add-group", "group", "op,name",
             "id,color,insertionIndex", false, false, true},
@@ -12559,10 +12904,10 @@ AutomationApplyResult applyAutomationBatch(
     }
 
     auto candidate = source;
-    auto* scenario = selectedScenario(candidate, scenarioId);
-    if (!scenario) {
+    auto activeScenarioId = *scenarioId;
+    if (!scenarioIndexByStableId(candidate, activeScenarioId)) {
         result.error = QStringLiteral("Scenario '%1' does not exist.")
-                           .arg(QString::fromStdString(*scenarioId));
+                           .arg(QString::fromStdString(activeScenarioId));
         return result;
     }
     CommandStack stack;
@@ -12586,6 +12931,16 @@ AutomationApplyResult applyAutomationBatch(
             return result;
         }
         const auto name = operationName.toString();
+        const auto activeScenarioIndex = scenarioIndexByStableId(
+            candidate, activeScenarioId);
+        if (!activeScenarioIndex) {
+            result.error = QStringLiteral(
+                "Operation %1 (%2): the active Scenario no longer exists.")
+                               .arg(index)
+                               .arg(name);
+            return result;
+        }
+        auto* scenario = &candidate.scenarios.at(*activeScenarioIndex);
         if (!canonicalizeOperationSelectors(
                 candidate,
                 *scenario,
@@ -12601,7 +12956,47 @@ AutomationApplyResult applyAutomationBatch(
             static_cast<int>(index), name, false);
         try {
             auto applied = false;
-            if (name == QStringLiteral("set-range")) {
+            if (name == QStringLiteral("create-scenario")) {
+                applied = applyCreateScenario(
+                    candidate,
+                    activeScenarioId,
+                    stack,
+                    operation,
+                    operationReport,
+                    error);
+            } else if (name == QStringLiteral("duplicate-scenario")) {
+                applied = applyDuplicateScenario(
+                    candidate,
+                    activeScenarioId,
+                    stack,
+                    operation,
+                    operationReport,
+                    error);
+            } else if (name == QStringLiteral("rename-scenario")) {
+                applied = applyRenameScenario(
+                    candidate,
+                    activeScenarioId,
+                    stack,
+                    operation,
+                    operationReport,
+                    error);
+            } else if (name == QStringLiteral("delete-scenario")) {
+                applied = applyDeleteScenario(
+                    candidate,
+                    activeScenarioId,
+                    stack,
+                    operation,
+                    operationReport,
+                    error);
+            } else if (name == QStringLiteral("reorder-scenario")) {
+                applied = applyReorderScenario(
+                    candidate,
+                    activeScenarioId,
+                    stack,
+                    operation,
+                    operationReport,
+                    error);
+            } else if (name == QStringLiteral("set-range")) {
                 applied = applySetRange(
                     candidate,
                     *scenario,
@@ -13108,7 +13503,7 @@ AutomationApplyResult applyAutomationBatch(
             {QStringLiteral("projectId"),
              QString::fromStdString(candidate.id)},
             {QStringLiteral("scenarioId"),
-             QString::fromStdString(*scenarioId)},
+             QString::fromStdString(activeScenarioId)},
             {QStringLiteral("operationCount"),
              static_cast<qint64>(operations.size())},
             {QStringLiteral("operations"), operationResults},
@@ -13131,7 +13526,7 @@ AutomationApplyResult applyAutomationBatch(
         {QStringLiteral("ok"), true},
         {QStringLiteral("changed"), result.changed},
         {QStringLiteral("projectId"), QString::fromStdString(candidate.id)},
-        {QStringLiteral("scenarioId"), QString::fromStdString(*scenarioId)},
+        {QStringLiteral("scenarioId"), QString::fromStdString(activeScenarioId)},
         {QStringLiteral("operationCount"),
          static_cast<qint64>(operations.size())},
         {QStringLiteral("operations"), operationResults},

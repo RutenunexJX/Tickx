@@ -805,7 +805,7 @@ int runInspect(const QStringList& arguments)
             InputError,
             options.pretty);
     }
-    const auto loaded = wave::loadProjectFile(projectPath);
+    const auto loaded = wave::deserializeProject(sourceBytes);
     if (!loaded.ok()) {
         return fail(
             QStringLiteral("inspect"),
@@ -2625,7 +2625,7 @@ int runApply(const QStringList& arguments)
             Rejected,
             options.pretty);
     }
-    const auto loaded = wave::loadProjectFile(projectPath);
+    const auto loaded = wave::deserializeProject(sourceBytes);
     if (!loaded.ok()) {
         return fail(
             QStringLiteral("apply"),

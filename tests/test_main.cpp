@@ -8631,7 +8631,7 @@ void testAutomationContracts()
                    .toString()
                 == QString::fromLatin1(
                     wave::AutomationBatchJsonSchemaRef)
-            && operationSchemaRefs.size() == 33,
+            && operationSchemaRefs.size() == 38,
         "automation schema catalog is incomplete or inconsistent");
     expect(
         operationCapabilities.at("delete-signal")
@@ -8645,7 +8645,10 @@ void testAutomationContracts()
                    .toBool()
             && !operationCapabilities.at("assert-value")
                     .value(QStringLiteral("mutatesProject"))
-                    .toBool(),
+                    .toBool()
+            && operationCapabilities.at("delete-scenario")
+                   .value(QStringLiteral("dangerous"))
+                   .toBool(),
         "automation operation safety classification is incorrect");
     const auto durationCapabilities =
         capabilities.json.value(
@@ -8660,11 +8663,16 @@ void testAutomationContracts()
                 == 11
             && capabilities.json.value(
                    QStringLiteral("operationCount")).toInt()
-                == 33
+                == 38
             && capabilityCommands.contains("edges")
             && capabilityCommands.contains("markers")
             && capabilityCommands.contains("relations")
-            && capabilityOperations.size() == 33
+            && capabilityOperations.size() == 38
+            && capabilityOperations.contains("create-scenario")
+            && capabilityOperations.contains("duplicate-scenario")
+            && capabilityOperations.contains("rename-scenario")
+            && capabilityOperations.contains("delete-scenario")
+            && capabilityOperations.contains("reorder-scenario")
             && capabilityOperations.contains("update-group")
             && capabilityOperations.contains("move-group")
             && capabilityOperations.contains("delete-group")
@@ -20353,6 +20361,221 @@ void testAutomationPostEditValidationGuardContracts()
         "post-edit validation guard ignored damage outside the edited Scenario");
 }
 
+void testScenarioLifecycleCommandsAndAutomation()
+{
+    auto project = wave::makeDemonstrationProject();
+    const auto baseline = project;
+    const auto sourceId = project.scenarios.front().id;
+    const auto sourceName = project.scenarios.front().name;
+    wave::ScenarioRef stableSource{project.scenarios.front()};
+    wave::CommandStack stack;
+
+    const auto durationBefore = project.scenarios.front().duration;
+    expect(
+        stack.execute(std::make_unique<wave::ChangeScenarioDurationCommand>(
+            project.scenarios.front(), durationBefore + 10'000)),
+        "pre-lifecycle Scenario edit was not recorded");
+    const auto editedSource = project.scenarios.front();
+
+    expectEqual(
+        wave::nextScenarioDuplicateName(project, project.scenarios.front()),
+        sourceName + " Copy",
+        "first duplicate name was not deterministic");
+    expect(
+        stack.execute(std::make_unique<wave::DuplicateScenarioCommand>(
+            project,
+            sourceId,
+            "scenario-lifecycle-copy",
+            std::string{})),
+        "Scenario duplicate command had no effect");
+    expectEqual(
+        project.scenarios.size(),
+        std::size_t{2},
+        "Scenario duplicate was not inserted");
+    expect(
+        stableSource && stableSource->id == sourceId
+            && *stableSource == editedSource,
+        "stable Scenario owner did not survive vector growth");
+    const auto duplicateIndex = wave::scenarioIndexByStableId(
+        project, "scenario-lifecycle-copy");
+    expect(duplicateIndex.has_value(), "duplicated Scenario ID is not addressable");
+    const auto& duplicate = project.scenarios.at(*duplicateIndex);
+    expect(
+        duplicate.name == sourceName + " Copy"
+            && duplicate.lanes == editedSource.lanes
+            && duplicate.events == editedSource.events
+            && duplicate.markers == editedSource.markers
+            && duplicate.relations == editedSource.relations,
+        "Scenario duplicate did not preserve full Scenario content");
+    expectEqual(
+        wave::nextScenarioDuplicateName(project, project.scenarios.front()),
+        sourceName + " Copy 2",
+        "subsequent duplicate name was not deterministic");
+
+    expect(
+        stack.execute(std::make_unique<wave::RenameScenarioCommand>(
+            project,
+            "scenario-lifecycle-copy",
+            "Renamed lifecycle copy")),
+        "Scenario rename command had no effect");
+    expect(
+        wave::scenarioIndexByStableId(project, "scenario-lifecycle-copy")
+            .has_value(),
+        "Scenario rename changed its stable ID");
+    expect(
+        stack.execute(std::make_unique<wave::ReorderScenarioCommand>(
+            project,
+            "scenario-lifecycle-copy",
+            0)),
+        "Scenario reorder command had no effect");
+    expectEqual(
+        project.scenarios.front().id,
+        std::string{"scenario-lifecycle-copy"},
+        "Scenario reorder did not move the stable target");
+    expect(
+        stableSource && stableSource->id == sourceId,
+        "stable Scenario owner did not survive reordering");
+
+    expect(stack.undo(), "Scenario reorder undo failed");
+    expectEqual(project.scenarios.front().id, sourceId, "reorder undo lost order");
+    expect(stack.undo(), "Scenario rename undo failed");
+    expectEqual(
+        project.scenarios.at(1).name,
+        sourceName + " Copy",
+        "rename undo did not restore the duplicate name");
+    expect(stack.undo(), "Scenario duplicate undo failed");
+    expectEqual(project.scenarios.size(), std::size_t{1}, "duplicate undo retained Scenario");
+    expect(
+        stableSource && stableSource->id == sourceId,
+        "stable Scenario owner did not survive duplicate undo");
+    expect(stack.undo(), "pre-lifecycle edit undo failed after structural changes");
+    expectEqual(
+        project.scenarios.front().duration,
+        durationBefore,
+        "pre-lifecycle command targeted a stale Scenario after structural undo");
+    expect(project == baseline, "Scenario lifecycle undo did not restore exact baseline");
+
+    expect(stack.redo(), "pre-lifecycle edit redo failed");
+    expect(stack.redo(), "Scenario duplicate redo failed");
+    expect(stack.redo(), "Scenario rename redo failed");
+    expect(stack.redo(), "Scenario reorder redo failed");
+    expectEqual(
+        project.scenarios.front().id,
+        std::string{"scenario-lifecycle-copy"},
+        "Scenario lifecycle redo sequence lost order");
+
+    expect(
+        stack.execute(std::make_unique<wave::DeleteScenarioCommand>(
+            project, "scenario-lifecycle-copy")),
+        "Scenario delete command had no effect");
+    expect(
+        !wave::scenarioIndexByStableId(project, "scenario-lifecycle-copy"),
+        "deleted Scenario stable ID still resolves");
+    expect(stack.undo(), "Scenario delete undo failed");
+    const auto restoredCopy = wave::scenarioIndexByStableId(
+        project, "scenario-lifecycle-copy");
+    expect(
+        restoredCopy && project.scenarios.at(*restoredCopy).name
+            == "Renamed lifecycle copy",
+        "Scenario delete undo did not restore exact content and position");
+    expect(stack.redo(), "Scenario delete redo failed");
+
+    bool protectedLast = false;
+    try {
+        [[maybe_unused]] wave::DeleteScenarioCommand invalid(
+            project, sourceId);
+    } catch (const std::invalid_argument&) {
+        protectedLast = true;
+    }
+    expect(protectedLast, "last Scenario deletion was not rejected");
+
+    wave::Project large;
+    large.id = "project-large-scenario-lifecycle";
+    large.name = "Large Scenario lifecycle";
+    large.timeBase = {1};
+    large.scenarios.reserve(512);
+    for (std::size_t index = 0; index < 512; ++index) {
+        wave::Scenario scenario;
+        scenario.id = "scenario-large-" + std::to_string(index);
+        scenario.name = "Scenario " + std::to_string(index + 1);
+        scenario.duration = 100'000 + static_cast<wave::Tick>(index);
+        large.scenarios.push_back(std::move(scenario));
+    }
+    wave::CommandStack largeStack;
+    expect(
+        largeStack.execute(std::make_unique<wave::ChangeScenarioDurationCommand>(
+            large.scenarios.at(255), 777'777)),
+        "large-project target edit failed");
+    expect(
+        largeStack.execute(std::make_unique<wave::ReorderScenarioCommand>(
+            large, "scenario-large-255", 0)),
+        "large-project Scenario reorder failed");
+    expect(largeStack.undo(), "large-project reorder undo failed");
+    expect(largeStack.undo(), "large-project target edit undo failed");
+    expectEqual(
+        large.scenarios.at(255).duration,
+        wave::Tick{100'255},
+        "large-project history used a stale Scenario address");
+
+    auto automationSource = wave::makeDemonstrationProject();
+    const auto automationBefore = automationSource;
+    const QJsonObject lifecycleBatch{
+        {QStringLiteral("schema"),
+         QStringLiteral("wave-workbench.operations/v1")},
+        {QStringLiteral("scenarioId"),
+         QString::fromStdString(automationSource.scenarios.front().id)},
+        {QStringLiteral("operations"),
+         QJsonArray{
+             QJsonObject{
+                 {QStringLiteral("op"), QStringLiteral("duplicate-scenario")},
+                 {QStringLiteral("id"), QStringLiteral("scenario-cli-copy")}},
+             QJsonObject{
+                 {QStringLiteral("op"), QStringLiteral("rename-scenario")},
+                 {QStringLiteral("name"), QStringLiteral("CLI copy")}},
+             QJsonObject{
+                 {QStringLiteral("op"), QStringLiteral("reorder-scenario")},
+                 {QStringLiteral("destinationIndex"), 0}},
+             QJsonObject{
+                 {QStringLiteral("op"), QStringLiteral("add-marker")},
+                 {QStringLiteral("id"), QStringLiteral("marker-cli-copy")},
+                 {QStringLiteral("name"), QStringLiteral("CLI marker")},
+                 {QStringLiteral("atTick"), 1}},
+         }},
+    };
+    const auto lifecycleApplied = wave::applyAutomationBatch(
+        automationSource, lifecycleBatch);
+    expect(
+        lifecycleApplied.ok()
+            && lifecycleApplied.changed
+            && lifecycleApplied.json.value(QStringLiteral("scenarioId")).toString()
+                == QStringLiteral("scenario-cli-copy")
+            && lifecycleApplied.project->scenarios.front().id
+                == "scenario-cli-copy"
+            && lifecycleApplied.project->scenarios.front().name
+                == "CLI copy"
+            && lifecycleApplied.project->scenarios.front().markers.back().id
+                == "marker-cli-copy"
+            && automationSource == automationBefore,
+        "atomic automation Scenario lifecycle did not target the selected duplicate");
+
+    auto failingBatch = lifecycleBatch;
+    auto failingOperations = failingBatch.value(
+        QStringLiteral("operations")).toArray();
+    failingOperations.append(QJsonObject{
+        {QStringLiteral("op"), QStringLiteral("delete-scenario")},
+        {QStringLiteral("unexpected"), true},
+    });
+    failingBatch.insert(QStringLiteral("operations"), failingOperations);
+    const auto rejected = wave::applyAutomationBatch(
+        automationSource, failingBatch);
+    expect(
+        !rejected.ok()
+            && !rejected.project
+            && rejected.failedOperation == 4
+            && automationSource == automationBefore,
+        "rejected Scenario lifecycle batch exposed a partial project");
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -20427,6 +20650,7 @@ int main(int argc, char* argv[])
         {"Imported Trace identity repair contracts", testAutomationTraceIdentityRepairContracts},
         {"Imported Trace reference repair contracts", testAutomationTraceReferenceRepairContracts},
         {"post-edit validation guard contracts", testAutomationPostEditValidationGuardContracts},
+        {"Scenario lifecycle commands and automation", testScenarioLifecycleCommandsAndAutomation},
     };
 
     int failures = 0;

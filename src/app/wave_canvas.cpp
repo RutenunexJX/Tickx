@@ -2262,9 +2262,11 @@ void WaveCanvas::setDocument(
 {
     pendingVisibleTimeSpanRestore_.reset();
     pendingVisibleTimeSpanRestoreScheduled_ = false;
-    if (scenario_ && scenario_ != scenario) {
-        documentContexts_[scenario_] = {
+    if (scenario_ && scenario_.get() != scenario && !scenario_->id.empty()) {
+        documentContexts_[scenario_->id] = {
             historySelectionSnapshot(),
+            selectedMarkerIds_,
+            selectedRelationIds_,
             historySelectionTransitions_,
             pixelsPerTick_,
             horizontalScrollBar()->value(),
@@ -2272,8 +2274,8 @@ void WaveCanvas::setDocument(
             collapsedGroupIds_,
         };
     }
-    const auto savedContext = scenario
-        ? documentContexts_.find(scenario)
+    const auto savedContext = scenario && !scenario->id.empty()
+        ? documentContexts_.find(scenario->id)
         : documentContexts_.end();
     const auto restoreContext = savedContext != documentContexts_.end();
 
@@ -2327,6 +2329,24 @@ void WaveCanvas::setDocument(
         collapsedGroupIds_ = context.collapsedGroupIds;
         sanitizeCollapsedGroups();
         historySelectionTransitions_ = context.historySelectionTransitions;
+        selectedMarkerIds_ = context.selectedMarkerIds;
+        std::erase_if(
+            selectedMarkerIds_,
+            [this](const std::string& markerId) {
+                return !markerById(markerId);
+            });
+        selectedMarkerId_ = selectedMarkerIds_.empty()
+            ? std::string{}
+            : selectedMarkerIds_.back();
+        selectedRelationIds_ = context.selectedRelationIds;
+        std::erase_if(
+            selectedRelationIds_,
+            [this](const std::string& relationId) {
+                return !relationById(relationId);
+            });
+        activeRelationId_ = selectedRelationIds_.empty()
+            ? std::string{}
+            : selectedRelationIds_.back();
         selectedLaneId_ = context.selection.selectedLaneId;
         selectedLaneIds_ = context.selection.selectedLaneIds;
         selectedSegmentLaneId_ = context.selection.selectedSegmentLaneId;
@@ -2413,7 +2433,21 @@ void WaveCanvas::clearDocumentContexts()
 
 bool WaveCanvas::hasDocumentContext(const Scenario* scenario) const noexcept
 {
-    return scenario && documentContexts_.contains(scenario);
+    return scenario
+        && !scenario->id.empty()
+        && documentContexts_.contains(scenario->id);
+}
+
+bool WaveCanvas::cloneDocumentContext(
+    const std::string_view sourceScenarioId,
+    const std::string_view targetScenarioId)
+{
+    if (sourceScenarioId.empty() || targetScenarioId.empty()) return false;
+    const auto source = documentContexts_.find(
+        std::string(sourceScenarioId));
+    if (source == documentContexts_.end()) return false;
+    documentContexts_[std::string(targetScenarioId)] = source->second;
+    return true;
 }
 
 void WaveCanvas::setTool(const Tool tool)
@@ -18427,6 +18461,34 @@ void WaveCanvas::clearMarkerSelection()
 {
     selectedMarkerId_.clear();
     selectedMarkerIds_.clear();
+}
+
+void WaveCanvas::restoreStableObjectSelections(
+    const QStringList& markerIds,
+    const QStringList& relationIds)
+{
+    clearMarkerSelection();
+    clearRelationSelection();
+    if (!scenario_) return;
+    for (const auto& markerId : markerIds) {
+        const auto id = markerId.toStdString();
+        if (markerById(id) && !markerSelected(id)) {
+            selectedMarkerIds_.push_back(id);
+        }
+    }
+    selectedMarkerId_ = selectedMarkerIds_.empty()
+        ? std::string{}
+        : selectedMarkerIds_.back();
+    for (const auto& relationId : relationIds) {
+        const auto id = relationId.toStdString();
+        if (relationById(id) && !isRelationSelected(id)) {
+            selectedRelationIds_.push_back(id);
+        }
+    }
+    activeRelationId_ = selectedRelationIds_.empty()
+        ? std::string{}
+        : selectedRelationIds_.back();
+    viewport()->update();
 }
 
 void WaveCanvas::selectOnlyMarker(const std::string& markerId)

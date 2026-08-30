@@ -105,8 +105,8 @@ foreach(operation_index RANGE 0 ${operation_last})
 endforeach()
 if(NOT reference_validation
    OR NOT reference_repair
-   OR NOT operation_count EQUAL 33
-   OR NOT operation_length EQUAL 33
+   OR NOT operation_count EQUAL 38
+   OR NOT operation_length EQUAL 38
    OR NOT has_reference_repair)
     message(FATAL_ERROR
         "capabilities omit Imported Trace reference repair")

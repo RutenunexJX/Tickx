@@ -61,8 +61,8 @@ foreach(operation_index RANGE 0 ${operation_last})
 endforeach()
 if(NOT structured_capability
    OR NOT deletion_capability
-   OR NOT operation_count EQUAL 33
-   OR NOT operation_length EQUAL 33
+   OR NOT operation_count EQUAL 38
+   OR NOT operation_length EQUAL 38
    OR NOT has_delete_event)
     message(FATAL_ERROR "capabilities omit structured Event recovery")
 endif()

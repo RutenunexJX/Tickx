@@ -66,6 +66,36 @@ wave::Project initialProject()
             "segment-cli-high-" + std::to_string(index));
         scenario.lanes.push_back(std::move(lane));
     }
+    wave::Event sourceEvent;
+    sourceEvent.id = "event-cli-source";
+    sourceEvent.laneId = "lane-cli-0";
+    sourceEvent.tick = 100'000;
+    sourceEvent.action = wave::EventAction::Drive;
+    sourceEvent.value = "0";
+    sourceEvent.description = "CLI source";
+    scenario.events.push_back(sourceEvent);
+    wave::Event targetEvent;
+    targetEvent.id = "event-cli-target";
+    targetEvent.laneId = "lane-cli-1";
+    targetEvent.tick = 200'000;
+    targetEvent.action = wave::EventAction::Expect;
+    targetEvent.value = "1";
+    targetEvent.description = "CLI target";
+    scenario.events.push_back(targetEvent);
+    wave::Relation relation;
+    relation.id = "relation-cli";
+    relation.sourceEventId = sourceEvent.id;
+    relation.targetEventId = targetEvent.id;
+    relation.minimumDelay = 0;
+    relation.maximumDelay = 200'000;
+    relation.description = "CLI external relation";
+    scenario.relations.push_back(std::move(relation));
+    wave::Marker marker;
+    marker.id = "marker-cli";
+    marker.name = "CLI checkpoint";
+    marker.start = 175'000;
+    marker.end = 175'000;
+    scenario.markers.push_back(std::move(marker));
     project.scenarios.push_back(std::move(scenario));
     return project;
 }
@@ -193,6 +223,11 @@ int main(int argc, char* argv[])
         std::min(120, canvas->horizontalScrollBar()->maximum()));
     canvas->verticalScrollBar()->setValue(
         std::min(160, canvas->verticalScrollBar()->maximum()));
+    const QStringList selectedMarkers{QStringLiteral("marker-cli")};
+    const QStringList selectedRelations{QStringLiteral("relation-cli")};
+    canvas->restoreStableObjectSelections(
+        selectedMarkers,
+        selectedRelations);
     QCoreApplication::processEvents();
 
     const auto cursorBefore = canvas->cursorTick();
@@ -226,7 +261,9 @@ int main(int argc, char* argv[])
         || canvas->cursorTick() != cursorBefore
         || canvas->visibleTimeSpan() != spanBefore
         || canvas->horizontalScrollBar()->value() != horizontalBefore
-        || canvas->verticalScrollBar()->value() != verticalBefore) {
+        || canvas->verticalScrollBar()->value() != verticalBefore
+        || canvas->selectedMarkerIds() != selectedMarkers
+        || canvas->selectedRelationIds() != selectedRelations) {
         return fail(12, "clean reload did not preserve GUI context");
     }
     const QString cleanSummary = window.property(
@@ -393,6 +430,40 @@ int main(int argc, char* argv[])
         || window.property("wavewidgets.externalConflictState").toString()
             != QStringLiteral("none")) {
         return fail(36, "stale watcher event changed the settled ABA result");
+    }
+
+    auto removedScenarioUpdate = window.project();
+    removedScenarioUpdate.name = "Scenario removed externally";
+    std::erase_if(
+        removedScenarioUpdate.scenarios,
+        [](const wave::Scenario& scenario) {
+            return scenario.id == "scenario-cli";
+        });
+    if (!saveProject(
+            removedScenarioUpdate,
+            projectPath,
+            "external Scenario removal")) {
+        return 37;
+    }
+    if (!waitUntil([&window, stableCount] {
+            return window.project().name == "Scenario removed externally"
+                && window.property("wavewidgets.externalReloadCount")
+                       .toULongLong()
+                    > stableCount;
+        })) {
+        return fail(38, "external Scenario removal did not reload");
+    }
+    const auto removalSummary = window.property(
+        "wavewidgets.lastExternalUpdateSummary").toString();
+    if (window.project().scenarios.size() != 1
+        || selector->count() != 1
+        || selector->currentIndex() != 0
+        || window.project().scenarios.front().id == "scenario-cli"
+        || !removalSummary.contains(QStringLiteral("scenario ID scenario-cli was removed"))
+        || !removalSummary.contains(QStringLiteral("nearest-index fallback"))
+        || !canvas->selectedMarkerIds().isEmpty()
+        || !canvas->selectedRelationIds().isEmpty()) {
+        return fail(39, "external Scenario removal did not report deterministic fallback");
     }
 
     window.close();
