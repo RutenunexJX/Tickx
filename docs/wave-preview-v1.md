@@ -71,3 +71,13 @@ RTL、不启动工具链，也不把 Symbolic Preview 标记为 Simulated Result
 视图支持 system/light/dark 主题、full/compact 密度、Fit、缩放、滚动、lane/cursor 键盘选择。
 选中带 source 的 lane 后按 Enter 或双击，视图发出 `sourceNavigationRequested`，但不自行打开文件。
 宿主关闭或删除视图即可取消其全部状态，不存在后台任务或跨宿主所有权。
+
+
+## View lifecycle and presentation
+
+The standalone app, full Simulation Workspace and lightweight Waveform View share rendering components.
+Preview never parses RTL or launches tools. Symbolic Preview and Simulated Result retain distinct provenance.
+Compatible generation updates preserve stable lane selection, cursor and viewport; malformed, oversized,
+unknown-version and stale payloads do not replace valid content. Fit follows widget/splitter size until
+explicit user zoom. Host destruction and late trace completions must not access released widgets.
+Theme and density changes affect presentation without rebuilding the domain model.

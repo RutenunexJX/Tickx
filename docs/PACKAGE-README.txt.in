@@ -15,8 +15,8 @@ Compatibility tools
 Experimental simulation runner
   wave-sim-runner.exe --help
   wave-sim-runner.exe probe --pretty
-  The fixed-fixture path consumes Module Manifest and Stimulus Scenario
-  contracts. It is not connected to the desktop UI yet.
+  The runner consumes Module Manifest and Stimulus Scenario contracts.
+  Simulation Result and the embedded Simulation Workspace integrate this path with the UI.
 
 The legacy wave-generate.exe, wave-compare.exe and wave-bridge.exe entry points
 remain installed for existing scripts. The wave-cli compatibility adapters

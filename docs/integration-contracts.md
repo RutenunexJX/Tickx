@@ -235,3 +235,12 @@ wave-workbench --uri="<waveworkbench URI>"
 其他工程或显示名称匹配。多 Scenario 工程打开后在工具栏显示当前 `Waveform`；单 Scenario
 工程不显示选择器。打开后可用 `Ctrl+PageUp` / `Ctrl+PageDown` 前后切换；该导航不改变
 URI、工程数组或 Saved 状态。
+
+
+## Shared view compatibility
+
+The original Simulation Workspace ABI 1 remains supported alongside `wave-workbench.waveform-view/v1`.
+Hosts discover capabilities before using optional payload, theme or navigation methods. Shared views expose
+bounded splitter geometry, visible keyboard focus and explicit empty/loading/stale/failed states.
+Run, Run all, Stop, Compare and Checks remain the primary simulation operations; secondary controls use
+grouped surfaces. Validate old/new factories and destruction with the existing ABI and view UI tests.

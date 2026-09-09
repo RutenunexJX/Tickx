@@ -1128,3 +1128,32 @@ wave::applyAutomationBatch(project, operationsObject, scenarioId);
 `createProjectForAutomation` 返回可继续交给宿主或 `applyAutomationBatch` 的空白工程。
 `applyAutomationBatch` 不修改传入的 `Project`。成功时返回新的工程副本；失败时不返回部分结果，
 并提供失败 operation 的零基索引。宿主应用负责决定保存位置和并发控制。
+
+
+## Scenario lifecycle operations
+
+The `wave-workbench.operations/v1` batch selects its target through top-level `scenarioId`
+(or the CLI Scenario selector). Fields below are operation fields; no nested `scenarioId` is accepted.
+
+| op | Required fields besides op | Optional fields |
+|---|---|---|
+| create-scenario | name | id, durationTick, duration, insertionIndex |
+| duplicate-scenario | none | id, name, insertionIndex |
+| rename-scenario | name | none |
+| delete-scenario | none | none |
+| reorder-scenario | destinationIndex | none |
+
+Indices are zero-based, durations are positive, and stable IDs/names are validated. Deleting the last
+Scenario is rejected. GUI commands are undoable; CLI edits use the existing validated atomic batch path.
+For an existing Scenario with ID `scenario-main`, a rename batch is:
+
+```json
+{
+  "schema": "wave-workbench.operations/v1",
+  "scenarioId": "scenario-main",
+  "operations": [{"op": "rename-scenario", "name": "Reset sequence"}]
+}
+```
+
+Save as `rename.operations.json` and run `wave-cli apply project.wave.json rename.operations.json --dry-run`
+before using `--in-place`. Discover all supported operations with `wave-cli capabilities --pretty`.

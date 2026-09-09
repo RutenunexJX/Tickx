@@ -335,6 +335,7 @@ if(WAVEWORKBENCH_ENABLE_WELLEN)
 endif()
 install(
     FILES
+        "${CMAKE_SOURCE_DIR}/docs/interaction.md"
         "${CMAKE_SOURCE_DIR}/docs/automation-cli.md"
         "${CMAKE_SOURCE_DIR}/docs/cli-quick-start.md"
         "${CMAKE_SOURCE_DIR}/docs/integration-contracts.md"
