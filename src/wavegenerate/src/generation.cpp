@@ -183,6 +183,7 @@ std::optional<std::string> systemVerilogLiteral(
     const GenerationSignal& signal,
     const std::string& input)
 {
+    if (signal.kind == LaneKind::Bus && busTextLabel(input)) return std::nullopt;
     auto value = removeSeparators(mappedValue(signal, input));
     if (value.empty()) return std::nullopt;
     auto lower = lowerCopy(value);
@@ -226,6 +227,7 @@ std::optional<std::string> cocotbDriveLiteral(
     const GenerationSignal& signal,
     const std::string& input)
 {
+    if (signal.kind == LaneKind::Bus && busTextLabel(input)) return std::nullopt;
     auto value = removeSeparators(mappedValue(signal, input));
     if (value.empty()) return std::nullopt;
     auto lower = lowerCopy(value);

@@ -7,6 +7,18 @@ function(wave_add_toolchain_fixture target mode)
 endfunction()
 
 find_package(Qt6 6.10.2 EXACT REQUIRED COMPONENTS Test)
+add_executable(wave-canvas-edit-regression-test canvas_edit_regression_test.cpp)
+target_link_libraries(wave-canvas-edit-regression-test PRIVATE wavewidgets waveproject wavegenerate Qt6::Test)
+wave_enable_warnings(wave-canvas-edit-regression-test)
+add_test(NAME wave-canvas-edit-regression-test
+    COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_EXE=$<TARGET_FILE:wave-canvas-edit-regression-test>"
+        "-DLOG_FILE=${CMAKE_BINARY_DIR}/canvas-edit-regression.txt"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+set_tests_properties(wave-canvas-edit-regression-test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1;WAVEWORKBENCH_REDUCED_MOTION=1;WAVE_CANVAS_PREVIEW_DIR=${CMAKE_BINARY_DIR}/canvas-previews"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+    TIMEOUT 30)
 add_executable(wave-ela-ui-test ela_ui_test.cpp)
 target_link_libraries(wave-ela-ui-test PRIVATE wavewidgets Qt6::Test Ela::WidgetTools)
 wave_enable_warnings(wave-ela-ui-test)
@@ -944,6 +956,8 @@ if(WIN32 AND EXISTS "C:/Windows/Fonts/segoeui.ttf")
     list(APPEND _wave_test_environment
         "QT_QPA_FONTDIR=${_wave_test_font_dir}")
 endif()
+set_property(TEST wave-canvas-edit-regression-test APPEND PROPERTY ENVIRONMENT
+    "QT_QPA_FONTDIR=${_wave_test_font_dir}")
 foreach(_wave_ela_scale IN ITEMS 1 1.25 1.5 2)
     set_property(TEST wave-ela-ui-${_wave_ela_scale} APPEND PROPERTY ENVIRONMENT
         "QT_QPA_FONTDIR=${_wave_test_font_dir}")

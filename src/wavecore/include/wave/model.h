@@ -258,6 +258,9 @@ struct ValueValidation {
 [[nodiscard]] const Relation* findRelation(const Scenario& scenario, std::string_view relationId) noexcept;
 
 [[nodiscard]] ValueValidation validateLaneValue(const Lane& lane, std::string_view value);
+// Bus text literals are display-only and deliberately have no numeric encoding.
+inline constexpr std::string_view BusTextPrefix = "text:";
+[[nodiscard]] std::optional<std::string_view> busTextLabel(std::string_view value) noexcept;
 [[nodiscard]] std::optional<std::string> laneValueBits(
     const Lane& lane,
     std::string_view value,

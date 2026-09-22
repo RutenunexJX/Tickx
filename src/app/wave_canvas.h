@@ -767,6 +767,7 @@ private:
     bool stepBusEditorValue(bool upward);
     bool cycleBusRecentValue(bool forward);
     void rememberBusValue(const std::string& laneId, const QString& value);
+    void setBusEditorDraftValue(const QString& value);
     [[nodiscard]] BusDraftValues parseBusDraftValues(
         const Lane& lane) const;
     [[nodiscard]] BusDraftValues parseBusDraftValues(

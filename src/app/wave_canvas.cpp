@@ -35,6 +35,7 @@
 #include <QRegularExpression>
 #include <QScrollBar>
 #include <QShowEvent>
+#include <QSignalBlocker>
 #include <QStyle>
 #include <QStringListModel>
 #include <QToolButton>
@@ -61,6 +62,7 @@ const QColor kSelectedLockedCursor(102, 187, 106);
 const QString kRangeMimeType = QStringLiteral("application/x-wave-workbench-range+json");
 constexpr std::string_view kBusPresetExtension = "waveWorkbench.busPreset";
 constexpr int kSoftSnapRadiusPixels = 7;
+constexpr int kTextBusInput = -1;
 
 const WaveformTheme& canvasTheme()
 {
@@ -108,6 +110,13 @@ QString busPresetDisplayLabel(const std::string_view presetId)
     if (presetId == "x") return QStringLiteral("X");
     if (presetId == "z") return QStringLiteral("Z");
     return QStringLiteral("BUS VALUE");
+}
+
+QString displayLaneValue(const Lane& lane, const std::string_view value)
+{
+    const auto label = lane.kind == LaneKind::Bus ? busTextLabel(value) : std::nullopt;
+    const auto text = label.value_or(value);
+    return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
 }
 
 std::string busPresetId(const Segment& segment)
@@ -580,6 +589,8 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     busRadixCombo_->addItem(QStringLiteral("BIN"), static_cast<int>(Radix::Binary));
     busRadixCombo_->addItem(QStringLiteral("DEC"), static_cast<int>(Radix::Decimal));
     busRadixCombo_->addItem(QStringLiteral("OCT"), static_cast<int>(Radix::Octal));
+    busRadixCombo_->addItem(tr("Text"), kTextBusInput);
+    busRadixCombo_->setToolTip(tr("Select a numeric radix or Text for a display-only label without a numeric encoding"));
     busRadixCombo_->setMaximumWidth(72);
     presetControlLayout->addWidget(busRadixCombo_);
     connect(
@@ -604,6 +615,10 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     laneValueCompleter_->setPopup(ui::completionPopup(busValueEdit_));
     busValueEdit_->setCompleter(laneValueCompleter_);
     busValueEdit_->installEventFilter(this);
+    connect(busRadixCombo_, qOverload<int>(&QComboBox::activated), this, [this] {
+        busValueEdit_->setModified(true);
+        updateBusEditActionStates(true);
+    });
     connect(
         busValueEdit_,
         &QLineEdit::textEdited,
@@ -627,7 +642,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         this,
         [this](const int index) {
             if (index <= 0 || !busValueEdit_) return;
-            busValueEdit_->setText(busRecentValuesCombo_->itemText(index));
+            setBusEditorDraftValue(busRecentValuesCombo_->itemData(index).toString());
             busValueEdit_->setModified(true);
             busValueEdit_->setFocus(Qt::OtherFocusReason);
             busValueEdit_->selectAll();
@@ -6026,8 +6041,8 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
                     std::max(RulerHeight + 3, top + 3),
                     labelWidth,
                     22);
-                painter.fillRect(labelRect, QColor(16, 25, 39, 224));
-                painter.setPen(QColor(225, 239, 255));
+                painter.fillRect(labelRect, canvasTheme().raised);
+                painter.setPen(canvasTheme().text);
                 painter.drawText(
                     labelRect.adjusted(8, 0, -8, 0),
                     Qt::AlignLeft | Qt::AlignVCenter,
@@ -6658,10 +6673,13 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
             waveEditOriginalRange_.reset();
             waveEditInteraction_ = WaveEditInteraction::ToggleBitRange;
             drawLaneId_ = lane->id;
-            drawStart_ = cursorTick_;
-            drawCurrent_ = cursorTick_;
+            // A click owns the containing beat, not the nearest clock edge.
+            drawStart_ = rawTick;
+            drawCurrent_ = rawTick;
             waveEditPressPosition_ = position;
             waveEditPreviewRange_ = editableBeatRangeAt(rawTick, *lane);
+            cursorTick_ = waveEditPreviewRange_->first;
+            emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
             waveEditHoverLaneId_ = lane->id;
             waveEditHoverRange_ = waveEditPreviewRange_;
             selectionRange_ = waveEditPreviewRange_;
@@ -7307,7 +7325,10 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
                 }
             } else if (editLane
                 && waveEditInteraction_ == WaveEditInteraction::ToggleBitRange) {
-                const auto beats = editableBeatRangesBetween(drawStart_, drawCurrent_, *editLane);
+                const auto beats = editableBeatRangesBetween(
+                    drawStart_,
+                    meaningfulDrag || waveEditDragAutoScrolled_ ? drawCurrent_ : drawStart_,
+                    *editLane);
                 if (!beats.empty()) {
                     waveEditPreviewRange_ = std::pair{
                         beats.front().first,
@@ -7875,7 +7896,7 @@ void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
             && (editLane->kind == LaneKind::Bus
                 || editLane->kind == LaneKind::Enum)
             && !segmentAtTick(*editLane, tickAtX(position.x()))) {
-            promptBusValueAt(editLane->id, editTick(tickAtX(position.x()), *editLane));
+            promptBusValueAt(editLane->id, tickAtX(position.x()));
         } else {
             editSegmentAt(position);
         }
@@ -8517,7 +8538,7 @@ WaveCanvas::assessBusEditAction(const BusEditAction action) const
         state.displayValue = sequence
             ? tr("%1 values").arg(static_cast<qulonglong>(
                   draft.normalizedValues.size()))
-            : QString::fromStdString(normalizedValue);
+            : displayLaneValue(*lane, normalizedValue);
     } else {
         state.valueCount = 1;
         const auto targetValue =
@@ -9425,6 +9446,8 @@ void WaveCanvas::showBusPresetPalette(
         return;
     }
     hideRangeEditPalette();
+    const auto keepTextMode = busPresetLaneId_ == lane.id
+        && busRadixCombo_ && busRadixCombo_->currentData().toInt() == kTextBusInput;
     busPresetLaneId_ = lane.id;
     const auto requested = exactTick.value_or(
         anchor.x() >= headerWidth_ ? tickAtX(anchor.x()) : cursorTick_);
@@ -9473,7 +9496,8 @@ void WaveCanvas::showBusPresetPalette(
     }
     if (busRadixCombo_) {
         busRadixCombo_->setVisible(!enumLane);
-        const auto index = busRadixCombo_->findData(static_cast<int>(lane.radix));
+        const auto index = busRadixCombo_->findData(
+            keepTextMode ? kTextBusInput : static_cast<int>(lane.radix));
         if (index >= 0) busRadixCombo_->setCurrentIndex(index);
     }
     if (busRecentValuesCombo_) {
@@ -9481,7 +9505,9 @@ void WaveCanvas::showBusPresetPalette(
         busRecentValuesCombo_->addItem(tr("Recent"));
         const auto recent = busRecentValues_.find(lane.id);
         if (recent != busRecentValues_.end()) {
-            busRecentValuesCombo_->addItems(recent->second);
+            for (const auto& value : recent->second) {
+                busRecentValuesCombo_->addItem(displayLaneValue(lane, value.toStdString()), value);
+            }
         }
         busRecentValuesCombo_->setCurrentIndex(0);
         busRecentValuesCombo_->setEnabled(busRecentValuesCombo_->count() > 1);
@@ -9563,7 +9589,7 @@ void WaveCanvas::showBusPresetPalette(
     if (busValueEdit_) {
         const auto probe = start + (end - start) / 2;
         const auto* existing = segmentAtTick(lane, probe);
-        busValueEdit_->setText(existing ? QString::fromStdString(existing->value) : QString{});
+        setBusEditorDraftValue(existing ? QString::fromStdString(existing->value) : QString{});
         busValueEdit_->setModified(false);
         busValueEdit_->setPlaceholderText(
             busEditScope_ == BusEditScope::Beat
@@ -9611,7 +9637,8 @@ void WaveCanvas::showBusPresetPalette(
         if (!enumLane) {
             busValueEdit_->setToolTip(
                 busValueEdit_->toolTip()
-                + tr("\nUp/Down adjusts a known numeric draft by one"));
+                + tr("\nUp/Down adjusts a known numeric draft by one")
+                + tr("\nText mode stores the entire input as one display-only label, including spaces, commas and *N; text has no simulation value"));
         }
         busValueEdit_->setToolTip(
             busValueEdit_->toolTip()
@@ -10037,7 +10064,7 @@ bool WaveCanvas::cycleBusRecentValue(const bool forward)
     }
 
     const auto& values = recent->second;
-    auto index = values.indexOf(busValueEdit_->text().trimmed());
+    auto index = values.indexOf(busEditorValue(*lane));
     if (index < 0) {
         index = 0;
     } else if (forward) {
@@ -10046,7 +10073,7 @@ bool WaveCanvas::cycleBusRecentValue(const bool forward)
         index = (index + values.size() - 1) % values.size();
     }
     const auto value = values.at(index);
-    busValueEdit_->setText(value);
+    setBusEditorDraftValue(value);
     busValueEdit_->setModified(true);
     setSemanticState(busValueEdit_, {});
     busValueEdit_->setFocus(Qt::OtherFocusReason);
@@ -10077,9 +10104,33 @@ void WaveCanvas::rememberBusValue(
     if (busRecentValuesCombo_ && busPresetLaneId_ == laneId) {
         busRecentValuesCombo_->clear();
         busRecentValuesCombo_->addItem(tr("Recent"));
-        busRecentValuesCombo_->addItems(recent);
+        const auto* lane = scenario_ ? findLane(*scenario_, laneId) : nullptr;
+        for (const auto& entry : recent) {
+            busRecentValuesCombo_->addItem(
+                lane ? displayLaneValue(*lane, entry.toStdString()) : entry, entry);
+        }
         busRecentValuesCombo_->setCurrentIndex(0);
         busRecentValuesCombo_->setEnabled(true);
+    }
+}
+
+void WaveCanvas::setBusEditorDraftValue(const QString& value)
+{
+    if (!busValueEdit_) return;
+    const auto* lane = scenario_ ? findLane(*scenario_, busPresetLaneId_) : nullptr;
+    if (lane && lane->kind == LaneKind::Bus && !value.isEmpty()) {
+        const auto raw = value.toStdString();
+        const auto text = busTextLabel(raw);
+        if (busRadixCombo_) {
+            const auto mode = text ? kTextBusInput
+                : busRadixCombo_->currentData().toInt() == kTextBusInput
+                    ? static_cast<int>(lane->radix) : busRadixCombo_->currentData().toInt();
+            const QSignalBlocker blocker(busRadixCombo_);
+            busRadixCombo_->setCurrentIndex(busRadixCombo_->findData(mode));
+        }
+        busValueEdit_->setText(displayLaneValue(*lane, raw));
+    } else {
+        busValueEdit_->setText(value);
     }
 }
 
@@ -10095,6 +10146,9 @@ QString WaveCanvas::busEditorValue(
 {
     auto value = entered.trimmed();
     if (lane.kind != LaneKind::Bus || value.isEmpty()) return value;
+    if (busRadixCombo_ && busRadixCombo_->currentData().toInt() == kTextBusInput) {
+        return QString::fromUtf8(BusTextPrefix.data(), static_cast<qsizetype>(BusTextPrefix.size())) + value;
+    }
     const auto lower = value.toLower();
     if (lower == QStringLiteral("x")) {
         return QString::fromStdString(
@@ -10159,7 +10213,9 @@ WaveCanvas::parseBusDraftValues(
                 ? busEditorValue(lane, value)
                 : value.trimmed();
         };
-    if (lane.kind == LaneKind::Enum) {
+    if (lane.kind == LaneKind::Enum
+        || (lane.kind == LaneKind::Bus && useEditorRadix
+            && busRadixCombo_ && busRadixCombo_->currentData().toInt() == kTextBusInput)) {
         const auto wholeValue =
             editorValue(entered);
         const auto wholeValidation =
@@ -15609,6 +15665,7 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
     const auto laneName = lane->name;
     const auto [start, end] = *busEditRange_;
     const auto editorScope = busEditScope_;
+    const auto displayValue = displayLaneValue(*lane, validation.normalizedValue);
     const auto valuePreflight =
         assessBusEditAction(BusEditAction::ApplyDraft);
     const auto navigateBeatAfterCommit = editorScope == BusEditScope::Beat
@@ -15666,12 +15723,12 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
         const auto message = alreadyMatches
             ? tr("%1 Segment already = %2 · no values changed")
                   .arg(QString::fromStdString(laneName))
-                  .arg(QString::fromStdString(validation.normalizedValue))
+                  .arg(displayValue)
             : tr("%1 Segment · %2–%3 = %4")
                   .arg(QString::fromStdString(laneName))
                   .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
                   .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
-                  .arg(QString::fromStdString(validation.normalizedValue));
+                  .arg(displayValue);
         if (!alreadyMatches) {
             auto result = appendRelationAwareUndo(
                 message,
@@ -15709,7 +15766,7 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
     }
     if (applied) {
         rememberBusValue(laneId, QString::fromStdString(validation.normalizedValue));
-        busValueEdit_->setText(QString::fromStdString(validation.normalizedValue));
+        setBusEditorDraftValue(QString::fromStdString(validation.normalizedValue));
         busValueEdit_->setModified(false);
         setSemanticState(busValueEdit_, {});
         if (stayAfterCommit) {
@@ -15730,7 +15787,7 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
             emit statusMessage(
                 tr("%1 · %2 %3 · target kept · Enter finishes")
                     .arg(QString::fromStdString(laneName))
-                    .arg(QString::fromStdString(validation.normalizedValue))
+                    .arg(displayValue)
                     .arg(changed
                              ? tr("applied · Ctrl+Z")
                              : tr("confirmed · no values changed")));
@@ -15758,7 +15815,7 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
             emit statusMessage(
                 tr("%1 · %2 %3 · already at %4 · %5")
                     .arg(QString::fromStdString(laneName))
-                    .arg(QString::fromStdString(validation.normalizedValue))
+                    .arg(displayValue)
                     .arg(changed ? tr("applied · Ctrl+Z") : tr("confirmed · no values changed"))
                     .arg(forward ? tr("End") : tr("start"))
                     .arg(forward ? tr("Shift+Tab goes back") : tr("Tab advances")));
@@ -15779,8 +15836,7 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
                          ? tr("%1 · %2 %3 · next Segment opened · Shift+Tab goes back")
                          : tr("%1 · %2 %3 · previous Segment opened · Tab goes forward"))
                         .arg(QString::fromStdString(laneName))
-                        .arg(QString::fromStdString(
-                            validation.normalizedValue))
+                        .arg(displayValue)
                         .arg(changed
                                  ? tr("applied · Ctrl+Z")
                                  : tr("confirmed · no values changed")));
@@ -15805,8 +15861,7 @@ void WaveCanvas::submitBusValue(const BusEditCommitAction action)
                      ? tr("%1 · %2 %3 · no next Segment · Shift+Tab goes back · target kept")
                      : tr("%1 · %2 %3 · no previous Segment · Tab goes forward · target kept"))
                     .arg(QString::fromStdString(laneName))
-                    .arg(QString::fromStdString(
-                        validation.normalizedValue))
+                    .arg(displayValue)
                     .arg(changed
                              ? tr("applied · Ctrl+Z")
                              : tr("confirmed · no values changed")));
@@ -15946,7 +16001,7 @@ void WaveCanvas::applyBusPreset(
     emit selectionChanged(QString::fromStdString(laneId), start);
     rebuildLaneLayout();
     if (busValueEdit_ && busPresetLaneId_ == laneId) {
-        busValueEdit_->setText(QString::fromStdString(validation.normalizedValue));
+        setBusEditorDraftValue(QString::fromStdString(validation.normalizedValue));
         busValueEdit_->setModified(false);
         setSemanticState(busValueEdit_, {});
         if (busScopeButton_) {
@@ -16104,6 +16159,7 @@ bool WaveCanvas::setLaneRangeValue(
         return false;
     }
     const auto laneName = lane->name;
+    const auto displayValue = displayLaneValue(*lane, validation.normalizedValue);
     const auto relationCountBefore = scenario_->relations.size();
     bool changed = false;
     try {
@@ -16139,12 +16195,12 @@ bool WaveCanvas::setLaneRangeValue(
               .arg(QString::fromStdString(laneName))
               .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
               .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
-              .arg(QString::fromStdString(validation.normalizedValue))
+              .arg(displayValue)
         : tr("%1 · %2–%3 already = %4 · no values changed")
               .arg(QString::fromStdString(laneName))
               .arg(QString::fromStdString(formatTick(start, project_->timeBase)))
               .arg(QString::fromStdString(formatTick(end, project_->timeBase)))
-              .arg(QString::fromStdString(validation.normalizedValue));
+              .arg(displayValue);
     if (changed) {
         message = appendRelationAwareUndo(
             message,
@@ -18230,7 +18286,7 @@ void WaveCanvas::drawLaneReorderOverlay(QPainter& painter)
             std::max(RulerHeight + 3, viewport()->height() - labelHeight - 3));
         const QRect labelRect(labelX, labelY, labelWidth, labelHeight);
         painter.setPen(QPen(accent, 1.5));
-        painter.setBrush(QColor(20, 28, 40, 232));
+        painter.setBrush(canvasTheme().raised);
         painter.drawRoundedRect(labelRect, 5, 5);
         painter.setPen(canvasTheme().text);
         painter.drawText(labelRect, Qt::AlignCenter, text);
@@ -19808,7 +19864,7 @@ QString WaveCanvas::laneValueAt(const Lane& lane, const Tick tick) const
     if (segment == lane.segments.begin()) return undefinedValue;
     const auto& candidate = *std::prev(segment);
     return candidate.start <= tick && tick < candidate.end
-        ? QString::fromStdString(candidate.value)
+        ? displayLaneValue(lane, candidate.value)
         : undefinedValue;
 }
 
@@ -20754,7 +20810,11 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
     }
 
     if (interaction == WaveEditInteraction::ToggleBitRange) {
-        const auto beats = editableBeatRangesBetween(drawStart_, rawTick, *lane);
+        const auto meaningfulDrag = waveEditDragAutoScrolled_
+            || (releasePosition - waveEditPressPosition_).manhattanLength()
+                >= QApplication::startDragDistance();
+        const auto beats = editableBeatRangesBetween(
+            drawStart_, meaningfulDrag ? rawTick : drawStart_, *lane);
         waveEditOriginalRange_.reset();
         waveEditPreviewRange_.reset();
         if (beats.empty()) {
@@ -21059,6 +21119,9 @@ void WaveCanvas::commitBitToggle(
     if (!scenario_ || !commandStack_ || beats.empty() || drawLaneId_.empty()) return;
     const auto* originalLane = findLane(*scenario_, drawLaneId_);
     if (!originalLane) return;
+    const auto activeBeat = tickAtX(position.x()) < drawStart_
+        ? beats.front() : beats.back();
+    cursorTick_ = activeBeat.first;
     const auto laneName = originalLane->name;
     const auto relationCountBefore = scenario_->relations.size();
     QString beforeValue = QStringLiteral("0");
@@ -21092,13 +21155,9 @@ void WaveCanvas::commitBitToggle(
     selectionRange_ = std::pair{beats.front().first, beats.back().second};
     selectedSegmentLaneId_.clear();
     selectedSegmentId_.clear();
-    if (const auto* lane = findLane(*scenario_, drawLaneId_)) {
-        const auto hoverTick = scenario_->duration > 0
-            ? std::clamp<Tick>(tickAtX(position.x()), 0, scenario_->duration - 1)
-            : Tick{0};
-        waveEditHoverLaneId_ = lane->id;
-        waveEditHoverRange_ = editableBeatRangeAt(hoverTick, *lane);
-    }
+    waveEditHoverLaneId_ = drawLaneId_;
+    waveEditHoverRange_ = activeBeat;
+    emit selectionChanged(QString::fromStdString(drawLaneId_), cursorTick_);
     viewport()->update();
     if (beats.size() == 1) {
         emit statusMessage(appendRelationAwareUndo(
@@ -21674,16 +21733,46 @@ void WaveCanvas::drawRuler(QPainter& painter)
     painter.fillRect(QRect(headerWidth_, 0, waveViewportWidth(), RulerHeight), canvasTheme().raised);
     painter.setClipRect(QRect(headerWidth_, 0, waveViewportWidth(), viewport()->height()));
     const auto [visibleStart, visibleEnd] = visibleTickRange();
-    const auto major = majorTickStep();
-    const auto minor = std::max<Tick>(1, major / 5);
-    auto first = floorToStep(visibleStart, minor);
+    auto major = majorTickStep();
+    auto minor = std::max<Tick>(1, major / 5);
+    Tick anchor = 0;
+    const auto* lane = findLane(*scenario_, selectedLaneId_);
+    const auto* clock = lane ? findClock(*project_, lane->clockDomainId) : nullptr;
+    if (!clock || !clock->isValid()) {
+        clock = nullptr;
+        for (const auto& layout : laneLayout_) {
+            const auto& candidate = scenario_->lanes.at(layout.laneIndex);
+            if (candidate.kind != LaneKind::Clock) continue;
+            const auto* domain = findClock(*project_, candidate.clockDomainId);
+            if (domain && domain->isValid()) {
+                clock = domain;
+                break;
+            }
+        }
+    }
+    if (clock) {
+        // Coarsen by whole cycles at low zoom; never introduce off-clock grid lines.
+        const auto multipleForPixels = [this](const Tick unit, const double pixels) {
+            const auto maximum = std::numeric_limits<Tick>::max() / unit;
+            const auto desired = std::ceil(pixels / (static_cast<double>(unit) * pixelsPerTick_));
+            return unit * (desired >= static_cast<double>(maximum)
+                ? maximum : std::max<Tick>(1, static_cast<Tick>(desired)));
+        };
+        minor = multipleForPixels(clock->period, 8.0);
+        major = multipleForPixels(minor, 110.0);
+        anchor = tickAtCycle(*clock, 0, clock->activeEdge).value_or(clock->phase)
+            % clock->period;
+        if (anchor < 0) anchor += clock->period;
+    }
+    auto first = visibleStart - (visibleStart - anchor) % minor;
+    if (first > visibleStart) first -= minor;
 
     QFont labelFont = painter.font();
     labelFont.setPointSizeF(std::max(7.5, labelFont.pointSizeF() - 1.0));
     painter.setFont(labelFont);
     for (auto tick = first; tick <= visibleEnd;) {
         const auto x = xAtTick(tick);
-        const auto isMajor = tick % major == 0;
+        const auto isMajor = (tick - anchor) % major == 0;
         painter.setPen(isMajor ? canvasTheme().gridMajor : canvasTheme().gridMinor);
         painter.drawLine(
             x,
@@ -21726,14 +21815,14 @@ void WaveCanvas::drawLane(
     painter.fillRect(
         QRect(0, y, headerWidth_, layout.height),
         selected
-            ? QColor(63, 80, 104)
+            ? canvasTheme().selection
             : groupHeader
-                ? QColor(38, 50, 67)
+                ? canvasTheme().raised
                 : canvasTheme().panel);
     if (groupHeader) {
         painter.fillRect(waveformRect, QColor(86, 111, 142, 24));
     }
-    if (selected) painter.fillRect(waveformRect, QColor(105, 151, 205, 34));
+    if (selected) painter.fillRect(waveformRect, canvasSelectionColor());
     if (groupedMember) {
         painter.setPen(QPen(QColor(101, 127, 157, 145), 1.0));
         painter.drawLine(20, y, 20, y + layout.height);
@@ -21745,7 +21834,7 @@ void WaveCanvas::drawLane(
             const auto center = disclosure.center();
             painter.setPen(Qt::NoPen);
             painter.setBrush(
-                selected ? QColor(219, 232, 247) : QColor(176, 196, 218));
+                selected ? canvasTheme().selectionText : canvasTheme().mutedText);
             if (collapsedGroupIds_.contains(lane.id)) {
                 painter.drawPolygon(QPolygon{
                     QPoint(center.x() - 3, center.y() - 5),
@@ -21761,7 +21850,7 @@ void WaveCanvas::drawLane(
             }
         }
     }
-    painter.setPen(canvasTheme().text);
+    painter.setPen(selected ? canvasTheme().selectionText : canvasTheme().text);
     QFont nameFont = painter.font();
     nameFont.setBold(selected || groupHeader);
     painter.setFont(nameFont);
@@ -21899,7 +21988,7 @@ void WaveCanvas::drawAddLaneRow(QPainter& painter)
         return;
     }
 
-    painter.fillRect(row, QColor(35, 43, 55));
+    painter.fillRect(row, canvasTheme().panel);
     painter.fillRect(
         QRect(0, row.top(), headerWidth_, row.height()),
         canvasTheme().panel);
@@ -21954,14 +22043,14 @@ void WaveCanvas::drawClock(
             const auto gated = *mode == ClockOverrideMode::Gated;
             painter.fillRect(
                 QRect(left, rect.top() + 1, std::max(1, right - left), rect.height() - 2),
-                gated ? QColor(61, 49, 25) : QColor(68, 31, 40));
+                gated ? canvasTheme().warningSurface : canvasTheme().errorSurface);
             painter.setPen(QPen(
                 gated ? canvasTheme().warning : canvasTheme().error,
                 2.0,
                 preview || !gated ? Qt::DashLine : Qt::SolidLine));
             const auto y = gated ? lowY : (highY + lowY) / 2;
             painter.drawLine(left, y, right, y);
-            painter.setPen(gated ? QColor(255, 202, 40) : QColor(255, 138, 128));
+            painter.setPen(gated ? canvasTheme().warning : canvasTheme().error);
             const auto fullLabel = gated ? tr("GATED") : tr("DISABLED · X");
             const auto compactLabel = gated ? tr("G") : tr("X");
             const auto availableWidth = right - left - 8;
@@ -22222,7 +22311,7 @@ void WaveCanvas::drawBusSegments(
                 QRect(left + bevel + 4, top, right - left - 2 * bevel - 8, bottom - top),
                 Qt::AlignCenter,
                 presetLabel.isEmpty()
-                    ? QString::fromStdString(iterator->value)
+                    ? displayLaneValue(lane, iterator->value)
                     : presetLabel);
         }
         cursor = std::max(cursor, segmentEnd);
@@ -22281,10 +22370,10 @@ void WaveCanvas::drawLaneHeaderPastePreview(
             waveformRect.adjusted(0, 1, 0, -1),
             Qt::IntersectClip);
         auto shade = removesRelations
-            ? QColor(68, 42, 16)
+            ? canvasTheme().warningSurface
             : noChange
-                ? QColor(29, 35, 43)
-                : QColor(12, 24, 38);
+                ? canvasTheme().panel
+                : canvasTheme().informationSurface;
         shade.setAlpha(112);
         painter.fillRect(previewRect, shade);
         painter.setClipRect(previewRect, Qt::IntersectClip);
@@ -22320,16 +22409,16 @@ void WaveCanvas::drawLaneHeaderPastePreview(
                 74,
                 layout->height / 2);
             painter.save();
-            painter.fillRect(valueRect, QColor(63, 80, 104));
+            painter.fillRect(valueRect, canvasTheme().selection);
             auto font = painter.font();
             font.setBold(true);
             painter.setFont(font);
             painter.setPen(
                 removesRelations
-                    ? QColor(255, 210, 128)
+                    ? canvasTheme().warning
                     : noChange
-                        ? QColor(202, 211, 220)
-                        : QColor(151, 214, 255));
+                        ? canvasTheme().mutedText
+                        : canvasTheme().information);
             painter.drawText(
                 valueRect,
                 Qt::AlignRight | Qt::AlignVCenter,
@@ -22911,13 +23000,13 @@ void WaveCanvas::drawWaveEditOverlay(
                 painter.fillRect(
                     labelRect,
                     !transferPreviewValid
-                        ? QColor(74, 24, 29, 232)
+                        ? canvasTheme().errorSurface
                         : transferRemovesRelations
-                            ? QColor(66, 47, 18, 232)
+                            ? canvasTheme().warningSurface
                             : transferHasNoEffect
-                                ? QColor(45, 51, 61, 232)
-                                : QColor(16, 25, 39, 224));
-                painter.setPen(QColor(225, 239, 255));
+                                ? canvasTheme().panel
+                                : canvasTheme().raised);
+                painter.setPen(canvasTheme().text);
                 painter.drawText(
                     labelRect.adjusted(8, 0, -8, 0),
                     Qt::AlignLeft | Qt::AlignVCenter,
@@ -23107,11 +23196,11 @@ void WaveCanvas::drawWaveEditOverlay(
             painter.fillRect(
                 labelRect,
                 removesRelations
-                    ? QColor(66, 47, 18, 232)
+                    ? canvasTheme().warningSurface
                     : noEffect
-                        ? QColor(45, 51, 61, 232)
-                        : QColor(16, 25, 39, 224));
-            painter.setPen(QColor(225, 239, 255));
+                        ? canvasTheme().panel
+                        : canvasTheme().raised);
+            painter.setPen(canvasTheme().text);
             painter.drawText(
                 labelRect.adjusted(4, 0, -4, 0),
                 Qt::AlignLeft | Qt::AlignVCenter,

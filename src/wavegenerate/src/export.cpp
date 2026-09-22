@@ -463,10 +463,13 @@ private:
             painter.drawPath(path);
             if (right - left > 26) {
                 painter.setPen(QColor(38, 45, 56));
+                const auto label = lane.kind == LaneKind::Bus
+                    ? busTextLabel(iterator->value).value_or(iterator->value)
+                    : std::string_view(iterator->value);
                 painter.drawText(
                     QRect(left + bevel + 3, top, right - left - 2 * bevel - 6, bottom - top),
                     Qt::AlignCenter,
-                    QString::fromStdString(iterator->value));
+                    QString::fromUtf8(label.data(), static_cast<qsizetype>(label.size())));
                 painter.setPen(QPen(color, 1.4));
             }
         }
@@ -702,7 +705,8 @@ QByteArray generateWaveDromJson(
                         : 'x');
             } else {
                 waveString.push_back('=');
-                dataValues.push_back(value);
+                dataValues.emplace_back(lane.kind == LaneKind::Bus
+                    ? busTextLabel(value).value_or(value) : std::string_view(value));
             }
         }
         QJsonObject signal{

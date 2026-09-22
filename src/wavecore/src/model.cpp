@@ -163,6 +163,13 @@ std::optional<std::string> digitsToBits(
 
 ValueValidation validateBus(const Lane& lane, const std::string_view rawValue)
 {
+    if (lane.kind == LaneKind::Bus) {
+        if (const auto text = busTextLabel(rawValue)) {
+            return text->empty()
+                ? ValueValidation{false, {}, "bus text label is empty"}
+                : ValueValidation{true, std::string(rawValue), {}};
+        }
+    }
     if (lane.kind == LaneKind::Enum) {
         const auto enumMatch = lane.enumMap.find(std::string(rawValue));
         if (enumMatch != lane.enumMap.end()) {
@@ -563,6 +570,12 @@ const Relation* findRelation(const Scenario& scenario, const std::string_view re
     return iterator == scenario.relations.end() ? nullptr : &*iterator;
 }
 
+std::optional<std::string_view> busTextLabel(const std::string_view value) noexcept
+{
+    return value.starts_with(BusTextPrefix)
+        ? std::optional{value.substr(BusTextPrefix.size())} : std::nullopt;
+}
+
 ValueValidation validateLaneValue(const Lane& lane, const std::string_view value)
 {
     switch (lane.kind) {
@@ -597,6 +610,7 @@ std::optional<std::string> laneValueBits(
     const std::string_view rawValue,
     const LaneValueEncoding encoding)
 {
+    if (lane.kind == LaneKind::Bus && busTextLabel(rawValue)) return std::nullopt;
     std::string value;
     if (encoding == LaneValueEncoding::ProjectLiteral) {
         const auto enumeration = lane.enumMap.find(std::string(rawValue));
