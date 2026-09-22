@@ -455,7 +455,6 @@ private:
     QAction* scenarioSelectorLabelAction_{nullptr};
     QAction* scenarioSelectorAction_{nullptr};
     QAction* scenarioSelectorSeparatorAction_{nullptr};
-    QLabel* waveTargetLabel_{nullptr};
     QAction* undoAction_{nullptr};
     QAction* redoAction_{nullptr};
     QAction* previousScenarioAction_{nullptr};
@@ -476,10 +475,6 @@ private:
     QAction* showRelationsAction_{nullptr};
     QWidget* signalFindWidget_{nullptr};
     QLineEdit* signalFindEdit_{nullptr};
-    QLabel* signalFindResultLabel_{nullptr};
-    QToolButton* signalFindPreviousButton_{nullptr};
-    QToolButton* signalFindNextButton_{nullptr};
-    QToolButton* signalFindCloseButton_{nullptr};
     int signalFindMatchIndex_{-1};
     QWidget* goToTimeWidget_{nullptr};
     QLabel* goToTimeLabel_{nullptr};
@@ -491,11 +486,11 @@ private:
     QAction* goToTimeWidgetAction_{nullptr};
     bool goToTimeEditsRange_{false};
     bool goToTimeEditsRangeWidth_{false};
+    bool preparingNavigation_{false};
     QAction* selectAction_{nullptr};
     QAction* drawAction_{nullptr};
     QAction* markerAction_{nullptr};
     QAction* asyncTimingAction_{nullptr};
-    QAction* waveTargetAction_{nullptr};
     QAction* selectSegmentAtCursorAction_{nullptr};
     QAction* previousSegmentAction_{nullptr};
     QAction* nextSegmentAction_{nullptr};
@@ -532,7 +527,6 @@ private:
     QMenu* segmentMenu_{nullptr};
     QMenu* recentProjectsMenu_{nullptr};
     QAction* signalFindAction_{nullptr};
-    QAction* signalFindWidgetAction_{nullptr};
     QAction* goToTimeAction_{nullptr};
     QAction* pinloomAction_{nullptr};
     bool populatingTables_{false};

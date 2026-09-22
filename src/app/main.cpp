@@ -4393,8 +4393,8 @@ int main(int argc, char* argv[])
                     QStringLiteral("RangeEditToolbarAction"));
                 auto* rangeEditContextLabel = window.findChild<QLabel*>(
                     QStringLiteral("RangeEditContextLabel"));
-                auto* signalFindToolbarAction = window.findChild<QAction*>(
-                    QStringLiteral("SignalFindToolbarAction"));
+                auto* signalFindToolbarAction = window.findChild<QLineEdit*>(
+                    QStringLiteral("SignalFindEdit"));
                 auto* goToBusPalette = window.findChild<QWidget*>(QStringLiteral("BusPresetPalette"));
                 auto* waveTargetLabel = window.findChild<QLabel*>(
                     QStringLiteral("WaveTargetLabel"));
@@ -4410,7 +4410,7 @@ int main(int argc, char* argv[])
                     || !goToTimeEdit || !goToTimeLabel || !goToTimeRange
                     || !goToTimeOtherEdge || !goToTimeGo || !goToTimeClose
                     || !rangeEditToolbarAction || !rangeEditContextLabel
-                    || !signalFindToolbarAction || !goToBusPalette || !waveTargetLabel
+                    || !signalFindToolbarAction || !goToBusPalette || waveTargetLabel
                     || window.project().scenarios.empty()) {
                     fail(QStringLiteral(
                         "Wave Edit autoscroll smoke prerequisites are missing"));
@@ -4441,14 +4441,14 @@ int main(int argc, char* argv[])
                     || goToTimeAction->shortcut().matches(
                            QKeySequence(Qt::CTRL | Qt::Key_G))
                         != QKeySequence::ExactMatch
-                    || goToTimeToolbarAction->isVisible()
-                    || goToTimeBar->isVisibleTo(&window)
+                    || !goToTimeToolbarAction->isVisible()
+                    || !goToTimeBar->isVisibleTo(&window)
                     || goToTimeEdit->placeholderText()
                         != QStringLiteral("2.5 ns or cycle 25")
                     || goToTimeEdit->accessibleName()
                         != QStringLiteral("Exact timeline position")
-                    || goToTimeRange->text() != QStringLiteral("0 ps–0 ps")
-                    || signalFindToolbarAction->isVisible()
+                    || goToTimeRange->text() != QStringLiteral("0 ps–1 us")
+                    || !signalFindToolbarAction->isVisible()
                     || QApplication::activeModalWidget()) {
                     fail(QStringLiteral(
                         "Wave Edit autoscroll smoke did not start from its Saved fixture"));
@@ -4979,11 +4979,11 @@ int main(int argc, char* argv[])
                     QCoreApplication::processEvents();
                 };
                 clickSignalHeader(laneY);
-                if (!waveTargetLabel->toolTip().contains(
+                if (!canvas->editTargetToolTip().contains(
                         QStringLiteral("Ctrl+Left/Right jumps edges"))
-                    || !waveTargetLabel->toolTip().contains(
+                    || !canvas->editTargetToolTip().contains(
                         QStringLiteral("Shift+Left/Right selects time"))
-                    || !waveTargetLabel->toolTip().contains(
+                    || !canvas->editTargetToolTip().contains(
                         QStringLiteral("Enter edits the value"))
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("value X"))
@@ -5000,7 +5000,7 @@ int main(int argc, char* argv[])
                     || goToTimeEdit->text() != QStringLiteral("0 ps")
                     || goToTimeEdit->selectedText() != QStringLiteral("0 ps")
                     || goToTimeRange->text() != QStringLiteral("0 ps–1 us")
-                    || signalFindToolbarAction->isVisible()
+                    || !signalFindToolbarAction->isVisible()
                     || canvas->cursorTick() != 0
                     || goToBusPalette->isVisibleTo(&window)
                     || canvas->selectedLaneId()
@@ -5176,8 +5176,8 @@ int main(int argc, char* argv[])
 
                 sendKey(goToTimeEdit, Qt::Key_Escape);
                 QCoreApplication::processEvents();
-                if (goToTimeToolbarAction->isVisible()
-                    || goToTimeBar->isVisibleTo(&window)
+                if (!goToTimeToolbarAction->isVisible()
+                    || !goToTimeBar->isVisibleTo(&window)
                     || !canvas->viewport()->hasFocus()
                     || canvas->cursorTick() != 375'000
                     || canvas->selectedLaneId()
@@ -5221,7 +5221,7 @@ int main(int argc, char* argv[])
                 }
                 goToTimeClose->click();
                 QCoreApplication::processEvents();
-                if (goToTimeToolbarAction->isVisible()
+                if (!goToTimeToolbarAction->isVisible()
                     || !canvas->viewport()->hasFocus()
                     || canvas->cursorTick() != 250'000
                     || !window.statusBar()->currentMessage().contains(
@@ -5692,7 +5692,7 @@ int main(int argc, char* argv[])
 
                 goToTimeClose->click();
                 QCoreApplication::processEvents();
-                if (goToTimeToolbarAction->isVisible()
+                if (!goToTimeToolbarAction->isVisible()
                     || !rangeEditToolbarAction->isVisible()
                     || !canvas->hasExplicitRangeSelection()
                     || canvas->selectedTimeRange() != crossedExactRange
@@ -5740,7 +5740,7 @@ int main(int argc, char* argv[])
                 }
                 clickSignalHeader(laneY);
                 QCoreApplication::processEvents();
-                if (goToTimeToolbarAction->isVisible()
+                if (!goToTimeToolbarAction->isVisible()
                     || rangeEditToolbarAction->isVisible()
                     || canvas->hasExplicitRangeSelection()
                     || canvas->selectedLaneId()
@@ -5758,7 +5758,7 @@ int main(int argc, char* argv[])
                     || canvas->cursorTick() != 0
                     || canvas->selectedLaneId()
                         != QStringLiteral("lane-wave-edit-scroll")
-                    || goToTimeToolbarAction->isVisible()
+                    || !goToTimeToolbarAction->isVisible()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
                     || saveState->text() != QStringLiteral("Saved")) {
@@ -5966,7 +5966,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Selected signal state"))
                     || !enumSelectionStatus.contains(
                         QStringLiteral("value WAIT_ACK"))
-                    || !waveTargetLabel->toolTip().contains(
+                    || !canvas->editTargetToolTip().contains(
                         QStringLiteral("Enter edits the value"))) {
                     fail(QStringLiteral(
                         "Enum selection did not disclose its value and direct edit path"));
@@ -6429,7 +6429,7 @@ int main(int argc, char* argv[])
                 }
                 goToTimeClose->click();
                 QCoreApplication::processEvents();
-                if (goToTimeToolbarAction->isVisible()
+                if (!goToTimeToolbarAction->isVisible()
                     || !rangeEditToolbarAction->isVisible()
                     || canvas->selectedTimeRange() != selectedEnumRange
                     || canvas->selectedLaneIds() != selectedEnumLanes
@@ -6464,7 +6464,7 @@ int main(int argc, char* argv[])
                 }
                 goToTimeAction->trigger();
                 QCoreApplication::processEvents();
-                if (goToTimeToolbarAction->isVisible()
+                if (!goToTimeToolbarAction->isVisible()
                     || !rangeEditToolbarAction->isVisible()
                     || !enumRangeValueEdit->hasFocus()
                     || !enumRangeValueEdit->isModified()
@@ -7612,9 +7612,9 @@ int main(int argc, char* argv[])
 
                 sendKey(canvas, Qt::Key_Home);
                 clickSignalHeader(laneY);
-                if (!waveTargetLabel->toolTip().contains(
+                if (!canvas->editTargetToolTip().contains(
                         QStringLiteral("Shift+Left/Right selects time"))
-                    || !waveTargetLabel->toolTip().contains(
+                    || !canvas->editTargetToolTip().contains(
                         QStringLiteral("Shift+Home/End selects to a timeline boundary"))) {
                     fail(QStringLiteral(
                         "Signal selection did not disclose keyboard time-range selection"));
@@ -8214,7 +8214,7 @@ int main(int argc, char* argv[])
 
                 sendKey(canvas, Qt::Key_Home);
                 clickSignalHeader(laneY);
-                if (!waveTargetLabel->toolTip().contains(
+                if (!canvas->editTargetToolTip().contains(
                         QStringLiteral("Ctrl+Shift+Left/Right selects to edges"))) {
                     fail(QStringLiteral(
                         "Signal selection did not disclose keyboard edge-range selection"));
@@ -8866,29 +8866,18 @@ int main(int argc, char* argv[])
                     QStringLiteral("TimelineDurationEdit"));
                 auto* findSignalAction = window.findChild<QAction*>(
                     QStringLiteral("FindSignalAction"));
-                auto* findToolbarAction = window.findChild<QAction*>(
-                    QStringLiteral("SignalFindToolbarAction"));
                 auto* findBar = window.findChild<QFrame*>(
                     QStringLiteral("SignalFindBar"));
                 auto* findEdit = window.findChild<QLineEdit*>(
                     QStringLiteral("SignalFindEdit"));
-                auto* findResult = window.findChild<QLabel*>(
-                    QStringLiteral("SignalFindResultLabel"));
-                auto* findPrevious = window.findChild<QToolButton*>(
-                    QStringLiteral("SignalFindPreviousButton"));
-                auto* findNext = window.findChild<QToolButton*>(
-                    QStringLiteral("SignalFindNextButton"));
-                auto* findClose = window.findChild<QToolButton*>(
-                    QStringLiteral("SignalFindCloseButton"));
                 auto fail = [&application, &window](const QString& message) {
                     qCritical().noquote() << message;
                     window.hide();
                     application.exit(4);
                 };
                 if (!canvas || !undoAction || !saveState || !durationEdit
-                    || !findSignalAction || !findToolbarAction || !findBar
-                    || !findEdit || !findResult || !findPrevious || !findNext
-                    || !findClose || window.project().scenarios.empty()) {
+                    || !findSignalAction || !findBar
+                    || !findEdit || window.project().scenarios.empty()) {
                     fail(QStringLiteral("Lane autoscroll smoke prerequisites are missing"));
                     return;
                 }
@@ -8900,13 +8889,13 @@ int main(int argc, char* argv[])
                     || canvas->verticalScrollBar()->maximum() <= 0
                     || findSignalAction->shortcut().matches(QKeySequence::Find)
                         != QKeySequence::ExactMatch
-                    || findToolbarAction->isVisible()
-                    || findBar->isVisibleTo(&window)
+                    || !findEdit->isVisible()
+                    || !findBar->isVisibleTo(&window)
                     || findEdit->placeholderText()
-                        != QStringLiteral("Visible signal name or ID")
+                        != QStringLiteral("Find signal")
                     || findEdit->accessibleName()
                         != QStringLiteral("Find visible signal")
-                    || findResult->text() != QStringLiteral("0/0")
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("0/0")
                     || QApplication::activeModalWidget()
                     || saveState->text() != QStringLiteral("Saved")
                     || undoAction->isEnabled()) {
@@ -9245,7 +9234,7 @@ int main(int argc, char* argv[])
                 sendKey(canvas, Qt::Key_Right, Qt::ShiftModifier);
                 QCoreApplication::processEvents();
                 if (!canvas->hasExplicitRangeSelection()
-                    || findToolbarAction->isVisible()
+                    || !findEdit->isVisible()
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
                     || saveState->text() != QStringLiteral("Saved")) {
@@ -9255,7 +9244,7 @@ int main(int argc, char* argv[])
                 }
                 sendKey(canvas, Qt::Key_F, Qt::ControlModifier);
                 QCoreApplication::processEvents();
-                if (findToolbarAction->isVisible()
+                if (!findEdit->isVisible()
                     || !canvas->hasExplicitRangeSelection()
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Esc clears the selected range"))
@@ -9286,19 +9275,17 @@ int main(int argc, char* argv[])
 
                 sendKey(canvas, Qt::Key_F, Qt::ControlModifier);
                 QCoreApplication::processEvents();
-                if (!findToolbarAction->isVisible()
+                if (!findEdit->isVisible()
                     || !findBar->isVisibleTo(&window)
                     || !findEdit->hasFocus()
                     || !findEdit->text().isEmpty()
-                    || findResult->text() != QStringLiteral("0/0")
-                    || findPrevious->isEnabled()
-                    || findNext->isEnabled()
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("0/0")
                     || canvas->selectedLaneId() != selectedBeforeFind
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Find visible signal"))
                     || QApplication::activeModalWidget()) {
                     fail(QStringLiteral(
-                        "Ctrl+F did not open an empty non-modal signal search"));
+                        "Ctrl+F did not focus the persistent signal search"));
                     return;
                 }
 
@@ -9306,9 +9293,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-00")
-                    || findResult->text() != QStringLiteral("1/9")
-                    || !findPrevious->isEnabled()
-                    || !findNext->isEnabled()
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("1/9")
                     || canvas->verticalScrollBar()->value() != 0
                     || canvas->horizontalScrollBar()->value()
                         != originalHorizontalScroll
@@ -9321,19 +9306,19 @@ int main(int argc, char* argv[])
                     return;
                 }
 
-                findNext->click();
+                sendKey(findEdit, Qt::Key_Down);
                 QCoreApplication::processEvents();
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-01")
-                    || findResult->text() != QStringLiteral("2/9")) {
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("2/9")) {
                     fail(QStringLiteral(
-                        "Signal search Next button did not advance in display order"));
+                        "Signal search Down key did not advance in display order"));
                     return;
                 }
                 sendKey(findEdit, Qt::Key_Return);
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-02")
-                    || findResult->text() != QStringLiteral("3/9")) {
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("3/9")) {
                     fail(QStringLiteral(
                         "Enter did not advance to the next signal match"));
                     return;
@@ -9341,17 +9326,17 @@ int main(int argc, char* argv[])
                 sendKey(findEdit, Qt::Key_Return, Qt::ShiftModifier);
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-01")
-                    || findResult->text() != QStringLiteral("2/9")) {
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("2/9")) {
                     fail(QStringLiteral(
                         "Shift+Enter did not return to the previous signal match"));
                     return;
                 }
-                findPrevious->click();
+                sendKey(findEdit, Qt::Key_Up);
                 sendKey(findEdit, Qt::Key_Return, Qt::ShiftModifier);
                 QCoreApplication::processEvents();
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-09")
-                    || findResult->text() != QStringLiteral("9/9")
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("9/9")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("wrapped"))) {
                     fail(QStringLiteral(
@@ -9363,9 +9348,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-09")
-                    || findResult->text() != QStringLiteral("0/0")
-                    || findPrevious->isEnabled()
-                    || findNext->isEnabled()
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("0/0")
                     || findEdit->property("waveState").toString()
                         != QStringLiteral("error")
                     || !window.statusBar()->currentMessage().contains(
@@ -9379,10 +9362,8 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-19")
-                    || findResult->text() != QStringLiteral("1/1")
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("1/1")
                     || !findEdit->property("waveState").toString().isEmpty()
-                    || !findPrevious->isEnabled()
-                    || !findNext->isEnabled()
                     || canvas->verticalScrollBar()->value() <= 0
                     || canvas->horizontalScrollBar()->value()
                         != originalHorizontalScroll) {
@@ -9395,7 +9376,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-10")
-                    || findResult->text() != QStringLiteral("1/10")) {
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("1/10")) {
                     fail(QStringLiteral(
                         "Changing the query did not restart at its first signal match"));
                     return;
@@ -9403,7 +9384,7 @@ int main(int argc, char* argv[])
                 sendKey(findEdit, Qt::Key_Return, Qt::ShiftModifier);
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-19")
-                    || findResult->text() != QStringLiteral("10/10")
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("10/10")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("wrapped"))) {
                     fail(QStringLiteral(
@@ -9414,7 +9395,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-10")
-                    || findResult->text() != QStringLiteral("1/10")
+                    || findEdit->property("searchResultPosition").toString() != QStringLiteral("1/10")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("wrapped"))
                     || scenario.lanes != originalLanes
@@ -9447,8 +9428,8 @@ int main(int argc, char* argv[])
 
                 sendKey(findEdit, Qt::Key_Escape);
                 QCoreApplication::processEvents();
-                if (findToolbarAction->isVisible()
-                    || findBar->isVisibleTo(&window)
+                if (!findEdit->isVisible()
+                    || !findBar->isVisibleTo(&window)
                     || !canvas->viewport()->hasFocus()
                     || canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-10")
@@ -9461,29 +9442,29 @@ int main(int argc, char* argv[])
                     || undoAction->isEnabled()
                     || saveState->text() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
-                        "Escape did not close signal search while retaining its result safely"));
+                        "Escape did not leave the persistent signal search while retaining its result safely"));
                     return;
                 }
 
                 sendKey(canvas, Qt::Key_F, Qt::ControlModifier);
                 QCoreApplication::processEvents();
-                if (!findToolbarAction->isVisible()
+                if (!findEdit->isVisible()
                     || !findEdit->hasFocus()
                     || findEdit->selectedText() != QStringLiteral("signal_1")) {
                     fail(QStringLiteral(
                         "Ctrl+F did not reopen signal search with the prior query selected"));
                     return;
                 }
-                findClose->click();
+                sendKey(findEdit, Qt::Key_Escape);
                 QCoreApplication::processEvents();
-                if (findToolbarAction->isVisible()
+                if (!findEdit->isVisible()
                     || canvas->selectedLaneId()
                         != QStringLiteral("lane-scroll-10")
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
                     || saveState->text() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
-                        "Signal search close button did not preserve the selected match and Saved state"));
+                        "Signal search Escape did not preserve the selected match and Saved state"));
                     return;
                 }
 
@@ -12386,7 +12367,7 @@ int main(int argc, char* argv[])
                 window.project().scenarios.front(),
                 "group-handshake");
             if (!canvas || !showButton || !hideAction || !undoAction || !redoAction
-                || !saveState || !waveTargetLabel
+                || !saveState || waveTargetLabel
                 || !initialGroup || initialGroup->visible
                 || !showButton->isVisible()
                 || showButton->text() != QStringLiteral("Show 1 hidden item")) {
@@ -12596,8 +12577,8 @@ int main(int argc, char* argv[])
                     QStringLiteral("5 signal(s) hidden from view"))
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("data unchanged"))
-                || !waveTargetLabel->text().contains(QStringLiteral("group"))
-                || !waveTargetLabel->text().contains(QStringLiteral("collapsed"))) {
+                || !canvas->editTargetSummary().contains(QStringLiteral("group"))
+                || !canvas->editTargetSummary().contains(QStringLiteral("collapsed"))) {
                 fail(QStringLiteral(
                     "Group collapse did not hide only its member rows or preserve project state"));
                 return;
@@ -12667,7 +12648,7 @@ int main(int argc, char* argv[])
             QCoreApplication::processEvents();
             if (!canvas->isGroupCollapsed(QStringLiteral("group-handshake"))
                 || canvas->selectedLaneId() != QStringLiteral("group-handshake")
-                || !waveTargetLabel->toolTip().contains(QStringLiteral("Delete"))) {
+                || !canvas->editTargetToolTip().contains(QStringLiteral("Delete"))) {
                 fail(QStringLiteral(
                     "Left did not collapse an explicitly selected Group while retaining its header target"));
                 return;
@@ -12708,16 +12689,16 @@ int main(int argc, char* argv[])
                 || !hideAction->text().contains(
                     QStringLiteral("Hide selected group"))
                 || !selectedStatus.contains(QStringLiteral("Selected group Handshake signals"))
-                || !waveTargetLabel->text().contains(
+                || !canvas->editTargetSummary().contains(
                     QStringLiteral("Target: group"))
-                || !waveTargetLabel->text().contains(
+                || !canvas->editTargetSummary().contains(
                     QStringLiteral("Handshake signals"))
-                || !waveTargetLabel->text().contains(
+                || !canvas->editTargetSummary().contains(
                     QStringLiteral("expanded"))
-                || !waveTargetLabel->toolTip().contains(QStringLiteral("Delete"))
-                || !waveTargetLabel->toolTip().contains(QStringLiteral("Left"))
-                 || !waveTargetLabel->toolTip().contains(QStringLiteral("Right"))
-                 || !waveTargetLabel->toolTip().contains(QStringLiteral("F2"))) {
+                || !canvas->editTargetToolTip().contains(QStringLiteral("Delete"))
+                || !canvas->editTargetToolTip().contains(QStringLiteral("Left"))
+                 || !canvas->editTargetToolTip().contains(QStringLiteral("Right"))
+                 || !canvas->editTargetToolTip().contains(QStringLiteral("F2"))) {
                 fail(
                     QStringLiteral(
                         "Clicking a visible Group header did not select it with clear actions"
@@ -12729,8 +12710,8 @@ int main(int argc, char* argv[])
                                                     : QStringLiteral("no"),
                             hideAction->text(),
                             selectedStatus,
-                            waveTargetLabel->text(),
-                            waveTargetLabel->toolTip()));
+                            canvas->editTargetSummary(),
+                            canvas->editTargetToolTip()));
                 return;
             }
 
@@ -12802,7 +12783,7 @@ int main(int argc, char* argv[])
             if (renameEdit->isVisible()
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Rename cancelled · selected group Handshake I/O"))
-                || !waveTargetLabel->toolTip().contains(QStringLiteral("Delete"))) {
+                || !canvas->editTargetToolTip().contains(QStringLiteral("Delete"))) {
                 fail(QStringLiteral("Escape did not cancel Group rename and restore its target"));
                 return;
             }
@@ -13332,9 +13313,9 @@ int main(int argc, char* argv[])
                 canvas->verticalScrollBar()->maximum());
             QCoreApplication::processEvents();
             const std::array<QString, 3> expectedLabels{
-                QStringLiteral("+ CLK"),
-                QStringLiteral("+ BIT"),
-                QStringLiteral("+ BUS"),
+                QStringLiteral("Add clock"),
+                QStringLiteral("Add bit signal"),
+                QStringLiteral("Add bus signal"),
             };
             for (std::size_t index = 0; index < addButtons.size(); ++index) {
                 const auto* button = addButtons.at(index);
@@ -13426,7 +13407,7 @@ int main(int argc, char* argv[])
                 || !measureAction
                 || !asyncTimingAction
                 || !showRelationsAction
-                || !waveTargetLabel
+                || waveTargetLabel
                 || !saveState
                 || !segmentMenu
                 || !selectSegmentAtCursorAction
@@ -13441,7 +13422,7 @@ int main(int argc, char* argv[])
                 || !expandSelectedSegmentEndAction
                 || !trimSelectedSegmentEndAction
                 || window.findChild<QAction*>(QStringLiteral("WaveEditToolAction"))
-                || checkableModeCount != 2
+                || checkableModeCount != 3
                 || measureAction->isChecked()
                 || asyncTimingAction->isChecked()
                 || showRelationsAction->isChecked()
@@ -13449,9 +13430,9 @@ int main(int argc, char* argv[])
                     QStringLiteral("Timing: Grid ·"))
                 || canvas->asynchronousEditing()
                 || canvas->relationsVisible()
-                || !waveTargetLabel->isVisible()
-                || waveTargetLabel->text() != QStringLiteral("Target: none")
-                || waveTargetLabel->toolTip().isEmpty()
+                || waveTargetLabel
+                || canvas->editTargetSummary() != QStringLiteral("Target: none")
+                || canvas->editTargetToolTip().isEmpty()
                 || measureAction->shortcut().matches(QKeySequence(Qt::CTRL | Qt::Key_M))
                     != QKeySequence::ExactMatch
                 || selectSegmentAtCursorAction->shortcut().matches(
@@ -15274,11 +15255,11 @@ int main(int argc, char* argv[])
                             window.project().timeBase))))
                 || canvas->selectedSegmentId()
                     != QString::fromStdString(presetSegmentId)
-                || !waveTargetLabel->text().startsWith(
+                || !canvas->editTargetSummary().startsWith(
                     QStringLiteral("Target: Segment ·"))
-                || !waveTargetLabel->text().contains(
+                || !canvas->editTargetSummary().contains(
                     QString::fromStdString(quickBus.name))
-                || !waveTargetLabel->toolTip().contains(
+                || !canvas->editTargetToolTip().contains(
                     QStringLiteral("Edit > Segment"))
                 || !duplicateSelectedSegmentBeforeAction->isEnabled()
                 || !duplicateSelectedSegmentAfterAction->isEnabled()
@@ -15314,9 +15295,9 @@ int main(int argc, char* argv[])
                         std::pair<wave::Tick, wave::Tick>{
                             presetStart,
                             presetStart + expectedBeat}}
-                || !waveTargetLabel->text().startsWith(
+                || !canvas->editTargetSummary().startsWith(
                     QStringLiteral("Target: Segment ·"))
-                || !waveTargetLabel->toolTip().contains(
+                || !canvas->editTargetToolTip().contains(
                     QStringLiteral("Edit > Segment"))
                 || !duplicateSelectedSegmentBeforeAction->isEnabled()
                 || !duplicateSelectedSegmentAfterAction->isEnabled()
@@ -16520,8 +16501,8 @@ int main(int argc, char* argv[])
                 || !renameCancelStatus.contains(QStringLiteral("Rename cancelled"))
                 || !renameCancelStatus.contains(QStringLiteral("selected signal"))
                 || !renameCancelStatus.contains(QString::fromStdString(quickBit.name))
-                || !waveTargetLabel->toolTip().contains(QStringLiteral("Delete"))
-                || !waveTargetLabel->toolTip().contains(QStringLiteral("F2"))) {
+                || !canvas->editTargetToolTip().contains(QStringLiteral("Delete"))
+                || !canvas->editTargetToolTip().contains(QStringLiteral("F2"))) {
                 fail(QStringLiteral("Escape did not cancel rename and restore the signal target"));
                 return;
             }
@@ -18804,10 +18785,10 @@ int main(int argc, char* argv[])
             const auto selectedHeaderStatus = window.statusBar()->currentMessage();
             if (!selectedHeaderStatus.contains(QStringLiteral("Selected signal"))
                 || !selectedHeaderStatus.contains(selectedDeleteName)
-                || !waveTargetLabel->text().startsWith(
+                || !canvas->editTargetSummary().startsWith(
                     QStringLiteral("Target: signal ·"))
-                || !waveTargetLabel->toolTip().contains(QStringLiteral("Delete"))
-                || !waveTargetLabel->toolTip().contains(QStringLiteral("F2"))) {
+                || !canvas->editTargetToolTip().contains(QStringLiteral("Delete"))
+                || !canvas->editTargetToolTip().contains(QStringLiteral("F2"))) {
                 fail(QStringLiteral("Signal header selection did not identify the target and keys"));
                 return;
             }
@@ -18850,7 +18831,7 @@ int main(int argc, char* argv[])
                     QStringLiteral("MeasureToolAction"));
                 auto* waveTargetLabel = window.findChild<QLabel*>(
                     QStringLiteral("WaveTargetLabel"));
-                if (!canvas || !measureAction || !waveTargetLabel
+                if (!canvas || !measureAction || waveTargetLabel
                     || measureAction->shortcut().matches(QKeySequence(Qt::CTRL | Qt::Key_M))
                         != QKeySequence::ExactMatch) {
                     qCritical().noquote() << "Measure controls are missing";
@@ -19177,10 +19158,10 @@ int main(int argc, char* argv[])
                     || !markerRetargetStatus.contains(QStringLiteral("Selected signal"))
                     || !markerRetargetStatus.contains(
                         QString::fromStdString(selectedDataLane->name))
-                    || !waveTargetLabel->text().startsWith(
+                    || !canvas->editTargetSummary().startsWith(
                         QStringLiteral("Target: signal ·"))
-                    || !waveTargetLabel->toolTip().contains(QStringLiteral("Delete"))
-                    || !waveTargetLabel->toolTip().contains(QStringLiteral("F2"))
+                    || !canvas->editTargetToolTip().contains(QStringLiteral("Delete"))
+                    || !canvas->editTargetToolTip().contains(QStringLiteral("F2"))
                     || !markerRetargetStatus.contains(
                         QStringLiteral("locked cursor/range deselected"))) {
                     qCritical().noquote()
@@ -19225,10 +19206,10 @@ int main(int argc, char* argv[])
                     || !contextRetargetStatus.contains(QStringLiteral("Selected signal"))
                     || !contextRetargetStatus.contains(
                         QString::fromStdString(selectedDataLane->name))
-                    || !waveTargetLabel->text().startsWith(
+                    || !canvas->editTargetSummary().startsWith(
                         QStringLiteral("Target: signal ·"))
-                    || !waveTargetLabel->toolTip().contains(QStringLiteral("Delete"))
-                    || !waveTargetLabel->toolTip().contains(QStringLiteral("F2"))
+                    || !canvas->editTargetToolTip().contains(QStringLiteral("Delete"))
+                    || !canvas->editTargetToolTip().contains(QStringLiteral("F2"))
                     || !contextRetargetStatus.contains(
                         QStringLiteral("locked cursor/range deselected"))) {
                     qCritical().noquote()
@@ -19755,7 +19736,7 @@ int main(int argc, char* argv[])
                     QStringLiteral("WaveTargetLabel"));
                 if (!canvas
                     || !measureAction
-                    || !waveTargetLabel
+                    || waveTargetLabel
                     || measureAction->isChecked()
                     || window.findChild<QAction*>(QStringLiteral("WaveEditToolAction"))
                     || canvas->tool() != wave::WaveCanvas::Tool::WaveEdit) {
@@ -20302,9 +20283,9 @@ int main(int argc, char* argv[])
                     || !busValue
                     || !busContext
                     || !initialBeat
-                    || !waveTargetLabel->text().startsWith(
+                    || !canvas->editTargetSummary().startsWith(
                         QStringLiteral("Target: beat ·"))
-                    || !waveTargetLabel->toolTip().contains(
+                    || !canvas->editTargetToolTip().contains(
                         QStringLiteral("Delete to clear the beat"))
                     || !canvas->viewport()->rect().contains(busPalette->geometry())) {
                     qCritical().noquote()
@@ -20657,7 +20638,7 @@ int main(int argc, char* argv[])
                     || valueAt(*appliedBusLane, 115'000) != "0x3a"
                     || canvas->selectedTimeRange() != initialEditableBeat
                     || !canvas->selectedSegmentId().isEmpty()
-                    || !waveTargetLabel->text().startsWith(
+                    || !canvas->editTargetSummary().startsWith(
                         QStringLiteral("Target: beat ·"))
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Ctrl+Z"))) {

@@ -44,7 +44,8 @@ enum class Icon {
     NewFile, Open, Save, Export, Undo, Redo, Up, Down, Delete,
     Play, Repeat, Stop, Refresh, Compare, Check, Source,
     ZoomIn, ZoomOut, Fit, Measure, Link, Add, Remove, Close, Copy, Paste,
-    Success, Information, Warning, Count
+    Success, Information, Warning,
+    Sync, Async, AddClock, AddBit, AddBus, Search, GoTo, Left, Right, Swap, Count
 };
 WAVEWIDGETS_API QIcon icon(Icon name, QWidget* owner = nullptr);
 

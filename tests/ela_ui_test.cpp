@@ -545,16 +545,10 @@ private slots:
         palette.setColor(QPalette::Disabled, QPalette::ButtonText, disabled);
         palette.setColor(QPalette::HighlightedText, selected);
         owner.setPalette(palette);
-        const auto font = QRawFont::fromFont(QFont(QStringLiteral("Font Awesome 6 Free"), 16));
-        QVERIFY(font.isValid());
-        QCOMPARE(font.familyName(), QStringLiteral("Font Awesome 6 Free"));
         for (int i = 0; i < int(wave::ui::Icon::Count); ++i) {
             const auto icon = wave::ui::icon(static_cast<wave::ui::Icon>(i), &owner);
             QVERIFY(!icon.isNull());
-            QVERIFY(icon.name().startsWith(QStringLiteral("wave-ela/")));
-            bool valid = false;
-            const auto character = icon.name().section('/', -1).toUInt(&valid, 16);
-            QVERIFY(valid); QVERIFY2(font.supportsCharacter(character), qPrintable(icon.name()));
+            QCOMPARE(icon.name(), QStringLiteral("wave-rounded/%1").arg(i));
             for (const auto scale : {1.0, 1.25, 1.5, 2.0}) {
                 const auto pixmap = icon.pixmap(QSize(24, 24), scale);
                 QCOMPARE(pixmap.size(), QSize(int(24 * scale), int(24 * scale)));
@@ -577,8 +571,129 @@ private slots:
         for (const auto* name : {"NewProjectAction", "UndoAction", "RedoAction", "MeasureToolAction",
                  "ZoomInAction", "ZoomOutAction", "FitScenarioAction", "RangeEditLoadValuesAction"}) {
             auto* action = window.findChild<QAction*>(QString::fromLatin1(name)); QVERIFY(action);
-            QVERIFY(action->icon().name().startsWith(QStringLiteral("wave-ela/")));
+            QVERIFY(action->icon().name().startsWith(QStringLiteral("wave-rounded/")));
         }
+    }
+
+    void compactToolbarAndPersistentNavigation()
+    {
+        wave::MainWindow window(wave::makeDemonstrationProject());
+        window.resize(1100, 720); window.show(); window.activateWindow();
+        auto* canvas = window.findChild<wave::WaveCanvas*>(); QVERIFY(canvas);
+        auto* toolbar = window.findChild<QToolBar*>(QStringLiteral("WaveformToolbar")); QVERIFY(toolbar);
+        auto* search = window.findChild<QLineEdit*>(QStringLiteral("SignalFindEdit")); QVERIFY(search);
+        auto* time = window.findChild<QLineEdit*>(QStringLiteral("GoToTimeEdit")); QVERIFY(time);
+        auto* searchBar = window.findChild<QWidget*>(QStringLiteral("SignalFindBar")); QVERIFY(searchBar);
+        auto* editMenu = window.menuBar()->actions().at(1)->menu(); QVERIFY(editMenu);
+        QVERIFY(!window.findChild<QLabel*>(QStringLiteral("WaveTargetLabel")));
+        QVERIFY(!window.findChild<QAction*>(QStringLiteral("WaveTargetToolbarAction")));
+        for (const auto* name : {"UndoAction", "RedoAction", "RelationToolAction", "FindSignalAction",
+                 "GoToTimeAction", "AddGroupAction"}) {
+            auto* action = window.findChild<QAction*>(QString::fromLatin1(name)); QVERIFY(action);
+            QVERIFY(!editMenu->actions().contains(action));
+            if (QString::fromLatin1(name) != QStringLiteral("AddGroupAction")) {
+                QVERIFY(window.actions().contains(action) || toolbar->actions().contains(action));
+            }
+        }
+        for (const auto* name : {"MeasureToolAction", "RelationToolAction", "AsyncTimingAction",
+                 "ZoomInAction", "ZoomOutAction", "FitScenarioAction"}) {
+            auto* action = window.findChild<QAction*>(QString::fromLatin1(name)); QVERIFY(action);
+            auto* button = qobject_cast<QToolButton*>(toolbar->widgetForAction(action)); QVERIFY(button);
+            QVERIFY(button->isVisible());
+            QCOMPARE(button->toolButtonStyle(), Qt::ToolButtonIconOnly);
+            QVERIFY(!button->icon().isNull()); QVERIFY(!button->toolTip().isEmpty());
+        }
+        QStringList addIcons;
+        for (const auto* name : {"CanvasAddClockButton", "CanvasAddBitButton", "CanvasAddBusButton"}) {
+            auto* button = window.findChild<QToolButton*>(QString::fromLatin1(name)); QVERIFY(button);
+            QCOMPARE(button->toolButtonStyle(), Qt::ToolButtonIconOnly);
+            QVERIFY(!button->accessibleName().isEmpty()); QVERIFY(!button->toolTip().isEmpty());
+            addIcons.push_back(button->icon().name());
+        }
+        QCOMPARE(QSet<QString>(addIcons.begin(), addIcons.end()).size(), 3);
+        for (const int width : {140, 190, 480}) {
+            canvas->setSignalHeaderWidth(width); QCoreApplication::processEvents();
+            QVERIFY(search->isVisible()); QVERIFY(time->isVisible());
+            QCOMPARE(searchBar->parentWidget(), canvas->viewport());
+            QVERIFY(QRect(0, 0, width, 40).contains(searchBar->geometry()));
+            QVERIFY(searchBar->rect().contains(search->geometry()));
+            const auto before = searchBar->geometry();
+            canvas->verticalScrollBar()->setValue(canvas->verticalScrollBar()->maximum());
+            QCOMPARE(searchBar->geometry(), before);
+        }
+        canvas->setSignalHeaderWidth(190);
+        canvas->verticalScrollBar()->setValue(0);
+        auto* timing = window.findChild<QAction*>(QStringLiteral("AsyncTimingAction"));
+        const auto syncIcon = timing->icon().name(); timing->trigger();
+        QVERIFY(canvas->asynchronousEditing()); QVERIFY(timing->icon().name() != syncIcon);
+        QVERIFY(timing->toolTip().contains(QStringLiteral("Async")));
+        timing->trigger(); QVERIFY(!canvas->asynchronousEditing());
+        auto* measure = window.findChild<QAction*>(QStringLiteral("MeasureToolAction"));
+        auto* relation = window.findChild<QAction*>(QStringLiteral("RelationToolAction"));
+        measure->trigger(); QCOMPARE(canvas->tool(), wave::WaveCanvas::Tool::Marker);
+        relation->trigger(); QCOMPARE(canvas->tool(), wave::WaveCanvas::Tool::Relation);
+        QVERIFY(!measure->isChecked()); QVERIFY(relation->isChecked());
+        canvas->setFocus(); QTest::keyClick(canvas, Qt::Key_Escape);
+        QCOMPARE(canvas->tool(), wave::WaveCanvas::Tool::WaveEdit);
+        QVERIFY(!relation->isChecked()); QVERIFY(search->isVisible()); QVERIFY(time->isVisible());
+        // Standalone light/dark previews use the real appearance actions below.
+    }
+
+    void persistentNavigationPreservesEditing()
+    {
+        wave::MainWindow window(wave::makeDemonstrationProject());
+        window.resize(1100, 720); window.show(); window.activateWindow();
+        auto* canvas = window.findChild<wave::WaveCanvas*>(); QVERIFY(canvas);
+        auto* search = window.findChild<QLineEdit*>(QStringLiteral("SignalFindEdit")); QVERIFY(search);
+        auto* time = window.findChild<QLineEdit*>(QStringLiteral("GoToTimeEdit")); QVERIFY(time);
+        const auto original = window.project();
+        canvas->revealLocation(QStringLiteral("lane-request"), 20'000);
+        canvas->insertPulse(); QVERIFY(window.project() != original);
+        const auto edited = window.project();
+        canvas->setFocus(); QTRY_VERIFY(canvas->hasFocus() || canvas->viewport()->hasFocus());
+        QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+        QVERIFY(window.project() == original);
+        QTest::keyClick(canvas, Qt::Key_Y, Qt::ControlModifier);
+        QVERIFY(window.project() == edited);
+        QTest::keyClick(canvas, Qt::Key_F, Qt::ControlModifier); QTRY_VERIFY(search->hasFocus());
+        QTest::keyClicks(search, "req");
+        QCOMPARE(canvas->selectedLaneId(), QStringLiteral("lane-request"));
+        QCOMPARE(search->property("searchResultPosition").toString(), QStringLiteral("1/1"));
+        QTest::keyClick(search, Qt::Key_Z, Qt::ControlModifier);
+        QVERIFY(search->text().isEmpty()); QVERIFY(window.project() == edited);
+        QTest::keyClick(search, Qt::Key_Y, Qt::ControlModifier);
+        QCOMPARE(search->text(), QStringLiteral("req")); QVERIFY(window.project() == edited);
+        QTest::keyClick(search, Qt::Key_Escape); QVERIFY(search->isVisible());
+        QTest::keyClick(canvas, Qt::Key_G, Qt::ControlModifier); QTRY_VERIFY(time->hasFocus());
+        time->setText(QStringLiteral("25 ns")); QTest::keyClick(time, Qt::Key_Return);
+        QCOMPARE(canvas->cursorTick(), wave::Tick(25'000)); QVERIFY(window.project() == edited);
+        time->setText(QStringLiteral("bad-time")); QTest::keyClick(time, Qt::Key_Return);
+        QCOMPARE(canvas->cursorTick(), wave::Tick(25'000)); QVERIFY(time->hasFocus());
+        QCOMPARE(time->property("waveState").toString(), QStringLiteral("error"));
+        QTest::keyClick(time, Qt::Key_Escape); QVERIFY(time->isVisible());
+        QCOMPARE(time->text(), QStringLiteral("25 ns"));
+
+        canvas->selectEntireTimeline();
+        const auto range = canvas->selectedTimeRange();
+        search->setFocus(); search->setText(QStringLiteral("ack"));
+        QCOMPARE(canvas->selectedLaneId(), QStringLiteral("lane-request"));
+        QCOMPARE(canvas->selectedTimeRange(), range); QVERIFY(window.project() == edited);
+        QTest::keyClick(search, Qt::Key_Escape);
+        QTest::keyClick(canvas, Qt::Key_Escape);
+        canvas->revealLocation(QStringLiteral("lane-data"), 90'000);
+        canvas->selectEntireTimeline();
+        auto* rangeValue = window.findChild<QLineEdit*>(QStringLiteral("RangeEditValueEdit")); QVERIFY(rangeValue);
+        QTRY_VERIFY(rangeValue->isVisible()); rangeValue->setFocus();
+        rangeValue->selectAll(); QTest::keyClicks(rangeValue, "not-a-numeric-value");
+        const auto busRange = canvas->selectedTimeRange();
+        QTest::mouseClick(time, Qt::LeftButton);
+        QTRY_VERIFY(rangeValue->hasFocus());
+        QCOMPARE(rangeValue->text(), QStringLiteral("not-a-numeric-value"));
+        QCOMPARE(canvas->selectedTimeRange(), busRange); QVERIFY(window.project() == edited);
+        QTest::mouseClick(search, Qt::LeftButton);
+        QTRY_VERIFY(rangeValue->hasFocus());
+        QCOMPARE(canvas->selectedLaneId(), QStringLiteral("lane-data"));
+        QCOMPARE(canvas->selectedTimeRange(), busRange); QVERIFY(window.project() == edited);
     }
 
     void notificationContracts()

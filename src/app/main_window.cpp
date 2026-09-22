@@ -35,6 +35,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileSystemWatcher>
+#include <QFocusEvent>
 #include <QFrame>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -55,6 +56,7 @@
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QScopedValueRollback>
 #include <QScrollBar>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -4283,8 +4285,7 @@ QStringList MainWindow::matchingVisibleSignals(const QString& query) const
 
 void MainWindow::showSignalFind()
 {
-    if (!canvas_ || !signalFindWidgetAction_ || !signalFindEdit_
-        || !signalFindResultLabel_) {
+    if (!canvas_ || !signalFindEdit_) {
         return;
     }
     if (canvas_->hasExplicitRangeSelection()) {
@@ -4302,7 +4303,6 @@ void MainWindow::showSignalFind()
     }
     closeGoToTime(false);
 
-    signalFindWidgetAction_->setVisible(true);
     signalFindMatchIndex_ = -1;
     signalFindEdit_->setFocus(Qt::ShortcutFocusReason);
     signalFindEdit_->selectAll();
@@ -4311,10 +4311,8 @@ void MainWindow::showSignalFind()
 
 void MainWindow::closeSignalFind(const bool announce)
 {
-    if (!signalFindWidgetAction_ || !signalFindWidgetAction_->isVisible()) return;
-    signalFindWidgetAction_->setVisible(false);
-    signalFindMatchIndex_ = -1;
-    if (canvas_ && canvas_->viewport()) {
+    if (!signalFindEdit_) return;
+    if (signalFindEdit_->hasFocus() && canvas_ && canvas_->viewport()) {
         canvas_->viewport()->setFocus(Qt::OtherFocusReason);
     }
     if (!announce) return;
@@ -4334,8 +4332,8 @@ void MainWindow::closeSignalFind(const bool announce)
     }
     statusBar()->showMessage(
         selectedName.isEmpty()
-            ? tr("Signal search closed · Ctrl+F opens it again")
-            : tr("Signal search closed · %1 remains selected · Ctrl+F finds another")
+            ? tr("Signal search finished · Ctrl+F focuses the search field")
+            : tr("Signal search finished · %1 remains selected · Ctrl+F finds another")
                   .arg(selectedName),
         5'000);
 }
@@ -4345,10 +4343,18 @@ void MainWindow::activateSignalFindMatch(
     const int index,
     const bool wrapped)
 {
-    if (!canvas_ || !signalFindEdit_ || !signalFindResultLabel_
+    if (!canvas_ || !signalFindEdit_
         || index < 0 || index >= matches.size()) {
         return;
     }
+    if (!commitPendingEdits()) return;
+    if (canvas_->hasExplicitRangeSelection()) {
+        statusBar()->showMessage(
+            tr("Esc clears the selected range before finding another signal"), 5'000);
+        return;
+    }
+    if (markerAction_ && markerAction_->isChecked()) markerAction_->setChecked(false);
+    if (relationAction_ && relationAction_->isChecked()) relationAction_->setChecked(false);
     const auto* scenario = activeScenario();
     if (!scenario) return;
     const auto laneId = matches.at(index);
@@ -4369,45 +4375,41 @@ void MainWindow::activateSignalFindMatch(
     canvas_->revealLocation(laneId, cursor);
     canvas_->horizontalScrollBar()->setValue(horizontalScroll);
     signalFindMatchIndex_ = index;
-    signalFindResultLabel_->setText(
-        tr("%1/%2").arg(index + 1).arg(matches.size()));
+    const auto position = tr("%1/%2").arg(index + 1).arg(matches.size());
+    signalFindEdit_->setProperty("searchResultPosition", position);
+    signalFindEdit_->setAccessibleDescription(tr("Matching signal %1").arg(position));
     setSemanticState(signalFindEdit_, {});
-    if (signalFindPreviousButton_) signalFindPreviousButton_->setEnabled(true);
-    if (signalFindNextButton_) signalFindNextButton_->setEnabled(true);
-
-    auto message = tr("Found signal %1 · %2 of %3 · Enter next · Shift+Enter previous · Esc closes")
+    auto message = tr("Found signal %1 · %2 of %3 · Enter next · Shift+Enter previous · Esc returns to waveform")
                        .arg(QString::fromStdString(lane->name))
                        .arg(index + 1)
                        .arg(matches.size());
     if (wrapped) message.append(tr(" · wrapped"));
+    signalFindEdit_->setToolTip(message);
     statusBar()->showMessage(message);
 }
 
 void MainWindow::updateSignalFind()
 {
-    if (!signalFindWidgetAction_ || !signalFindWidgetAction_->isVisible()
-        || !signalFindEdit_ || !signalFindResultLabel_) {
+    if (!signalFindEdit_) {
         return;
     }
     const auto query = signalFindEdit_->text().trimmed();
     if (query.isEmpty()) {
         signalFindMatchIndex_ = -1;
-        signalFindResultLabel_->setText(QStringLiteral("0/0"));
+        signalFindEdit_->setProperty("searchResultPosition", QStringLiteral("0/0"));
+        signalFindEdit_->setAccessibleDescription(tr("Enter a signal name or ID"));
         setSemanticState(signalFindEdit_, {});
-        if (signalFindPreviousButton_) signalFindPreviousButton_->setEnabled(false);
-        if (signalFindNextButton_) signalFindNextButton_->setEnabled(false);
-        statusBar()->showMessage(
-            tr("Find visible signal · type a name or ID · Enter next · Shift+Enter previous · Esc closes"));
+        signalFindEdit_->setToolTip(tr("Find visible signal by name or ID · Enter next · Shift+Enter previous · Ctrl+F focuses"));
+        if (signalFindEdit_->hasFocus()) statusBar()->showMessage(signalFindEdit_->toolTip());
         return;
     }
 
     const auto matches = matchingVisibleSignals(query);
     if (matches.isEmpty()) {
         signalFindMatchIndex_ = -1;
-        signalFindResultLabel_->setText(QStringLiteral("0/0"));
+        signalFindEdit_->setProperty("searchResultPosition", QStringLiteral("0/0"));
+        signalFindEdit_->setAccessibleDescription(tr("No matching signal"));
         setSemanticState(signalFindEdit_, QStringLiteral("error"));
-        if (signalFindPreviousButton_) signalFindPreviousButton_->setEnabled(false);
-        if (signalFindNextButton_) signalFindNextButton_->setEnabled(false);
         statusBar()->showMessage(
             tr("No visible signal matches “%1” · edit the query or press Esc")
                 .arg(query),
@@ -4424,8 +4426,7 @@ void MainWindow::updateSignalFind()
 
 void MainWindow::stepSignalFind(const int direction)
 {
-    if (!signalFindWidgetAction_ || !signalFindWidgetAction_->isVisible()
-        || !signalFindEdit_) {
+    if (!signalFindEdit_) {
         return;
     }
     const auto matches = matchingVisibleSignals(signalFindEdit_->text());
@@ -4447,11 +4448,12 @@ void MainWindow::stepSignalFind(const int direction)
         next = (candidate % matches.size() + matches.size()) % matches.size();
     }
     activateSignalFindMatch(matches, next, wrapped && matches.size() > 1);
-    signalFindEdit_->setFocus(Qt::OtherFocusReason);
 }
 
 void MainWindow::showGoToTime()
 {
+    if (preparingNavigation_) return;
+    const QScopedValueRollback preparing(preparingNavigation_, true);
     if (!canvas_ || !goToTimeWidgetAction_ || !goToTimeEdit_
         || !goToTimeLabel_ || !goToTimeRangeLabel_
         || !goToTimeGoButton_ || !goToTimeOtherEdgeButton_) {
@@ -4491,7 +4493,7 @@ void MainWindow::showGoToTime()
                          : QString{}));
     } else {
         statusBar()->showMessage(
-            tr("Go to time · enter decimal ps/ns/us/ms, integer tick, or cycle N · Enter jumps · Esc closes"));
+            tr("Go to time · enter decimal ps/ns/us/ms, integer tick, or cycle N · Enter jumps · Esc returns to waveform"));
     }
 }
 
@@ -4515,6 +4517,10 @@ void MainWindow::syncGoToTimeEditor(const bool replaceInput)
         goToTimeEditsRangeWidth_ = false;
     }
 
+    goToTimeLabel_->setVisible(goToTimeEditsRange_);
+    goToTimeRangeLabel_->setVisible(goToTimeEditsRange_);
+    goToTimeGoButton_->setVisible(goToTimeEditsRange_);
+    goToTimeCloseButton_->setVisible(goToTimeEditsRange_);
     const QSignalBlocker blocker(goToTimeEdit_);
     if (goToTimeEditsRange_) {
         goToTimeLabel_->setCursor(Qt::PointingHandCursor);
@@ -4599,16 +4605,18 @@ void MainWindow::closeGoToTime(const bool announce)
 {
     if (!goToTimeWidgetAction_ || !goToTimeWidgetAction_->isVisible()) return;
     const auto wasRangeEdit = goToTimeEditsRange_;
-    goToTimeWidgetAction_->setVisible(false);
     goToTimeEditsRange_ = false;
     goToTimeEditsRangeWidth_ = false;
     if (wasRangeEdit && rangeEditPaletteAction_
         && canvas_ && canvas_->hasExplicitRangeSelection()) {
         rangeEditPaletteAction_->setVisible(true);
     }
-    if (canvas_ && canvas_->viewport()) {
+    if ((announce || (goToTimeEdit_ && goToTimeEdit_->hasFocus()))
+        && canvas_ && canvas_->viewport()) {
         canvas_->viewport()->setFocus(Qt::OtherFocusReason);
     }
+    syncGoToTimeEditor(true);
+    setSemanticState(goToTimeEdit_, {});
     if (!announce) return;
 
     if (wasRangeEdit && canvas_ && canvas_->selectedTimeRange()) {
@@ -4627,8 +4635,8 @@ void MainWindow::closeGoToTime(const bool announce)
         : QString{};
     statusBar()->showMessage(
         location.isEmpty()
-            ? tr("Go to time closed · Ctrl+G opens it again")
-            : tr("Go to time closed · edit cursor remains at %1 · Ctrl+G opens it again")
+            ? tr("Time entry finished · Ctrl+G focuses the time field")
+            : tr("Time entry finished · edit cursor remains at %1 · Ctrl+G focuses the time field")
                   .arg(location),
         5'000);
 }
@@ -4843,6 +4851,31 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if ((watched == signalFindEdit_ || watched == goToTimeEdit_) && event
+        && event->type() == QEvent::FocusIn && !preparingNavigation_) {
+        const auto prepare = [this, watched] {
+            if (preparingNavigation_) return;
+            if (watched == signalFindEdit_ && signalFindEdit_->hasFocus()) {
+                const QScopedValueRollback preparing(preparingNavigation_, true);
+                if (!commitPendingEdits()) return;
+                if (canvas_->hasExplicitRangeSelection()) {
+                    canvas_->viewport()->setFocus(Qt::OtherFocusReason);
+                    statusBar()->showMessage(
+                        tr("Esc clears the selected range before finding another signal"), 5'000);
+                }
+            } else if (watched == goToTimeEdit_ && goToTimeEdit_->hasFocus()) {
+                showGoToTime();
+            }
+        };
+        const auto reason = static_cast<QFocusEvent*>(event)->reason();
+        if (reason == Qt::MouseFocusReason || reason == Qt::ShortcutFocusReason) {
+            prepare();
+        } else if (reason == Qt::TabFocusReason || reason == Qt::BacktabFocusReason) {
+            // Hiding an inline editor can briefly tab here before restoring the
+            // canvas focus. Such a transfer must not commit another editor's draft.
+            QTimer::singleShot(0, this, prepare);
+        }
+    }
     if (watched == goToTimeLabel_ && event
         && event->type() == QEvent::MouseButtonRelease) {
         const auto* mouseEvent = static_cast<QMouseEvent*>(event);
@@ -5403,12 +5436,16 @@ void MainWindow::updateCommandActions()
 void MainWindow::updateWaveContext()
 {
     if (!canvas_) return;
-
-    if (waveTargetLabel_) {
-        waveTargetLabel_->setText(canvas_->editTargetSummary());
-        waveTargetLabel_->setToolTip(canvas_->editTargetToolTip());
+    if (goToTimeEdit_ && !goToTimeEdit_->hasFocus() && !preparingNavigation_) {
+        syncGoToTimeEditor(true);
     }
+
     if (asyncTimingAction_) {
+        const auto asynchronous = canvas_->asynchronousEditing();
+        if (asyncTimingAction_->property("waveTimingIconAsync").toBool() != asynchronous) {
+            asyncTimingAction_->setIcon(ui::icon(asynchronous ? ui::Icon::Async : ui::Icon::Sync, this));
+            asyncTimingAction_->setProperty("waveTimingIconAsync", asynchronous);
+        }
         const auto timing = canvas_->editTimingSummary();
         const auto clockSynchronized = timing.startsWith(
             tr("Sync"), Qt::CaseInsensitive);
@@ -10236,7 +10273,7 @@ void MainWindow::createActions()
 
     editMenu_ = ui::addMenu(menuBar(), tr("&Edit"));
     editMenu_->setToolTipsVisible(true);
-    undoAction_ = editMenu_->addAction(
+    undoAction_ = addAction(
         ui::icon(ui::Icon::Undo, this),
         tr("Undo"),
         QKeySequence::Undo,
@@ -10244,7 +10281,7 @@ void MainWindow::createActions()
         &MainWindow::undo);
     undoAction_->setObjectName(QStringLiteral("UndoAction"));
     undoAction_->setToolTip(tr("Undo the last edit"));
-    redoAction_ = editMenu_->addAction(
+    redoAction_ = addAction(
         ui::icon(ui::Icon::Redo, this),
         tr("Redo"),
         QKeySequence::Redo,
@@ -10436,14 +10473,16 @@ void MainWindow::createActions()
         }
         canvas_->selectEntireTimeline();
     });
-    signalFindAction_ = editMenu_->addAction(tr("&Find signal…"));
+    signalFindAction_ = new QAction(tr("Find signal"), this);
+    addAction(signalFindAction_);
     signalFindAction_->setObjectName(QStringLiteral("FindSignalAction"));
     signalFindAction_->setShortcut(QKeySequence::Find);
     signalFindAction_->setToolTip(
         tr("Find a visible signal by name or ID without changing the edit cursor"));
     connect(signalFindAction_, &QAction::triggered, this, &MainWindow::showSignalFind);
 
-    goToTimeAction_ = editMenu_->addAction(tr("Go to &time…"));
+    goToTimeAction_ = new QAction(tr("Go to time"), this);
+    addAction(goToTimeAction_);
     goToTimeAction_->setObjectName(QStringLiteral("GoToTimeAction"));
     goToTimeAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_G));
     goToTimeAction_->setToolTip(
@@ -10645,10 +10684,8 @@ void MainWindow::createActions()
         this,
         &MainWindow::addLane);
     addLaneAction->setToolTip(tr("Add a signal lane with editable structural properties"));
-    auto* addGroupAction = editMenu_->addAction(
-        tr("Add &group…"),
-        this,
-        &MainWindow::addGroup);
+    auto* addGroupAction = new QAction(tr("Add group…"), this);
+    connect(addGroupAction, &QAction::triggered, this, &MainWindow::addGroup);
     addGroupAction->setObjectName(QStringLiteral("AddGroupAction"));
     addGroupAction->setToolTip(
         tr("Create an empty Group by name; advanced properties remain available from its header"));
@@ -11508,7 +11545,8 @@ void MainWindow::createToolBars()
 {
     auto* editBar = ui::addToolBar(this, tr("Waveform tools"));
     editBar->setObjectName(QStringLiteral("WaveformToolbar"));
-    editBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    editBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    editBar->setIconSize(QSize(20, 20));
     editBar->setMovable(false);
     editBar->setFloatable(false);
     editBar->setAllowedAreas(Qt::TopToolBarArea);
@@ -11591,7 +11629,7 @@ void MainWindow::createToolBars()
         ui::icon(ui::Icon::Link, this),
         tr("Edit relations"),
         this);
-    editMenu_->addAction(relationAction_);
+    editBar->addAction(relationAction_);
     relationAction_->setObjectName(QStringLiteral("RelationToolAction"));
     relationAction_->setCheckable(true);
     relationAction_->setShortcut(
@@ -11630,7 +11668,7 @@ void MainWindow::createToolBars()
             5'000);
     });
 
-    asyncTimingAction_ = editBar->addAction(tr("Timing: Grid"));
+    asyncTimingAction_ = editBar->addAction(ui::icon(ui::Icon::Sync, this), tr("Timing: Grid"));
     asyncTimingAction_->setObjectName(QStringLiteral("AsyncTimingAction"));
     asyncTimingAction_->setCheckable(true);
     asyncTimingAction_->setChecked(false);
@@ -11648,17 +11686,6 @@ void MainWindow::createToolBars()
     });
 
     editBar->addSeparator();
-    waveTargetLabel_ = new QLabel(editBar);
-    waveTargetLabel_->setObjectName(QStringLiteral("WaveTargetLabel"));
-    waveTargetLabel_->setAccessibleName(tr("Current waveform edit target"));
-    waveTargetLabel_->setTextInteractionFlags(Qt::NoTextInteraction);
-    waveTargetLabel_->setMinimumWidth(190);
-    waveTargetLabel_->setMaximumWidth(440);
-    waveTargetLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    waveTargetLabel_->setProperty("waveRole", QStringLiteral("fixedBar"));
-    waveTargetAction_ = editBar->addWidget(waveTargetLabel_);
-    waveTargetAction_->setObjectName(QStringLiteral("WaveTargetToolbarAction"));
-    editBar->addSeparator();
 
     auto* rangeEditPalette = canvas_->rangeEditPaletteWidget();
     rangeEditPaletteAction_ = editBar->addWidget(rangeEditPalette);
@@ -11673,81 +11700,29 @@ void MainWindow::createToolBars()
         rangeEditPaletteAction_,
         &QAction::setVisible);
 
-    signalFindWidget_ = new QFrame(editBar);
+    signalFindWidget_ = new QFrame(canvas_->viewport());
     signalFindWidget_->setObjectName(QStringLiteral("SignalFindBar"));
     auto* signalFindLayout = new QHBoxLayout(signalFindWidget_);
     signalFindLayout->setContentsMargins(0, 0, 0, 0);
     signalFindLayout->setSpacing(4);
     signalFindLayout->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    auto* signalFindLabel = ui::text(tr("Find signal"), signalFindWidget_);
-    signalFindLabel->setObjectName(QStringLiteral("SignalFindLabel"));
-    signalFindLayout->addWidget(signalFindLabel);
-
     signalFindEdit_ = ui::lineEdit(signalFindWidget_);
     signalFindEdit_->setObjectName(QStringLiteral("SignalFindEdit"));
-    signalFindEdit_->setPlaceholderText(tr("Visible signal name or ID"));
+    signalFindEdit_->setPlaceholderText(tr("Find signal"));
     signalFindEdit_->setAccessibleName(tr("Find visible signal"));
     signalFindEdit_->setToolTip(
         tr("Type to select a visible signal; Enter finds next, Shift+Enter finds previous"));
     signalFindEdit_->setClearButtonEnabled(true);
-    signalFindEdit_->setMinimumWidth(210);
-    signalFindEdit_->setMaximumWidth(300);
+    signalFindEdit_->setMinimumWidth(0);
+    signalFindEdit_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    signalFindEdit_->addAction(ui::icon(ui::Icon::Search, signalFindEdit_), QLineEdit::LeadingPosition);
+    signalFindEdit_->setProperty("searchResultPosition", QStringLiteral("0/0"));
     signalFindEdit_->installEventFilter(this);
-    signalFindLayout->addWidget(signalFindEdit_);
-
-    signalFindResultLabel_ = ui::text(QStringLiteral("0/0"), signalFindWidget_);
-    signalFindResultLabel_->setObjectName(QStringLiteral("SignalFindResultLabel"));
-    signalFindResultLabel_->setAlignment(Qt::AlignCenter);
-    signalFindResultLabel_->setMinimumWidth(42);
-    signalFindResultLabel_->setAccessibleName(tr("Signal search result position"));
-    signalFindLayout->addWidget(signalFindResultLabel_);
-
-    const auto makeFindButton = [signalFindLayout, this](
-                                    const QString& text,
-                                    const QString& objectName,
-                                    const QString& accessibleName,
-                                    const QString& toolTip) {
-        auto* button = ui::toolButton(signalFindWidget_);
-        button->setText(text);
-        button->setObjectName(objectName);
-        button->setAccessibleName(accessibleName);
-        button->setToolTip(toolTip);
-        button->setAutoRaise(true);
-        button->setFocusPolicy(Qt::NoFocus);
-        signalFindLayout->addWidget(button);
-        return button;
-    };
-    signalFindPreviousButton_ = makeFindButton(
-        QStringLiteral("↑"),
-        QStringLiteral("SignalFindPreviousButton"),
-        tr("Previous matching signal"),
-        tr("Previous matching signal (Shift+Enter)"));
-    signalFindNextButton_ = makeFindButton(
-        QStringLiteral("↓"),
-        QStringLiteral("SignalFindNextButton"),
-        tr("Next matching signal"),
-        tr("Next matching signal (Enter)"));
-    signalFindCloseButton_ = makeFindButton(
-        QStringLiteral("×"),
-        QStringLiteral("SignalFindCloseButton"),
-        tr("Close signal search"),
-        tr("Close signal search (Esc)"));
-
-    signalFindWidgetAction_ = editBar->addWidget(signalFindWidget_);
-    signalFindWidgetAction_->setObjectName(QStringLiteral("SignalFindToolbarAction"));
-    signalFindWidgetAction_->setVisible(false);
+    signalFindLayout->addWidget(signalFindEdit_, 1);
+    canvas_->setSignalHeaderWidget(signalFindWidget_);
     connect(signalFindEdit_, &QLineEdit::textChanged, this, [this] {
         signalFindMatchIndex_ = -1;
         updateSignalFind();
-    });
-    connect(signalFindPreviousButton_, &QToolButton::clicked, this, [this] {
-        stepSignalFind(-1);
-    });
-    connect(signalFindNextButton_, &QToolButton::clicked, this, [this] {
-        stepSignalFind(1);
-    });
-    connect(signalFindCloseButton_, &QToolButton::clicked, this, [this] {
-        closeSignalFind();
     });
 
     goToTimeWidget_ = new QFrame(editBar);
@@ -11759,6 +11734,7 @@ void MainWindow::createToolBars()
     goToTimeLabel_ = ui::text(tr("Go to"), goToTimeWidget_);
     goToTimeLabel_->setObjectName(QStringLiteral("GoToTimeLabel"));
     goToTimeLabel_->installEventFilter(this);
+    goToTimeLabel_->hide();
     goToTimeLayout->addWidget(goToTimeLabel_);
 
     goToTimeEdit_ = ui::lineEdit(goToTimeWidget_);
@@ -11768,8 +11744,9 @@ void MainWindow::createToolBars()
     goToTimeEdit_->setToolTip(
         tr("Enter a decimal ps, ns, us, or ms value, an integer tick, or a clock cycle within the scenario"));
     goToTimeEdit_->setClearButtonEnabled(true);
-    goToTimeEdit_->setMinimumWidth(170);
-    goToTimeEdit_->setMaximumWidth(240);
+    goToTimeEdit_->setMinimumWidth(140);
+    goToTimeEdit_->setMaximumWidth(180);
+    goToTimeEdit_->addAction(ui::icon(ui::Icon::GoTo, goToTimeEdit_), QLineEdit::LeadingPosition);
     goToTimeEdit_->installEventFilter(this);
     goToTimeLayout->addWidget(goToTimeEdit_);
 
@@ -11778,6 +11755,7 @@ void MainWindow::createToolBars()
     goToTimeRangeLabel_->setAlignment(Qt::AlignCenter);
     goToTimeRangeLabel_->setMinimumWidth(90);
     goToTimeRangeLabel_->setAccessibleName(tr("Available timeline range"));
+    goToTimeRangeLabel_->hide();
     goToTimeLayout->addWidget(goToTimeRangeLabel_);
 
     const auto makeGoToTimeButton = [goToTimeLayout, this](
@@ -11811,10 +11789,18 @@ void MainWindow::createToolBars()
         QStringLiteral("GoToTimeCloseButton"),
         tr("Close time navigation"),
         tr("Close time navigation (Esc)"));
+    goToTimeOtherEdgeButton_->setIcon(ui::icon(ui::Icon::Swap, this));
+    goToTimeGoButton_->setIcon(ui::icon(ui::Icon::GoTo, this));
+    goToTimeCloseButton_->setIcon(ui::icon(ui::Icon::Close, this));
+    for (auto* button : {goToTimeOtherEdgeButton_, goToTimeGoButton_, goToTimeCloseButton_}) {
+        button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    }
+    goToTimeCloseButton_->hide();
+    goToTimeGoButton_->hide();
 
     goToTimeWidgetAction_ = editBar->addWidget(goToTimeWidget_);
     goToTimeWidgetAction_->setObjectName(QStringLiteral("GoToTimeToolbarAction"));
-    goToTimeWidgetAction_->setVisible(false);
+    goToTimeWidgetAction_->setVisible(true);
     connect(goToTimeEdit_, &QLineEdit::textChanged, this, [this] {
         if (!goToTimeWidgetAction_ || !goToTimeWidgetAction_->isVisible()) return;
         setSemanticState(goToTimeEdit_, {});
@@ -11852,10 +11838,7 @@ void MainWindow::createToolBars()
         &WaveCanvas::busEditPaletteVisibilityChanged,
         this,
         [this](const bool visible) {
-            if (visible && signalFindWidgetAction_
-                && signalFindWidgetAction_->isVisible()) {
-                closeSignalFind(false);
-            }
+            if (visible) closeSignalFind(false);
             if (visible && goToTimeWidgetAction_
                 && goToTimeWidgetAction_->isVisible()) {
                 closeGoToTime(false);
@@ -11866,15 +11849,12 @@ void MainWindow::createToolBars()
         &WaveCanvas::rangeEditPaletteVisibilityChanged,
         this,
         [this](const bool visible) {
-            if (waveTargetAction_) waveTargetAction_->setVisible(!visible);
             if (!visible && goToTimeEditsRange_
                 && goToTimeWidgetAction_
                 && goToTimeWidgetAction_->isVisible()) {
                 closeGoToTime(false);
             }
-            if (visible && signalFindWidgetAction_ && signalFindWidgetAction_->isVisible()) {
-                closeSignalFind(false);
-            }
+            if (visible) closeSignalFind(false);
             if (visible && goToTimeWidgetAction_ && goToTimeWidgetAction_->isVisible()) {
                 closeGoToTime(false);
             }

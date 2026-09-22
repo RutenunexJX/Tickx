@@ -8,6 +8,7 @@
 #include <QAbstractScrollArea>
 #include <QLineF>
 #include <QPoint>
+#include <QPointer>
 #include <QRect>
 #include <QString>
 #include <QStringList>
@@ -256,6 +257,7 @@ public:
     void showLaneRenameError(const QString& message);
     void showDurationEditError(const QString& message);
     void setSignalHeaderWidth(int width);
+    void setSignalHeaderWidget(QWidget* widget);
     void setDifferenceRanges(std::vector<DifferenceRange> ranges);
 
 public slots:
@@ -1094,6 +1096,7 @@ private:
     ScenarioRef scenario_;
     CommandStack* commandStack_{nullptr};
     std::array<QToolButton*, 3> addLaneButtons_{};
+    QPointer<QWidget> signalHeaderWidget_;
     QToolButton* showHiddenLanesButton_{nullptr};
     QMenu* hiddenLanesMenu_{nullptr};
     QFrame* quickLaneSetupPanel_{nullptr};

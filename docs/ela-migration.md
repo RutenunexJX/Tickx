@@ -68,8 +68,9 @@ callbacks. Owner destruction, region exit and input dismiss the tooltip.
 The native-frame color picker keeps its action buttons outside a scrollable
 content area for small screens. Only acceptance edits the existing color text;
 the parent dialog still owns validation and applying changes to the model.
-All 39 existing application action-icon sites now use ElaIcon with verified
-Unicode code points from the pinned Font Awesome Free font. The icon engine
+The subsequent compact-toolbar update replaces application action glyphs with
+39 palette-driven vector designs: a 24-unit grid and rounded 1.75-unit strokes,
+following ZeroSlack's rounded monochrome visual language. The icon engine
 resolves its owner's palette on each render and renders at the requested device
 pixel ratio; it does not cache stale light/dark bitmaps. Application branding and
 Qt standard-dialog internal icons retain their original roles.
@@ -126,7 +127,7 @@ long-text bounds, dynamic child registration and unmanaged host tooltip isolatio
 Color tests exercise real keyboard hex entry, acceptance/escape, invalid drafts,
 8-bit RGBA preservation, text undo/redo and pinned actions on small screens.
 Both themed Lane properties previews verify the real Ela button and caption.
-Icon tests check all 29 glyphs, four pixel ratios, normal/disabled/selected/checked
+Icon tests check all 39 vector designs, four pixel ratios, normal/disabled/selected/checked
 colors, live palette updates, owner destruction and actual application actions.
 Notification tests check actual ElaMessageBar ownership, focus and status
 preservation, deduplication, replacement/timeout/close, long plain text, larger
@@ -181,3 +182,27 @@ multi-monitor DPI transitions, native file-picker integration, a new real
 ZeroSlack host process, or a real Verilator run (not available in this configured
 environment). Offscreen checks do not replace those platform acceptance checks.
 Upstream Ela C++20 deprecation/pedantic warnings remain visible in build logs.
+
+### Compact UI and rounded-icon follow-up (2026-09-22)
+
+On baseline `fd9491557a49c350ffb7efe0d09f7dfc20e79ab4`, the ten recorded menu/toolbar
+requests are complete. Application icons now use the 39 rounded vector designs
+described above. Search is fixed in the Signals header and time entry is always
+available on the top toolbar. Shortcuts, text undo, mode state, tooltips, inline
+validation and exact range editing remain covered. Passive focus transfers while
+an editor closes cannot commit an unrelated pending End draft.
+
+The incremental Release build succeeded; the full CTest suite passed **110/110**
+with four-way parallel execution in 18.27 seconds. This includes the existing
+canvas edit regression test, all four UI scale tests and the complete user-journey
+smoke. Log: `build/ela-migration/compact-toolbar-ctest.log`. Updated standalone
+light/dark previews use the real appearance actions and are in the scale-specific
+`ela-previews` directories described above.
+
+This follow-up changes only application UI sources, UI regression assertions and
+three documentation files. It does not change the model/schema, public v1 ABI,
+CLI implementation or other repositories. At implementation acceptance it was
+uncommitted and unpushed, without a formal package or AppPackage replacement.
+Subsequent publication and component replacement are authorized separately;
+the revision-specific release receipt records their result. Native platform
+acceptance remains outside the offscreen validation evidence.

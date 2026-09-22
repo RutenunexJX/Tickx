@@ -380,9 +380,12 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         LaneKind::Bus,
     };
     const std::array<QString, 3> quickLabels{
-        tr("+ CLK"),
-        tr("+ BIT"),
-        tr("+ BUS"),
+        tr("Add clock"),
+        tr("Add bit signal"),
+        tr("Add bus signal"),
+    };
+    const std::array<ui::Icon, 3> quickIcons{
+        ui::Icon::AddClock, ui::Icon::AddBit, ui::Icon::AddBus,
     };
     const std::array<QString, 3> quickObjectNames{
         QStringLiteral("CanvasAddClockButton"),
@@ -393,6 +396,9 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         auto* button = ui::toolButton(viewport());
         button->setObjectName(quickObjectNames.at(index));
         button->setText(quickLabels.at(index));
+        button->setIcon(ui::icon(quickIcons.at(index), this));
+        button->setIconSize(QSize(22, 22));
+        button->setToolButtonStyle(Qt::ToolButtonIconOnly);
         button->setToolTip(tr("Add a %1 lane immediately").arg(
             laneKindLabel(quickKinds.at(index))));
         button->setAccessibleName(quickLabels.at(index));
@@ -578,6 +584,12 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         QStringLiteral("BusEditCloseButton"),
         tr("Close Bus editor"),
         tr("Discard an uncommitted draft and keep the waveform target (Esc)"));
+    busPreviousButton_->setIcon(ui::icon(ui::Icon::Left, this));
+    busNextButton_->setIcon(ui::icon(ui::Icon::Right, this));
+    busCloseButton_->setIcon(ui::icon(ui::Icon::Close, this));
+    for (auto* button : {busPreviousButton_, busNextButton_, busCloseButton_}) {
+        button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    }
     presetHeaderLayout->addWidget(busCloseButton_);
     connect(busCloseButton_, &QToolButton::clicked, this, &WaveCanvas::cancelBusValueEdit);
 
@@ -949,6 +961,8 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         "clock-disable");
     rangeCloseButton_ = ui::toolButton(rangeEditPalette_);
     rangeCloseButton_->setText(QStringLiteral("×"));
+    rangeCloseButton_->setIcon(ui::icon(ui::Icon::Close, this));
+    rangeCloseButton_->setToolButtonStyle(Qt::ToolButtonIconOnly);
     rangeCloseButton_->setObjectName(QStringLiteral("RangeEditCloseButton"));
     rangeCloseButton_->setAccessibleName(tr("Close range selection"));
     rangeCloseButton_->setToolTip(
@@ -6058,10 +6072,12 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
     QFont titleFont = painter.font();
     titleFont.setBold(true);
     painter.setFont(titleFont);
-    painter.drawText(
-        QRect(14, 0, headerWidth_ - 20, RulerHeight),
-        Qt::AlignVCenter | Qt::AlignLeft,
-        tr("Signals"));
+    if (!signalHeaderWidget_) {
+        painter.drawText(
+            QRect(14, 0, headerWidth_ - 20, RulerHeight),
+            Qt::AlignVCenter | Qt::AlignLeft,
+            tr("Signals"));
+    }
     painter.setPen(canvasTheme().gridMajor);
     painter.drawLine(headerWidth_ - 1, 0, headerWidth_ - 1, viewport()->height());
     lastPaintViewGeneration_ = viewGeneration_;
@@ -8248,8 +8264,26 @@ int WaveCanvas::fittedSignalHeaderWidth() const
     return std::clamp(fitted, MinimumHeaderWidth, MaximumHeaderWidth);
 }
 
+void WaveCanvas::setSignalHeaderWidget(QWidget* widget)
+{
+    if (signalHeaderWidget_ && signalHeaderWidget_ != widget) {
+        signalHeaderWidget_->hide();
+    }
+    signalHeaderWidget_ = widget;
+    if (widget) {
+        widget->setParent(viewport());
+        widget->show();
+    }
+    updateAddLaneButtonGeometry();
+    viewport()->update();
+}
+
 void WaveCanvas::updateAddLaneButtonGeometry()
 {
+    if (signalHeaderWidget_) {
+        signalHeaderWidget_->setGeometry(6, 4, headerWidth_ - 14, RulerHeight - 8);
+        signalHeaderWidget_->raise();
+    }
     const auto row = addLaneRowRect();
     const auto visible = scenario_
         && row.bottom() >= RulerHeight
@@ -8268,7 +8302,7 @@ void WaveCanvas::updateAddLaneButtonGeometry()
         scenario_->lanes.end(),
         [](const Lane& lane) { return lane.visible && lane.kind != LaneKind::Group; });
     const auto spacing = empty ? 10 : 4;
-    const auto buttonWidth = empty ? 92 : (headerWidth_ - 20 - spacing * 2) / 3;
+    const auto buttonWidth = empty ? 42 : std::min(38, (headerWidth_ - 20 - spacing * 2) / 3);
     const auto buttonHeight = empty ? 38 : row.height() - 12;
     const auto totalWidth = buttonWidth * 3 + spacing * 2;
     const auto startX = empty
