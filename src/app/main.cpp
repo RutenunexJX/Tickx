@@ -4,6 +4,7 @@
 #endif
 #include "wave_canvas.h"
 #include "waveform_theme.h"
+#include "ui_controls.h"
 
 #include "wave/model.h"
 #include "wave/integration.h"
@@ -56,7 +57,6 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
-#include <QToolTip>
 #include <QUrl>
 
 #include <algorithm>
@@ -71,59 +71,7 @@
 int main(int argc, char* argv[])
 {
     QApplication application(argc, argv);
-    const auto applyVisualTheme = [&application]() {
-        const auto scheme = QGuiApplication::styleHints()->colorScheme()
-                    == Qt::ColorScheme::Dark
-                ? wave::WaveformColorScheme::Dark
-                : wave::WaveformColorScheme::Light;
-        const wave::WaveformTheme theme = wave::waveformTheme(scheme);
-        const wave::WaveformMetrics metrics = wave::waveformMetrics();
-        QPalette palette = application.palette();
-        palette.setColor(QPalette::Window, theme.application);
-        palette.setColor(QPalette::WindowText, theme.text);
-        palette.setColor(QPalette::Base, theme.canvas);
-        palette.setColor(QPalette::AlternateBase, theme.raised);
-        palette.setColor(QPalette::Text, theme.text);
-        palette.setColor(QPalette::Button, theme.raised);
-        palette.setColor(QPalette::ButtonText, theme.text);
-        palette.setColor(QPalette::Highlight, theme.selection);
-        palette.setColor(QPalette::HighlightedText, theme.selectionText);
-        palette.setColor(QPalette::Link, theme.accentSecondary);
-        palette.setColor(QPalette::LinkVisited, theme.accent);
-        palette.setColor(QPalette::BrightText, theme.error);
-        palette.setColor(QPalette::ToolTipBase, theme.raised);
-        palette.setColor(QPalette::ToolTipText, theme.text);
-        palette.setColor(QPalette::PlaceholderText, theme.mutedText);
-        palette.setColor(QPalette::Disabled, QPalette::WindowText, theme.mutedText);
-        palette.setColor(QPalette::Disabled, QPalette::Text, theme.mutedText);
-        palette.setColor(QPalette::Disabled, QPalette::ButtonText, theme.mutedText);
-        application.setPalette(palette);
-        application.setProperty(
-            "waveworkbench.colorScheme",
-            scheme == wave::WaveformColorScheme::Dark
-                ? QStringLiteral("dark")
-                : QStringLiteral("light"));
-        application.setProperty(
-            "waveworkbench.spacingUnit",
-            metrics.spacingUnit);
-        application.setProperty(
-            "waveworkbench.controlHeight",
-            metrics.controlHeight);
-        application.setProperty(
-            "waveworkbench.radius",
-            metrics.radius);
-        application.setProperty(
-            "waveworkbench.reducedMotion",
-            wave::waveReducedMotionEnabled());
-        application.setStyleSheet(wave::waveApplicationStyleSheet(scheme));
-    };
-    applyVisualTheme();
-    QObject::connect(QGuiApplication::styleHints(),
-                     &QStyleHints::colorSchemeChanged,
-                     &application,
-                     [&applyVisualTheme](Qt::ColorScheme) {
-                         applyVisualTheme();
-                     });
+    wave::ui::initialize();
     application.setWindowIcon(
         QIcon(QStringLiteral(":/branding/wave-workbench-icon.png")));
     if (QGuiApplication::platformName() == QStringLiteral("offscreen")) {
@@ -148,6 +96,8 @@ int main(int argc, char* argv[])
             QSettings::UserScope,
             QDir::cleanPath(testSettingsDirectory));
     }
+
+    wave::ui::initializeApplicationTheme();
 
     bool smokeTest = false;
     bool loadFirstTrace = false;
@@ -329,7 +279,7 @@ int main(int argc, char* argv[])
                 qCritical().noquote() << parsed.error;
                 return 2;
             }
-            QMessageBox::critical(nullptr, QObject::tr("Invalid Wave Workbench URI"), parsed.error);
+            wave::ui::MessageBox::critical(nullptr, QObject::tr("Invalid Wave Workbench URI"), parsed.error);
             return 2;
         }
         launchRequest = *parsed.request;
@@ -426,7 +376,7 @@ int main(int argc, char* argv[])
                 qCritical().noquote() << loadResult.error;
                 return 2;
             }
-            QMessageBox::critical(nullptr, QObject::tr("Open failed"), loadResult.error);
+            wave::ui::MessageBox::critical(nullptr, QObject::tr("Open failed"), loadResult.error);
             return 2;
         }
         project = *loadResult.project;
@@ -452,7 +402,7 @@ int main(int argc, char* argv[])
                                 : "URI scenario ID is ambiguous");
                     return 2;
                 }
-                QMessageBox::critical(
+                wave::ui::MessageBox::critical(
                     nullptr,
                     QObject::tr("Open failed"),
                     matchCount == 0
@@ -473,7 +423,7 @@ int main(int argc, char* argv[])
                 if (smokeTest) {
                     qCritical().noquote() << message;
                 } else {
-                    QMessageBox::critical(
+                    wave::ui::MessageBox::critical(
                         nullptr,
                         QObject::tr("Invalid Wave Workbench URI"),
                         message);
@@ -13149,7 +13099,7 @@ int main(int argc, char* argv[])
             auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
             auto fail = [&application, &window](const QString& message) {
                 qCritical().noquote() << message;
-                QToolTip::hideText();
+                wave::ui::hideToolTip();
                 window.hide();
                 application.exit(4);
             };
@@ -13217,11 +13167,11 @@ int main(int argc, char* argv[])
                 canvas->viewport()->mapToGlobal(QPoint(40, requestY)));
             QCoreApplication::sendEvent(canvas->viewport(), &nameTip);
             QCoreApplication::processEvents();
-            if (QToolTip::text() != fullName) {
+            if (wave::ui::toolTipText() != fullName) {
                 fail(QStringLiteral("Signal header tooltip did not expose the complete long name"));
                 return;
             }
-            QToolTip::hideText();
+            wave::ui::hideToolTip();
 
             sendMouse(
                 QEvent::MouseMove,
@@ -13238,12 +13188,12 @@ int main(int argc, char* argv[])
                 canvas->viewport()->mapToGlobal(QPoint(190, 20)));
             QCoreApplication::sendEvent(canvas->viewport(), &dividerTip);
             QCoreApplication::processEvents();
-            if (!QToolTip::text().contains(QStringLiteral("Drag to resize"))
-                || !QToolTip::text().contains(QStringLiteral("double-click to fit"))) {
+            if (!wave::ui::toolTipText().contains(QStringLiteral("Drag to resize"))
+                || !wave::ui::toolTipText().contains(QStringLiteral("double-click to fit"))) {
                 fail(QStringLiteral("Signal header divider tooltip did not explain both direct actions"));
                 return;
             }
-            QToolTip::hideText();
+            wave::ui::hideToolTip();
 
             sendMouse(
                 QEvent::MouseButtonPress,
@@ -13329,11 +13279,11 @@ int main(int argc, char* argv[])
                 canvas->viewport()->mapToGlobal(QPoint(40, requestY)));
             QCoreApplication::sendEvent(canvas->viewport(), &resizedNameTip);
             QCoreApplication::processEvents();
-            if (QToolTip::text() != fullName) {
+            if (wave::ui::toolTipText() != fullName) {
                 fail(QStringLiteral("Long-name tooltip was lost after signal header resizing"));
                 return;
             }
-            QToolTip::hideText();
+            wave::ui::hideToolTip();
 
             wave::MainWindow reopened(window.project(), QString{});
             reopened.show();
@@ -13856,14 +13806,14 @@ int main(int argc, char* argv[])
                 canvas->viewport(),
                 &implicitBusTooltip);
             QCoreApplication::processEvents();
-            if (!QToolTip::text().contains(QStringLiteral("implicit value X"))
-                || !QToolTip::text().contains(
+            if (!wave::ui::toolTipText().contains(QStringLiteral("implicit value X"))
+                || !wave::ui::toolTipText().contains(
                     QStringLiteral("double-click edits that beat"))) {
                 fail(QStringLiteral(
                     "Implicit Bus hover did not explain X and the one-beat edit target"));
                 return;
             }
-            QToolTip::hideText();
+            wave::ui::hideToolTip();
             sendMouse(
                 QEvent::MouseButtonDblClick,
                 paletteClick,
@@ -15462,7 +15412,7 @@ int main(int argc, char* argv[])
                 canvas->viewport(),
                 &segmentTooltip);
             QCoreApplication::processEvents();
-            const auto segmentTooltipText = QToolTip::text();
+            const auto segmentTooltipText = wave::ui::toolTipText();
             if (window.project().scenarios.front()
                     != beforeExactSegmentSelection
                 || !segmentTooltipText.contains(
@@ -15492,7 +15442,7 @@ int main(int argc, char* argv[])
                     "Wave Edit Segment hover did not expose exact value, range, width, and actions"));
                 return;
             }
-            QToolTip::hideText();
+            wave::ui::hideToolTip();
             sendMouse(
                 QEvent::MouseMove,
                 copySourcePoint,
@@ -32158,10 +32108,10 @@ int main(int argc, char* argv[])
                     canvas->viewport(),
                     &headerRulerTooltip);
                 QCoreApplication::processEvents();
-                if (!QToolTip::text().contains(
+                if (!wave::ui::toolTipText().contains(
                         QStringLiteral(
                             "keeping 2 selected signal target(s)"))
-                    || !QToolTip::text().contains(
+                    || !wave::ui::toolTipText().contains(
                         QStringLiteral(
                             "press Ctrl+V to paste at that time"))) {
                     qCritical().noquote()
@@ -32170,7 +32120,7 @@ int main(int argc, char* argv[])
                     application.exit(4);
                     return;
                 }
-                QToolTip::hideText();
+                wave::ui::hideToolTip();
                 if (!waveEditScreenshotPath.isEmpty()) {
                     auto headerRulerScreenshotPath = waveEditScreenshotPath;
                     const auto suffix =
@@ -34623,16 +34573,16 @@ int main(int argc, char* argv[])
                     canvas->viewport()->mapToGlobal(rulerEnd));
                 QCoreApplication::sendEvent(canvas->viewport(), &rulerTooltip);
                 QCoreApplication::processEvents();
-                if (!QToolTip::text().contains(
+                if (!wave::ui::toolTipText().contains(
                         QStringLiteral("Click or drag to place the edit cursor"))
-                    || !QToolTip::text().contains(QStringLiteral("Ctrl+wheel"))) {
+                    || !wave::ui::toolTipText().contains(QStringLiteral("Ctrl+wheel"))) {
                     qCritical().noquote()
                         << "Ruler tooltip did not disclose cursor, pan, and zoom controls";
                     window.hide();
                     application.exit(4);
                     return;
                 }
-                QToolTip::hideText();
+                wave::ui::hideToolTip();
 
                 const QPoint bitTooltipPoint(xAtTick(65'000), requestY);
                 QHelpEvent bitTooltip(
@@ -34641,18 +34591,18 @@ int main(int argc, char* argv[])
                     canvas->viewport()->mapToGlobal(bitTooltipPoint));
                 QCoreApplication::sendEvent(canvas->viewport(), &bitTooltip);
                 QCoreApplication::processEvents();
-                if (!QToolTip::text().contains(
+                if (!wave::ui::toolTipText().contains(
                         QStringLiteral("Click toggles one beat"))
-                    || !QToolTip::text().contains(
+                    || !wave::ui::toolTipText().contains(
                         QStringLiteral("drag toggles several beats"))
-                    || !QToolTip::text().contains(QStringLiteral("width"))) {
+                    || !wave::ui::toolTipText().contains(QStringLiteral("width"))) {
                     qCritical().noquote()
                         << "Bit hover tooltip did not expose exact beat behavior";
                     window.hide();
                     application.exit(4);
                     return;
                 }
-                QToolTip::hideText();
+                wave::ui::hideToolTip();
 
                 if (canvas->tool() != wave::WaveCanvas::Tool::WaveEdit
                     || measureAction->isChecked()) {

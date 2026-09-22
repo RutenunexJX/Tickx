@@ -2,9 +2,9 @@
 
 ## 所需 Kit
 
-选择 Qt 6.5 或更高版本的 Desktop Kit。该 Kit 必须提供：
+选择 Qt 6.10.2 Desktop Kit。Ela 的私有 Qt 头文件依赖要求固定此补丁版本。该 Kit 必须提供：
 
-- Qt Core、Gui、Widgets、Svg、Concurrent。
+- Qt Core、Gui、Widgets、WidgetsPrivate、Svg、Concurrent，以及运行测试所需的 Test。
 - C++20 编译器。
 - CMake 3.24 或更高版本。
 - Ninja。

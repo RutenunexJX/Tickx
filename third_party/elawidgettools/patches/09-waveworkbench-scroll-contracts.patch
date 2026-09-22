@@ -1,0 +1,59 @@
+diff --git a/Development/ElaScrollBarStyle.cpp b/Development/ElaScrollBarStyle.cpp
+index 7d6099a..e1ce8e0 100644
+--- a/Development/ElaScrollBarStyle.cpp
++++ b/Development/ElaScrollBarStyle.cpp
+@@ -25,6 +25,9 @@ ElaScrollBarStyle::~ElaScrollBarStyle()
+ 
+ void ElaScrollBarStyle::drawComplexControl(ComplexControl control, const QStyleOptionComplex* option, QPainter* painter, const QWidget* widget) const
+ {
++    const auto scheme = widget ? widget->property("waveColorScheme").toString() : QString();
++    const auto themeMode = scheme == QLatin1String("dark") ? ElaThemeType::Dark
++        : scheme == QLatin1String("light") ? ElaThemeType::Light : _themeMode;
+     //QStyle::SC_ScrollBarGroove QStyle::SC_ScrollBarAddLine   QStyle::SC_ScrollBarSubLine上指示器
+     switch (control)
+     {
+@@ -41,11 +44,11 @@ void ElaScrollBarStyle::drawComplexControl(ComplexControl control, const QStyleO
+                 // 背景绘制
+                 painter->setOpacity(_pOpacity);
+                 painter->setPen(Qt::NoPen);
+-                painter->setBrush(ElaThemeColor(_themeMode, BasicBase));
++                painter->setBrush(ElaThemeColor(themeMode, BasicBase));
+                 painter->drawRoundedRect(scrollBarRect, 6, 6);
+                 //指示器绘制 center()在此处不适用 存在外围边距宽度 需手动计算
+                 int sideLength = 8;
+-                painter->setBrush(ElaThemeColor(_themeMode, ScrollBarHandle));
++                painter->setBrush(ElaThemeColor(themeMode, ScrollBarHandle));
+                 if (sopt->orientation == Qt::Horizontal)
+                 {
+                     QRect leftIndicatorRect = subControlRect(control, sopt, QStyle::SC_ScrollBarSubLine, widget);
+@@ -98,7 +101,7 @@ void ElaScrollBarStyle::drawComplexControl(ComplexControl control, const QStyleO
+             painter->setOpacity(1);
+             //滑块绘制
+             QRectF sliderRect = subControlRect(control, sopt, QStyle::SC_ScrollBarSlider, widget);
+-            painter->setBrush(ElaThemeColor(_themeMode, ScrollBarHandle));
++            painter->setBrush(ElaThemeColor(themeMode, ScrollBarHandle));
+             if (sopt->orientation == Qt::Horizontal)
+             {
+                 sliderRect.setRect(sliderRect.x(), sliderRect.bottom() - _sliderMargin - _pSliderExtent, sliderRect.width(), _pSliderExtent);
+@@ -139,7 +142,8 @@ int ElaScrollBarStyle::pixelMetric(PixelMetric metric, const QStyleOption* optio
+ 
+ int ElaScrollBarStyle::styleHint(StyleHint hint, const QStyleOption* option, const QWidget* widget, QStyleHintReturn* returnData) const
+ {
+-    if (hint == QStyle::SH_ScrollBar_LeftClickAbsolutePosition)
++    if (hint == QStyle::SH_ScrollBar_LeftClickAbsolutePosition
++        && !(widget && widget->property("waveNativeScroll").toBool()))
+     {
+         return true;
+     }
+diff --git a/Development/ElaListViewStyle.cpp b/Development/ElaListViewStyle.cpp
+index beb2cfa..93f589b 100644
+--- a/Development/ElaListViewStyle.cpp
++++ b/Development/ElaListViewStyle.cpp
+@@ -145,6 +145,7 @@ void ElaListViewStyle::drawControl(ControlElement element, const QStyleOption* o
+             // 文字绘制
+             if (!vopt->text.isEmpty())
+             {
++                painter->setFont(vopt->font);
+                 painter->setPen(ElaThemeColor(_themeMode, BasicText));
+                 painter->drawText(textRect, vopt->displayAlignment, vopt->text);
+             }

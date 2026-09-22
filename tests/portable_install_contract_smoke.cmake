@@ -37,10 +37,13 @@ endforeach()
 
 if(WIN32)
     set(wavewidgets_library "wavewidgets.dll")
+    set(ela_library "WaveWorkbenchEla.dll")
 elseif(APPLE)
     set(wavewidgets_library "libwavewidgets.dylib")
+    set(ela_library "libWaveWorkbenchEla.dylib")
 else()
     set(wavewidgets_library "libwavewidgets.so")
+    set(ela_library "libWaveWorkbenchEla.so")
 endif()
 if(NOT EXISTS "${OUTPUT}/${wavewidgets_library}")
     message(FATAL_ERROR
@@ -48,6 +51,11 @@ if(NOT EXISTS "${OUTPUT}/${wavewidgets_library}")
 endif()
 
 foreach(document IN ITEMS
+    ${ela_library}
+    licenses/ElaWidgetTools/LICENSE
+    licenses/ElaWidgetTools/FontAwesome-LICENSE.txt
+    licenses/ElaWidgetTools/UPSTREAM-REVISION.md
+    licenses/ElaWidgetTools/WAVEWORKBENCH.md
     PACKAGE-README.txt
     docs/automation-cli.md
     docs/cli-quick-start.md

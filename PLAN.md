@@ -4,6 +4,14 @@ Current version: `0.12.0`.
 
 ## Current baseline
 
+The ElaWidgetTools migration is implemented, with pinned in-tree source,
+system/light/dark appearance, managed tooltips, ordinary text, color pickers,
+action icons, non-blocking completion notices and
+retained waveform/embedding contracts. Release validation on 2026-09-22 passed
+109/109 CTest tests, each repeated twice. Commit, push and Windows x64 portable
+packaging are authorized. Native platform acceptance remains pending;
+see [migration scope and evidence](docs/ela-migration.md).
+
 Scenario create/duplicate/rename/delete/reorder and semantic light/dark rendering are implemented.
 The CLI publishes its current operation set through capabilities and versioned schemas; do not maintain
 an independent fixed operation count in this plan.

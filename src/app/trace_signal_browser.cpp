@@ -1,3 +1,4 @@
+#include "ui_controls.h"
 #include "trace_signal_browser.h"
 
 #include "wave/trace_hierarchy.h"
@@ -160,19 +161,20 @@ TraceSignalBrowser::TraceSignalBrowser(QWidget* parent)
     : QWidget(parent)
 {
     setObjectName(QStringLiteral("TraceSignalBrowser"));
+    ui::installToolTips(this);
     setMinimumWidth(210);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 8, 8, 6);
     layout->setSpacing(6);
 
-    searchEdit_ = new QLineEdit(this);
+    searchEdit_ = ui::lineEdit(this);
     searchEdit_->setObjectName(QStringLiteral("TraceHierarchySearch"));
     searchEdit_->setPlaceholderText(tr("Filter internal signals"));
     searchEdit_->setClearButtonEnabled(true);
     layout->addWidget(searchEdit_);
 
-    tree_ = new QTreeWidget(this);
+    tree_ = ui::tree(this);
     tree_->setObjectName(QStringLiteral("TraceHierarchyTree"));
     tree_->setHeaderLabels({tr("Signal"), tr("Width")});
     tree_->setRootIsDecorated(true);
@@ -183,7 +185,7 @@ TraceSignalBrowser::TraceSignalBrowser(QWidget* parent)
     tree_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     layout->addWidget(tree_, 1);
 
-    summaryLabel_ = new QLabel(this);
+    summaryLabel_ = ui::text(this);
     summaryLabel_->setObjectName(QStringLiteral("TraceHierarchySummary"));
     summaryLabel_->setText(tr("No simulation result"));
     layout->addWidget(summaryLabel_);

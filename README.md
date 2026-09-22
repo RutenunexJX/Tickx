@@ -80,11 +80,19 @@ v5 增加结果与源码导航元数据，并将构建或运行错误以源码�
 但不解析 RTL 或启动仿真。接口见
 [docs/wave-preview-v1.md](docs/wave-preview-v1.md)。
 
+## 通用界面与主题
+
+工具栏、菜单、输入编辑和参数控件使用仓库内固定版本的 ElaWidgetTools；
+`View > Appearance` 支持跟随系统、浅色和深色。专用波形画布、整数 tick、撤销/重做、
+CLI 与 `wavewidgets` v1 契约保持不变。迁移范围、许可证与验证边界见
+[Ela 迁移清单](docs/ela-migration.md)。
+
 ## 构建
 
 要求：
 
-- Qt 6.5 或更高版本，包含 Core、Gui、Widgets、Svg、Concurrent。
+- Qt **6.10.2**，包含 Core、Gui、Widgets、WidgetsPrivate、Svg、Concurrent；
+  测试另需 Test。Ela 使用 Qt 私有头文件，因此固定到此补丁版本。
 - CMake 3.24 或更高版本。
 - 支持 C++20 的编译器。
 - Ninja。
@@ -109,7 +117,7 @@ E:\QT6\Tools\CMake_64\bin\ctest.exe --test-dir build --output-on-failure
 ### Qt Creator
 
 仓库提供 `Qt Creator - Debug` 和 `Qt Creator - Release` CMake presets。使用 Qt Creator
-打开根目录 `CMakeLists.txt`，选择 Qt 6.5+ Desktop Kit 和 Debug preset，即可点击 Build；
+打开根目录 `CMakeLists.txt`，选择 Qt 6.10.2 Desktop Kit 和 Debug preset，即可点击 Build；
 将运行目标设为 `wave-workbench` 后可直接 Run 或按 `F5` 调试。Qt Kit 配置、可用目标、
 示例工程参数及命令行等价验证见 [docs/qt-creator.md](docs/qt-creator.md)。
 

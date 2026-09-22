@@ -1,3 +1,5 @@
+#include "ui_controls.h"
+#include "ElaMenu.h"
 #include "main_window.h"
 
 #include "wave/export.h"
@@ -194,12 +196,6 @@ private:
     std::int64_t minimum_;
 };
 
-QIcon themedIcon(const QString& name, QStyle* style, const QStyle::StandardPixmap fallback)
-{
-    const auto icon = QIcon::fromTheme(name);
-    return icon.isNull() ? style->standardIcon(fallback) : icon;
-}
-
 QString laneKindText(const LaneKind kind)
 {
     const auto text = toString(kind);
@@ -287,7 +283,7 @@ std::optional<std::string> promptNewGroupName(
     const QString& description,
     const std::string_view defaultName)
 {
-    QDialog dialog(parent);
+    ui::Dialog dialog(parent);
     dialog.setObjectName(QStringLiteral("GroupNameDialog"));
     dialog.setWindowTitle(title);
     dialog.setMinimumWidth(380);
@@ -296,12 +292,12 @@ std::optional<std::string> promptNewGroupName(
     auto* layout = new QVBoxLayout(&dialog);
     layout->setContentsMargins(16, 14, 16, 14);
     layout->setSpacing(8);
-    auto* prompt = new QLabel(description, &dialog);
+    auto* prompt = ui::text(description, &dialog);
     prompt->setObjectName(QStringLiteral("GroupNamePromptLabel"));
     prompt->setWordWrap(true);
     layout->addWidget(prompt);
 
-    auto* name = new QLineEdit(
+    auto* name = ui::lineEdit(
         QString::fromStdString(std::string(defaultName)),
         &dialog);
     name->setObjectName(QStringLiteral("GroupNameEdit"));
@@ -317,7 +313,7 @@ std::optional<std::string> promptNewGroupName(
     error->setProperty("waveState", QStringLiteral("error"));
     layout->addWidget(error);
 
-    auto* buttons = new QDialogButtonBox(
+    auto* buttons = ui::buttonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
         &dialog);
     buttons->setObjectName(QStringLiteral("GroupNameButtonBox"));
@@ -526,11 +522,11 @@ std::optional<ExportOptions> requestExportOptions(
     const Scenario& scenario,
     const std::optional<std::pair<Tick, Tick>>& selection)
 {
-    QDialog dialog(parent);
+    ui::Dialog dialog(parent);
     dialog.setObjectName(QStringLiteral("ExportOptionsDialog"));
     dialog.setWindowTitle(QObject::tr("Export scenario"));
-    auto* layout = new QFormLayout(&dialog);
-    auto* scope = new QComboBox;
+    auto* layout = new ui::FormLayout(&dialog);
+    auto* scope = ui::comboBox();
     scope->setObjectName(QStringLiteral("ExportScopeCombo"));
     scope->addItem(QObject::tr("Full scenario"), QStringLiteral("full"));
     scope->addItem(QObject::tr("Current selection"), QStringLiteral("selection"));
@@ -538,29 +534,29 @@ std::optional<ExportOptions> requestExportOptions(
     if (!selection || selection->second <= selection->first) {
         scope->setItemData(1, 0, Qt::UserRole - 1);
     }
-    auto* start = new QLineEdit(QString::fromStdString(formatTick(0, project.timeBase)));
+    auto* start = ui::lineEdit(QString::fromStdString(formatTick(0, project.timeBase)));
     start->setObjectName(QStringLiteral("ExportStartEdit"));
-    auto* end = new QLineEdit(
+    auto* end = ui::lineEdit(
         QString::fromStdString(formatTick(scenario.duration, project.timeBase)));
     end->setObjectName(QStringLiteral("ExportEndEdit"));
-    auto* width = new QSpinBox;
+    auto* width = ui::spinBox();
     width->setObjectName(QStringLiteral("ExportLogicalWidthSpin"));
     width->setRange(640, 8000);
     width->setValue(1600);
-    auto* dpi = new QSpinBox;
+    auto* dpi = ui::spinBox();
     dpi->setObjectName(QStringLiteral("ExportPngDpiSpin"));
     dpi->setRange(72, 600);
     dpi->setValue(192);
-    auto* pdfSpan = new QLineEdit(QStringLiteral("0 tick"));
+    auto* pdfSpan = ui::lineEdit(QStringLiteral("0 tick"));
     pdfSpan->setObjectName(QStringLiteral("ExportPdfSpanEdit"));
     pdfSpan->setToolTip(QObject::tr("0 keeps the selected range on one PDF page"));
-    auto* relations = new QCheckBox(QObject::tr("Include relations"));
+    auto* relations = ui::checkBox(QObject::tr("Include relations"));
     relations->setObjectName(QStringLiteral("ExportRelationsCheck"));
     relations->setChecked(true);
-    auto* markers = new QCheckBox(QObject::tr("Include markers"));
+    auto* markers = ui::checkBox(QObject::tr("Include markers"));
     markers->setObjectName(QStringLiteral("ExportMarkersCheck"));
     markers->setChecked(true);
-    auto* annotations = new QCheckBox(QObject::tr("Include annotations"));
+    auto* annotations = ui::checkBox(QObject::tr("Include annotations"));
     annotations->setObjectName(QStringLiteral("ExportAnnotationsCheck"));
     annotations->setChecked(true);
     layout->addRow(QObject::tr("Scope"), scope);
@@ -578,7 +574,7 @@ std::optional<ExportOptions> requestExportOptions(
     error->setProperty("waveState", QStringLiteral("error"));
     error->hide();
     layout->addRow(error);
-    auto* buttons = new QDialogButtonBox(
+    auto* buttons = ui::buttonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     layout->addRow(buttons);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -861,19 +857,19 @@ std::optional<Lane> promptLaneProperties(
     const Lane& initial,
     const bool lockKind)
 {
-    QDialog dialog(parent);
+    ui::Dialog dialog(parent);
     dialog.setObjectName(QStringLiteral("LanePropertiesDialog"));
     dialog.setWindowTitle(
         initial.kind == LaneKind::Group
             ? QObject::tr("Group properties")
             : QObject::tr("Lane properties"));
-    auto* layout = new QFormLayout(&dialog);
-    auto* stableId = new QLineEdit(QString::fromStdString(initial.id));
+    auto* layout = new ui::FormLayout(&dialog);
+    auto* stableId = ui::lineEdit(QString::fromStdString(initial.id));
     stableId->setObjectName(QStringLiteral("LanePropertiesStableId"));
     stableId->setReadOnly(true);
-    auto* name = new QLineEdit(QString::fromStdString(initial.name));
+    auto* name = ui::lineEdit(QString::fromStdString(initial.name));
     name->setObjectName(QStringLiteral("LanePropertiesNameEdit"));
-    auto* kind = new QComboBox;
+    auto* kind = ui::comboBox();
     kind->setObjectName(QStringLiteral("LanePropertiesKindCombo"));
     for (const auto candidate : {
              LaneKind::Clock,
@@ -890,12 +886,12 @@ std::optional<Lane> promptLaneProperties(
     }
     kind->setCurrentIndex(kind->findData(static_cast<int>(initial.kind)));
     kind->setEnabled(!lockKind);
-    auto* width = new QLineEdit(QString::number(initial.width));
+    auto* width = ui::lineEdit(QString::number(initial.width));
     width->setObjectName(QStringLiteral("LanePropertiesWidthEdit"));
-    auto* signedValue = new QCheckBox;
+    auto* signedValue = ui::checkBox();
     signedValue->setObjectName(QStringLiteral("LanePropertiesSignedCheck"));
     signedValue->setChecked(initial.isSigned);
-    auto* radix = new QComboBox;
+    auto* radix = ui::comboBox();
     radix->setObjectName(QStringLiteral("LanePropertiesRadixCombo"));
     for (const auto candidate : {
              Radix::Binary,
@@ -909,10 +905,10 @@ std::optional<Lane> promptLaneProperties(
             static_cast<int>(candidate));
     }
     radix->setCurrentIndex(radix->findData(static_cast<int>(initial.radix)));
-    auto* enumMap = new QLineEdit(enumMapText(initial.enumMap));
+    auto* enumMap = ui::lineEdit(enumMapText(initial.enumMap));
     enumMap->setObjectName(QStringLiteral("LanePropertiesEnumMapEdit"));
     enumMap->setPlaceholderText(QObject::tr("IDLE=0; BUSY=1"));
-    auto* clock = new QComboBox;
+    auto* clock = ui::comboBox();
     clock->setObjectName(QStringLiteral("LanePropertiesClockCombo"));
     clock->addItem(QObject::tr("<none>"), QString{});
     for (const auto& domain : project.clockDomains) {
@@ -933,7 +929,7 @@ std::optional<Lane> promptLaneProperties(
     clock->setCurrentIndex(std::max(
         0,
         clock->findData(QString::fromStdString(initial.clockDomainId))));
-    auto* group = new QComboBox;
+    auto* group = ui::comboBox();
     group->setObjectName(QStringLiteral("LanePropertiesGroupCombo"));
     group->addItem(QObject::tr("<none>"), QString{});
     for (const auto& candidate : scenario.lanes) {
@@ -955,16 +951,16 @@ std::optional<Lane> promptLaneProperties(
     group->setCurrentIndex(std::max(
         0,
         group->findData(QString::fromStdString(initial.groupId))));
-    auto* color = new QLineEdit(QString::fromStdString(initial.color));
+    auto* color = ui::lineEdit(QString::fromStdString(initial.color));
     color->setObjectName(QStringLiteral("LanePropertiesColorEdit"));
-    auto* height = new QSpinBox;
+    auto* height = ui::spinBox();
     height->setObjectName(QStringLiteral("LanePropertiesHeightSpin"));
     height->setRange(30, 240);
     height->setValue(std::clamp(initial.height, 30, 240));
-    auto* visible = new QCheckBox;
+    auto* visible = ui::checkBox();
     visible->setObjectName(QStringLiteral("LanePropertiesVisibleCheck"));
     visible->setChecked(initial.visible);
-    auto* compatibility = new QLabel(QObject::tr(
+    auto* compatibility = ui::text(QObject::tr(
         "Stable ID and waveform data are preserved. Incompatible type or width changes are rejected."));
     compatibility->setWordWrap(true);
 
@@ -977,7 +973,7 @@ std::optional<Lane> promptLaneProperties(
     layout->addRow(QObject::tr("Enum map"), enumMap);
     layout->addRow(QObject::tr("Clock domain"), clock);
     layout->addRow(QObject::tr("Group"), group);
-    layout->addRow(QObject::tr("Color"), color);
+    layout->addRow(QObject::tr("Color"), ui::colorField(color, &dialog));
     layout->addRow(QObject::tr("Height"), height);
     layout->addRow(QObject::tr("Visible"), visible);
     layout->addRow(compatibility);
@@ -987,7 +983,7 @@ std::optional<Lane> promptLaneProperties(
     error->setProperty("waveState", QStringLiteral("error"));
     error->hide();
     layout->addRow(error);
-    auto* buttons = new QDialogButtonBox(
+    auto* buttons = ui::buttonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     layout->addRow(buttons);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -1355,7 +1351,7 @@ void MainWindow::initializeProjectFileMonitoring()
         QSizePolicy::Expanding,
         QSizePolicy::Preferred);
     conflictLayout->addWidget(externalProjectConflictLabel_, 1);
-    externalProjectReloadButton_ = new QPushButton(
+    externalProjectReloadButton_ = ui::button(
         tr("Reload"), externalProjectConflictBar_);
     externalProjectReloadButton_->setObjectName(
         QStringLiteral("ExternalProjectReloadButton"));
@@ -1363,13 +1359,13 @@ void MainWindow::initializeProjectFileMonitoring()
         "waveRole", QStringLiteral("primary"));
     externalProjectReloadButton_->setProperty(
         "waveDensity", QStringLiteral("compact"));
-    externalProjectKeepButton_ = new QPushButton(
+    externalProjectKeepButton_ = ui::button(
         tr("Keep"), externalProjectConflictBar_);
     externalProjectKeepButton_->setObjectName(
         QStringLiteral("ExternalProjectKeepButton"));
     externalProjectKeepButton_->setProperty(
         "waveDensity", QStringLiteral("compact"));
-    externalProjectSaveAsButton_ = new QPushButton(
+    externalProjectSaveAsButton_ = ui::button(
         tr("Save As…"), externalProjectConflictBar_);
     externalProjectSaveAsButton_->setObjectName(
         QStringLiteral("ExternalProjectSaveAsButton"));
@@ -1910,6 +1906,7 @@ MainWindow::MainWindow(
               : QFileInfo(std::move(wellenReaderExecutable)).absoluteFilePath())
     , simulationResultMode_(loadFirstTrace)
 {
+    ui::prepareWindow(this);
     const auto recoveredSnapshot = projectFile_.endsWith(
         QStringLiteral(".autosave"),
         Qt::CaseInsensitive);
@@ -1947,7 +1944,7 @@ MainWindow::MainWindow(
             auto* layout = new QVBoxLayout(panel);
             layout->setContentsMargins(0, 0, 0, 0);
             layout->setSpacing(0);
-            auto* label = new QLabel(title, panel);
+            auto* label = ui::text(title, panel);
             label->setObjectName(objectName + QStringLiteral("Label"));
             label->setProperty("waveSectionHeader", true);
             label->setProperty("waveRole", QStringLiteral("panelHeader"));
@@ -1976,10 +1973,10 @@ MainWindow::MainWindow(
         auto* compareLayout = new QVBoxLayout(comparePanel_);
         compareLayout->setContentsMargins(0, 0, 0, 0);
         compareLayout->setSpacing(0);
-        auto* compareBar = new QToolBar(comparePanel_);
+        auto* compareBar = ui::toolBar(comparePanel_);
         compareBar->setObjectName(QStringLiteral("SimulationComparisonToolbar"));
         compareBar->setIconSize(QSize(16, 16));
-        compareXCombo_ = new QComboBox(compareBar);
+        compareXCombo_ = ui::comboBox(compareBar);
         compareXCombo_->setObjectName(QStringLiteral("SimulationCompareXHandling"));
         compareXCombo_->setToolTip(
             tr("Choose how X values participate in expected/actual comparison"));
@@ -1991,7 +1988,7 @@ MainWindow::MainWindow(
             tr("Expected X wildcard"),
             static_cast<int>(XHandling::ExpectedXWildcard));
         compareBar->addWidget(compareXCombo_);
-        compareToleranceEdit_ = new QLineEdit(QStringLiteral("0 tick"), compareBar);
+        compareToleranceEdit_ = ui::lineEdit(QStringLiteral("0 tick"), compareBar);
         compareToleranceEdit_->setObjectName(
             QStringLiteral("SimulationCompareEdgeTolerance"));
         compareToleranceEdit_->setPlaceholderText(tr("Edge tolerance"));
@@ -2003,7 +2000,7 @@ MainWindow::MainWindow(
         compareSpacer->setSizePolicy(
             QSizePolicy::Expanding, QSizePolicy::Preferred);
         compareBar->addWidget(compareSpacer);
-        compareSummary_ = new QLabel(
+        compareSummary_ = ui::text(
             tr("Add an expected waveform to an output lane, then compare"),
             compareBar);
         compareSummary_->setObjectName(QStringLiteral("CompareSummary"));
@@ -2011,7 +2008,7 @@ MainWindow::MainWindow(
         compareBar->addWidget(compareSummary_);
         compareLayout->addWidget(compareBar);
 
-        compareTable_ = new QTableWidget(comparePanel_);
+        compareTable_ = ui::table(comparePanel_);
         compareTable_->setObjectName(QStringLiteral("CompareResultTable"));
         compareTable_->setColumnCount(7);
         compareTable_->setHorizontalHeaderLabels({
@@ -2036,7 +2033,7 @@ MainWindow::MainWindow(
         auto* checkLayout = new QVBoxLayout(simulationCheckPanel_);
         checkLayout->setContentsMargins(0, 0, 0, 0);
         checkLayout->setSpacing(0);
-        auto* checkBar = new QToolBar(simulationCheckPanel_);
+        auto* checkBar = ui::toolBar(simulationCheckPanel_);
         checkBar->setObjectName(QStringLiteral("SimulationChecksToolbar"));
         checkBar->setIconSize(QSize(16, 16));
         auto* addValue = checkBar->addAction(
@@ -2055,7 +2052,7 @@ MainWindow::MainWindow(
         editSimulationCheckAction_->setObjectName(
             QStringLiteral("EditSimulationCheckAction"));
         removeSimulationCheckAction_ = checkBar->addAction(
-            themedIcon(QStringLiteral("edit-delete"), style(), QStyle::SP_TrashIcon),
+            ui::icon(ui::Icon::Delete, this),
             tr("Remove"),
             this,
             &MainWindow::removeSelectedSimulationCheck);
@@ -2063,10 +2060,7 @@ MainWindow::MainWindow(
             QStringLiteral("RemoveSimulationCheckAction"));
         checkBar->addSeparator();
         auto* runChecks = checkBar->addAction(
-            themedIcon(
-                QStringLiteral("media-playback-start"),
-                style(),
-                QStyle::SP_MediaPlay),
+            ui::icon(ui::Icon::Play, this),
             tr("Run checks"),
             this,
             &MainWindow::runSimulationChecks);
@@ -2076,7 +2070,7 @@ MainWindow::MainWindow(
         checkSpacer->setSizePolicy(
             QSizePolicy::Expanding, QSizePolicy::Preferred);
         checkBar->addWidget(checkSpacer);
-        simulationCheckSummary_ = new QLabel(
+        simulationCheckSummary_ = ui::text(
             tr("Add a lightweight check to the current scenario"), checkBar);
         simulationCheckSummary_->setObjectName(
             QStringLiteral("SimulationCheckSummary"));
@@ -2084,7 +2078,7 @@ MainWindow::MainWindow(
         checkBar->addWidget(simulationCheckSummary_);
         checkLayout->addWidget(checkBar);
 
-        simulationCheckTable_ = new QTableWidget(simulationCheckPanel_);
+        simulationCheckTable_ = ui::table(simulationCheckPanel_);
         simulationCheckTable_->setObjectName(
             QStringLiteral("SimulationCheckResultTable"));
         simulationCheckTable_->setColumnCount(7);
@@ -2123,10 +2117,10 @@ MainWindow::MainWindow(
         auto* batchLayout = new QVBoxLayout(simulationBatchPanel);
         batchLayout->setContentsMargins(0, 0, 0, 0);
         batchLayout->setSpacing(0);
-        auto* batchBar = new QToolBar(simulationBatchPanel);
+        auto* batchBar = ui::toolBar(simulationBatchPanel);
         batchBar->setObjectName(QStringLiteral("SimulationBatchToolbar"));
         batchBar->setIconSize(QSize(16, 16));
-        simulationBatchSummary_ = new QLabel(
+        simulationBatchSummary_ = ui::text(
             tr("Run all stored scenarios to compare their simulation status"),
             batchBar);
         simulationBatchSummary_->setObjectName(
@@ -2135,7 +2129,7 @@ MainWindow::MainWindow(
         batchBar->addWidget(simulationBatchSummary_);
         batchLayout->addWidget(batchBar);
 
-        simulationBatchTable_ = new QTableWidget(simulationBatchPanel);
+        simulationBatchTable_ = ui::table(simulationBatchPanel);
         simulationBatchTable_->setObjectName(
             QStringLiteral("SimulationBatchResultTable"));
         simulationBatchTable_->setColumnCount(5);
@@ -2158,7 +2152,7 @@ MainWindow::MainWindow(
             this, &MainWindow::revealSimulationBatchResult);
         batchLayout->addWidget(simulationBatchTable_, 1);
 
-        simulationReviewTabs_ = new QTabWidget(this);
+        simulationReviewTabs_ = ui::tabs(this);
         simulationReviewTabs_->setObjectName(
             QStringLiteral("SimulationReviewTabs"));
         simulationReviewTabs_->addTab(comparePanel_, tr("Expected / Actual"));
@@ -2337,6 +2331,7 @@ MainWindow::MainWindow(
         &MainWindow::updateActiveActualSignal);
 
     createActions();
+    ui::addAppearanceMenu(this);
     if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
         rememberProjectPath(projectFile_);
     }
@@ -2346,7 +2341,7 @@ MainWindow::MainWindow(
                 QStringLiteral("WaveformToolbar"))) {
             waveformToolbar->hide();
         }
-        auto* resultToolbar = addToolBar(tr("Simulation result"));
+        auto* resultToolbar = ui::addToolBar(this, tr("Simulation result"));
         resultToolbar->setObjectName(QStringLiteral("SimulationResultToolbar"));
         resultToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         resultToolbar->setMovable(false);
@@ -2355,75 +2350,54 @@ MainWindow::MainWindow(
         resultToolbar->toggleViewAction()->setEnabled(false);
         resultToolbar->toggleViewAction()->setVisible(false);
         runSimulationAction_ = resultToolbar->addAction(
-            themedIcon(
-                QStringLiteral("media-playback-start"),
-                style(),
-                QStyle::SP_MediaPlay),
+            ui::icon(ui::Icon::Play, this),
             tr("Run"),
             this,
             &MainWindow::runSimulation);
         runSimulationAction_->setObjectName(QStringLiteral("RunSimulationAction"));
         runAllSimulationScenariosAction_ = resultToolbar->addAction(
-            themedIcon(
-                QStringLiteral("media-playlist-repeat"),
-                style(),
-                QStyle::SP_MediaPlay),
+            ui::icon(ui::Icon::Repeat, this),
             tr("Run all"),
             this,
             &MainWindow::runAllSimulationScenarios);
         runAllSimulationScenariosAction_->setObjectName(
             QStringLiteral("RunAllSimulationScenariosAction"));
         stopSimulationAction_ = resultToolbar->addAction(
-            themedIcon(
-                QStringLiteral("media-playback-stop"),
-                style(),
-                QStyle::SP_MediaStop),
+            ui::icon(ui::Icon::Stop, this),
             tr("Stop"),
             this,
             &MainWindow::stopSimulation);
         stopSimulationAction_->setObjectName(QStringLiteral("StopSimulationAction"));
         rerunSimulationAction_ = new QAction(
-            themedIcon(
-                QStringLiteral("view-refresh"),
-                style(),
-                QStyle::SP_BrowserReload),
+            ui::icon(ui::Icon::Refresh, this),
             tr("Rerun"),
             this);
         connect(rerunSimulationAction_, &QAction::triggered,
                 this, &MainWindow::rerunSimulation);
         rerunSimulationAction_->setObjectName(QStringLiteral("RerunSimulationAction"));
         runSimulationCompareAction_ = resultToolbar->addAction(
-            themedIcon(
-                QStringLiteral("view-statistics"),
-                style(),
-                QStyle::SP_DialogApplyButton),
+            ui::icon(ui::Icon::Compare, this),
             tr("Compare"),
             this,
             &MainWindow::runCompare);
         runSimulationCompareAction_->setObjectName(
             QStringLiteral("RunSimulationCompareAction"));
         runSimulationChecksAction_ = resultToolbar->addAction(
-            themedIcon(
-                QStringLiteral("task-complete"),
-                style(),
-                QStyle::SP_DialogApplyButton),
+            ui::icon(ui::Icon::Check, this),
             tr("Checks"),
             this,
             &MainWindow::runSimulationChecks);
         runSimulationChecksAction_->setObjectName(
             QStringLiteral("RunSimulationChecksAction"));
         simulationSourceAction_ = new QAction(
-            themedIcon(
-                QStringLiteral("go-jump-definition"),
-                style(),
-                QStyle::SP_ArrowForward),
+            ui::icon(ui::Icon::Source, this),
             tr("Source"),
             this);
         connect(simulationSourceAction_, &QAction::triggered,
                 this, &MainWindow::navigateActiveActualSignalToDeclaration);
         simulationSourceAction_->setObjectName(
             QStringLiteral("SimulationSourceNavigationAction"));
-        simulationDriversButton_ = new QToolButton(resultToolbar);
+        simulationDriversButton_ = ui::toolButton(resultToolbar);
         simulationDriversButton_->setObjectName(
             QStringLiteral("SimulationDriverNavigationButton"));
         simulationDriversButton_->setText(tr("Drivers"));
@@ -2431,9 +2405,9 @@ MainWindow::MainWindow(
         simulationDriversButton_->setToolButtonStyle(
             Qt::ToolButtonTextBesideIcon);
         simulationDriversButton_->setMenu(
-            new QMenu(simulationDriversButton_));
+            ui::menu(simulationDriversButton_));
         createSimulationScenarioAction_ = new QAction(
-            themedIcon(QStringLiteral("document-new"), style(), QStyle::SP_FileIcon),
+            ui::icon(ui::Icon::NewFile, this),
             tr("New scenario"),
             this);
         connect(createSimulationScenarioAction_, &QAction::triggered,
@@ -2446,57 +2420,54 @@ MainWindow::MainWindow(
         renameSimulationScenarioAction_->setObjectName(
             QStringLiteral("RenameSimulationScenarioAction"));
         deleteSimulationScenarioAction_ = new QAction(
-            themedIcon(QStringLiteral("edit-delete"), style(), QStyle::SP_TrashIcon),
+            ui::icon(ui::Icon::Delete, this),
             tr("Delete scenario"),
             this);
         connect(deleteSimulationScenarioAction_, &QAction::triggered,
                 this, &MainWindow::deleteSimulationScenario);
         deleteSimulationScenarioAction_->setObjectName(
             QStringLiteral("DeleteSimulationScenarioAction"));
-        simulationStubButton_ = new QToolButton(resultToolbar);
+        simulationStubButton_ = ui::toolButton(resultToolbar);
         simulationStubButton_->setObjectName(
             QStringLiteral("SimulationStubDependenciesButton"));
         simulationStubButton_->setPopupMode(QToolButton::InstantPopup);
         simulationStubButton_->setToolButtonStyle(
             Qt::ToolButtonTextBesideIcon);
         simulationStubButton_->setMenu(
-            new QMenu(simulationStubButton_));
-        simulationClockButton_ = new QToolButton(resultToolbar);
+            ui::menu(simulationStubButton_));
+        simulationClockButton_ = ui::toolButton(resultToolbar);
         simulationClockButton_->setObjectName(
             QStringLiteral("SimulationClockDomainsButton"));
         simulationClockButton_->setPopupMode(QToolButton::InstantPopup);
         simulationClockButton_->setToolButtonStyle(
             Qt::ToolButtonTextBesideIcon);
         simulationClockButton_->setMenu(
-            new QMenu(simulationClockButton_));
+            ui::menu(simulationClockButton_));
         auto* zoomInAction = new QAction(
-            themedIcon(QStringLiteral("zoom-in"), style(), QStyle::SP_ArrowUp),
+            ui::icon(ui::Icon::ZoomIn, this),
             tr("Zoom in"),
             this);
         connect(zoomInAction, &QAction::triggered,
                 compareTraceCanvas_, &TraceCanvas::zoomIn);
         auto* zoomOutAction = new QAction(
-            themedIcon(QStringLiteral("zoom-out"), style(), QStyle::SP_ArrowDown),
+            ui::icon(ui::Icon::ZoomOut, this),
             tr("Zoom out"),
             this);
         connect(zoomOutAction, &QAction::triggered,
                 compareTraceCanvas_, &TraceCanvas::zoomOut);
         auto* fitTraceAction = new QAction(
-            themedIcon(
-                QStringLiteral("zoom-fit-best"),
-                style(),
-                QStyle::SP_DesktopIcon),
+            ui::icon(ui::Icon::Fit, this),
             tr("Fit trace"),
             this);
         connect(fitTraceAction, &QAction::triggered,
                 compareTraceCanvas_, &TraceCanvas::fitTrace);
 
-        auto* overflowButton = new QToolButton(resultToolbar);
+        auto* overflowButton = ui::toolButton(resultToolbar);
         overflowButton->setObjectName(QStringLiteral("SimulationMoreButton"));
         overflowButton->setText(tr("More"));
         overflowButton->setPopupMode(QToolButton::InstantPopup);
         overflowButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        auto* overflowMenu = new QMenu(overflowButton);
+        auto* overflowMenu = ui::menu(overflowButton);
         overflowMenu->setObjectName(QStringLiteral("SimulationMoreMenu"));
         overflowMenu->addAction(rerunSimulationAction_);
         overflowMenu->addSeparator();
@@ -2606,7 +2577,7 @@ MainWindow::MainWindow(
         this,
         &MainWindow::finishAutosave);
     initializeProjectFileMonitoring();
-    pointerStatusLabel_ = new QLabel(this);
+    pointerStatusLabel_ = ui::text(this);
     pointerStatusLabel_->setObjectName(QStringLiteral("PointerStatusLabel"));
     pointerStatusLabel_->setMinimumWidth(210);
     pointerStatusLabel_->setMaximumWidth(520);
@@ -2648,6 +2619,9 @@ MainWindow::MainWindow(
 
 MainWindow::~MainWindow()
 {
+    // Child focus is cleared by QWidget after MainWindow's members/actions
+    // have begun teardown. Do not run command-state callbacks at that point.
+    disconnect(qApp, nullptr, this, nullptr);
     if (traceCancelFlag_) traceCancelFlag_->store(true);
     if (fstSignalLoadCancelFlag_) fstSignalLoadCancelFlag_->store(true);
 }
@@ -2806,11 +2780,11 @@ void MainWindow::createSimulationScenario()
     if (!source || simulationScenarioDirectory_.isEmpty()) return;
     QString error;
     if (!persistActiveSimulationScenario(&error)) {
-        QMessageBox::warning(this, tr("New scenario"), error);
+        ui::MessageBox::warning(this, tr("New scenario"), error);
         return;
     }
     bool accepted = false;
-    const auto name = QInputDialog::getText(
+    const auto name = ui::InputDialog::getText(
         this,
         tr("New scenario"),
         tr("Scenario name"),
@@ -2826,7 +2800,7 @@ void MainWindow::createSimulationScenario()
                        Qt::CaseInsensitive) == 0;
         });
     if (duplicate) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this, tr("New scenario"), tr("A scenario with this name already exists."));
         return;
     }
@@ -2862,7 +2836,7 @@ void MainWindow::createSimulationScenario()
     switchActiveScenario(targetIndex, false);
     markEdited();
     if (!persistActiveSimulationScenario(&error)) {
-        QMessageBox::warning(this, tr("New scenario"), error);
+        ui::MessageBox::warning(this, tr("New scenario"), error);
     }
     updateSimulationScenarioActions();
 }
@@ -2872,7 +2846,7 @@ void MainWindow::renameSimulationScenario()
     auto* scenario = activeScenario();
     if (!scenario || scenario->id == defaultSimulationScenarioId_) return;
     bool accepted = false;
-    const auto name = QInputDialog::getText(
+    const auto name = ui::InputDialog::getText(
         this,
         tr("Rename scenario"),
         tr("Scenario name"),
@@ -2892,7 +2866,7 @@ void MainWindow::renameSimulationScenario()
                        Qt::CaseInsensitive) == 0;
         });
     if (duplicate) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this, tr("Rename scenario"), tr("A scenario with this name already exists."));
         return;
     }
@@ -2900,7 +2874,7 @@ void MainWindow::renameSimulationScenario()
     markEdited();
     QString error;
     if (!persistActiveSimulationScenario(&error)) {
-        QMessageBox::warning(this, tr("Rename scenario"), error);
+        ui::MessageBox::warning(this, tr("Rename scenario"), error);
     }
     populateScenarioSelector();
     updateSimulationScenarioActions();
@@ -2915,7 +2889,7 @@ void MainWindow::deleteSimulationScenario()
     }
     const auto scenarioId = scenario->id;
     const auto name = QString::fromStdString(scenario->name);
-    if (QMessageBox::question(
+    if (ui::MessageBox::question(
             this,
             tr("Delete scenario"),
             tr("Delete scenario '%1'?").arg(name)) != QMessageBox::Yes) {
@@ -2924,7 +2898,7 @@ void MainWindow::deleteSimulationScenario()
     QString error;
     if (!removeSimulationScenario(
             simulationScenarioDirectory_, scenarioId, &error)) {
-        QMessageBox::warning(this, tr("Delete scenario"), error);
+        ui::MessageBox::warning(this, tr("Delete scenario"), error);
         return;
     }
     project_.scenarios.erase(
@@ -3591,6 +3565,9 @@ void MainWindow::finishSimulationBatch()
     updateSimulationBatchView();
     updateSimulationControls(message);
     statusBar()->showMessage(message, 10'000);
+    ui::notify(this,
+        summary.failed || summary.cancelled || !resultError.isEmpty() ? ui::Notice::Warning : ui::Notice::Success,
+        tr("Batch complete"), message);
     emit simulationBatchFinished(
         static_cast<int>(summary.succeeded),
         static_cast<int>(summary.failed),
@@ -4212,6 +4189,7 @@ void MainWindow::finishSimulationRun(SimulationRunReport report)
                   .arg(report.durationMs);
         updateSimulationControls(message);
         statusBar()->showMessage(message, 8'000);
+        ui::notify(this, ui::Notice::Success, tr("Simulation complete"), message);
         return;
     }
 
@@ -5093,7 +5071,8 @@ void MainWindow::saveProject()
         saveProjectAs();
         return;
     }
-    writeToPath(projectFile_);
+    if (writeToPath(projectFile_))
+        ui::notify(this, ui::Notice::Success, tr("Project saved"), statusBar()->currentMessage());
 }
 
 void MainWindow::saveProjectAs()
@@ -5116,7 +5095,8 @@ void MainWindow::saveProjectAs()
     if (QFileInfo(path).suffix().isEmpty()) {
         path += QStringLiteral(".wave.json");
     }
-    writeToPath(path);
+    if (writeToPath(path))
+        ui::notify(this, ui::Notice::Success, tr("Project saved"), statusBar()->currentMessage());
 }
 
 void MainWindow::undo()
@@ -5617,7 +5597,7 @@ void MainWindow::showHiddenLanes()
             return;
         }
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot show hidden items"),
             QString::fromUtf8(exception.what()));
@@ -5671,7 +5651,7 @@ void MainWindow::showHiddenLane(const QString& laneId)
             return;
         }
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot restore item"),
             QString::fromUtf8(exception.what()));
@@ -5717,7 +5697,7 @@ void MainWindow::addLane()
     if (!replacement) return;
     if (replacement->kind == LaneKind::Clock
         && replacement->clockDomainId.empty()) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Invalid lane"),
             tr("A clock lane must reference a clock domain."));
@@ -5728,7 +5708,7 @@ void MainWindow::addLane()
             *scenario,
             *replacement));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot add lane"),
             QString::fromUtf8(exception.what()));
@@ -5799,7 +5779,7 @@ void MainWindow::addQuickLane(const LaneKind kind)
             commandStack_.execute(std::make_unique<AddLaneCommand>(*scenario, lane));
         }
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot add lane"),
             QString::fromUtf8(exception.what()));
@@ -6085,7 +6065,7 @@ void MainWindow::addGroup()
             *scenario,
             group));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot add group"),
             QString::fromUtf8(exception.what()));
@@ -6169,7 +6149,7 @@ void MainWindow::duplicateLaneById(const QString& laneId)
     if (duplicate.kind == LaneKind::Clock) {
         const auto* sourceClock = findClock(project_, source->clockDomainId);
         if (!sourceClock) {
-            QMessageBox::warning(
+            ui::MessageBox::warning(
                 this,
                 tr("Cannot duplicate clock"),
                 tr("The selected clock does not reference a valid clock domain."));
@@ -6196,7 +6176,7 @@ void MainWindow::duplicateLaneById(const QString& laneId)
                 insertionIndex));
         }
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot duplicate signal"),
             QString::fromUtf8(exception.what()));
@@ -6325,7 +6305,7 @@ void MainWindow::duplicateLanesById(const QStringList& laneIds)
                 insertionIndex));
     } catch (const std::exception& exception) {
         canvas_->cancelCommandSelectionTransition();
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot duplicate selected signals"),
             QString::fromUtf8(exception.what()));
@@ -6407,7 +6387,7 @@ void MainWindow::hideLaneById(const QString& laneId)
             return;
         }
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot hide item"),
             QString::fromUtf8(exception.what()));
@@ -6480,7 +6460,7 @@ void MainWindow::hideLanesById(const QStringList& laneIds)
         }
     } catch (const std::exception& exception) {
         canvas_->cancelCommandSelectionTransition();
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot hide selected signals"),
             QString::fromUtf8(exception.what()));
@@ -6686,7 +6666,7 @@ void MainWindow::removeLaneById(const QString& laneId)
                        .arg(removedEffects.join(QStringLiteral(", ")));
     }
     message += tr(" You can undo this with Ctrl+Z.");
-    if (QMessageBox::question(
+    if (ui::MessageBox::question(
             this,
             tr("Remove lane or group"),
             message,
@@ -6701,7 +6681,7 @@ void MainWindow::removeLaneById(const QString& laneId)
             *scenario,
             removedLaneId));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot remove lane"),
             QString::fromUtf8(exception.what()));
@@ -6829,7 +6809,7 @@ void MainWindow::removeLanesById(const QStringList& laneIds)
                        .arg(removedEffects.join(QStringLiteral(", ")));
     }
     message += tr(" You can undo this with Ctrl+Z.");
-    if (QMessageBox::question(
+    if (ui::MessageBox::question(
             this,
             tr("Remove selected signals"),
             message,
@@ -6848,7 +6828,7 @@ void MainWindow::removeLanesById(const QStringList& laneIds)
             orderedIds));
     } catch (const std::exception& exception) {
         canvas_->cancelCommandSelectionTransition();
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot remove selected signals"),
             QString::fromUtf8(exception.what()));
@@ -6880,7 +6860,7 @@ void MainWindow::showLaneContextMenu(
     const auto* lane = scenario ? findLane(*scenario, laneId.toStdString()) : nullptr;
     if (!lane) return;
 
-    QMenu menu(this);
+    ElaMenu menu(this);
     menu.setObjectName(QStringLiteral("LaneHeaderContextMenu"));
     menu.setToolTipsVisible(true);
     if (lane->kind == LaneKind::Group) {
@@ -7243,7 +7223,7 @@ void MainWindow::setLanesGroupById(
             orderedIds,
             targetId));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             orderedIds.size() == 1
                 ? tr("Cannot move signal to group")
@@ -7408,7 +7388,7 @@ void MainWindow::createGroupWithLanes(const QStringList& laneIds)
                 group,
                 orderedIds));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot create group"),
             QString::fromUtf8(exception.what()));
@@ -7465,44 +7445,44 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
     if (lane->kind == LaneKind::Clock) {
         const auto* original = findClock(project_, lane->clockDomainId);
         if (!original) {
-            QMessageBox::warning(
+            ui::MessageBox::warning(
                 this,
                 tr("Cannot edit clock"),
                 tr("The clock lane does not reference a valid clock domain."));
             return;
         }
-        QDialog dialog(this);
+        ui::Dialog dialog(this);
         dialog.setObjectName(QStringLiteral("QuickClockParametersDialog"));
         dialog.setWindowTitle(tr("Clock parameters"));
-        auto* layout = new QFormLayout(&dialog);
-        auto* mode = new QComboBox;
+        auto* layout = new ui::FormLayout(&dialog);
+        auto* mode = ui::comboBox();
         mode->setObjectName(QStringLiteral("ClockRateMode"));
         mode->addItem(tr("Period"), QStringLiteral("period"));
         mode->addItem(tr("Frequency (Hz)"), QStringLiteral("frequency"));
-        auto* value = new QLineEdit(
+        auto* value = ui::lineEdit(
             QString::fromStdString(formatTick(original->period, project_.timeBase)));
         value->setObjectName(QStringLiteral("ClockRateValue"));
         value->setPlaceholderText(tr("For example 2.5 ns"));
         value->setToolTip(
             tr("Period accepts decimal ps, ns, us, or ms values; frequency accepts Hz"));
-        auto* phase = new QLineEdit(
+        auto* phase = ui::lineEdit(
             QString::fromStdString(formatTick(original->phase, project_.timeBase)));
         phase->setObjectName(QStringLiteral("ClockPhaseEdit"));
         phase->setPlaceholderText(tr("For example 0 ns"));
-        auto* numerator = new QLineEdit(
+        auto* numerator = ui::lineEdit(
             QString::number(original->dutyCycle.numerator));
         numerator->setObjectName(QStringLiteral("ClockDutyNumeratorEdit"));
         numerator->setValidator(new PositiveInt64Validator(1, numerator));
-        auto* denominator = new QLineEdit(
+        auto* denominator = ui::lineEdit(
             QString::number(original->dutyCycle.denominator));
         denominator->setObjectName(QStringLiteral("ClockDutyDenominatorEdit"));
         denominator->setValidator(new PositiveInt64Validator(2, denominator));
-        auto* edge = new QComboBox;
+        auto* edge = ui::comboBox();
         edge->setObjectName(QStringLiteral("ClockActiveEdgeCombo"));
         edge->addItem(tr("Rising"), static_cast<int>(ClockEdge::Rising));
         edge->addItem(tr("Falling"), static_cast<int>(ClockEdge::Falling));
         edge->setCurrentIndex(original->activeEdge == ClockEdge::Rising ? 0 : 1);
-        auto* reset = new QLineEdit(QString::fromStdString(original->resetRelation));
+        auto* reset = ui::lineEdit(QString::fromStdString(original->resetRelation));
         reset->setObjectName(QStringLiteral("ClockResetConditionEdit"));
         reset->setPlaceholderText(tr("Optional reset / disable condition"));
         layout->addRow(tr("Edit as"), mode);
@@ -7518,7 +7498,7 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         error->setProperty("waveState", QStringLiteral("error"));
         error->hide();
         layout->addRow(error);
-        auto* buttons = new QDialogButtonBox(
+        auto* buttons = ui::buttonBox(
             QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         layout->addRow(buttons);
         const auto ticksPerSecond = 1.0e12
@@ -7668,7 +7648,7 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
             changed = commandStack_.execute(std::make_unique<ChangeClockCommand>(
                 project_, *scenario, original->id, replacement));
         } catch (const std::exception& exception) {
-            QMessageBox::warning(this, tr("Cannot change clock"), QString::fromUtf8(exception.what()));
+            ui::MessageBox::warning(this, tr("Cannot change clock"), QString::fromUtf8(exception.what()));
             return;
         }
         resultSummary = tr("%1 · period %2 · phase %3 · duty %4/%5 · %6 edge")
@@ -7681,18 +7661,18 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
                                      ? tr("rising")
                                      : tr("falling"));
     } else {
-        QDialog dialog(this);
+        ui::Dialog dialog(this);
         dialog.setObjectName(QStringLiteral("QuickLaneParametersDialog"));
         dialog.setWindowTitle(
             lane->kind == LaneKind::Bus ? tr("Bus parameters") : tr("Bit parameters"));
-        auto* layout = new QFormLayout(&dialog);
-        auto* color = new QLineEdit(QString::fromStdString(lane->color));
+        auto* layout = new ui::FormLayout(&dialog);
+        auto* color = ui::lineEdit(QString::fromStdString(lane->color));
         color->setObjectName(QStringLiteral("LaneColorEdit"));
-        auto* height = new QSpinBox;
+        auto* height = ui::spinBox();
         height->setObjectName(QStringLiteral("LaneHeightSpin"));
         height->setRange(30, 240);
         height->setValue(lane->height);
-        auto* clock = new QComboBox;
+        auto* clock = ui::comboBox();
         clock->setObjectName(QStringLiteral("LaneClockDomainCombo"));
         clock->addItem(tr("None"), QString{});
         for (const auto& domain : project_.clockDomains) {
@@ -7702,7 +7682,7 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         }
         const auto clockIndex = clock->findData(QString::fromStdString(lane->clockDomainId));
         clock->setCurrentIndex(std::max(0, clockIndex));
-        layout->addRow(tr("Color"), color);
+        layout->addRow(tr("Color"), ui::colorField(color, &dialog));
         layout->addRow(tr("Height"), height);
         layout->addRow(tr("Clock domain"), clock);
 
@@ -7710,14 +7690,14 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         QCheckBox* signedValue = nullptr;
         QComboBox* radix = nullptr;
         if (lane->kind == LaneKind::Bus) {
-            width = new QSpinBox;
+            width = ui::spinBox();
             width->setObjectName(QStringLiteral("BusWidthSpin"));
             width->setRange(1, 65'536);
             width->setValue(static_cast<int>(std::min<std::uint32_t>(lane->width, 65'536)));
-            signedValue = new QCheckBox(tr("Signed values"));
+            signedValue = ui::checkBox(tr("Signed values"));
             signedValue->setObjectName(QStringLiteral("BusSignedCheck"));
             signedValue->setChecked(lane->isSigned);
-            radix = new QComboBox;
+            radix = ui::comboBox();
             radix->setObjectName(QStringLiteral("BusRadixCombo"));
             for (const auto value : {Radix::Binary, Radix::Octal, Radix::Decimal, Radix::Hexadecimal}) {
                 const auto label = toString(value);
@@ -7736,7 +7716,7 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         error->setProperty("waveState", QStringLiteral("error"));
         error->hide();
         layout->addRow(error);
-        auto* buttons = new QDialogButtonBox(
+        auto* buttons = ui::buttonBox(
             QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         layout->addRow(buttons);
         QColor parsedColor;
@@ -7797,7 +7777,7 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
             changed = commandStack_.execute(std::make_unique<ChangeLaneCommand>(
                 project_, *scenario, lane->id, replacement));
         } catch (const std::exception& exception) {
-            QMessageBox::warning(this, tr("Cannot change lane"), QString::fromUtf8(exception.what()));
+            ui::MessageBox::warning(this, tr("Cannot change lane"), QString::fromUtf8(exception.what()));
             return;
         }
     }
@@ -7972,7 +7952,7 @@ void MainWindow::moveSelectedLaneBy(const int offset)
             }
         } catch (const std::exception& exception) {
             canvas_->cancelCommandSelectionTransition();
-            QMessageBox::warning(
+            ui::MessageBox::warning(
                 this,
                 tr("Cannot reorder selected signals"),
                 QString::fromUtf8(exception.what()));
@@ -8036,7 +8016,7 @@ void MainWindow::moveSelectedLaneBy(const int offset)
             laneId.toStdString(),
             static_cast<std::size_t>(destinationIndex)));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot reorder lane"),
             QString::fromUtf8(exception.what()));
@@ -8270,7 +8250,7 @@ void MainWindow::editLaneById(const QString& laneId)
             lane->id,
             *replacement));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot change lane"),
             QString::fromUtf8(exception.what()));
@@ -8318,27 +8298,27 @@ void MainWindow::editClockById(const std::string& clockId)
     const auto* original = findClock(project_, clockId);
     if (!original) return;
 
-    QDialog dialog(this);
+    ui::Dialog dialog(this);
     dialog.setWindowTitle(tr("Edit clock domain"));
-    auto* layout = new QFormLayout(&dialog);
-    auto* name = new QLineEdit(QString::fromStdString(original->name));
-    auto* period = new QLineEdit(
+    auto* layout = new ui::FormLayout(&dialog);
+    auto* name = ui::lineEdit(QString::fromStdString(original->name));
+    auto* period = ui::lineEdit(
         QString::fromStdString(formatTick(original->period, project_.timeBase)));
-    auto* phase = new QLineEdit(
+    auto* phase = ui::lineEdit(
         QString::fromStdString(formatTick(original->phase, project_.timeBase)));
-    auto* numerator = new QLineEdit(
+    auto* numerator = ui::lineEdit(
         QString::number(original->dutyCycle.numerator));
     numerator->setObjectName(QStringLiteral("ClockDomainDutyNumeratorEdit"));
     numerator->setValidator(new PositiveInt64Validator(1, numerator));
-    auto* denominator = new QLineEdit(
+    auto* denominator = ui::lineEdit(
         QString::number(original->dutyCycle.denominator));
     denominator->setObjectName(QStringLiteral("ClockDomainDutyDenominatorEdit"));
     denominator->setValidator(new PositiveInt64Validator(2, denominator));
-    auto* edge = new QComboBox;
+    auto* edge = ui::comboBox();
     edge->addItem(tr("Rising"), static_cast<int>(ClockEdge::Rising));
     edge->addItem(tr("Falling"), static_cast<int>(ClockEdge::Falling));
     edge->setCurrentIndex(original->activeEdge == ClockEdge::Rising ? 0 : 1);
-    auto* reset = new QLineEdit(QString::fromStdString(original->resetRelation));
+    auto* reset = ui::lineEdit(QString::fromStdString(original->resetRelation));
     layout->addRow(tr("Name"), name);
     layout->addRow(tr("Period"), period);
     layout->addRow(tr("Phase"), phase);
@@ -8346,7 +8326,7 @@ void MainWindow::editClockById(const std::string& clockId)
     layout->addRow(tr("Duty denominator"), denominator);
     layout->addRow(tr("Active edge"), edge);
     layout->addRow(tr("Reset / disable condition"), reset);
-    auto* buttons = new QDialogButtonBox(
+    auto* buttons = ui::buttonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     layout->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -8371,7 +8351,7 @@ void MainWindow::editClockById(const std::string& clockId)
             parseError)
         : std::optional<Tick>{};
     if (!parseError.isEmpty() || !parsedPeriod || *parsedPeriod <= 0 || !parsedPhase) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Invalid clock"),
             parseError.isEmpty()
@@ -8390,7 +8370,7 @@ void MainWindow::editClockById(const std::string& clockId)
         || !denominatorValid
         || parsedDenominator < 2
         || parsedNumerator >= parsedDenominator) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Invalid clock"),
             tr("Duty numerator and denominator must be positive 64-bit integers, with the numerator smaller than the denominator."));
@@ -8412,7 +8392,7 @@ void MainWindow::editClockById(const std::string& clockId)
             clockId,
             std::move(replacement)));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot change clock"),
             QString::fromUtf8(exception.what()));
@@ -8452,7 +8432,7 @@ void MainWindow::addEvent()
         value = covering != lane->segments.end() && covering->value == "0" ? "1" : "0";
     } else {
         bool accepted = false;
-        const auto entered = QInputDialog::getText(
+        const auto entered = ui::InputDialog::getText(
             this,
             tr("Add event"),
             tr("Value for %1:").arg(QString::fromStdString(lane->name)),
@@ -8476,7 +8456,7 @@ void MainWindow::addEvent()
     try {
         commandStack_.execute(std::make_unique<AddEventCommand>(*scenario, event));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(this, tr("Cannot add event"), QString::fromUtf8(exception.what()));
+        ui::MessageBox::warning(this, tr("Cannot add event"), QString::fromUtf8(exception.what()));
         return;
     }
     canvas_->refreshModel();
@@ -8496,7 +8476,7 @@ void MainWindow::removeSelectedEvent()
             *scenario,
             eventId.toStdString()));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(this, tr("Cannot remove event"), QString::fromUtf8(exception.what()));
+        ui::MessageBox::warning(this, tr("Cannot remove event"), QString::fromUtf8(exception.what()));
         return;
     }
     canvas_->refreshModel();
@@ -8586,7 +8566,7 @@ void MainWindow::eventCellChanged(const int row, const int column)
     }
 
     if (!error.isEmpty()) {
-        QMessageBox::warning(this, tr("Invalid event edit"), error);
+        ui::MessageBox::warning(this, tr("Invalid event edit"), error);
         populateBottomTables();
         return;
     }
@@ -8596,7 +8576,7 @@ void MainWindow::eventCellChanged(const int row, const int column)
             eventId,
             std::move(replacement)));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(this, tr("Invalid event edit"), QString::fromUtf8(exception.what()));
+        ui::MessageBox::warning(this, tr("Invalid event edit"), QString::fromUtf8(exception.what()));
         populateBottomTables();
         return;
     }
@@ -8726,7 +8706,7 @@ void MainWindow::relationCellChanged(const int row, const int column)
         return;
     }
     if (!error.isEmpty()) {
-        QMessageBox::warning(this, tr("Invalid relation edit"), error);
+        ui::MessageBox::warning(this, tr("Invalid relation edit"), error);
         populateRelationTable();
         return;
     }
@@ -8736,7 +8716,7 @@ void MainWindow::relationCellChanged(const int row, const int column)
             relationId,
             std::move(replacement)));
     } catch (const std::exception& exception) {
-        QMessageBox::warning(this, tr("Invalid relation edit"), QString::fromUtf8(exception.what()));
+        ui::MessageBox::warning(this, tr("Invalid relation edit"), QString::fromUtf8(exception.what()));
         populateRelationTable();
         return;
     }
@@ -8778,7 +8758,7 @@ void MainWindow::removeSelectedRelation()
                 relationIds));
         }
     } catch (const std::exception& exception) {
-        QMessageBox::warning(this, tr("Cannot remove relation"), QString::fromUtf8(exception.what()));
+        ui::MessageBox::warning(this, tr("Cannot remove relation"), QString::fromUtf8(exception.what()));
         return;
     }
     canvas_->refreshModel();
@@ -8831,7 +8811,7 @@ void MainWindow::exportArtifacts()
             if (!message.isEmpty()) message += QLatin1Char('\n');
             message += diagnosticLines.join(QLatin1Char('\n'));
         }
-        QMessageBox::critical(this, tr("Export failed"), message);
+        ui::MessageBox::critical(this, tr("Export failed"), message);
         return;
     }
 
@@ -8843,17 +8823,20 @@ void MainWindow::exportArtifacts()
             directory,
             baseName,
             &writeError)) {
-        QMessageBox::critical(this, tr("Export failed"), writeError);
+        ui::MessageBox::critical(this, tr("Export failed"), writeError);
         return;
     }
     const auto suffix = diagnosticLines.isEmpty()
         ? QString{}
         : tr("\n\nDiagnostics:\n%1").arg(diagnosticLines.join(QLatin1Char('\n')));
-    QMessageBox::information(
-        this,
-        tr("Export complete"),
-        tr("Generated SystemVerilog, SVA, cocotb, SVG, PNG, PDF, and WaveDrom JSON in:\n%1%2")
-            .arg(directory, suffix));
+    const auto message = tr("Generated SystemVerilog, SVA, cocotb, SVG, PNG, PDF, and WaveDrom JSON in:\n%1%2")
+        .arg(directory, suffix);
+    if (!diagnosticLines.isEmpty()) {
+        ui::MessageBox::information(this, tr("Export complete"), message);
+    } else {
+        statusBar()->showMessage(message, 8'000);
+        ui::notify(this, ui::Notice::Success, tr("Export complete"), message);
+    }
 }
 
 void MainWindow::importTrace()
@@ -8882,7 +8865,7 @@ void MainWindow::importTrace()
                 : TraceFormat::Vcd;
     if (suffix != QStringLiteral("vcd") && suffix != QStringLiteral("csv")
         && suffix != QStringLiteral("fst")) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Unsupported trace"),
             tr("Only VCD, FST, and timestamped CSV files are supported."));
@@ -8909,19 +8892,19 @@ void MainWindow::alignImportedTrace()
     const auto* scenario = activeScenario();
     if (!reference || !traceIndex_ || !scenario) return;
 
-    QDialog dialog(this);
+    ui::Dialog dialog(this);
     dialog.setWindowTitle(tr("Align imported trace"));
-    auto* layout = new QFormLayout(&dialog);
-    auto* mode = new QComboBox;
+    auto* layout = new ui::FormLayout(&dialog);
+    auto* mode = ui::comboBox();
     mode->addItem(tr("Manual offset"), QStringLiteral("manual"));
     mode->addItem(tr("Match marker start"), QStringLiteral("marker"));
     mode->addItem(tr("Match clock edge"), QStringLiteral("clock"));
-    auto* manualOffset = new QLineEdit(
+    auto* manualOffset = ui::lineEdit(
         QString::fromStdString(formatTick(reference->offset, project_.timeBase)));
-    auto* actualTime = new QLineEdit(
+    auto* actualTime = ui::lineEdit(
         QString::fromStdString(formatTick(traceIndex_->startTick, project_.timeBase)));
     actualTime->setToolTip(tr("Currently aligned time of the selected actual marker or edge"));
-    auto* marker = new QComboBox;
+    auto* marker = ui::comboBox();
     for (const auto& candidate : scenario->markers) {
         marker->addItem(
             tr("%1 @ %2")
@@ -8929,13 +8912,13 @@ void MainWindow::alignImportedTrace()
                 .arg(QString::fromStdString(formatTick(candidate.start, project_.timeBase))),
             QString::fromStdString(candidate.id));
     }
-    auto* clock = new QComboBox;
+    auto* clock = ui::comboBox();
     for (const auto& candidate : project_.clockDomains) {
         clock->addItem(
             QString::fromStdString(candidate.name),
             QString::fromStdString(candidate.id));
     }
-    auto* cycleIndex = new QSpinBox;
+    auto* cycleIndex = ui::spinBox();
     cycleIndex->setRange(-1'000'000'000, 1'000'000'000);
     cycleIndex->setValue(0);
     layout->addRow(tr("Alignment mode"), mode);
@@ -8944,7 +8927,7 @@ void MainWindow::alignImportedTrace()
     layout->addRow(tr("Expected marker"), marker);
     layout->addRow(tr("Clock domain"), clock);
     layout->addRow(tr("Clock cycle"), cycleIndex);
-    auto* buttons = new QDialogButtonBox(
+    auto* buttons = ui::buttonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     layout->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -9018,7 +9001,7 @@ void MainWindow::alignImportedTrace()
         }
     }
     if (!offset || !error.isEmpty()) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Invalid alignment"),
             error.isEmpty() ? tr("The offset is invalid.") : error);
@@ -9027,7 +9010,7 @@ void MainWindow::alignImportedTrace()
     Tick delta = 0;
     if (!checkedDifference(*offset, reference->offset, delta)
         || !traceIndex_->shift(delta)) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Invalid alignment"),
             tr("The aligned timestamps exceed the integer tick range."));
@@ -9091,7 +9074,7 @@ void MainWindow::traceMappingCellChanged(const int row, const int column)
                     || QString::fromStdString(candidate.name) == entered;
             });
         if (lane == scenario->lanes.end()) {
-            QMessageBox::warning(
+            ui::MessageBox::warning(
                 this,
                 tr("Unknown expected lane"),
                 tr("Enter an existing lane name or stable ID."));
@@ -9142,7 +9125,7 @@ void MainWindow::finishTraceImport()
     if (!parsed->ok()) {
         const auto message = QString::fromStdString(parsed->errorSummary());
         if (!simulationResultMode_) {
-            QMessageBox::critical(this, tr("Trace import failed"), message);
+            ui::MessageBox::critical(this, tr("Trace import failed"), message);
         }
         reportFailure(tr("Trace import failed: %1").arg(message));
         return;
@@ -9353,7 +9336,7 @@ void MainWindow::runCompare()
 {
     const auto reportUnavailable = [this](const QString& message) {
         if (!simulationResultMode_) {
-            QMessageBox::warning(this, tr("Compare unavailable"), message);
+            ui::MessageBox::warning(this, tr("Compare unavailable"), message);
             return;
         }
         compareResult_.reset();
@@ -9409,7 +9392,7 @@ void MainWindow::runCompare()
         if (simulationResultMode_) {
             reportUnavailable(message);
         } else {
-            QMessageBox::warning(this, tr("Invalid edge tolerance"), message);
+            ui::MessageBox::warning(this, tr("Invalid edge tolerance"), message);
         }
         return;
     }
@@ -9429,7 +9412,7 @@ void MainWindow::runCompare()
     if (compareSelectionOnly_ && compareSelectionOnly_->isChecked()) {
         const auto selection = canvas_->selectedTimeRange();
         if (!selection || selection->second <= selection->first) {
-            QMessageBox::warning(
+            ui::MessageBox::warning(
                 this,
                 tr("No compare selection"),
                 tr("Create a non-empty time selection on the Expected canvas first."));
@@ -9513,7 +9496,7 @@ void MainWindow::addSimulationCheck(const SimulationCheckKind kind)
     if (!scenario) return;
     const auto loaded = loadSimulationChecks(*scenario);
     if (!loaded.ok()) {
-        QMessageBox::warning(this, tr("Checks unavailable"), loaded.error);
+        ui::MessageBox::warning(this, tr("Checks unavailable"), loaded.error);
         return;
     }
     const auto check = promptSimulationCheck(kind);
@@ -9522,7 +9505,7 @@ void MainWindow::addSimulationCheck(const SimulationCheckKind kind)
     checks.push_back(*check);
     QString error;
     if (!storeSimulationChecks(*scenario, checks, &error)) {
-        QMessageBox::warning(this, tr("Invalid check"), error);
+        ui::MessageBox::warning(this, tr("Invalid check"), error);
         return;
     }
     markEdited();
@@ -9539,24 +9522,24 @@ std::optional<SimulationCheckDefinition> MainWindow::promptSimulationCheck(
     const auto* scenario = activeScenario();
     if (!scenario) return std::nullopt;
 
-    QDialog dialog(this);
+    ui::Dialog dialog(this);
     dialog.setWindowTitle(existing ? tr("Edit simulation check")
                                    : tr("Add simulation check"));
     dialog.setMinimumWidth(520);
     auto* layout = new QVBoxLayout(&dialog);
-    auto* form = new QFormLayout;
-    auto* name = new QLineEdit(&dialog);
-    auto* enabled = new QCheckBox(tr("Enabled"), &dialog);
-    auto* kind = new QComboBox(&dialog);
+    auto* form = new ui::FormLayout;
+    auto* name = ui::lineEdit(&dialog);
+    auto* enabled = ui::checkBox(tr("Enabled"), &dialog);
+    auto* kind = ui::comboBox(&dialog);
     kind->addItem(
         tr("Value at time"), static_cast<int>(SimulationCheckKind::ValueAtTick));
     kind->addItem(
         tr("Stable range"), static_cast<int>(SimulationCheckKind::StableRange));
     kind->addItem(
         tr("Edge response"), static_cast<int>(SimulationCheckKind::EdgeResponse));
-    auto* lane = new QComboBox(&dialog);
-    auto* sourceLane = new QComboBox(&dialog);
-    auto* targetLane = new QComboBox(&dialog);
+    auto* lane = ui::comboBox(&dialog);
+    auto* sourceLane = ui::comboBox(&dialog);
+    auto* targetLane = ui::comboBox(&dialog);
     const auto addLanes = [scenario](QComboBox* combo) {
         for (const auto& item : scenario->lanes) {
             if (item.kind == LaneKind::Group) continue;
@@ -9569,19 +9552,19 @@ std::optional<SimulationCheckDefinition> MainWindow::promptSimulationCheck(
     addLanes(sourceLane);
     addLanes(targetLane);
     if (lane->count() == 0) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this, tr("Checks unavailable"), tr("The scenario has no signal lanes."));
         return std::nullopt;
     }
 
-    auto* tick = new QLineEdit(&dialog);
-    auto* expected = new QLineEdit(&dialog);
-    auto* start = new QLineEdit(&dialog);
-    auto* end = new QLineEdit(&dialog);
-    auto* sourceEdge = new QComboBox(&dialog);
-    auto* targetEdge = new QComboBox(&dialog);
-    auto* minimumDelay = new QLineEdit(&dialog);
-    auto* maximumDelay = new QLineEdit(&dialog);
+    auto* tick = ui::lineEdit(&dialog);
+    auto* expected = ui::lineEdit(&dialog);
+    auto* start = ui::lineEdit(&dialog);
+    auto* end = ui::lineEdit(&dialog);
+    auto* sourceEdge = ui::comboBox(&dialog);
+    auto* targetEdge = ui::comboBox(&dialog);
+    auto* minimumDelay = ui::lineEdit(&dialog);
+    auto* maximumDelay = ui::lineEdit(&dialog);
     tick->setPlaceholderText(tr("tick or time, for example 120 ns"));
     start->setPlaceholderText(tr("inclusive start"));
     end->setPlaceholderText(tr("exclusive end"));
@@ -9604,14 +9587,14 @@ std::optional<SimulationCheckDefinition> MainWindow::promptSimulationCheck(
     form->addRow(tr("Maximum delay"), maximumDelay);
     layout->addLayout(form);
 
-    auto* semantics = new QLabel(
+    auto* semantics = ui::text(
         tr("Ranges use [start, end). Rising and falling edges require a one-bit signal. "
            "Each target edge satisfies at most one source edge."),
         &dialog);
     semantics->setWordWrap(true);
     semantics->setProperty("waveRole", QStringLiteral("muted"));
     layout->addWidget(semantics);
-    auto* buttons = new QDialogButtonBox(
+    auto* buttons = ui::buttonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -9787,7 +9770,7 @@ std::optional<SimulationCheckDefinition> MainWindow::promptSimulationCheck(
                 return check;
             }
         }
-        QMessageBox::warning(&dialog, tr("Invalid check"), error);
+        ui::MessageBox::warning(&dialog, tr("Invalid check"), error);
     }
     return std::nullopt;
 }
@@ -9827,7 +9810,7 @@ void MainWindow::editSelectedSimulationCheck()
     checks[*selected] = *replacement;
     QString error;
     if (!storeSimulationChecks(*scenario, checks, &error)) {
-        QMessageBox::warning(this, tr("Invalid check"), error);
+        ui::MessageBox::warning(this, tr("Invalid check"), error);
         return;
     }
     markEdited();
@@ -9841,7 +9824,7 @@ void MainWindow::removeSelectedSimulationCheck()
     if (!scenario || !selected) return;
     const auto loaded = loadSimulationChecks(*scenario);
     if (!loaded.ok() || *selected >= loaded.checks.size()) return;
-    if (QMessageBox::question(
+    if (ui::MessageBox::question(
             this,
             tr("Remove check"),
             tr("Remove '%1' from this scenario?")
@@ -9853,7 +9836,7 @@ void MainWindow::removeSelectedSimulationCheck()
     checks.erase(checks.begin() + static_cast<std::ptrdiff_t>(*selected));
     QString error;
     if (!storeSimulationChecks(*scenario, checks, &error)) {
-        QMessageBox::warning(this, tr("Cannot remove check"), error);
+        ui::MessageBox::warning(this, tr("Cannot remove check"), error);
         return;
     }
     markEdited();
@@ -9875,7 +9858,7 @@ void MainWindow::runSimulationChecks()
         setProperty("wavewidgets.checkFailureCount", 0);
     };
     if (!simulationResultMode_) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this, tr("Checks unavailable"),
             tr("Lightweight checks run in a simulation-result workspace."));
         return;
@@ -10016,7 +9999,7 @@ void MainWindow::exportCompareReport()
 {
     const auto* scenario = activeScenario();
     if (!scenario || !compareResult_) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("No compare result"),
             tr("Run Expected/Actual compare before exporting a report."));
@@ -10057,17 +10040,16 @@ void MainWindow::exportCompareReport()
         if (!file.open(QIODevice::WriteOnly)
             || file.write(content) != content.size()
             || !file.commit()) {
-            QMessageBox::critical(
+            ui::MessageBox::critical(
                 this,
                 tr("Report export failed"),
                 tr("Cannot safely write %1: %2").arg(name, file.errorString()));
             return;
         }
     }
-    QMessageBox::information(
-        this,
-        tr("Compare report exported"),
-        tr("Generated JSON, CSV, and HTML reports in:\n%1").arg(directory));
+    const auto message = tr("Generated JSON, CSV, and HTML reports in:\n%1").arg(directory);
+    statusBar()->showMessage(message, 8'000);
+    ui::notify(this, ui::Notice::Success, tr("Compare report exported"), message);
 }
 
 void MainWindow::exportPinloomEntry()
@@ -10100,13 +10082,13 @@ void MainWindow::exportPinloomEntry()
     if (!file.open(QIODevice::WriteOnly)
         || file.write(entry.document) != entry.document.size()
         || !file.commit()) {
-        QMessageBox::critical(
+        ui::MessageBox::critical(
             this,
             tr("Pinloom entry failed"),
             tr("Cannot safely write the archive entry: %1").arg(file.errorString()));
         return;
     }
-    QMessageBox message(
+    ui::MessageBox message(
         QMessageBox::Information,
         tr("Pinloom entry created"),
         tr("Archive entry:\n%1\n\nURI:\n%2")
@@ -10118,7 +10100,7 @@ void MainWindow::exportPinloomEntry()
     message.exec();
     if (message.clickedButton() == openButton
         && !QDesktopServices::openUrl(entry.archiveUri)) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Cannot open Pinloom"),
             tr("No application accepted the pinloom URI. The archive entry remains available."));
@@ -10211,9 +10193,9 @@ void MainWindow::finishAutosave()
 
 void MainWindow::createActions()
 {
-    auto* fileMenu = menuBar()->addMenu(tr("&File"));
+    auto* fileMenu = ui::addMenu(menuBar(), tr("&File"));
     auto* newAction = fileMenu->addAction(
-        themedIcon(QStringLiteral("document-new"), style(), QStyle::SP_FileIcon),
+        ui::icon(ui::Icon::NewFile, this),
         tr("&New"),
         QKeySequence::New,
         this,
@@ -10221,13 +10203,13 @@ void MainWindow::createActions()
     newAction->setObjectName(QStringLiteral("NewProjectAction"));
     newAction->setToolTip(tr("Create a blank waveform project"));
     auto* openAction = fileMenu->addAction(
-        themedIcon(QStringLiteral("document-open"), style(), QStyle::SP_DialogOpenButton),
+        ui::icon(ui::Icon::Open, this),
         tr("&Open…"),
         QKeySequence::Open,
         this,
         &MainWindow::openProject);
     openAction->setToolTip(tr("Open a project.wave.json file"));
-    recentProjectsMenu_ = fileMenu->addMenu(tr("Open &Recent"));
+    recentProjectsMenu_ = ui::addMenu(fileMenu, tr("Open &Recent"));
     recentProjectsMenu_->setObjectName(QStringLiteral("RecentProjectsMenu"));
     connect(
         recentProjectsMenu_,
@@ -10236,7 +10218,7 @@ void MainWindow::createActions()
         &MainWindow::updateRecentProjectsMenu);
     updateRecentProjectsMenu();
     auto* saveAction = fileMenu->addAction(
-        themedIcon(QStringLiteral("document-save"), style(), QStyle::SP_DialogSaveButton),
+        ui::icon(ui::Icon::Save, this),
         tr("&Save"),
         QKeySequence::Save,
         this,
@@ -10244,7 +10226,7 @@ void MainWindow::createActions()
     saveAction->setToolTip(tr("Safely save the current project"));
     fileMenu->addAction(tr("Save &As…"), QKeySequence::SaveAs, this, &MainWindow::saveProjectAs);
     exportAction_ = fileMenu->addAction(
-        themedIcon(QStringLiteral("document-export"), style(), QStyle::SP_DialogSaveButton),
+        ui::icon(ui::Icon::Export, this),
         tr("&Export…"),
         this,
         &MainWindow::exportArtifacts);
@@ -10252,10 +10234,10 @@ void MainWindow::createActions()
     fileMenu->addSeparator();
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
-    editMenu_ = menuBar()->addMenu(tr("&Edit"));
+    editMenu_ = ui::addMenu(menuBar(), tr("&Edit"));
     editMenu_->setToolTipsVisible(true);
     undoAction_ = editMenu_->addAction(
-        themedIcon(QStringLiteral("edit-undo"), style(), QStyle::SP_ArrowBack),
+        ui::icon(ui::Icon::Undo, this),
         tr("Undo"),
         QKeySequence::Undo,
         this,
@@ -10263,7 +10245,7 @@ void MainWindow::createActions()
     undoAction_->setObjectName(QStringLiteral("UndoAction"));
     undoAction_->setToolTip(tr("Undo the last edit"));
     redoAction_ = editMenu_->addAction(
-        themedIcon(QStringLiteral("edit-redo"), style(), QStyle::SP_ArrowForward),
+        ui::icon(ui::Icon::Redo, this),
         tr("Redo"),
         QKeySequence::Redo,
         this,
@@ -10329,7 +10311,7 @@ void MainWindow::createActions()
         this,
         [this] { switchAdjacentScenario(true); });
 
-    auto* scenarioMenu = editMenu_->addMenu(tr("&Scenario"));
+    auto* scenarioMenu = ui::addMenu(editMenu_, tr("&Scenario"));
     scenarioMenu->setObjectName(QStringLiteral("ScenarioMenu"));
     scenarioMenu->setToolTipsVisible(true);
     createScenarioAction_ = scenarioMenu->addAction(tr("&Create scenario…"));
@@ -10468,7 +10450,7 @@ void MainWindow::createActions()
         tr("Move the edit cursor, or set the active selected range edge or width exactly"));
     connect(goToTimeAction_, &QAction::triggered, this, &MainWindow::showGoToTime);
 
-    segmentMenu_ = editMenu_->addMenu(tr("&Segment"));
+    segmentMenu_ = ui::addMenu(editMenu_, tr("&Segment"));
     segmentMenu_->setObjectName(QStringLiteral("SegmentMenu"));
     segmentMenu_->setToolTipsVisible(true);
 
@@ -10705,7 +10687,7 @@ void MainWindow::createActions()
         canvas_,
         &WaveCanvas::setRelationsVisible);
     moveLaneUpAction_ = editMenu_->addAction(
-        themedIcon(QStringLiteral("go-up"), style(), QStyle::SP_ArrowUp),
+        ui::icon(ui::Icon::Up, this),
         tr("Move selected lane &up"),
         this,
         &MainWindow::moveSelectedLaneUp);
@@ -10715,7 +10697,7 @@ void MainWindow::createActions()
     moveLaneUpAction_->setToolTip(
         tr("Move the selected lane or group one position earlier in display order"));
     moveLaneDownAction_ = editMenu_->addAction(
-        themedIcon(QStringLiteral("go-down"), style(), QStyle::SP_ArrowDown),
+        ui::icon(ui::Icon::Down, this),
         tr("Move selected lane &down"),
         this,
         &MainWindow::moveSelectedLaneDown);
@@ -11188,7 +11170,7 @@ bool MainWindow::executeScenarioLifecycleCommand(
     } catch (const std::exception& exception) {
         static_cast<void>(
             restoreScenarioAfterLifecycle(beforeActiveScenarioId));
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Scenario edit"),
             QString::fromUtf8(exception.what()));
@@ -11243,7 +11225,7 @@ void MainWindow::createScenario()
     bool accepted = false;
     const auto suggested = QString::fromStdString(
         nextScenarioName(project_));
-    const auto name = QInputDialog::getText(
+    const auto name = ui::InputDialog::getText(
         this,
         tr("Create scenario"),
         tr("Scenario name"),
@@ -11252,7 +11234,7 @@ void MainWindow::createScenario()
         &accepted).trimmed();
     if (!accepted) return;
     if (!scenarioNameAvailable(project_, name.toStdString())) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Create scenario"),
             tr("Scenario names must be non-empty and unique."));
@@ -11300,7 +11282,7 @@ void MainWindow::renameScenario()
     const auto* scenario = activeScenario();
     if (!scenario || simulationResultMode_) return;
     bool accepted = false;
-    const auto name = QInputDialog::getText(
+    const auto name = ui::InputDialog::getText(
         this,
         tr("Rename scenario"),
         tr("Scenario name"),
@@ -11310,7 +11292,7 @@ void MainWindow::renameScenario()
     if (!accepted || name == QString::fromStdString(scenario->name)) return;
     if (!scenarioNameAvailable(
             project_, name.toStdString(), scenario->id)) {
-        QMessageBox::warning(
+        ui::MessageBox::warning(
             this,
             tr("Rename scenario"),
             tr("Scenario names must be non-empty and unique."));
@@ -11333,7 +11315,7 @@ void MainWindow::deleteScenario()
     }
     const auto scenarioId = scenario->id;
     const auto scenarioName = QString::fromStdString(scenario->name);
-    if (QMessageBox::question(
+    if (ui::MessageBox::question(
             this,
             tr("Delete scenario"),
             tr("Delete scenario '%1'? This removes its lanes, markers, and relations.")
@@ -11388,7 +11370,7 @@ void MainWindow::showScenarioSelectorContextMenu(const QPoint& position)
 {
     if (!scenarioSelector_) return;
     updateScenarioLifecycleActions();
-    QMenu menu(this);
+    ElaMenu menu(this);
     menu.setObjectName(QStringLiteral("ScenarioSelectorContextMenu"));
     menu.addAction(createScenarioAction_);
     menu.addAction(duplicateScenarioAction_);
@@ -11524,7 +11506,7 @@ bool MainWindow::selectScenarioForHistoryState(const std::uint64_t stateId)
 
 void MainWindow::createToolBars()
 {
-    auto* editBar = addToolBar(tr("Waveform tools"));
+    auto* editBar = ui::addToolBar(this, tr("Waveform tools"));
     editBar->setObjectName(QStringLiteral("WaveformToolbar"));
     editBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     editBar->setMovable(false);
@@ -11533,7 +11515,7 @@ void MainWindow::createToolBars()
     editBar->toggleViewAction()->setEnabled(false);
     editBar->toggleViewAction()->setVisible(false);
 
-    scenarioSelectorLabel_ = new QLabel(tr("Waveform"), editBar);
+    scenarioSelectorLabel_ = ui::text(tr("Waveform"), editBar);
     scenarioSelectorLabel_->setObjectName(
         QStringLiteral("WaveformSelectorLabel"));
     scenarioSelectorLabel_->setAccessibleName(tr("Waveform selector label"));
@@ -11542,7 +11524,7 @@ void MainWindow::createToolBars()
     scenarioSelectorLabelAction_->setObjectName(
         QStringLiteral("WaveformSelectorLabelToolbarAction"));
 
-    scenarioSelector_ = new QComboBox(editBar);
+    scenarioSelector_ = ui::comboBox(editBar);
     scenarioSelector_->setObjectName(QStringLiteral("WaveformSelector"));
     scenarioSelector_->setAccessibleName(tr("Waveform to edit"));
     scenarioSelector_->setMinimumWidth(150);
@@ -11574,7 +11556,7 @@ void MainWindow::createToolBars()
     populateScenarioSelector();
 
     markerAction_ = editBar->addAction(
-        themedIcon(QStringLiteral("flag"), style(), QStyle::SP_DialogYesButton),
+        ui::icon(ui::Icon::Measure, this),
         tr("Measure"));
     markerAction_->setObjectName(QStringLiteral("MeasureToolAction"));
     markerAction_->setCheckable(true);
@@ -11606,10 +11588,7 @@ void MainWindow::createToolBars()
     });
 
     relationAction_ = new QAction(
-        themedIcon(
-            QStringLiteral("insert-link"),
-            style(),
-            QStyle::SP_ArrowRight),
+        ui::icon(ui::Icon::Link, this),
         tr("Edit relations"),
         this);
     editMenu_->addAction(relationAction_);
@@ -11700,11 +11679,11 @@ void MainWindow::createToolBars()
     signalFindLayout->setContentsMargins(0, 0, 0, 0);
     signalFindLayout->setSpacing(4);
     signalFindLayout->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    auto* signalFindLabel = new QLabel(tr("Find signal"), signalFindWidget_);
+    auto* signalFindLabel = ui::text(tr("Find signal"), signalFindWidget_);
     signalFindLabel->setObjectName(QStringLiteral("SignalFindLabel"));
     signalFindLayout->addWidget(signalFindLabel);
 
-    signalFindEdit_ = new QLineEdit(signalFindWidget_);
+    signalFindEdit_ = ui::lineEdit(signalFindWidget_);
     signalFindEdit_->setObjectName(QStringLiteral("SignalFindEdit"));
     signalFindEdit_->setPlaceholderText(tr("Visible signal name or ID"));
     signalFindEdit_->setAccessibleName(tr("Find visible signal"));
@@ -11716,7 +11695,7 @@ void MainWindow::createToolBars()
     signalFindEdit_->installEventFilter(this);
     signalFindLayout->addWidget(signalFindEdit_);
 
-    signalFindResultLabel_ = new QLabel(QStringLiteral("0/0"), signalFindWidget_);
+    signalFindResultLabel_ = ui::text(QStringLiteral("0/0"), signalFindWidget_);
     signalFindResultLabel_->setObjectName(QStringLiteral("SignalFindResultLabel"));
     signalFindResultLabel_->setAlignment(Qt::AlignCenter);
     signalFindResultLabel_->setMinimumWidth(42);
@@ -11728,7 +11707,7 @@ void MainWindow::createToolBars()
                                     const QString& objectName,
                                     const QString& accessibleName,
                                     const QString& toolTip) {
-        auto* button = new QToolButton(signalFindWidget_);
+        auto* button = ui::toolButton(signalFindWidget_);
         button->setText(text);
         button->setObjectName(objectName);
         button->setAccessibleName(accessibleName);
@@ -11777,12 +11756,12 @@ void MainWindow::createToolBars()
     goToTimeLayout->setContentsMargins(0, 0, 0, 0);
     goToTimeLayout->setSpacing(4);
     goToTimeLayout->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    goToTimeLabel_ = new QLabel(tr("Go to"), goToTimeWidget_);
+    goToTimeLabel_ = ui::text(tr("Go to"), goToTimeWidget_);
     goToTimeLabel_->setObjectName(QStringLiteral("GoToTimeLabel"));
     goToTimeLabel_->installEventFilter(this);
     goToTimeLayout->addWidget(goToTimeLabel_);
 
-    goToTimeEdit_ = new QLineEdit(goToTimeWidget_);
+    goToTimeEdit_ = ui::lineEdit(goToTimeWidget_);
     goToTimeEdit_->setObjectName(QStringLiteral("GoToTimeEdit"));
     goToTimeEdit_->setPlaceholderText(tr("2.5 ns or cycle 25"));
     goToTimeEdit_->setAccessibleName(tr("Exact timeline position"));
@@ -11794,7 +11773,7 @@ void MainWindow::createToolBars()
     goToTimeEdit_->installEventFilter(this);
     goToTimeLayout->addWidget(goToTimeEdit_);
 
-    goToTimeRangeLabel_ = new QLabel(QStringLiteral("0 ps–0 ps"), goToTimeWidget_);
+    goToTimeRangeLabel_ = ui::text(QStringLiteral("0 ps–0 ps"), goToTimeWidget_);
     goToTimeRangeLabel_->setObjectName(QStringLiteral("GoToTimeRangeLabel"));
     goToTimeRangeLabel_->setAlignment(Qt::AlignCenter);
     goToTimeRangeLabel_->setMinimumWidth(90);
@@ -11806,7 +11785,7 @@ void MainWindow::createToolBars()
                                         const QString& objectName,
                                         const QString& accessibleName,
                                         const QString& toolTip) {
-        auto* button = new QToolButton(goToTimeWidget_);
+        auto* button = ui::toolButton(goToTimeWidget_);
         button->setText(text);
         button->setObjectName(objectName);
         button->setAccessibleName(accessibleName);
@@ -11902,7 +11881,7 @@ void MainWindow::createToolBars()
         });
     editBar->addSeparator();
     auto* zoomInAction = editBar->addAction(
-        themedIcon(QStringLiteral("zoom-in"), style(), QStyle::SP_ArrowUp),
+        ui::icon(ui::Icon::ZoomIn, this),
         tr("Zoom in"));
     zoomInAction->setObjectName(QStringLiteral("ZoomInAction"));
     zoomInAction->setShortcut(QKeySequence::ZoomIn);
@@ -11910,7 +11889,7 @@ void MainWindow::createToolBars()
     zoomInAction->setToolTip(
         tr("Zoom in around the visible edit cursor, or the viewport center"));
     auto* zoomOutAction = editBar->addAction(
-        themedIcon(QStringLiteral("zoom-out"), style(), QStyle::SP_ArrowDown),
+        ui::icon(ui::Icon::ZoomOut, this),
         tr("Zoom out"));
     zoomOutAction->setObjectName(QStringLiteral("ZoomOutAction"));
     zoomOutAction->setShortcut(QKeySequence::ZoomOut);
@@ -11918,7 +11897,7 @@ void MainWindow::createToolBars()
     zoomOutAction->setToolTip(
         tr("Zoom out around the visible edit cursor, or the viewport center"));
     auto* fitAction = editBar->addAction(
-        themedIcon(QStringLiteral("zoom-fit-best"), style(), QStyle::SP_DesktopIcon),
+        ui::icon(ui::Icon::Fit, this),
         tr("Fit scenario"));
     fitAction->setObjectName(QStringLiteral("FitScenarioAction"));
     fitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
@@ -11952,8 +11931,8 @@ void MainWindow::createToolBars()
 }
 void MainWindow::createDocks()
 {
-    auto* navigatorTabs = new QTabWidget;
-    signalTree_ = new QTreeWidget;
+    auto* navigatorTabs = ui::tabs();
+    signalTree_ = ui::tree();
     signalTree_->setHeaderLabels({tr("Signal"), tr("Type")});
     signalTree_->setRootIsDecorated(false);
     signalTree_->setAlternatingRowColors(true);
@@ -11972,7 +11951,7 @@ void MainWindow::createDocks()
         [this](QTreeWidgetItem* item, int) {
             if (item) editLaneById(item->data(0, Qt::UserRole).toString());
         });
-    clockTree_ = new QTreeWidget;
+    clockTree_ = ui::tree();
     clockTree_->setHeaderLabels({tr("Clock"), tr("Period")});
     clockTree_->setRootIsDecorated(false);
     connect(
@@ -11980,7 +11959,7 @@ void MainWindow::createDocks()
         &QTreeWidget::itemDoubleClicked,
         this,
         [this](QTreeWidgetItem*, int) { editSelectedClock(); });
-    groupTree_ = new QTreeWidget;
+    groupTree_ = ui::tree();
     groupTree_->setHeaderLabels({tr("Group / signal"), tr("Type")});
     groupTree_->setRootIsDecorated(true);
     groupTree_->setAlternatingRowColors(true);
@@ -12002,7 +11981,7 @@ void MainWindow::createDocks()
     navigatorTabs->addTab(signalTree_, tr("Signals"));
     navigatorTabs->addTab(clockTree_, tr("Clocks"));
     navigatorTabs->addTab(groupTree_, tr("Groups"));
-    resourceTree_ = new QTreeWidget;
+    resourceTree_ = ui::tree();
     resourceTree_->setHeaderLabels({tr("Linked resource"), tr("Status")});
     resourceTree_->setRootIsDecorated(false);
     resourceTree_->setAlternatingRowColors(true);
@@ -12018,7 +11997,7 @@ void MainWindow::createDocks()
     leftDock->setMinimumWidth(220);
     addDockWidget(Qt::LeftDockWidgetArea, leftDock);
 
-    inspectorTree_ = new QTreeWidget;
+    inspectorTree_ = ui::tree();
     inspectorTree_->setHeaderLabels({tr("Property"), tr("Value")});
     inspectorTree_->setRootIsDecorated(false);
     inspectorTree_->setAlternatingRowColors(true);
@@ -12028,9 +12007,9 @@ void MainWindow::createDocks()
     rightDock->setMinimumWidth(260);
     addDockWidget(Qt::RightDockWidgetArea, rightDock);
 
-    bottomTabs_ = new QTabWidget;
+    bottomTabs_ = ui::tabs();
     auto* bottomTabs = bottomTabs_;
-    eventTable_ = new QTableWidget;
+    eventTable_ = ui::table();
     eventTable_->setColumnCount(7);
     eventTable_->setHorizontalHeaderLabels({
         tr("Time / cycle"),
@@ -12052,19 +12031,19 @@ void MainWindow::createDocks()
     auto* eventLayout = new QVBoxLayout(eventPanel);
     eventLayout->setContentsMargins(0, 0, 0, 0);
     eventLayout->setSpacing(0);
-    auto* eventBar = new QToolBar;
+    auto* eventBar = ui::toolBar();
     eventBar->setIconSize(QSize(16, 16));
     eventBar->addAction(
-        themedIcon(QStringLiteral("list-add"), style(), QStyle::SP_FileDialogNewFolder),
+        ui::icon(ui::Icon::Add, this),
         tr("Add event"),
         this,
         &MainWindow::addEvent);
     eventBar->addAction(
-        themedIcon(QStringLiteral("list-remove"), style(), QStyle::SP_TrashIcon),
+        ui::icon(ui::Icon::Remove, this),
         tr("Remove event"),
         this,
         &MainWindow::removeSelectedEvent);
-    auto* eventFilter = new QLineEdit;
+    auto* eventFilter = ui::lineEdit();
     eventFilter->setClearButtonEnabled(true);
     eventFilter->setPlaceholderText(tr("Filter events"));
     eventFilter->setMaximumWidth(240);
@@ -12084,7 +12063,7 @@ void MainWindow::createDocks()
     eventLayout->addWidget(eventTable_);
     bottomTabs->addTab(eventPanel, tr("Events"));
 
-    relationTable_ = new QTableWidget;
+    relationTable_ = ui::table();
     relationTable_->setObjectName(QStringLiteral("RelationTable"));
     relationTable_->setColumnCount(8);
     relationTable_->setHorizontalHeaderLabels({
@@ -12116,10 +12095,10 @@ void MainWindow::createDocks()
     auto* relationLayout = new QVBoxLayout(relationPanel);
     relationLayout->setContentsMargins(0, 0, 0, 0);
     relationLayout->setSpacing(0);
-    auto* relationBar = new QToolBar;
+    auto* relationBar = ui::toolBar();
     relationBar->setIconSize(QSize(16, 16));
     relationBar->addAction(
-        themedIcon(QStringLiteral("list-remove"), style(), QStyle::SP_TrashIcon),
+        ui::icon(ui::Icon::Remove, this),
         tr("Remove relation"),
         this,
         &MainWindow::removeSelectedRelation);
@@ -12127,7 +12106,7 @@ void MainWindow::createDocks()
     relationLayout->addWidget(relationTable_);
     bottomTabs->addTab(relationPanel, tr("Relations"));
 
-    validationTable_ = new QTableWidget;
+    validationTable_ = ui::table();
     validationTable_->setColumnCount(4);
     validationTable_->setHorizontalHeaderLabels({
         tr("Severity"),
@@ -12150,18 +12129,15 @@ void MainWindow::createDocks()
     auto* traceLayout = new QVBoxLayout(tracePanel);
     traceLayout->setContentsMargins(0, 0, 0, 0);
     traceLayout->setSpacing(0);
-    auto* traceBar = new QToolBar;
+    auto* traceBar = ui::toolBar();
     traceBar->setIconSize(QSize(16, 16));
     importTraceAction_ = traceBar->addAction(
-        themedIcon(
-            QStringLiteral("document-open"),
-            style(),
-            QStyle::SP_DialogOpenButton),
+        ui::icon(ui::Icon::Open, this),
         tr("Import trace"),
         this,
         &MainWindow::importTrace);
     cancelTraceAction_ = traceBar->addAction(
-        themedIcon(QStringLiteral("process-stop"), style(), QStyle::SP_DialogCancelButton),
+        ui::icon(ui::Icon::Close, this),
         tr("Cancel import"),
         this,
         &MainWindow::cancelTraceImport);
@@ -12172,12 +12148,12 @@ void MainWindow::createDocks()
     traceBar->addAction(tr("Fit"), [this] {
         if (traceCanvas_) traceCanvas_->fitTrace();
     });
-    traceSummary_ = new QLabel(tr("No imported trace"));
+    traceSummary_ = ui::text(tr("No imported trace"));
     traceSummary_->setObjectName(QStringLiteral("TraceSummary"));
     traceSummary_->setMinimumWidth(220);
     traceBar->addSeparator();
     traceBar->addWidget(traceSummary_);
-    traceProgress_ = new QProgressBar;
+    traceProgress_ = ui::progressBar();
     traceProgress_->setObjectName(QStringLiteral("TraceProgress"));
     traceProgress_->setRange(0, 0);
     traceProgress_->setMaximumWidth(130);
@@ -12186,7 +12162,7 @@ void MainWindow::createDocks()
     traceBar->addWidget(traceProgress_);
     traceLayout->addWidget(traceBar);
 
-    traceMappingTable_ = new QTableWidget;
+    traceMappingTable_ = ui::table();
     traceMappingTable_->setColumnCount(2);
     traceMappingTable_->setHorizontalHeaderLabels({tr("Actual signal"), tr("Expected lane")});
     traceMappingTable_->horizontalHeader()->setStretchLastSection(true);
@@ -12221,14 +12197,14 @@ void MainWindow::createDocks()
     auto* compareLayout = new QVBoxLayout(comparePanel_);
     compareLayout->setContentsMargins(0, 0, 0, 0);
     compareLayout->setSpacing(0);
-    auto* compareBar = new QToolBar;
+    auto* compareBar = ui::toolBar();
     compareBar->setIconSize(QSize(16, 16));
     compareBar->addAction(
-        themedIcon(QStringLiteral("media-playback-start"), style(), QStyle::SP_MediaPlay),
+        ui::icon(ui::Icon::Play, this),
         tr("Run compare"),
         this,
         &MainWindow::runCompare);
-    compareXCombo_ = new QComboBox;
+    compareXCombo_ = ui::comboBox();
     compareXCombo_->setToolTip(tr("Choose how X values participate in comparison"));
     compareXCombo_->addItem(tr("Exact X"), static_cast<int>(XHandling::Exact));
     compareXCombo_->addItem(tr("Ignore any X"), static_cast<int>(XHandling::IgnoreAnyX));
@@ -12236,34 +12212,34 @@ void MainWindow::createDocks()
         tr("Expected X wildcard"),
         static_cast<int>(XHandling::ExpectedXWildcard));
     compareBar->addWidget(compareXCombo_);
-    compareToleranceEdit_ = new QLineEdit(QStringLiteral("0 tick"));
+    compareToleranceEdit_ = ui::lineEdit(QStringLiteral("0 tick"));
     compareToleranceEdit_->setPlaceholderText(tr("Edge tolerance"));
     compareToleranceEdit_->setToolTip(tr("Maximum accepted skew between matching expected and actual edges"));
     compareToleranceEdit_->setMaximumWidth(110);
     compareBar->addWidget(compareToleranceEdit_);
-    compareMaskEdit_ = new QLineEdit;
+    compareMaskEdit_ = ui::lineEdit();
     compareMaskEdit_->setPlaceholderText(tr("Bus mask"));
     compareMaskEdit_->setToolTip(tr("Global bit mask; 1 compares a bit and 0 ignores it"));
     compareMaskEdit_->setMaximumWidth(105);
     compareBar->addWidget(compareMaskEdit_);
-    compareRelationOnly_ = new QCheckBox(tr("Relations only"));
+    compareRelationOnly_ = ui::checkBox(tr("Relations only"));
     compareRelationOnly_->setObjectName(QStringLiteral("CompareRelationOnly"));
     compareBar->addWidget(compareRelationOnly_);
-    compareSelectionOnly_ = new QCheckBox(tr("Selection window"));
+    compareSelectionOnly_ = ui::checkBox(tr("Selection window"));
     compareBar->addWidget(compareSelectionOnly_);
     compareBar->addAction(
-        themedIcon(QStringLiteral("document-save"), style(), QStyle::SP_DialogSaveButton),
+        ui::icon(ui::Icon::Save, this),
         tr("Export report…"),
         this,
         &MainWindow::exportCompareReport);
-    compareSummary_ = new QLabel(tr("Run compare to calculate differences"));
+    compareSummary_ = ui::text(tr("Run compare to calculate differences"));
     compareSummary_->setObjectName(QStringLiteral("CompareSummary"));
     compareSummary_->setMinimumWidth(260);
     compareBar->addSeparator();
     compareBar->addWidget(compareSummary_);
     compareLayout->addWidget(compareBar);
 
-    compareTable_ = new QTableWidget;
+    compareTable_ = ui::table();
     compareTable_->setObjectName(QStringLiteral("CompareResultTable"));
     compareTable_->setColumnCount(7);
     compareTable_->setHorizontalHeaderLabels({
@@ -12891,7 +12867,7 @@ bool MainWindow::loadFromPath(const QString& path, const bool preferRecovery)
         : path;
     const auto result = loadProjectFile(selectedPath);
     if (!result.ok()) {
-        QMessageBox::critical(this, tr("Open failed"), result.error);
+        ui::MessageBox::critical(this, tr("Open failed"), result.error);
         return false;
     }
     rememberActiveScenarioLocation();
@@ -12973,7 +12949,7 @@ bool MainWindow::writeToPath(const QString& path)
             && diskRevision.state == ProjectFileRevision::State::Present
             && loadedProjectRevision_.sha256 != diskRevision.sha256;
         if (unreadableRevision || stateChanged || contentChanged) {
-            QMessageBox conflict(this);
+            ui::MessageBox conflict(this);
             conflict.setIcon(QMessageBox::Warning);
             conflict.setWindowTitle(tr("Project changed on disk"));
             conflict.setText(
@@ -13016,7 +12992,7 @@ bool MainWindow::writeToPath(const QString& path)
     QString error;
     if (!saveProjectFileAtomic(project_, path, &error)) {
         project_.name = beforeName;
-        QMessageBox::critical(this, tr("Save failed"), error);
+        ui::MessageBox::critical(this, tr("Save failed"), error);
         return false;
     }
     projectFile_ = path;
@@ -13114,7 +13090,7 @@ bool MainWindow::discardRecoverySnapshots()
 
     if (!inFlightPath.isEmpty()) discardedAutosavePaths_.erase(inFlightPath);
     scheduleAutosave();
-    QMessageBox::warning(
+    ui::MessageBox::warning(
         this,
         tr("Cannot discard recovery snapshot"),
         tr("The unsaved changes remain open because these recovery snapshots could not be removed:\n%1")
@@ -13125,7 +13101,7 @@ bool MainWindow::discardRecoverySnapshots()
 bool MainWindow::confirmDiscardChanges()
 {
     if (!dirty_) return true;
-    const auto choice = QMessageBox::warning(
+    const auto choice = ui::MessageBox::warning(
         this,
         tr("Unsaved changes"),
         tr("The project contains unsaved changes."),

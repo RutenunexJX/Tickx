@@ -3,6 +3,12 @@ Wave Workbench @PROJECT_VERSION@ - Windows x64 portable package
 Desktop application
   wave-workbench.exe
 
+Private UI runtime
+  wavewidgets.dll and WaveWorkbenchEla.dll must be deployed together.
+  This build requires matching Qt 6.10.2 runtime libraries.
+  Ela and Font Awesome licenses are in licenses\ElaWidgetTools.
+  See docs\ela-migration.md for the pinned source and integration boundaries.
+
 Primary automation entry point
   wave-cli.exe capabilities --pretty
   wave-cli.exe --help

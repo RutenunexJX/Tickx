@@ -165,10 +165,6 @@ QMainWindow, QDialog, QMessageBox { background: @APPLICATION@; color: @TEXT@; }
 QWidget[waveSurface="canvas"] { background: @CANVAS@; color: @TEXT@; }
 QWidget[waveSurface="panel"] { background: @PANEL@; color: @TEXT@; }
 QWidget[waveSurface="raised"] { background: @RAISED@; color: @TEXT@; }
-QToolBar {
-  background: @PANEL@; color: @TEXT@; border: 0;
-  border-bottom: 1px solid @BORDER@; spacing: @SPACING@px; padding: @SPACING@px;
-}
 QDockWidget::title, QLabel[waveSectionHeader="true"], QLabel[waveRole="panelHeader"] {
   min-height: @HEADER_HEIGHT@px; background: @PANEL@; color: @TEXT@;
   border-bottom: 1px solid @BORDER@; padding: 0 @NOTICE_PADDING@px; font-weight: 600;
@@ -214,74 +210,8 @@ QLabel#SimulationStateLabel[simulationState="running"] { color: @INFORMATION@; b
 QLabel#SimulationStateLabel[simulationState="current"] { color: @SUCCESS@; background: @SUCCESS_SURFACE@; border: 1px solid @SUCCESS@; }
 QLabel#SimulationStateLabel[simulationState="stale"] { color: @WARNING@; background: @WARNING_SURFACE@; border: 1px solid @WARNING@; }
 QLabel#SimulationStateLabel[simulationState="failed"] { color: @ERROR@; background: @ERROR_SURFACE@; border: 1px solid @ERROR@; }
-QMenu { background: @RAISED@; color: @TEXT@; border: 1px solid @BORDER@; padding: @SPACING@px; }
-QMenu::item { min-height: @COMPACT_HEIGHT@px; padding: 0 24px 0 8px; border-radius: @RADIUS@px; }
-QMenu::item:selected { color: @SELECTION_TEXT@; background: @SELECTION@; }
-QMenu::item:disabled { color: @MUTED@; }
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QTextEdit {
-  min-height: @CONTROL_HEIGHT@px; background: @RAISED@; color: @TEXT@;
-  border: 1px solid @BORDER@; border-radius: @RADIUS@px; padding: 0 8px;
-  selection-color: @SELECTION_TEXT@; selection-background-color: @SELECTION@;
-}
-QLineEdit[waveDensity="compact"], QComboBox[waveDensity="compact"],
-QSpinBox[waveDensity="compact"], QDoubleSpinBox[waveDensity="compact"] {
-  min-height: @COMPACT_HEIGHT@px;
-}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
-QPlainTextEdit:focus, QTextEdit:focus, QAbstractItemView:focus {
-  border: @FOCUS_WIDTH@px solid @FOCUS@;
-}
-QLineEdit[waveState="error"], QComboBox[waveState="error"],
-QSpinBox[waveState="error"], QDoubleSpinBox[waveState="error"],
-QLineEdit[invalidDraft="true"] {
-  color: @ERROR@; background: @ERROR_SURFACE@; border-color: @ERROR@;
-}
-QLineEdit[relationRisk="true"], QToolButton[relationRisk="true"] {
-  color: @WARNING@; background: @WARNING_SURFACE@; border-color: @WARNING@;
-}
-QLineEdit[noEffect="true"] { color: @MUTED@; background: @PANEL@; border-style: dashed; }
-QLineEdit[loadedExisting="true"] { color: @MUTED@; background: @PANEL@; border-style: dashed; }
-QPushButton, QToolButton {
-  min-height: @CONTROL_HEIGHT@px; color: @TEXT@; background: @RAISED@;
-  border: 1px solid @BORDER@; border-radius: @RADIUS@px; padding: 0 10px;
-}
-QToolBar QToolButton, QPushButton[waveDensity="compact"], QToolButton[waveDensity="compact"] {
-  min-height: @COMPACT_HEIGHT@px;
-}
-QPushButton:hover, QToolButton:hover { background: @SELECTION@; border-color: @ACCENT_SECONDARY@; }
-QPushButton:focus, QToolButton:focus { border: @FOCUS_WIDTH@px solid @FOCUS@; }
-QPushButton:checked, QToolButton:checked,
-QPushButton[waveRole="primary"], QToolButton[waveRole="primary"] {
-  color: @SELECTION_TEXT@; background: @SELECTION@; border-color: @ACCENT@;
-}
-QPushButton[waveRole="danger"] { color: @ERROR@; border-color: @ERROR@; }
-QPushButton:disabled, QToolButton:disabled {
-  color: @MUTED@; background: @PANEL@; border-color: @BORDER@;
-}
-QTreeView, QTableView, QListView, QTreeWidget, QTableWidget, QListWidget {
-  background: @CANVAS@; alternate-background-color: @PANEL@; color: @TEXT@;
-  border: 1px solid @BORDER@; outline: 0;
-  selection-color: @SELECTION_TEXT@; selection-background-color: @SELECTION@;
-}
-QHeaderView::section {
-  min-height: @HEADER_HEIGHT@px; background: @PANEL@; color: @TEXT@;
-  border: 0; border-right: 1px solid @BORDER@; padding: 0 8px;
-}
-QTabWidget::pane { border: 1px solid @BORDER@; background: @CANVAS@; }
-QTabBar::tab {
-  min-height: @COMPACT_HEIGHT@px; background: @PANEL@; color: @MUTED@;
-  padding: 0 12px; border: 1px solid @BORDER@;
-}
-QTabBar::tab:selected { background: @RAISED@; color: @TEXT@; border-bottom: 2px solid @ACCENT@; }
-QStatusBar { background: @PANEL@; color: @MUTED@; border-top: 1px solid @BORDER@; }
-QStatusBar QLabel { min-height: @COMPACT_HEIGHT@px; padding: 0 @NOTICE_PADDING@px; }
-QCheckBox, QRadioButton { min-height: @CONTROL_HEIGHT@px; color: @TEXT@; spacing: @SPACING@px; }
-QProgressBar { min-height: @COMPACT_HEIGHT@px; border: 1px solid @BORDER@; border-radius: @RADIUS@px; text-align: center; }
-QProgressBar::chunk { background: @ACCENT_SECONDARY@; border-radius: @RADIUS@px; }
 QSplitter::handle { background: @BORDER@; }
 QToolTip { color: @TEXT@; background: @RAISED@; border: 1px solid @BORDER@; padding: @SPACING@px; }
-QScrollBar:horizontal, QScrollBar:vertical { background: @PANEL@; border: 0; }
-QScrollBar::handle:horizontal, QScrollBar::handle:vertical { background: @BORDER@; border-radius: @RADIUS@px; min-width: 24px; min-height: 24px; }
 )QSS");
 
     const std::array<std::pair<QString, QColor>, 20> colors{{

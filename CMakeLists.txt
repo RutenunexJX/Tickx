@@ -17,8 +17,18 @@ endif()
 option(WAVEWORKBENCH_BUILD_TESTS "Build automated tests" ON)
 option(WAVEWORKBENCH_ENABLE_WELLEN "Build the Wellen FST reader" ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent)
+find_package(Qt6 6.10.2 EXACT REQUIRED COMPONENTS Core Gui Widgets WidgetsPrivate Svg Concurrent)
 find_package(SuiteApp 1 CONFIG QUIET)
+
+# Pinned, in-tree source; see third_party/elawidgettools/WAVEWORKBENCH.md.
+# Ela includes Qt private headers, so the Qt patch version is part of the pin.
+set(QT_VERSION_MAJOR 6)
+set(ELAWIDGETTOOLS_BUILD_STATIC_LIB OFF CACHE BOOL "Build Ela as a private runtime" FORCE)
+add_subdirectory(third_party/elawidgettools EXCLUDE_FROM_ALL)
+set_target_properties(ElaWidgetTools PROPERTIES
+    OUTPUT_NAME "WaveWorkbenchEla"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 if(WAVEWORKBENCH_ENABLE_WELLEN)
     find_program(CARGO_EXECUTABLE
@@ -197,6 +207,10 @@ target_link_libraries(waveautomation
 wave_enable_warnings(waveautomation)
 
 add_library(wavewidgets SHARED
+    src/app/ui_controls.cpp
+    src/app/ui_feedback.cpp
+    src/app/ui_icons.cpp
+    src/app/ui_controls.h
     src/app/main_window.cpp
     src/app/main_window.h
     src/app/trace_canvas.cpp
@@ -221,6 +235,7 @@ target_include_directories(wavewidgets
 target_link_libraries(wavewidgets
     PUBLIC wavecore wavetime waveedit waveproject wavevalidate wavegenerate wavetrace wavefst wavecompare waveintegration wavesim
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent ${CMAKE_DL_LIBS}
+    PRIVATE Ela::WidgetTools
 )
 if(SuiteApp_FOUND)
     target_sources(wavewidgets PRIVATE
@@ -300,6 +315,7 @@ target_link_libraries(wave-cli
 wave_enable_warnings(wave-cli)
 
 set(WAVEWORKBENCH_PORTABLE_TARGETS
+    ElaWidgetTools
     wavewidgets
     wave-workbench
     wave-cli
@@ -328,6 +344,11 @@ install(
     DESTINATION .
     COMPONENT Portable
 )
+install(FILES third_party/elawidgettools/LICENSE
+    third_party/elawidgettools/UPSTREAM-REVISION.md
+    third_party/elawidgettools/WAVEWORKBENCH.md
+    third_party/elawidgettools/Font/FontAwesome-LICENSE.txt
+    DESTINATION licenses/ElaWidgetTools COMPONENT Portable)
 if(WAVEWORKBENCH_ENABLE_WELLEN)
     install(PROGRAMS "${WAVE_WELLEN_READER_OUTPUT}"
         DESTINATION .
@@ -336,6 +357,7 @@ endif()
 install(
     FILES
         "${CMAKE_SOURCE_DIR}/docs/interaction.md"
+        "${CMAKE_SOURCE_DIR}/docs/ela-migration.md"
         "${CMAKE_SOURCE_DIR}/docs/automation-cli.md"
         "${CMAKE_SOURCE_DIR}/docs/cli-quick-start.md"
         "${CMAKE_SOURCE_DIR}/docs/integration-contracts.md"

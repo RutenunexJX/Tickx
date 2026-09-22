@@ -1,6 +1,7 @@
 #include "trace_canvas.h"
 
 #include "waveform_theme.h"
+#include "ui_controls.h"
 
 #include <QMouseEvent>
 #include <QPainter>
@@ -79,6 +80,7 @@ TraceCanvas::TraceCanvas(QWidget* parent)
     : QAbstractScrollArea(parent)
 {
     setObjectName(QStringLiteral("ActualTraceCanvas"));
+    ui::installScrollBars(this);
     setMouseTracking(true);
     setFrameShape(QFrame::NoFrame);
     horizontalScrollBar()->setRange(0, 0);

@@ -1,6 +1,7 @@
 #include "waveform_view.h"
 
 #include "waveform_theme.h"
+#include "ui_controls.h"
 
 #include <QDir>
 #include <QJsonArray>
@@ -528,6 +529,7 @@ WaveformView::WaveformView(QWidget* parent)
     , data_(std::make_unique<Data>())
 {
     setObjectName(QStringLiteral("WaveformView"));
+    ui::installScrollBars(this);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
     setFrameShape(QFrame::NoFrame);
@@ -539,6 +541,10 @@ WaveformView::WaveformView(QWidget* parent)
             viewport(), qOverload<>(&QWidget::update));
     connect(verticalScrollBar(), &QScrollBar::valueChanged,
             viewport(), qOverload<>(&QWidget::update));
+    connect(this, &WaveformView::themeChanged, this, [this] {
+        horizontalScrollBar()->update();
+        verticalScrollBar()->update();
+    });
     setProperty("wavewidgets.contract", contract());
     setProperty("wavewidgets.capabilities", capabilities());
     setProperty("wavewidgets.previewContract", QStringLiteral("wave-preview/v1"));

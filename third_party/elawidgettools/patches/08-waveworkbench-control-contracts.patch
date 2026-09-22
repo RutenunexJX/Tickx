@@ -1,0 +1,588 @@
+diff --git a/Development/ElaCheckBoxStyle.cpp b/Development/ElaCheckBoxStyle.cpp
+index 92b686a..aa4e6ef 100644
+--- a/Development/ElaCheckBoxStyle.cpp
++++ b/Development/ElaCheckBoxStyle.cpp
+@@ -31,7 +31,7 @@ void ElaCheckBoxStyle::drawControl(ControlElement element, const QStyleOption* o
+             painter->save();
+             painter->setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
+             QRect checkBoxRect = bopt->rect;
+-            QRect checkRect(checkBoxRect.x(), checkBoxRect.y(), _pCheckIndicatorWidth, _pCheckIndicatorWidth);
++            QRect checkRect(checkBoxRect.x(), checkBoxRect.center().y() - _pCheckIndicatorWidth / 2, _pCheckIndicatorWidth, _pCheckIndicatorWidth);
+             checkRect.adjust(1, 1, -1, -1);
+             //复选框绘制
+             painter->setPen(Qt::NoPen);
+@@ -92,8 +92,8 @@ void ElaCheckBoxStyle::drawControl(ControlElement element, const QStyleOption* o
+             }
+             //文字绘制
+             painter->setPen(isEnabled ? ElaThemeColor(_themeMode, BasicText) : ElaThemeColor(_themeMode, BasicTextDisable));
+-            QRect textRect(checkRect.right() + 10, checkBoxRect.y(), checkBoxRect.width(), checkBoxRect.height() - 3);
+-            painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, bopt->text);
++            QRect textRect(checkRect.right() + 10, checkBoxRect.y(), checkBoxRect.width() - checkRect.width() - 10, checkBoxRect.height());
++            painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter | Qt::TextShowMnemonic, bopt->text);
+             painter->restore();
+         }
+         return;
+diff --git a/Development/ElaComboBoxStyle.h b/Development/ElaComboBoxStyle.h
+index 1696fef..0fcad3f 100644
+--- a/Development/ElaComboBoxStyle.h
++++ b/Development/ElaComboBoxStyle.h
+@@ -4,7 +4,7 @@
+ #include <QProxyStyle>
+ 
+ #include "ElaWidgetToolsDef.h"
+-class ElaComboBoxStyle : public QProxyStyle
++class ELA_EXPORT ElaComboBoxStyle : public QProxyStyle
+ {
+     Q_OBJECT
+     Q_PROPERTY_CREATE(qreal, ExpandIconRotate)
+diff --git a/Development/ElaLineEditStyle.h b/Development/ElaLineEditStyle.h
+index 25cd992..0edae1f 100644
+--- a/Development/ElaLineEditStyle.h
++++ b/Development/ElaLineEditStyle.h
+@@ -4,7 +4,7 @@
+ #include <QProxyStyle>
+ 
+ #include "ElaWidgetToolsDef.h"
+-class ElaLineEditStyle : public QProxyStyle
++class ELA_EXPORT ElaLineEditStyle : public QProxyStyle
+ {
+     Q_OBJECT
+ public:
+diff --git a/Development/ElaMenuBarStyle.cpp b/Development/ElaMenuBarStyle.cpp
+index a750392..84be2bb 100644
+--- a/Development/ElaMenuBarStyle.cpp
++++ b/Development/ElaMenuBarStyle.cpp
+@@ -95,7 +95,8 @@ void ElaMenuBarStyle::drawControl(ControlElement element, const QStyleOption* op
+             QIcon icon = mopt->icon;
+             QString menuText = mopt->text;
+             QString iconText;
+-            menuText = menuText.replace("&", "");
++            const int mnemonic = styleHint(SH_UnderlineShortcut, option, widget)
++                ? Qt::TextShowMnemonic : Qt::TextHideMnemonic;
+             const ElaMenuBar* menuBar = dynamic_cast<const ElaMenuBar*>(widget);
+             if (menuBar)
+             {
+@@ -130,7 +131,7 @@ void ElaMenuBarStyle::drawControl(ControlElement element, const QStyleOption* op
+                 painter->setPen(!mopt->state.testFlag(QStyle::State_Enabled) ? ElaThemeColor(_themeMode, BasicTextDisable) : ElaThemeColor(_themeMode, BasicText));
+                 if (icon.isNull() && iconText.isEmpty())
+                 {
+-                    painter->drawText(menuItemRect, Qt::AlignCenter, menuText);
++                    painter->drawText(menuItemRect, Qt::AlignCenter | mnemonic, menuText);
+                 }
+                 else
+                 {
+@@ -143,13 +144,13 @@ void ElaMenuBarStyle::drawControl(ControlElement element, const QStyleOption* op
+                         painter->setFont(iconFont);
+                         painter->drawText(menuIconRect, Qt::AlignCenter, iconText);
+                         painter->restore();
+-                        painter->drawText(QRect(menuIconRect.right(), menuItemRect.y(), menuItemRect.width() - menuIconRect.width(), menuBarHeight), Qt::AlignCenter, menuText);
++                        painter->drawText(QRect(menuIconRect.right(), menuItemRect.y(), menuItemRect.width() - menuIconRect.width(), menuBarHeight), Qt::AlignCenter | mnemonic, menuText);
+                     }
+                     else
+                     {
+                         QRect menuIconRect(menuItemRect.x() + menuBarHeight * 0.1 + _menuBarItemMargin, menuBarHeight * 0.1, menuBarHeight * 0.8, menuBarHeight * 0.8);
+                         painter->drawPixmap(menuIconRect, icon.pixmap(menuBarHeight * 0.8, menuBarHeight * 0.8));
+-                        painter->drawText(QRect(menuIconRect.right(), menuItemRect.y(), menuItemRect.width() - menuIconRect.width(), menuBarHeight), Qt::AlignCenter, menuText);
++                        painter->drawText(QRect(menuIconRect.right(), menuItemRect.y(), menuItemRect.width() - menuIconRect.width(), menuBarHeight), Qt::AlignCenter | mnemonic, menuText);
+                     }
+                 }
+             }
+diff --git a/Development/ElaMenuStyle.cpp b/Development/ElaMenuStyle.cpp
+index 44fab13..0578460 100644
+--- a/Development/ElaMenuStyle.cpp
++++ b/Development/ElaMenuStyle.cpp
+@@ -53,6 +53,25 @@ void ElaMenuStyle::drawPrimitive(PrimitiveElement element, const QStyleOption* o
+ 
+ void ElaMenuStyle::drawControl(ControlElement element, const QStyleOption* option, QPainter* painter, const QWidget* widget) const
+ {
++    if (element == CE_MenuItem) {
++        const auto* item = qstyleoption_cast<const QStyleOptionMenuItem*>(option);
++        const auto* menu = qobject_cast<const QMenu*>(widget);
++        const auto* action = menu && item ? menu->actionAt(item->rect.center()) : nullptr;
++        if (item && (!action || action->property("ElaIconType").toString().isEmpty())) {
++            // Standard QActions need Qt's mnemonic, check/radio, icon, disabled,
++            // shortcut and RTL layout, with the same Ela popup palette.
++            auto styled = *item;
++            styled.palette.setColor(QPalette::Window, ElaThemeColor(_themeMode, PopupBase));
++            styled.palette.setColor(QPalette::Button, ElaThemeColor(_themeMode, PopupBase));
++            styled.palette.setColor(QPalette::Text, ElaThemeColor(_themeMode, BasicText));
++            styled.palette.setColor(QPalette::ButtonText, ElaThemeColor(_themeMode, BasicText));
++            styled.palette.setColor(QPalette::Highlight, ElaThemeColor(_themeMode, PopupHover));
++            styled.palette.setColor(QPalette::HighlightedText, ElaThemeColor(_themeMode, BasicText));
++            styled.palette.setColor(QPalette::Disabled, QPalette::Text, ElaThemeColor(_themeMode, BasicTextDisable));
++            QProxyStyle::drawControl(element, &styled, painter, widget);
++            return;
++        }
++    }
+     switch (element)
+     {
+     case QStyle::CE_MenuItem:
+@@ -212,11 +231,11 @@ QSize ElaMenuStyle::sizeFromContents(ContentsType type, const QStyleOption* opti
+             }
+             QSize menuItemSize = QProxyStyle::sizeFromContents(type, option, size, widget);
+             const ElaMenu* menu = dynamic_cast<const ElaMenu*>(widget);
+-            if (menu->isHasIcon() || mopt->menuHasCheckableItems)
++            if ((menu && menu->isHasIcon()) || mopt->menuHasCheckableItems)
+             {
+                 _isAnyoneItemHasIcon = true;
+             }
+-            if (menu->isHasChildMenu())
++            if (menu && menu->isHasChildMenu())
+             {
+                 return QSize(menuItemSize.width() + 20, _pMenuItemHeight);
+             }
+diff --git a/Development/ElaScrollBarStyle.cpp b/Development/ElaScrollBarStyle.cpp
+index 4ac8a8d..7d6099a 100644
+--- a/Development/ElaScrollBarStyle.cpp
++++ b/Development/ElaScrollBarStyle.cpp
+@@ -1,6 +1,7 @@
+ #include "ElaScrollBarStyle.h"
+ 
+ #include <QPainter>
++#include <QCoreApplication>
+ #include <QPainterPath>
+ #include <QPropertyAnimation>
+ #include <QStyleOptionSlider>
+@@ -147,6 +148,15 @@ int ElaScrollBarStyle::styleHint(StyleHint hint, const QStyleOption* option, con
+ 
+ void ElaScrollBarStyle::startExpandAnimation(bool isExpand)
+ {
++    if (qEnvironmentVariableIntValue("WAVEWORKBENCH_REDUCED_MOTION") == 1
++        || (QCoreApplication::instance()
++            && QCoreApplication::instance()->property("waveworkbench.reducedMotion").toBool())) {
++        _pIsExpand = isExpand;
++        _pOpacity = isExpand ? 1 : 0;
++        _pSliderExtent = isExpand ? _scrollBarExtent - 2 * _sliderMargin : 2.4;
++        if (_pScrollBar) _pScrollBar->update();
++        return;
++    }
+     if (isExpand)
+     {
+         _pIsExpand = true;
+diff --git a/Development/ElaTabBarStyle.h b/Development/ElaTabBarStyle.h
+index a99e1d7..f41c68d 100644
+--- a/Development/ElaTabBarStyle.h
++++ b/Development/ElaTabBarStyle.h
+@@ -4,7 +4,7 @@
+ #include <QProxyStyle>
+ 
+ #include "ElaWidgetToolsDef.h"
+-class ElaTabBarStyle : public QProxyStyle
++class ELA_EXPORT ElaTabBarStyle : public QProxyStyle
+ {
+     Q_OBJECT
+     Q_PRIVATE_CREATE(QSize, TabSize)
+diff --git a/Development/ElaTableViewStyle.h b/Development/ElaTableViewStyle.h
+index 89175bd..9ef01f8 100644
+--- a/Development/ElaTableViewStyle.h
++++ b/Development/ElaTableViewStyle.h
+@@ -5,7 +5,7 @@
+ 
+ #include "ElaWidgetToolsDef.h"
+ class QStyleOptionViewItem;
+-class ElaTableViewStyle : public QProxyStyle
++class ELA_EXPORT ElaTableViewStyle : public QProxyStyle
+ {
+     Q_OBJECT
+     Q_PROPERTY_CREATE(int, HeaderMargin)
+diff --git a/Development/ElaToolButtonStyle.cpp b/Development/ElaToolButtonStyle.cpp
+index d878724..dcfe83a 100644
+--- a/Development/ElaToolButtonStyle.cpp
++++ b/Development/ElaToolButtonStyle.cpp
+@@ -100,6 +100,11 @@ void ElaToolButtonStyle::drawComplexControl(ComplexControl control, const QStyle
+ 
+             // 文字绘制
+             _drawText(painter, contentRect, bopt);
++            if (bopt->state.testFlag(QStyle::State_HasFocus)) {
++                painter->setBrush(Qt::NoBrush);
++                painter->setPen(QPen(ElaThemeColor(_themeMode, PrimaryNormal), 2));
++                painter->drawRoundedRect(bopt->rect.adjusted(2, 2, -2, -2), _pBorderRadius, _pBorderRadius);
++            }
+             painter->restore();
+         }
+         return;
+@@ -312,12 +317,12 @@ void ElaToolButtonStyle::_drawText(QPainter* painter, QRect contentRect, const Q
+         case Qt::ToolButtonTextOnly:
+         {
+             contentRect.setLeft(contentRect.left() + _contentMargin);
+-            painter->drawText(contentRect, Qt::AlignLeft | Qt::AlignVCenter, bopt->text);
++            painter->drawText(contentRect, Qt::AlignLeft | Qt::AlignVCenter | Qt::TextShowMnemonic, bopt->text);
+             break;
+         }
+         case Qt::ToolButtonTextBesideIcon:
+         {
+-            painter->drawText(QRect(contentRect.x() + _contentMargin * 2 + bopt->iconSize.width(), contentRect.y(), contentRect.width() - bopt->iconSize.width(), contentRect.height()), Qt::AlignLeft | Qt::AlignVCenter, bopt->text);
++            painter->drawText(QRect(contentRect.x() + _contentMargin * 2 + bopt->iconSize.width(), contentRect.y(), contentRect.width() - bopt->iconSize.width(), contentRect.height()), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextShowMnemonic, bopt->text);
+             break;
+         }
+         case Qt::ToolButtonTextUnderIcon:
+@@ -325,11 +330,11 @@ void ElaToolButtonStyle::_drawText(QPainter* painter, QRect contentRect, const Q
+             if (bopt->features.testFlag(QStyleOptionToolButton::HasMenu) && !bopt->features.testFlag(QStyleOptionToolButton::MenuButtonPopup))
+             {
+                 contentRect.setLeft(contentRect.left() + _contentMargin);
+-                painter->drawText(contentRect, Qt::AlignBottom | Qt::AlignLeft, bopt->text);
++                painter->drawText(contentRect, Qt::AlignBottom | Qt::AlignLeft | Qt::TextShowMnemonic, bopt->text);
+             }
+             else
+             {
+-                painter->drawText(contentRect, Qt::AlignBottom | Qt::AlignHCenter, bopt->text);
++                painter->drawText(contentRect, Qt::AlignBottom | Qt::AlignHCenter | Qt::TextShowMnemonic, bopt->text);
+             }
+             break;
+         }
+diff --git a/Development/ElaToolButtonStyle.h b/Development/ElaToolButtonStyle.h
+index af92928..90a9d52 100644
+--- a/Development/ElaToolButtonStyle.h
++++ b/Development/ElaToolButtonStyle.h
+@@ -5,7 +5,7 @@
+ 
+ #include "ElaWidgetToolsDef.h"
+ class QStyleOptionToolButton;
+-class ElaToolButtonStyle : public QProxyStyle
++class ELA_EXPORT ElaToolButtonStyle : public QProxyStyle
+ {
+     Q_OBJECT
+     Q_PRIVATE_CREATE(bool, IsTransparent)
+diff --git a/Development/ElaTreeViewStyle.h b/Development/ElaTreeViewStyle.h
+index 6b5ca5e..35565d9 100644
+--- a/Development/ElaTreeViewStyle.h
++++ b/Development/ElaTreeViewStyle.h
+@@ -4,7 +4,7 @@
+ #include <QProxyStyle>
+ 
+ #include "ElaWidgetToolsDef.h"
+-class ElaTreeViewStyle : public QProxyStyle
++class ELA_EXPORT ElaTreeViewStyle : public QProxyStyle
+ {
+     Q_OBJECT
+     Q_PROPERTY_CREATE(int, ItemHeight)
+diff --git a/ElaApplication.cpp b/ElaApplication.cpp
+index 99c96bd..12d151f 100644
+--- a/ElaApplication.cpp
++++ b/ElaApplication.cpp
+@@ -104,12 +104,21 @@ int ElaApplication::getFontPixelSize() const
+     return d->_pFontPixelSize;
+ }
+ 
++void ElaApplication::initResources()
++{
++    static const bool initialized = [] {
++        Q_INIT_RESOURCE(ElaWidgetTools);
++        QFontDatabase::addApplicationFont(":/include/Font/FontAwesomeFreeSolid.ttf");
++        return true;
++    }();
++    Q_UNUSED(initialized);
++}
++
+ void ElaApplication::init()
+ {
+     Q_D(ElaApplication);
+-    Q_INIT_RESOURCE(ElaWidgetTools);
++    initResources();
+     QApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
+-    QFontDatabase::addApplicationFont(":/include/Font/FontAwesomeFreeSolid.ttf");
+     //默认字体
+     QFont font = qApp->font();
+     font.setPixelSize(d->_pFontPixelSize);
+diff --git a/ElaApplication.h b/ElaApplication.h
+index 44f31d2..1525ed9 100644
+--- a/ElaApplication.h
++++ b/ElaApplication.h
+@@ -22,6 +22,8 @@ private:
+ 
+ public:
+     void init();
++    // Resource-only initialization for embedded widgets; preserves the host.
++    void initResources();
+     void syncWindowDisplayMode(QWidget* widget, bool isSync = true);
+     static bool containsCursorToItem(QWidget* item);
+ };
+diff --git a/ElaCheckBox.cpp b/ElaCheckBox.cpp
+index a17efc3..e725802 100644
+--- a/ElaCheckBox.cpp
++++ b/ElaCheckBox.cpp
+@@ -8,7 +8,8 @@ ElaCheckBox::ElaCheckBox(QWidget* parent)
+     _pBorderRadius = 3;
+     setMouseTracking(true);
+     setObjectName("ElaCheckBox");
+-    setStyle(new ElaCheckBoxStyle(style()));
++    _waveOwnedStyle = new ElaCheckBoxStyle();
++    setStyle(_waveOwnedStyle);
+     QFont font = this->font();
+     font.setPixelSize(eApp->getFontPixelSize() + 2);
+     setFont(font);
+@@ -22,5 +23,6 @@ ElaCheckBox::ElaCheckBox(const QString& text, QWidget* parent)
+ 
+ ElaCheckBox::~ElaCheckBox()
+ {
+-    delete this->style();
++    setStyle(nullptr);
++    delete _waveOwnedStyle;
+ }
+diff --git a/ElaCheckBox.h b/ElaCheckBox.h
+index 05da8bd..9ea6285 100644
+--- a/ElaCheckBox.h
++++ b/ElaCheckBox.h
+@@ -8,6 +8,7 @@
+ class ELA_EXPORT ElaCheckBox : public QCheckBox
+ {
+     Q_OBJECT
++    QStyle* _waveOwnedStyle{};
+     Q_PROPERTY_CREATE(int, BorderRadius)
+ public:
+     explicit ElaCheckBox(QWidget* parent = nullptr);
+diff --git a/ElaLineEdit.cpp b/ElaLineEdit.cpp
+index bd3fbf3..9777c6d 100644
+--- a/ElaLineEdit.cpp
++++ b/ElaLineEdit.cpp
+@@ -33,16 +33,17 @@ ElaLineEdit::ElaLineEdit(QWidget* parent)
+     QFont textFont = font();
+     textFont.setLetterSpacing(QFont::AbsoluteSpacing, d->_textSpacing);
+     setFont(textFont);
+-    setStyle(new ElaLineEditStyle(style()));
++    _waveOwnedStyle = new ElaLineEditStyle();
++    setStyle(_waveOwnedStyle);
+     setStyleSheet("#ElaLineEdit{background-color:transparent;padding-left: 10px;}");
+     d->onThemeChanged(eTheme->getThemeMode());
+     connect(eTheme, &ElaTheme::themeModeChanged, d, &ElaLineEditPrivate::onThemeChanged);
+-    setVisible(true);
+ }
+ 
+ ElaLineEdit::~ElaLineEdit()
+ {
+-    delete this->style();
++    setStyle(nullptr);
++    delete _waveOwnedStyle;
+ }
+ 
+ void ElaLineEdit::setIsClearButtonEnable(bool isClearButtonEnable)
+diff --git a/ElaLineEdit.h b/ElaLineEdit.h
+index bdf95c3..91808da 100644
+--- a/ElaLineEdit.h
++++ b/ElaLineEdit.h
+@@ -10,6 +10,7 @@ class ElaLineEditPrivate;
+ class ELA_EXPORT ElaLineEdit : public QLineEdit
+ {
+     Q_OBJECT
++    QStyle* _waveOwnedStyle{};
+     Q_Q_CREATE(ElaLineEdit)
+     Q_PROPERTY_CREATE_Q_H(int, BorderRadius)
+     Q_PROPERTY_CREATE_Q_H(bool, IsClearButtonEnable)
+diff --git a/ElaMenu.cpp b/ElaMenu.cpp
+index db86750..7fa15ed 100644
+--- a/ElaMenu.cpp
++++ b/ElaMenu.cpp
+@@ -32,6 +32,7 @@ ElaMenu::ElaMenu(const QString& title, QWidget* parent)
+ ElaMenu::~ElaMenu()
+ {
+     Q_D(ElaMenu);
++    setStyle(nullptr);
+     delete d->_menuStyle;
+ }
+ 
+@@ -133,64 +134,14 @@ bool ElaMenu::isHasIcon() const
+ 
+ void ElaMenu::showEvent(QShowEvent* event)
+ {
++    // Do not move an already-positioned popup or retain animated snapshots.
++    // Qt owns keyboard/popup timing; this also supports reduced motion.
+     Q_EMIT menuShow();
+-    Q_D(ElaMenu);
+-    //消除阴影偏移
+-    move(this->pos().x() - 6, this->pos().y());
+     updateGeometry();
+-    if (!d->_animationPix.isNull())
+-    {
+-        d->_animationPix = QPixmap();
+-    }
+-    d->_animationPix = this->grab(this->rect());
+-    QPropertyAnimation* posAnimation = new QPropertyAnimation(d, "pAnimationImagePosY");
+-    connect(posAnimation, &QPropertyAnimation::finished, this, [=]() {
+-        d->_animationPix = QPixmap();
+-        update();
+-    });
+-    connect(posAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-        update();
+-    });
+-    posAnimation->setEasingCurve(QEasingCurve::OutCubic);
+-    posAnimation->setDuration(400);
+-    int targetPosY = height();
+-    if (targetPosY > 160)
+-    {
+-        if (targetPosY < 320)
+-        {
+-            targetPosY = 160;
+-        }
+-        else
+-        {
+-            targetPosY /= 2;
+-        }
+-    }
+-
+-    if (pos().y() + d->_menuStyle->getMenuItemHeight() + 9 >= QCursor::pos().y())
+-    {
+-        posAnimation->setStartValue(-targetPosY);
+-    }
+-    else
+-    {
+-        posAnimation->setStartValue(targetPosY);
+-    }
+-
+-    posAnimation->setEndValue(0);
+-    posAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+     QMenu::showEvent(event);
+ }
+ 
+ void ElaMenu::paintEvent(QPaintEvent* event)
+ {
+-    Q_D(ElaMenu);
+-    QPainter painter(this);
+-    painter.setRenderHints(QPainter::Antialiasing);
+-    if (!d->_animationPix.isNull())
+-    {
+-        painter.drawPixmap(QRect(0, d->_pAnimationImagePosY, width(), height()), d->_animationPix);
+-    }
+-    else
+-    {
+-        QMenu::paintEvent(event);
+-    }
++    QMenu::paintEvent(event);
+ }
+diff --git a/ElaMenuBar.cpp b/ElaMenuBar.cpp
+index 2f9cb06..25d0795 100644
+--- a/ElaMenuBar.cpp
++++ b/ElaMenuBar.cpp
+@@ -12,9 +12,10 @@ ElaMenuBar::ElaMenuBar(QWidget* parent)
+ {
+     setMouseTracking(true);
+     setObjectName("ElaMenuBar");
+-    setStyle(new ElaMenuBarStyle(style()));
++    _waveOwnedStyle = new ElaMenuBarStyle();
++    setStyle(_waveOwnedStyle);
+     QToolButton* tool = this->findChild<QToolButton*>();
+-    if (tool->objectName() == "qt_menubar_ext_button")
++    if (tool && tool->objectName() == "qt_menubar_ext_button")
+     {
+         QMenu* oldMenu = tool->menu();
+         ElaMenu* menu = new ElaMenu(this);
+@@ -30,7 +31,8 @@ ElaMenuBar::ElaMenuBar(QWidget* parent)
+ 
+ ElaMenuBar::~ElaMenuBar()
+ {
+-    delete this->style();
++    setStyle(nullptr);
++    delete _waveOwnedStyle;
+ }
+ 
+ QAction* ElaMenuBar::addMenu(QMenu* menu)
+diff --git a/ElaMenuBar.h b/ElaMenuBar.h
+index ab98502..a814da7 100644
+--- a/ElaMenuBar.h
++++ b/ElaMenuBar.h
+@@ -11,6 +11,7 @@ class ElaMenu;
+ class ELA_EXPORT ElaMenuBar : public QMenuBar
+ {
+     Q_OBJECT
++    QStyle* _waveOwnedStyle{};
+ public:
+     explicit ElaMenuBar(QWidget* parent = nullptr);
+     ~ElaMenuBar();
+diff --git a/ElaProgressBar.cpp b/ElaProgressBar.cpp
+index 31c9e94..8118746 100644
+--- a/ElaProgressBar.cpp
++++ b/ElaProgressBar.cpp
+@@ -26,6 +26,7 @@ ElaProgressBar::ElaProgressBar(QWidget* parent)
+ ElaProgressBar::~ElaProgressBar()
+ {
+     Q_D(ElaProgressBar);
++    setStyle(nullptr);
+     delete d->_style;
+ }
+ 
+diff --git a/ElaScrollBar.cpp b/ElaScrollBar.cpp
+index 18fcccf..5c0bdda 100644
+--- a/ElaScrollBar.cpp
++++ b/ElaScrollBar.cpp
+@@ -25,6 +25,7 @@ ElaScrollBar::ElaScrollBar(QWidget* parent)
+     d->_pIsAnimation = false;
+     connect(this, &ElaScrollBar::rangeChanged, d, &ElaScrollBarPrivate::onRangeChanged);
+     ElaScrollBarStyle* scrollBarStyle = new ElaScrollBarStyle(style());
++    _waveOwnedStyle = scrollBarStyle;
+     scrollBarStyle->setScrollBar(this);
+     setStyle(scrollBarStyle);
+     d->_slideSmoothAnimation = new QPropertyAnimation(this, "value");
+@@ -79,7 +80,8 @@ ElaScrollBar::ElaScrollBar(QScrollBar* originScrollBar, QAbstractScrollArea* par
+ 
+ ElaScrollBar::~ElaScrollBar()
+ {
+-    delete this->style();
++    setStyle(nullptr);
++    delete _waveOwnedStyle;
+ }
+ 
+ bool ElaScrollBar::event(QEvent* event)
+diff --git a/ElaScrollBar.h b/ElaScrollBar.h
+index 3432da3..9884c64 100644
+--- a/ElaScrollBar.h
++++ b/ElaScrollBar.h
+@@ -11,6 +11,7 @@ class ElaScrollBarPrivate;
+ class ELA_EXPORT ElaScrollBar : public QScrollBar
+ {
+     Q_OBJECT
++    QStyle* _waveOwnedStyle{};
+     Q_Q_CREATE(ElaScrollBar)
+     Q_PROPERTY_CREATE_Q_H(bool, IsAnimation)
+     Q_PROPERTY_CREATE_Q_H(qreal, SpeedLimit)
+diff --git a/ElaStatusBar.cpp b/ElaStatusBar.cpp
+index ab13bd9..68c66fa 100644
+--- a/ElaStatusBar.cpp
++++ b/ElaStatusBar.cpp
+@@ -11,9 +11,12 @@ ElaStatusBar::ElaStatusBar(QWidget* parent)
+     setStyleSheet("#ElaStatusBar{background-color:transparent;}");
+     setFixedHeight(28);
+     setContentsMargins(20, 0, 0, 0);
+-    setStyle(new ElaStatusBarStyle(style()));
++    _waveOwnedStyle = new ElaStatusBarStyle();
++    setStyle(_waveOwnedStyle);
+ }
+ 
+ ElaStatusBar::~ElaStatusBar()
+ {
++    setStyle(nullptr);
++    delete _waveOwnedStyle;
+ }
+diff --git a/ElaStatusBar.h b/ElaStatusBar.h
+index 12f1f28..534b167 100644
+--- a/ElaStatusBar.h
++++ b/ElaStatusBar.h
+@@ -8,6 +8,7 @@
+ class ELA_EXPORT ElaStatusBar : public QStatusBar
+ {
+     Q_OBJECT
++    QStyle* _waveOwnedStyle{};
+ public:
+     explicit ElaStatusBar(QWidget* parent = nullptr);
+     ~ElaStatusBar() override;
+diff --git a/ElaToolBar.cpp b/ElaToolBar.cpp
+index af3138c..303f9ad 100644
+--- a/ElaToolBar.cpp
++++ b/ElaToolBar.cpp
+@@ -50,6 +50,7 @@ ElaToolBar::ElaToolBar(const QString& title, QWidget* parent)
+ ElaToolBar::~ElaToolBar()
+ {
+     Q_D(ElaToolBar);
++    setStyle(nullptr);
+     delete d->_toolBarStyle;
+ }
+ 
+@@ -97,6 +98,10 @@ QAction* ElaToolBar::addElaIconAction(ElaIconType::IconName icon, const QString&
+ void ElaToolBar::paintEvent(QPaintEvent* event)
+ {
+     Q_D(ElaToolBar);
++    if (!isFloating()) {
++        QToolBar::paintEvent(event);
++        return;
++    }
+     QPainter painter(this);
+     painter.save();
+     painter.setRenderHints(QPainter::Antialiasing);

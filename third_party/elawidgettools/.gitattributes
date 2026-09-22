@@ -1,0 +1,4 @@
+# Unified patches require a single context-prefix space on empty source lines.
+# Binary patch blocks also require blank separators. Preserve that syntax;
+# all non-patch source retains normal whitespace checks.
+patches/*.patch whitespace=-blank-at-eol,-blank-at-eof

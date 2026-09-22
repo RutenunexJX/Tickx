@@ -1,0 +1,147 @@
+#include "ElaMenu.h"
+
+#include <QApplication>
+#include <QCloseEvent>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPropertyAnimation>
+#include <QVBoxLayout>
+
+#include "ElaMenuStyle.h"
+#include "private/ElaMenuPrivate.h"
+ElaMenu::ElaMenu(QWidget* parent)
+    : QMenu(parent), d_ptr(new ElaMenuPrivate())
+{
+    Q_D(ElaMenu);
+    d->q_ptr = this;
+    setWindowFlags(Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+    setAttribute(Qt::WA_TranslucentBackground);
+    setObjectName("ElaMenu");
+    d->_menuStyle = new ElaMenuStyle(style());
+    setStyle(d->_menuStyle);
+    d->_pAnimationImagePosY = 0;
+}
+
+ElaMenu::ElaMenu(const QString& title, QWidget* parent)
+    : ElaMenu(parent)
+{
+    setTitle(title);
+}
+
+ElaMenu::~ElaMenu()
+{
+    Q_D(ElaMenu);
+    setStyle(nullptr);
+    delete d->_menuStyle;
+}
+
+void ElaMenu::setMenuItemHeight(int menuItemHeight)
+{
+    Q_D(ElaMenu);
+    d->_menuStyle->setMenuItemHeight(menuItemHeight);
+}
+
+int ElaMenu::getMenuItemHeight() const
+{
+    Q_D(const ElaMenu);
+    return d->_menuStyle->getMenuItemHeight();
+}
+
+QAction* ElaMenu::addMenu(QMenu* menu)
+{
+    return QMenu::addMenu(menu);
+}
+
+ElaMenu* ElaMenu::addMenu(const QString& title)
+{
+    ElaMenu* menu = new ElaMenu(title, this);
+    QMenu::addAction(menu->menuAction());
+    return menu;
+}
+
+ElaMenu* ElaMenu::addMenu(const QIcon& icon, const QString& title)
+{
+    ElaMenu* menu = new ElaMenu(title, this);
+    menu->setIcon(icon);
+    QMenu::addAction(menu->menuAction());
+    return menu;
+}
+
+ElaMenu* ElaMenu::addMenu(ElaIconType::IconName icon, const QString& title)
+{
+    ElaMenu* menu = new ElaMenu(title, this);
+    QMenu::addAction(menu->menuAction());
+    menu->menuAction()->setProperty("ElaIconType", QChar(static_cast<char32_t>(icon)));
+    return menu;
+}
+
+QAction* ElaMenu::addElaIconAction(ElaIconType::IconName icon, const QString& text)
+{
+    QAction* action = new QAction(text, this);
+    action->setProperty("ElaIconType", QChar(static_cast<char32_t>(icon)));
+    QMenu::addAction(action);
+    return action;
+}
+
+QAction* ElaMenu::addElaIconAction(ElaIconType::IconName icon, const QString& text, const QKeySequence& shortcut)
+{
+    QAction* action = new QAction(text, this);
+    action->setShortcut(shortcut);
+    action->setProperty("ElaIconType", QChar(static_cast<char32_t>(icon)));
+    QMenu::addAction(action);
+    return action;
+}
+
+bool ElaMenu::isHasChildMenu() const
+{
+    QList<QAction*> actionList = this->actions();
+    for (auto action: actionList)
+    {
+        if (action->isSeparator())
+        {
+            continue;
+        }
+        if (action->menu())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ElaMenu::isHasIcon() const
+{
+    QList<QAction*> actionList = this->actions();
+    for (auto action: actionList)
+    {
+        if (action->isSeparator())
+        {
+            continue;
+        }
+        QMenu* menu = action->menu();
+        if (menu && (!menu->icon().isNull() || !menu->property("ElaIconType").toString().isEmpty()))
+        {
+            return true;
+        }
+        if (!action->icon().isNull() || !action->property("ElaIconType").toString().isEmpty())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ElaMenu::showEvent(QShowEvent* event)
+{
+    // Do not move an already-positioned popup or retain animated snapshots.
+    // Qt owns keyboard/popup timing; this also supports reduced motion.
+    Q_EMIT menuShow();
+    updateGeometry();
+    QMenu::showEvent(event);
+}
+
+void ElaMenu::paintEvent(QPaintEvent* event)
+{
+    QMenu::paintEvent(event);
+}

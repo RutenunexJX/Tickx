@@ -3,6 +3,7 @@
 #include "trace_signal_browser.h"
 #include "wave_canvas.h"
 #include "waveform_theme.h"
+#include "ui_controls.h"
 #include "waveform_view.h"
 #include "wave/project_io.h"
 #include "wave/widgets.h"
@@ -458,8 +459,9 @@ int main(int argc, char** argv)
                       && style.contains(QStringLiteral("waveState=\"loading\""))
                       && style.contains(QStringLiteral("waveState=\"error\""))
                       && style.contains(QStringLiteral("min-height: 32px"))
-                      && style.contains(QStringLiteral("border: 2px solid")),
-                  "application stylesheet resolves semantic components, geometry, and focus ring tokens");
+                      && !style.contains(QStringLiteral("QLineEdit:focus"))
+                      && !style.contains(QStringLiteral("QPushButton, QToolButton")),
+                  "semantic stylesheet resolves tokens without overriding Ela control painting");
         }
 
         application.setStyleSheet(wave::waveApplicationStyleSheet(
@@ -470,10 +472,10 @@ int main(int argc, char** argv)
         auto* semanticLayout = new QVBoxLayout(&semanticHost);
         semanticLayout->setContentsMargins(8, 8, 8, 8);
         semanticLayout->setSpacing(metrics.spacingUnit);
-        auto* semanticEdit = new QLineEdit(&semanticHost);
+        auto* semanticEdit = wave::ui::lineEdit(&semanticHost);
         semanticEdit->setObjectName(QStringLiteral("SemanticFocusEdit"));
         semanticEdit->setAccessibleName(QStringLiteral("Semantic focus editor"));
-        auto* semanticButton = new QPushButton(
+        auto* semanticButton = wave::ui::button(
             QStringLiteral("Apply"), &semanticHost);
         semanticButton->setObjectName(QStringLiteral("SemanticPrimaryButton"));
         semanticButton->setProperty("waveRole", QStringLiteral("primary"));

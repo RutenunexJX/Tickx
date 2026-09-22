@@ -1,0 +1,108 @@
+diff --git a/ElaMessageBar.h b/ElaMessageBar.h
+index d713344..34ee08e 100644
+--- a/ElaMessageBar.h
++++ b/ElaMessageBar.h
+@@ -14,17 +14,22 @@ class ELA_EXPORT ElaMessageBar : public QWidget
+     Q_Q_CREATE(ElaMessageBar)
+ 
+ public:
++    // A hidden, parent-owned surface: the caller owns content, geometry and lifetime.
++    static ElaMessageBar* createManaged(QWidget* parent);
+     static void success(ElaMessageBarType::PositionPolicy policy, QString title, QString text, int displayMsec, QWidget* parent = nullptr);
+     static void warning(ElaMessageBarType::PositionPolicy policy, QString title, QString text, int displayMsec, QWidget* parent = nullptr);
+     static void information(ElaMessageBarType::PositionPolicy policy, QString title, QString text, int displayMsec, QWidget* parent = nullptr);
+     static void error(ElaMessageBarType::PositionPolicy policy, QString title, QString text, int displayMsec, QWidget* parent = nullptr);
+ 
++Q_SIGNALS:
++    void closeRequested();
++
+ protected:
+     void paintEvent(QPaintEvent* event) override;
+     bool eventFilter(QObject* watched, QEvent* event) override;
+ 
+ private:
+-    explicit ElaMessageBar(ElaMessageBarType::PositionPolicy policy, ElaMessageBarType::MessageMode messageMode, QString& title, QString& text, int displayMsec, QWidget* parent = nullptr);
++    explicit ElaMessageBar(ElaMessageBarType::PositionPolicy policy, ElaMessageBarType::MessageMode messageMode, QString& title, QString& text, int displayMsec, QWidget* parent = nullptr, bool managed = false);
+     ~ElaMessageBar() override;
+ };
+ 
+diff --git a/ElaMessageBar.cpp b/ElaMessageBar.cpp
+index cf01782..ef3efc7 100644
+--- a/ElaMessageBar.cpp
++++ b/ElaMessageBar.cpp
+@@ -12,11 +12,19 @@
+ #include "ElaTheme.h"
+ #include "private/ElaMessageBarPrivate.h"
+ 
+-ElaMessageBar::ElaMessageBar(ElaMessageBarType::PositionPolicy policy, ElaMessageBarType::MessageMode messageMode, QString& title, QString& text, int displayMsec, QWidget* parent)
++ElaMessageBar::ElaMessageBar(ElaMessageBarType::PositionPolicy policy, ElaMessageBarType::MessageMode messageMode, QString& title, QString& text, int displayMsec, QWidget* parent, bool managed)
+     : QWidget{parent}, d_ptr(new ElaMessageBarPrivate())
+ {
+     Q_D(ElaMessageBar);
+     d->q_ptr = this;
++    d->_managed = managed;
++    if (managed) {
++        setObjectName("ElaMessageBar");
++        setAttribute(Qt::WA_ShowWithoutActivating);
++        setFocusPolicy(Qt::NoFocus);
++        hide();
++        return;
++    }
+     d->_borderRadius = 6;
+     d->_title = title;
+     d->_text = text;
+@@ -80,6 +88,14 @@ ElaMessageBar::~ElaMessageBar()
+ {
+ }
+ 
++ElaMessageBar* ElaMessageBar::createManaged(QWidget* parent)
++{
++    if (!parent) return nullptr;
++    QString empty;
++    return new ElaMessageBar(ElaMessageBarType::BottomRight,
++        ElaMessageBarType::Information, empty, empty, 0, parent, true);
++}
++
+ void ElaMessageBar::success(ElaMessageBarType::PositionPolicy policy, QString title, QString text, int displayMsec, QWidget* parent)
+ {
+     // qDebug() << QApplication::topLevelWidgets();
+@@ -169,6 +185,14 @@ void ElaMessageBar::error(ElaMessageBarType::PositionPolicy policy, QString titl
+ void ElaMessageBar::paintEvent(QPaintEvent* event)
+ {
+     Q_D(ElaMessageBar);
++    if (d->_managed) {
++        QPainter painter(this);
++        painter.setRenderHint(QPainter::Antialiasing);
++        painter.setPen(palette().color(QPalette::Mid));
++        painter.setBrush(palette().color(QPalette::Window));
++        painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 6, 6);
++        return;
++    }
+     int fontPixelSize = eApp->getFontPixelSize();
+     QPainter painter(this);
+     painter.setOpacity(d->_pOpacity);
+diff --git a/private/ElaMessageBarPrivate.h b/private/ElaMessageBarPrivate.h
+index 832c666..0479dd2 100644
+--- a/private/ElaMessageBarPrivate.h
++++ b/private/ElaMessageBarPrivate.h
+@@ -49,6 +49,7 @@ private:
+ 
+     // 逻辑数据
+     bool _isNormalDisplay{false};
++    bool _managed{false};
+     bool _isOtherMessageBarEnd{false};
+     ElaIconButton* _closeButton{nullptr};
+     void _messageBarCreate(int displayMsec);
+diff --git a/private/ElaMessageBarPrivate.cpp b/private/ElaMessageBarPrivate.cpp
+index e85df86..c6bac36 100644
+--- a/private/ElaMessageBarPrivate.cpp
++++ b/private/ElaMessageBarPrivate.cpp
+@@ -23,7 +23,7 @@ ElaMessageBarPrivate::ElaMessageBarPrivate(QObject* parent)
+ 
+ ElaMessageBarPrivate::~ElaMessageBarPrivate()
+ {
+-    _updateActiveMap(false);
++    if (!_managed) _updateActiveMap(false);
+ }
+ 
+ void ElaMessageBarPrivate::onOtherMessageBarEnd()

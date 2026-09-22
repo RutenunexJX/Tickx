@@ -1,0 +1,11 @@
+execute_process(COMMAND "${TEST_EXE}" -o "${LOG_FILE},txt"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 25)
+if(EXISTS "${LOG_FILE}")
+    file(READ "${LOG_FILE}" report)
+else()
+    set(report "No QtTest log was produced")
+endif()
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "${report}\n${output}\n${error}\nQtTest result: ${result}")
+endif()
+message(STATUS "${report}")

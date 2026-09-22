@@ -1,3 +1,5 @@
+#include "ui_controls.h"
+#include "ElaMenu.h"
 #include "wave_canvas.h"
 #include "waveform_theme.h"
 
@@ -36,7 +38,6 @@
 #include <QStyle>
 #include <QStringListModel>
 #include <QToolButton>
-#include <QToolTip>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWheelEvent>
@@ -339,6 +340,8 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     : QAbstractScrollArea(parent)
 {
     setObjectName(QStringLiteral("StimulusCanvas"));
+    ui::installScrollBars(this);
+    ui::installToolTips(this);
     setFrameShape(QFrame::NoFrame);
     setMouseTracking(true);
     viewport()->setMouseTracking(true);
@@ -378,7 +381,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         QStringLiteral("CanvasAddBusButton"),
     };
     for (std::size_t index = 0; index < addLaneButtons_.size(); ++index) {
-        auto* button = new QToolButton(viewport());
+        auto* button = ui::toolButton(viewport());
         button->setObjectName(quickObjectNames.at(index));
         button->setText(quickLabels.at(index));
         button->setToolTip(tr("Add a %1 lane immediately").arg(
@@ -395,9 +398,9 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         });
     }
 
-    showHiddenLanesButton_ = new QToolButton(viewport());
+    showHiddenLanesButton_ = ui::toolButton(viewport());
     showHiddenLanesButton_->setObjectName(QStringLiteral("CanvasShowHiddenLanesButton"));
-    hiddenLanesMenu_ = new QMenu(showHiddenLanesButton_);
+    hiddenLanesMenu_ = ui::menu(showHiddenLanesButton_);
     hiddenLanesMenu_->setObjectName(QStringLiteral("HiddenLanesMenu"));
     hiddenLanesMenu_->setTitle(tr("Restore one hidden item"));
     showHiddenLanesButton_->setText(tr("Show hidden items"));
@@ -422,19 +425,19 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     auto* quickLayout = new QHBoxLayout(quickLaneSetupPanel_);
     quickLayout->setContentsMargins(8, 4, 8, 4);
     quickLayout->setSpacing(4);
-    auto* quickPrompt = new QLabel(tr("New signal"), quickLaneSetupPanel_);
+    auto* quickPrompt = ui::text(tr("New signal"), quickLaneSetupPanel_);
     quickPrompt->setObjectName(QStringLiteral("QuickLaneSetupPrompt"));
     quickLayout->addWidget(quickPrompt);
-    quickLaneNameEdit_ = new QLineEdit(quickLaneSetupPanel_);
+    quickLaneNameEdit_ = ui::lineEdit(quickLaneSetupPanel_);
     quickLaneNameEdit_->setObjectName(QStringLiteral("QuickLaneNameEdit"));
     quickLaneNameEdit_->setPlaceholderText(tr("Signal name"));
     quickLaneNameEdit_->setMinimumWidth(130);
     quickLayout->addWidget(quickLaneNameEdit_, 1);
-    quickLaneParameterEdit_ = new QLineEdit(quickLaneSetupPanel_);
+    quickLaneParameterEdit_ = ui::lineEdit(quickLaneSetupPanel_);
     quickLaneParameterEdit_->setObjectName(QStringLiteral("QuickLaneParameterEdit"));
     quickLaneParameterEdit_->setMaximumWidth(120);
     quickLayout->addWidget(quickLaneParameterEdit_);
-    quickLaneClockCombo_ = new QComboBox(quickLaneSetupPanel_);
+    quickLaneClockCombo_ = ui::comboBox(quickLaneSetupPanel_);
     quickLaneClockCombo_->setObjectName(QStringLiteral("QuickLaneClockCombo"));
     quickLaneClockCombo_->setMinimumWidth(120);
     quickLayout->addWidget(quickLaneClockCombo_);
@@ -443,7 +446,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     quickLaneErrorLabel_->setProperty("waveState", QStringLiteral("error"));
     quickLaneErrorLabel_->setMaximumWidth(230);
     quickLayout->addWidget(quickLaneErrorLabel_);
-    auto* quickHint = new QLabel(
+    auto* quickHint = ui::text(
         tr("Enter or click the next target to apply · Esc to cancel"),
         quickLaneSetupPanel_);
     quickHint->setObjectName(QStringLiteral("QuickLaneSetupHint"));
@@ -455,7 +458,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     quickLaneClockCombo_->installEventFilter(this);
     quickLaneSetupPanel_->hide();
 
-    laneRenameEdit_ = new QLineEdit(viewport());
+    laneRenameEdit_ = ui::lineEdit(viewport());
     laneRenameEdit_->setObjectName(QStringLiteral("LaneRenameEdit"));
     laneRenameEdit_->setAccessibleName(tr("Signal name"));
     laneRenameEdit_->setPlaceholderText(tr("Signal name"));
@@ -468,10 +471,10 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     });
     laneRenameEdit_->hide();
 
-    durationLabel_ = new QLabel(tr("End"), viewport());
+    durationLabel_ = ui::text(tr("End"), viewport());
     durationLabel_->setObjectName(QStringLiteral("TimelineDurationLabel"));
     durationLabel_->setProperty("waveRole", QStringLiteral("muted"));
-    durationEdit_ = new QLineEdit(viewport());
+    durationEdit_ = ui::lineEdit(viewport());
     durationEdit_->setObjectName(QStringLiteral("TimelineDurationEdit"));
     durationEdit_->setAccessibleName(tr("Timeline end"));
     durationEdit_->setToolTip(
@@ -515,7 +518,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
                                     const QString& objectName,
                                     const QString& accessibleName,
                                     const QString& toolTip) {
-        auto* button = new QToolButton(busPresetPalette_);
+        auto* button = ui::toolButton(busPresetPalette_);
         button->setText(text);
         button->setObjectName(objectName);
         button->setAccessibleName(accessibleName);
@@ -569,7 +572,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     presetHeaderLayout->addWidget(busCloseButton_);
     connect(busCloseButton_, &QToolButton::clicked, this, &WaveCanvas::cancelBusValueEdit);
 
-    busRadixCombo_ = new QComboBox(busPresetPalette_);
+    busRadixCombo_ = ui::comboBox(busPresetPalette_);
     busRadixCombo_->setObjectName(QStringLiteral("BusEditRadixCombo"));
     busRadixCombo_->setAccessibleName(tr("Bus input radix"));
     busRadixCombo_->setToolTip(tr("Interpret values without a prefix using this radix"));
@@ -588,7 +591,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
                 updateBusEditActionStates(true);
             }
         });
-    busValueEdit_ = new QLineEdit(busPresetPalette_);
+    busValueEdit_ = ui::lineEdit(busPresetPalette_);
     busValueEdit_->setObjectName(QStringLiteral("BusPresetValueEdit"));
     busValueEdit_->setPlaceholderText(tr("Value + Enter"));
     busValueEdit_->setAccessibleName(tr("Bus value"));
@@ -598,6 +601,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     laneValueCompleter_ = new QCompleter(laneValueCompletionModel_, this);
     laneValueCompleter_->setCaseSensitivity(Qt::CaseInsensitive);
     laneValueCompleter_->setCompletionMode(QCompleter::PopupCompletion);
+    laneValueCompleter_->setPopup(ui::completionPopup(busValueEdit_));
     busValueEdit_->setCompleter(laneValueCompleter_);
     busValueEdit_->installEventFilter(this);
     connect(
@@ -608,7 +612,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
             updateBusEditActionStates(true);
         });
     presetControlLayout->addWidget(busValueEdit_, 1);
-    busRecentValuesCombo_ = new QComboBox(busPresetPalette_);
+    busRecentValuesCombo_ = ui::comboBox(busPresetPalette_);
     busRecentValuesCombo_->setObjectName(QStringLiteral("BusEditRecentValuesCombo"));
     busRecentValuesCombo_->setAccessibleName(tr("Recent Bus values"));
     busRecentValuesCombo_->setToolTip(tr("Reuse a recent value for this signal"));
@@ -638,7 +642,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     }};
     std::size_t presetIndex = 0;
     for (const auto& [presetId, label, objectName] : presets) {
-        auto* button = new QToolButton(busPresetPalette_);
+        auto* button = ui::toolButton(busPresetPalette_);
         button->setText(label);
         button->setObjectName(objectName);
         button->setAutoRaise(true);
@@ -706,7 +710,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeEditContextLabel_->setCursor(Qt::PointingHandCursor);
     rangeEditContextLabel_->installEventFilter(this);
     rangeLayout->addWidget(rangeEditContextLabel_);
-    rangeCopyButton_ = new QToolButton(rangeEditPalette_);
+    rangeCopyButton_ = ui::toolButton(rangeEditPalette_);
     rangeCopyButton_->setText(tr("Copy"));
     rangeCopyButton_->setObjectName(QStringLiteral("RangeEditCopyButton"));
     rangeCopyButton_->setAutoRaise(true);
@@ -714,13 +718,11 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeCopyButton_->setCursor(Qt::PointingHandCursor);
     rangeCopyButton_->setToolTip(tr("Copy the selected signals and time range (Ctrl+C)"));
     rangeCopyButton_->setAccessibleName(tr("Copy selected range"));
-    rangeCopyButton_->setIcon(QIcon::fromTheme(
-        QStringLiteral("edit-copy"),
-        style()->standardIcon(QStyle::SP_FileDialogListView)));
+    rangeCopyButton_->setIcon(ui::icon(ui::Icon::Copy, this));
     rangeCopyButton_->setText({});
     rangeLayout->addWidget(rangeCopyButton_);
     connect(rangeCopyButton_, &QToolButton::clicked, this, &WaveCanvas::copySelection);
-    rangeRepeatButton_ = new QToolButton(rangeEditPalette_);
+    rangeRepeatButton_ = ui::toolButton(rangeEditPalette_);
     rangeRepeatButton_->setText(tr("Repeat"));
     rangeRepeatButton_->setObjectName(QStringLiteral("RangeEditRepeatButton"));
     rangeRepeatButton_->setAutoRaise(true);
@@ -729,8 +731,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeRepeatButton_->setToolTip(
         tr("Repeat the complete selected range immediately after it without changing the clipboard (Ctrl+D)"));
     rangeRepeatButton_->setAccessibleName(tr("Repeat selected range after"));
-    rangeRepeatButton_->setIcon(
-        style()->standardIcon(QStyle::SP_BrowserReload));
+    rangeRepeatButton_->setIcon(ui::icon(ui::Icon::Repeat, this));
     rangeRepeatButton_->setText({});
     rangeRepeatButton_->installEventFilter(this);
     rangeLayout->addWidget(rangeRepeatButton_);
@@ -739,7 +740,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         &QToolButton::clicked,
         this,
         &WaveCanvas::duplicateSelectionAfter);
-    rangePasteButton_ = new QToolButton(rangeEditPalette_);
+    rangePasteButton_ = ui::toolButton(rangeEditPalette_);
     rangePasteButton_->setText(tr("Paste"));
     rangePasteButton_->setObjectName(QStringLiteral("RangeEditPasteButton"));
     rangePasteButton_->setAutoRaise(true);
@@ -747,9 +748,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangePasteButton_->setCursor(Qt::PointingHandCursor);
     rangePasteButton_->setToolTip(tr("Paste a copied range at the selected start (Ctrl+V)"));
     rangePasteButton_->setAccessibleName(tr("Paste copied range into selected signals"));
-    rangePasteButton_->setIcon(QIcon::fromTheme(
-        QStringLiteral("edit-paste"),
-        style()->standardIcon(QStyle::SP_DialogOpenButton)));
+    rangePasteButton_->setIcon(ui::icon(ui::Icon::Paste, this));
     rangePasteButton_->setText({});
     rangeLayout->addWidget(rangePasteButton_);
     connect(rangePasteButton_, &QToolButton::clicked, this, &WaveCanvas::pasteAtCursor);
@@ -757,7 +756,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         if (rangeEditPaletteVisible_) showRangeEditPalette();
         viewport()->update();
     });
-    rangeClearButton_ = new QToolButton(rangeEditPalette_);
+    rangeClearButton_ = ui::toolButton(rangeEditPalette_);
     rangeClearButton_->setText(tr("Clear"));
     rangeClearButton_->setObjectName(QStringLiteral("RangeEditClearButton"));
     rangeClearButton_->setAutoRaise(true);
@@ -765,14 +764,13 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeClearButton_->setCursor(Qt::PointingHandCursor);
     rangeClearButton_->setToolTip(tr("Clear values in the selected range (Delete)"));
     rangeClearButton_->setAccessibleName(tr("Clear selected range"));
-    rangeClearButton_->setIcon(
-        style()->standardIcon(QStyle::SP_TrashIcon));
+    rangeClearButton_->setIcon(ui::icon(ui::Icon::Delete, this));
     rangeClearButton_->setText({});
     rangeLayout->addWidget(rangeClearButton_);
     connect(rangeClearButton_, &QToolButton::clicked, this, [this] {
         static_cast<void>(clearExplicitRange());
     });
-    rangeValueEdit_ = new QLineEdit(rangeEditPalette_);
+    rangeValueEdit_ = ui::lineEdit(rangeEditPalette_);
     rangeValueEdit_->setObjectName(QStringLiteral("RangeEditValueEdit"));
     rangeValueEdit_->setPlaceholderText(tr("Value + Enter"));
     rangeValueEdit_->setAccessibleName(tr("Selected bus range value"));
@@ -782,10 +780,11 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeValueCompleter_ = new QCompleter(rangeValueCompletionModel_, this);
     rangeValueCompleter_->setCaseSensitivity(Qt::CaseInsensitive);
     rangeValueCompleter_->setCompletionMode(QCompleter::PopupCompletion);
+    rangeValueCompleter_->setPopup(ui::completionPopup(rangeValueEdit_));
     rangeValueEdit_->setCompleter(rangeValueCompleter_);
     rangeValueEdit_->installEventFilter(this);
     rangeLoadValuesAction_ = rangeValueEdit_->addAction(
-        style()->standardIcon(QStyle::SP_BrowserReload),
+        ui::icon(ui::Icon::Refresh, this),
         QLineEdit::TrailingPosition);
     rangeLoadValuesAction_->setObjectName(
         QStringLiteral("RangeEditLoadValuesAction"));
@@ -896,7 +895,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
                                      const QString& text,
                                      const QString& objectName,
                                      const std::string& presetId) {
-        auto* button = new QToolButton(rangeEditPalette_);
+        auto* button = ui::toolButton(rangeEditPalette_);
         button->setText(text);
         button->setObjectName(objectName);
         button->setAutoRaise(true);
@@ -933,7 +932,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         tr("Disable"),
         QStringLiteral("RangeEditClockDisableButton"),
         "clock-disable");
-    rangeCloseButton_ = new QToolButton(rangeEditPalette_);
+    rangeCloseButton_ = ui::toolButton(rangeEditPalette_);
     rangeCloseButton_->setText(QStringLiteral("×"));
     rangeCloseButton_->setObjectName(QStringLiteral("RangeEditCloseButton"));
     rangeCloseButton_->setAccessibleName(tr("Close range selection"));
@@ -4221,7 +4220,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
     if (event && event->type() == QEvent::ToolTip) {
         const auto* help = static_cast<QHelpEvent*>(event);
         if (signalHeaderDividerAt(help->pos())) {
-            QToolTip::showText(
+            ui::showToolTip(
                 help->globalPos(),
                 tr("Drag to resize signal names · double-click to fit"),
                 viewport(),
@@ -4243,7 +4242,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                                  .arg(static_cast<qulonglong>(
                                      selectedLaneIds_.size()));
             }
-            QToolTip::showText(
+            ui::showToolTip(
                 help->globalPos(),
                 rulerHelp,
                 viewport(),
@@ -4260,7 +4259,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                     const auto memberCount =
                         visibleGroupMemberCount(lane->id);
                     if (memberCount == 0) {
-                        QToolTip::showText(
+                        ui::showToolTip(
                             help->globalPos(),
                             tr("%1\nGroup · no visible member signals")
                                 .arg(QString::fromStdString(lane->name)),
@@ -4269,7 +4268,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                     }
                     const auto collapsed =
                         collapsedGroupIds_.contains(lane->id);
-                    QToolTip::showText(
+                    ui::showToolTip(
                         help->globalPos(),
                         tr("%1\n%2 · %3 visible member signal(s)\n"
                            "Click the arrow or use Left/Right to %4")
@@ -4287,7 +4286,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                         tr("\nMember of %1")
                             .arg(QString::fromStdString(group->name)));
                 }
-                QToolTip::showText(
+                ui::showToolTip(
                     help->globalPos(),
                     label,
                     viewport());
@@ -4324,7 +4323,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                                 QString::fromStdString(formatTick(
                                     range.second - range.first,
                                     project_->timeBase)));
-                    QToolTip::showText(help->globalPos(), details, viewport());
+                    ui::showToolTip(help->globalPos(), details, viewport());
                     return true;
                 }
                 if (const auto* segment = segmentAtTick(*lane, tick)) {
@@ -4342,7 +4341,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                                 QString::fromStdString(formatTick(
                                     segment->end - segment->start,
                                     project_->timeBase)));
-                    QToolTip::showText(
+                    ui::showToolTip(
                         help->globalPos(),
                         lane->kind == LaneKind::Clock
                             ? details
@@ -4378,19 +4377,19 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                               QString::fromStdString(formatTick(
                                   range.second - range.first,
                                   project_->timeBase)));
-                QToolTip::showText(help->globalPos(), details, viewport());
+                ui::showToolTip(help->globalPos(), details, viewport());
                 return true;
             }
         }
         if (help->pos().x() >= headerWidth_) {
-            QToolTip::showText(
+            ui::showToolTip(
                 help->globalPos(),
                 tr("Space+drag or middle-drag pans · Ctrl+wheel zooms · "
                    "Shift+wheel scrolls horizontally"),
                 viewport());
             return true;
         }
-        QToolTip::hideText();
+        ui::hideToolTip();
         event->ignore();
         return true;
     }
@@ -4401,7 +4400,7 @@ bool WaveCanvas::viewportEvent(QEvent* event)
         waveEditHoverLaneId_.clear();
         waveEditHoverRange_.reset();
         snapGuideTick_.reset();
-        QToolTip::hideText();
+        ui::hideToolTip();
         if (changed) viewport()->update();
     }
     return QAbstractScrollArea::viewportEvent(event);
@@ -4427,7 +4426,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     }
     if (explicitRangeContains(event->pos())) {
         setFocus(Qt::MouseFocusReason);
-        QMenu menu(this);
+        ElaMenu menu(this);
         menu.setObjectName(QStringLiteral("WaveformRangeContextMenu"));
         menu.setToolTipsVisible(true);
         const auto clearAvailability = rangeClearAvailability();
@@ -4671,7 +4670,7 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
     emit selectionChanged(QString::fromStdString(lane->id), cursorTick_);
     viewport()->update();
 
-    QMenu menu(this);
+    ElaMenu menu(this);
     menu.setObjectName(QStringLiteral("WaveformContextMenu"));
     menu.setToolTipsVisible(true);
     QAction* pasteRange = nullptr;
@@ -6220,7 +6219,7 @@ void WaveCanvas::mousePressEvent(QMouseEvent* event)
         && rangeSequenceTokenAt(position)) {
         rangeSequenceTokenPress_ = true;
         rangeSequenceTokenPressPosition_ = position;
-        QToolTip::hideText();
+        ui::hideToolTip();
         event->accept();
         return;
     }
@@ -7369,7 +7368,7 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
                 || !waveEditHoverLaneId_.empty();
             waveEditHoverLaneId_.clear();
             waveEditHoverRange_.reset();
-            QToolTip::hideText();
+            ui::hideToolTip();
             viewport()->setCursor(Qt::SplitHCursor);
             if (hadHover) viewport()->update();
         } else if (rangeSequenceHoverSpan) {
@@ -7380,7 +7379,7 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
             waveEditHoverRange_.reset();
             viewport()->setCursor(
                 Qt::PointingHandCursor);
-            QToolTip::showText(
+            ui::showToolTip(
                 event->globalPosition().toPoint(),
                 tr("Click to select token %1 in the range editor\nEditing it affects %2 mapped target(s)")
                     .arg(
@@ -7398,7 +7397,7 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
                 || !waveEditHoverLaneId_.empty();
             waveEditHoverLaneId_.clear();
             waveEditHoverRange_.reset();
-            QToolTip::hideText();
+            ui::hideToolTip();
             viewport()->setCursor(
                 event->modifiers().testFlag(Qt::ControlModifier)
                     ? Qt::DragCopyCursor
@@ -7894,7 +7893,7 @@ void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
     const auto start = snappedTick(tickAtX(event->position().toPoint().x()), lane);
     const auto end = std::min(scenario_->duration, start + std::max<Tick>(1, majorTickStep()));
     bool accepted = false;
-    const auto value = QInputDialog::getText(
+    const auto value = ui::InputDialog::getText(
         this,
         tr("Set bus value"),
         tr("Value for %1:").arg(QString::fromStdString(lane->name)),
@@ -7905,7 +7904,7 @@ void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
 
     const auto validation = validateLaneValue(*lane, value.toStdString());
     if (!validation.valid) {
-        QToolTip::showText(
+        ui::showToolTip(
             event->globalPosition().toPoint(),
             QString::fromStdString(validation.error),
             viewport());
@@ -7919,7 +7918,7 @@ void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
             end,
             validation.normalizedValue));
     } catch (const std::exception& exception) {
-        QToolTip::showText(
+        ui::showToolTip(
             event->globalPosition().toPoint(),
             QString::fromUtf8(exception.what()),
             viewport());
@@ -12367,7 +12366,7 @@ bool WaveCanvas::selectRangeSequenceTokenAt(
         lane->id,
         tick,
     };
-    QToolTip::hideText();
+    ui::hideToolTip();
     hideBusPresetPalette();
     rangeValueEdit_->setFocus(
         Qt::MouseFocusReason);
@@ -16095,7 +16094,7 @@ bool WaveCanvas::setLaneRangeValue(
     if (!lane || lane->kind == LaneKind::Group) return false;
     const auto validation = validateLaneValue(*lane, value);
     if (!validation.valid) {
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(QPoint(xAtTick(start), RulerHeight + 4)),
             QString::fromStdString(validation.error),
             viewport());
@@ -18032,7 +18031,7 @@ void WaveCanvas::commitLaneReorder()
                 return;
             }
         } catch (const std::exception& exception) {
-            QToolTip::showText(
+            ui::showToolTip(
                 viewport()->mapToGlobal(laneHeaderPressPosition_),
                 QString::fromUtf8(exception.what()),
                 viewport());
@@ -18083,7 +18082,7 @@ void WaveCanvas::commitLaneReorder()
                 return;
             }
         } catch (const std::exception& exception) {
-            QToolTip::showText(
+            ui::showToolTip(
                 viewport()->mapToGlobal(laneHeaderPressPosition_),
                 QString::fromUtf8(exception.what()),
                 viewport());
@@ -18125,7 +18124,7 @@ void WaveCanvas::commitLaneReorder()
             laneDragId_,
             destinationIndex));
     } catch (const std::exception& exception) {
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(laneHeaderPressPosition_),
             QString::fromUtf8(exception.what()),
             viewport());
@@ -20147,7 +20146,7 @@ void WaveCanvas::commitDraw(const QPoint& releasePosition)
     auto value = drawValue_;
     if (lane->kind == LaneKind::Clock) {
         bool accepted = false;
-        const auto choice = QInputDialog::getItem(
+        const auto choice = ui::InputDialog::getItem(
             this,
             tr("Clock interval"),
             tr("Mode for %1:").arg(QString::fromStdString(lane->name)),
@@ -20180,7 +20179,7 @@ void WaveCanvas::commitDraw(const QPoint& releasePosition)
                     value));
             }
         } catch (const std::exception& exception) {
-            QToolTip::showText(
+            ui::showToolTip(
                 viewport()->mapToGlobal(releasePosition),
                 QString::fromUtf8(exception.what()),
                 viewport());
@@ -20197,7 +20196,7 @@ void WaveCanvas::commitDraw(const QPoint& releasePosition)
         || lane->kind == LaneKind::Transaction
         || lane->kind == LaneKind::Event) {
         bool accepted = false;
-        const auto entered = QInputDialog::getText(
+        const auto entered = ui::InputDialog::getText(
             this,
             tr("Set range value"),
             tr("Value for %1:").arg(QString::fromStdString(lane->name)),
@@ -20213,7 +20212,7 @@ void WaveCanvas::commitDraw(const QPoint& releasePosition)
 
     const auto validation = validateLaneValue(*lane, value);
     if (!validation.valid) {
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(releasePosition),
             QString::fromStdString(validation.error),
             viewport());
@@ -20228,7 +20227,7 @@ void WaveCanvas::commitDraw(const QPoint& releasePosition)
             end,
             validation.normalizedValue));
     } catch (const std::exception& exception) {
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(releasePosition),
             QString::fromUtf8(exception.what()),
             viewport());
@@ -20759,7 +20758,7 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
         waveEditOriginalRange_.reset();
         waveEditPreviewRange_.reset();
         if (beats.empty()) {
-            QToolTip::showText(
+            ui::showToolTip(
                 viewport()->mapToGlobal(releasePosition),
                 tr("The selection contains too many beats to toggle at once"),
                 viewport());
@@ -20828,7 +20827,7 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
                 start,
                 end));
         } catch (const std::exception& exception) {
-            QToolTip::showText(
+            ui::showToolTip(
                 viewport()->mapToGlobal(releasePosition),
                 QString::fromUtf8(exception.what()),
                 viewport());
@@ -20928,7 +20927,7 @@ void WaveCanvas::commitWaveEdit(const QPoint& releasePosition)
                 end,
                 segmentValue));
         } catch (const std::exception& exception) {
-            QToolTip::showText(
+            ui::showToolTip(
                 viewport()->mapToGlobal(releasePosition),
                 QString::fromUtf8(exception.what()),
                 viewport());
@@ -21080,7 +21079,7 @@ void WaveCanvas::commitBitToggle(
             drawLaneId_,
             beats));
     } catch (const std::exception& exception) {
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(position),
             QString::fromUtf8(exception.what()),
             viewport());
@@ -21139,7 +21138,7 @@ void WaveCanvas::editSegmentAt(const QPoint& position)
         selectionRange_ = editableBeatRangeAt(hoverTick, *lane);
         waveEditHoverLaneId_ = lane->id;
         waveEditHoverRange_ = selectionRange_;
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(position),
             tr("Click or drag to toggle beats; press 0, 1, X or Z to set an explicit value"),
             viewport());
@@ -21188,7 +21187,7 @@ void WaveCanvas::editSegmentAt(const QPoint& position)
     std::string replacementValue;
     bool clearClockOverride = false;
     if (lane->kind == LaneKind::Clock) {
-        const auto choice = QInputDialog::getItem(
+        const auto choice = ui::InputDialog::getItem(
             this,
             tr("Edit clock segment"),
             tr("Mode for %1:").arg(QString::fromStdString(lane->name)),
@@ -21207,7 +21206,7 @@ void WaveCanvas::editSegmentAt(const QPoint& position)
                 : "gated";
         }
     } else {
-        const auto entered = QInputDialog::getText(
+        const auto entered = ui::InputDialog::getText(
             this,
             tr("Edit segment value"),
             tr("Value for %1:").arg(QString::fromStdString(lane->name)),
@@ -21232,7 +21231,7 @@ void WaveCanvas::editSegmentAt(const QPoint& position)
         const auto validation = validateLaneValue(*lane, replacementValue);
         if (!validation.valid) {
             const auto error = QString::fromStdString(validation.error);
-            QToolTip::showText(
+            ui::showToolTip(
                 viewport()->mapToGlobal(position),
                 error,
                 viewport());
@@ -21263,7 +21262,7 @@ void WaveCanvas::editSegmentAt(const QPoint& position)
         }
     } catch (const std::exception& exception) {
         const auto error = QString::fromUtf8(exception.what());
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(position),
             error,
             viewport());
@@ -21381,7 +21380,7 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
                     selectedMarkerId_,
                     replacement));
             } catch (const std::exception& exception) {
-                QToolTip::showText(
+                ui::showToolTip(
                     viewport()->mapToGlobal(releasePosition),
                     QString::fromUtf8(exception.what()),
                     viewport());
@@ -21436,7 +21435,7 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
     try {
         commandStack_->execute(std::make_unique<AddMarkerCommand>(*scenario_, marker));
     } catch (const std::exception& exception) {
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(releasePosition),
             QString::fromUtf8(exception.what()),
             viewport());
@@ -21472,7 +21471,7 @@ void WaveCanvas::commitRelation(const QPoint& releasePosition)
         const auto relationId = activeRelationId_;
         const auto* relation = relationById(relationId);
         if (!relation || !droppedEvent) {
-            QToolTip::showText(
+            ui::showToolTip(
                 viewport()->mapToGlobal(releasePosition),
                 tr("Release on a visible event marker"),
                 viewport());
@@ -21487,7 +21486,7 @@ void WaveCanvas::commitRelation(const QPoint& releasePosition)
             : replacement.targetEventId;
         if (interaction == RelationInteraction::RetargetSource) {
             if (droppedEvent->id == replacement.targetEventId) {
-                QToolTip::showText(
+                ui::showToolTip(
                     viewport()->mapToGlobal(releasePosition),
                     tr("A relation requires two different events"),
                     viewport());
@@ -21498,7 +21497,7 @@ void WaveCanvas::commitRelation(const QPoint& releasePosition)
             replacement.sourceEventId = droppedEvent->id;
         } else {
             if (droppedEvent->id == replacement.sourceEventId) {
-                QToolTip::showText(
+                ui::showToolTip(
                     viewport()->mapToGlobal(releasePosition),
                     tr("A relation requires two different events"),
                     viewport());
@@ -21520,7 +21519,7 @@ void WaveCanvas::commitRelation(const QPoint& releasePosition)
                 relationId,
                 std::move(replacement)));
         } catch (const std::exception& exception) {
-            QToolTip::showText(
+            ui::showToolTip(
                 viewport()->mapToGlobal(releasePosition),
                 QString::fromUtf8(exception.what()),
                 viewport());
@@ -21544,7 +21543,7 @@ void WaveCanvas::commitRelation(const QPoint& releasePosition)
         || !source
         || !target
         || source->id == target->id) {
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(releasePosition),
             tr("Finish on a different visible event marker"),
             viewport());
@@ -21573,7 +21572,7 @@ void WaveCanvas::commitRelation(const QPoint& releasePosition)
     try {
         commandStack_->execute(std::make_unique<AddRelationCommand>(*scenario_, relation));
     } catch (const std::exception& exception) {
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(releasePosition),
             QString::fromUtf8(exception.what()),
             viewport());
@@ -21619,7 +21618,7 @@ void WaveCanvas::commitTransition(const QPoint& releasePosition)
             existing->id,
             std::move(replacement)));
     } catch (const std::exception& exception) {
-        QToolTip::showText(
+        ui::showToolTip(
             viewport()->mapToGlobal(releasePosition),
             QString::fromUtf8(exception.what()),
             viewport());

@@ -6,6 +6,22 @@ function(wave_add_toolchain_fixture target mode)
     wave_enable_warnings(${target})
 endfunction()
 
+find_package(Qt6 6.10.2 EXACT REQUIRED COMPONENTS Test)
+add_executable(wave-ela-ui-test ela_ui_test.cpp)
+target_link_libraries(wave-ela-ui-test PRIVATE wavewidgets Qt6::Test Ela::WidgetTools)
+wave_enable_warnings(wave-ela-ui-test)
+foreach(_wave_ela_scale IN ITEMS 1 1.25 1.5 2)
+    add_test(NAME wave-ela-ui-${_wave_ela_scale}
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTEST_EXE=$<TARGET_FILE:wave-ela-ui-test>"
+            "-DLOG_FILE=${CMAKE_BINARY_DIR}/ela-ui-${_wave_ela_scale}.txt"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+    set_tests_properties(wave-ela-ui-${_wave_ela_scale} PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=${_wave_ela_scale};WAVEWORKBENCH_REDUCED_MOTION=1;WAVE_ELA_PREVIEW_DIR=${CMAKE_BINARY_DIR}/ela-previews/${_wave_ela_scale};WAVEWORKBENCH_RECOVERY_DIR=${CMAKE_BINARY_DIR}/test-recovery/ela-${_wave_ela_scale};WAVEWORKBENCH_SETTINGS_DIR=${CMAKE_BINARY_DIR}/test-settings/ela-${_wave_ela_scale}"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        TIMEOUT 30)
+endforeach()
+
 if(SuiteApp_FOUND)
     find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
     add_executable(wave-suiteapp-integration-test
@@ -258,7 +274,8 @@ add_test(
 add_test(
     NAME wave-file-conflict-smoke
     COMMAND wave-workbench
-            "--file-conflict-smoke=${CMAKE_BINARY_DIR}/file-conflict-smoke.wave.json"
+            # Other tests' build-root output must not reset the directory debounce.
+            "--file-conflict-smoke=${CMAKE_BINARY_DIR}/test-projects/file-conflict/project.wave.json"
 )
 add_test(
     NAME wave-lane-dialog-smoke
@@ -927,6 +944,10 @@ if(WIN32 AND EXISTS "C:/Windows/Fonts/segoeui.ttf")
     list(APPEND _wave_test_environment
         "QT_QPA_FONTDIR=${_wave_test_font_dir}")
 endif()
+foreach(_wave_ela_scale IN ITEMS 1 1.25 1.5 2)
+    set_property(TEST wave-ela-ui-${_wave_ela_scale} APPEND PROPERTY ENVIRONMENT
+        "QT_QPA_FONTDIR=${_wave_test_font_dir}")
+endforeach()
 foreach(_waveform_scale_test _waveform_scale IN ZIP_LISTS
         _waveform_view_scale_tests _waveform_view_scales)
     set_tests_properties(${_waveform_scale_test} PROPERTIES
