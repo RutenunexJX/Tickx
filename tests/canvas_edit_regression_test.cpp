@@ -473,6 +473,72 @@ private slots:
         }
     }
 
+    void signalHeaderRangeLabel_data()
+    {
+        QTest::addColumn<int>("width");
+        QTest::addColumn<QString>("name");
+        QTest::addColumn<QString>("label");
+        QTest::newRow("bus-8") << 8 << QString("bus") << QString("bus[7:0]");
+        QTest::newRow("bus-16") << 16 << QString("data") << QString("data[15:0]");
+        QTest::newRow("bus-32") << 32 << QString("payload") << QString("payload[31:0]");
+        QTest::newRow("bus-64") << 64 << QString("data") << QString("data[63:0]");
+        QTest::newRow("one-bit") << 1 << QString("ready") << QString("ready");
+        QTest::newRow("already-indexed") << 32 << QString("data[31:0]") << QString("data[31:0]");
+        QTest::newRow("declared-range") << 8 << QString("data[15:8]") << QString("data[15:8]");
+        QTest::newRow("array-member") << 8 << QString("port[2].data") << QString("port[2].data[7:0]");
+    }
+
+    void signalHeaderRangeLabel()
+    {
+        QFETCH(int, width);
+        QFETCH(QString, name);
+        QFETCH(QString, label);
+        Fixture f;
+        f.lane(2).name = name.toStdString();
+        f.lane(2).width = width;
+        const auto original = wave::serializeProject(f.project);
+        f.show();
+        f.canvas.setSignalHeaderWidth(320);
+        const auto header = [&] {
+            return f.canvas.viewport()->grab(QRect(0, 40 + 2 * 56, 319, 56)).toImage();
+        };
+        const auto rendered = header();
+        QCOMPARE(wave::serializeProject(f.project), original);
+        QCOMPARE(f.commands.size(), std::size_t(0));
+        f.lane(2).name = label.toStdString();
+        f.canvas.refreshModel();
+        QCOMPARE(header(), rendered);
+        f.canvas.beginLaneRename("bus", name);
+        const auto* rename = f.canvas.findChild<QLineEdit*>("LaneRenameEdit");
+        QVERIFY(rename);
+        QCOMPARE(rename->text(), name);
+    }
+
+    void signalHeadersHaveNoSubtitles()
+    {
+        Fixture f;
+        f.show();
+        const auto original = wave::serializeProject(f.project);
+        const auto background = wave::waveformTheme(wave::WaveformColorScheme::Light).raised;
+        const auto image = f.canvas.viewport()->grab().toImage();
+        for (const auto lane : {0, 1, 2}) {
+            for (int y = 40; y < 51; ++y) {
+                for (int x = 38; x < f.canvas.signalHeaderWidth() - 12; ++x) {
+                    QCOMPARE(pixel(image, {x, 40 + lane * 56 + y}), background);
+                }
+            }
+        }
+        const auto clockHeader = f.canvas.viewport()->grab(QRect(0, 40, 189, 56)).toImage();
+        f.project.clockDomains.front().period = 25;
+        f.project.clockDomains.front().name = "reference_clock";
+        f.canvas.refreshModel();
+        QCOMPARE(f.canvas.viewport()->grab(QRect(0, 40, 189, 56)).toImage(), clockHeader);
+        f.project.clockDomains.front().period = 10;
+        f.project.clockDomains.front().name = "clk";
+        QCOMPARE(wave::serializeProject(f.project), original);
+        savePreview(f.canvas, "single-line-signal-headers");
+    }
+
     void signalHeaderLayout()
     {
         QFETCH(bool, dark);
