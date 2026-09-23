@@ -7,6 +7,32 @@ function(wave_add_toolchain_fixture target mode)
 endfunction()
 
 find_package(Qt6 6.10.2 EXACT REQUIRED COMPONENTS Test)
+add_executable(wave-ui-capabilities-test ui_capabilities_test.cpp)
+target_link_libraries(wave-ui-capabilities-test PRIVATE wavewidgets waveproject Qt6::Test Ela::WidgetTools)
+wave_enable_warnings(wave-ui-capabilities-test)
+foreach(_wave_capability_scale IN ITEMS 1 2)
+    add_test(NAME wave-ui-capabilities-${_wave_capability_scale}
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTEST_EXE=$<TARGET_FILE:wave-ui-capabilities-test>"
+            "-DLOG_FILE=${CMAKE_BINARY_DIR}/ui-capabilities-${_wave_capability_scale}.txt"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+    set_tests_properties(wave-ui-capabilities-${_wave_capability_scale} PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=${_wave_capability_scale};WAVEWORKBENCH_REDUCED_MOTION=0;QT_QPA_FONTDIR=${CMAKE_BINARY_DIR}/test-fonts;WAVEWORKBENCH_SETTINGS_DIR=${CMAKE_BINARY_DIR}/test-settings/capabilities-${_wave_capability_scale};WAVEWORKBENCH_RECOVERY_DIR=${CMAKE_BINARY_DIR}/test-recovery/capabilities-${_wave_capability_scale}"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        RUN_SERIAL TRUE TIMEOUT 45)
+    if(WIN32)
+        add_test(NAME wave-ui-capabilities-native-${_wave_capability_scale}
+            COMMAND "${CMAKE_COMMAND}"
+                "-DTEST_EXE=$<TARGET_FILE:wave-ui-capabilities-test>"
+                "-DTEST_FUNCTIONS=interruptibleCombo;focusAnimationsAreOwned;focusedViewDestruction;browsingScrollAndExactTimeline;replacedOverlayScrollBarOrigin;tabsKeepQtPageOwnership;menuKeepsActionsAndLiveEditors;simulationDrawersPreserveData"
+                "-DLOG_FILE=${CMAKE_BINARY_DIR}/ui-capabilities-native-${_wave_capability_scale}.txt"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+        set_tests_properties(wave-ui-capabilities-native-${_wave_capability_scale} PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_SCALE_FACTOR=${_wave_capability_scale};WAVEWORKBENCH_REDUCED_MOTION=0;QT_QPA_FONTDIR=${CMAKE_BINARY_DIR}/test-fonts;WAVEWORKBENCH_SETTINGS_DIR=${CMAKE_BINARY_DIR}/test-settings/capabilities-native-${_wave_capability_scale};WAVEWORKBENCH_RECOVERY_DIR=${CMAKE_BINARY_DIR}/test-recovery/capabilities-native-${_wave_capability_scale}"
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+            RUN_SERIAL TRUE TIMEOUT 45)
+    endif()
+endforeach()
 add_executable(wave-ui-followup-test ui_followup_test.cpp)
 target_link_libraries(wave-ui-followup-test PRIVATE wavewidgets waveproject Qt6::Test Ela::WidgetTools)
 wave_enable_warnings(wave-ui-followup-test)

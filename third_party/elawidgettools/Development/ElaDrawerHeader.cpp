@@ -2,6 +2,7 @@
 #include "ElaApplication.h"
 #include "ElaTheme.h"
 #include <QEvent>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPropertyAnimation>
@@ -13,12 +14,17 @@ ElaDrawerHeader::ElaDrawerHeader(QWidget* parent)
     _pExpandIconRotate = 0;
     setFixedHeight(75);
     setMouseTracking(true);
+    setFocusPolicy(Qt::StrongFocus);
     setObjectName("ElaDrawerHeader");
     setStyleSheet("#ElaDrawerHeader{background-color:transparent;}");
 
     _mainLayout = new QVBoxLayout(this);
     _mainLayout->setContentsMargins(0, 0, 0, 0);
     setContentsMargins(0, 0, 30, 0);
+    _rotation = new QPropertyAnimation(this, "pExpandIconRotate", this);
+    _rotation->setDuration(300);
+    _rotation->setEasingCurve(QEasingCurve::InOutSine);
+    connect(_rotation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
 
     _themeMode = eTheme->getThemeMode();
     connect(eTheme, &ElaTheme::themeModeChanged, this, [=](ElaThemeType::ThemeMode themeMode) {
@@ -45,23 +51,34 @@ void ElaDrawerHeader::setHeaderWidget(QWidget* widget)
     _headerWidget = widget;
 }
 
-void ElaDrawerHeader::doExpandOrCollapseAnimation()
+void ElaDrawerHeader::doExpandOrCollapseAnimation(bool animate)
 {
-    QPropertyAnimation* rotateAnimation = new QPropertyAnimation(this, "pExpandIconRotate");
-    connect(rotateAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+    _rotation->stop();
+    const qreal target = _pIsExpand ? -180 : 0;
+    if (!animate || !isVisible()) {
+        _pExpandIconRotate = target;
         update();
-    });
-    rotateAnimation->setDuration(300);
-    rotateAnimation->setEasingCurve(QEasingCurve::InOutSine);
-    rotateAnimation->setStartValue(_pExpandIconRotate);
-    rotateAnimation->setEndValue(_pIsExpand ? -180 : 0);
-    rotateAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+        return;
+    }
+    _rotation->setStartValue(_pExpandIconRotate);
+    _rotation->setEndValue(target);
+    _rotation->start();
 }
 
 bool ElaDrawerHeader::event(QEvent* event)
 {
     switch (event->type())
     {
+    case QEvent::KeyPress:
+    {
+        const auto key = static_cast<QKeyEvent*>(event)->key();
+        if (key == Qt::Key_Space || key == Qt::Key_Return || key == Qt::Key_Enter) {
+            Q_EMIT drawerHeaderClicked(!_pIsExpand);
+            event->accept();
+            return true;
+        }
+        break;
+    }
     case QEvent::Enter:
     case QEvent::Leave:
     {
@@ -79,7 +96,7 @@ bool ElaDrawerHeader::event(QEvent* event)
 void ElaDrawerHeader::mousePressEvent(QMouseEvent* event)
 {
     QWidget* posWidget = childAt(event->pos());
-    if (!posWidget || (posWidget && posWidget->objectName().isEmpty()))
+    if (event->button() == Qt::LeftButton && (!posWidget || posWidget->objectName().isEmpty()))
     {
         _isPressed = true;
         update();
@@ -89,15 +106,13 @@ void ElaDrawerHeader::mousePressEvent(QMouseEvent* event)
 
 void ElaDrawerHeader::mouseReleaseEvent(QMouseEvent* event)
 {
-    QWidget* posWidget = childAt(event->pos());
-    if (!posWidget || (posWidget && posWidget->objectName().isEmpty()))
+    if (_isPressed && event->button() == Qt::LeftButton && rect().contains(event->pos()))
     {
         _isPressed = false;
-        _pIsExpand = !_pIsExpand;
-        //指示器动画
-        doExpandOrCollapseAnimation();
-        Q_EMIT drawerHeaderClicked(_pIsExpand);
+        Q_EMIT drawerHeaderClicked(!_pIsExpand);
     }
+    _isPressed = false;
+    update();
     QWidget::mouseReleaseEvent(event);
 }
 
@@ -118,6 +133,11 @@ void ElaDrawerHeader::paintEvent(QPaintEvent* event)
                                                                                                : ElaThemeColor(_themeMode, BasicBaseAlpha));
     QRect foregroundRect(1, 1, width() - 2, _pIsExpand ? height() + _pBorderRadius : height() - 2);
     painter.drawRoundedRect(foregroundRect, _pBorderRadius, _pBorderRadius);
+    if (hasFocus()) {
+        painter.setPen(QPen(ElaThemeColor(_themeMode, PrimaryNormal), 2));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(rect().adjusted(2, 2, -2, -2), _pBorderRadius, _pBorderRadius);
+    }
     // 底边线绘制
     if (isUnderMouse)
     {

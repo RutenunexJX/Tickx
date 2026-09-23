@@ -353,6 +353,9 @@ install(FILES third_party/elawidgettools/LICENSE
     third_party/elawidgettools/WAVEWORKBENCH.md
     third_party/elawidgettools/Font/FontAwesome-LICENSE.txt
     DESTINATION licenses/ElaWidgetTools COMPONENT Portable)
+install(DIRECTORY third_party/elawidgettools/patches/
+    DESTINATION licenses/ElaWidgetTools/patches COMPONENT Portable
+    FILES_MATCHING PATTERN "*.patch")
 if(WAVEWORKBENCH_ENABLE_WELLEN)
     install(PROGRAMS "${WAVE_WELLEN_READER_OUTPUT}"
         DESTINATION .

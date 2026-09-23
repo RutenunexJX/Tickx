@@ -6,7 +6,9 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPropertyAnimation>
+#include <QPointer>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 
 #include "ElaMenuStyle.h"
 #include "private/ElaMenuPrivate.h"
@@ -21,6 +23,11 @@ ElaMenu::ElaMenu(QWidget* parent)
     d->_menuStyle = new ElaMenuStyle(style());
     setStyle(d->_menuStyle);
     d->_pAnimationImagePosY = 0;
+    d->_popupAnimation = new QPropertyAnimation(d, "pAnimationImagePosY", this);
+    d->_popupAnimation->setEasingCurve(QEasingCurve::OutCubic);
+    d->_popupAnimation->setDuration(160);
+    connect(d->_popupAnimation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
+    connect(d->_popupAnimation, &QPropertyAnimation::finished, this, &ElaMenu::finishPopupAnimation);
 }
 
 ElaMenu::ElaMenu(const QString& title, QWidget* parent)
@@ -32,8 +39,16 @@ ElaMenu::ElaMenu(const QString& title, QWidget* parent)
 ElaMenu::~ElaMenu()
 {
     Q_D(ElaMenu);
-    setStyle(nullptr);
-    delete d->_menuStyle;
+    d->_popupAnimation->stop();
+    d->_menuStyle->setParent(this);
+}
+
+void ElaMenu::setNativeMenuBehavior(bool enabled)
+{
+    Q_D(ElaMenu);
+    finishPopupAnimation();
+    _nativeMenuBehavior = enabled;
+    d->_menuStyle->setNativeItemContent(enabled);
 }
 
 void ElaMenu::setMenuItemHeight(int menuItemHeight)
@@ -56,6 +71,7 @@ QAction* ElaMenu::addMenu(QMenu* menu)
 ElaMenu* ElaMenu::addMenu(const QString& title)
 {
     ElaMenu* menu = new ElaMenu(title, this);
+    menu->setNativeMenuBehavior(_nativeMenuBehavior);
     QMenu::addAction(menu->menuAction());
     return menu;
 }
@@ -63,6 +79,7 @@ ElaMenu* ElaMenu::addMenu(const QString& title)
 ElaMenu* ElaMenu::addMenu(const QIcon& icon, const QString& title)
 {
     ElaMenu* menu = new ElaMenu(title, this);
+    menu->setNativeMenuBehavior(_nativeMenuBehavior);
     menu->setIcon(icon);
     QMenu::addAction(menu->menuAction());
     return menu;
@@ -71,6 +88,7 @@ ElaMenu* ElaMenu::addMenu(const QIcon& icon, const QString& title)
 ElaMenu* ElaMenu::addMenu(ElaIconType::IconName icon, const QString& title)
 {
     ElaMenu* menu = new ElaMenu(title, this);
+    menu->setNativeMenuBehavior(_nativeMenuBehavior);
     QMenu::addAction(menu->menuAction());
     menu->menuAction()->setProperty("ElaIconType", QChar(static_cast<char32_t>(icon)));
     return menu;
@@ -132,16 +150,81 @@ bool ElaMenu::isHasIcon() const
     return false;
 }
 
+bool ElaMenu::isPopupAnimating() const
+{
+    Q_D(const ElaMenu);
+    return d->_popupAnimation && d->_popupAnimation->state() == QAbstractAnimation::Running;
+}
+
+void ElaMenu::finishPopupAnimation()
+{
+    Q_D(ElaMenu);
+    if (d->_popupAnimation) d->_popupAnimation->stop();
+    d->_animationPix = QPixmap();
+    d->_pAnimationImagePosY = 0;
+    update();
+}
+
+bool ElaMenu::event(QEvent* event)
+{
+    Q_D(ElaMenu);
+    if (!d->_capturing && isPopupAnimating()) {
+        switch (event->type()) {
+        case QEvent::KeyPress:
+        case QEvent::MouseButtonPress:
+        case QEvent::MouseMove:
+        case QEvent::Wheel:
+        case QEvent::Hide:
+        case QEvent::Resize:
+        case QEvent::ActionAdded:
+        case QEvent::ActionRemoved:
+        case QEvent::ActionChanged:
+        case QEvent::PaletteChange:
+        case QEvent::StyleChange:
+        case QEvent::FontChange:
+            finishPopupAnimation();
+            break;
+        default:
+            break;
+        }
+    }
+    return QMenu::event(event);
+}
+
 void ElaMenu::showEvent(QShowEvent* event)
 {
-    // Do not move an already-positioned popup or retain animated snapshots.
-    // Qt owns keyboard/popup timing; this also supports reduced motion.
-    Q_EMIT menuShow();
-    updateGeometry();
     QMenu::showEvent(event);
+    QPointer<ElaMenu> alive(this);
+    Q_EMIT menuShow();
+    if (!alive || !isVisible()) return;
+    finishPopupAnimation();
+    Q_D(ElaMenu);
+    if (qApp->property("waveworkbench.reducedMotion").toBool()) return;
+    // Qt keeps popup placement and actionable item semantics. Ela animates its image.
+    // Embedded editors must remain live instead of painting a duplicate snapshot.
+    for (auto* action : actions())
+        if (qobject_cast<QWidgetAction*>(action)) return;
+    const qreal scale = devicePixelRatioF();
+    if (qint64(qCeil(width() * scale)) * qCeil(height() * scale) * 4 > 8 * 1024 * 1024)
+        return;
+    d->_capturing = true;
+    d->_animationPix = grab();
+    d->_capturing = false;
+    if (d->_animationPix.isNull()) return;
+    const int distance = qMin(160, height());
+    const bool fromAbove = pos().y() + d->_menuStyle->getMenuItemHeight() + 9 >= QCursor::pos().y();
+    d->_popupAnimation->setStartValue(fromAbove ? -distance : distance);
+    d->_popupAnimation->setEndValue(0);
+    d->_popupAnimation->start();
 }
 
 void ElaMenu::paintEvent(QPaintEvent* event)
 {
-    QMenu::paintEvent(event);
+    Q_D(ElaMenu);
+    if (!d->_animationPix.isNull() && !d->_capturing) {
+        QPainter painter(this);
+        painter.drawPixmap(QPoint(0, d->_pAnimationImagePosY), d->_animationPix);
+    } else {
+        QMenu::paintEvent(event);
+    }
 }

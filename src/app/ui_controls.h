@@ -24,6 +24,7 @@ class QMenuBar;
 class QProgressBar;
 class QPainter;
 class QSpinBox;
+class QSplitter;
 class QStatusBar;
 class QTabWidget;
 class QTableWidget;
@@ -81,6 +82,9 @@ WAVEWIDGETS_API QToolBar* toolBar(const QString& title, QWidget* parent = nullpt
 WAVEWIDGETS_API QToolBar* toolBar(QWidget* parent = nullptr);
 WAVEWIDGETS_API QToolBar* addToolBar(QMainWindow* parent, const QString& title);
 WAVEWIDGETS_API QTabWidget* tabs(QWidget* parent = nullptr);
+WAVEWIDGETS_API QWidget* collapsibleSection(const QString& title, QWidget* content,
+    const QString& objectName, QSplitter* parent);
+WAVEWIDGETS_API void rememberSplitterLayout(QSplitter* splitter);
 WAVEWIDGETS_API QTreeWidget* tree(QWidget* parent = nullptr);
 WAVEWIDGETS_API QTableWidget* table(QWidget* parent = nullptr);
 WAVEWIDGETS_API QProgressBar* progressBar(QWidget* parent = nullptr);

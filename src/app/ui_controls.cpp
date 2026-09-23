@@ -6,6 +6,7 @@
 #include "ElaComboBox.h"
 #include "ElaComboBoxStyle.h"
 #include "ElaDoubleSpinBox.h"
+#include "ElaDrawerArea.h"
 #include "ElaLineEdit.h"
 #include "ElaLineEditStyle.h"
 #include "ElaListView.h"
@@ -16,13 +17,14 @@
 #include "ElaScrollBar.h"
 #include "ElaSpinBox.h"
 #include "ElaStatusBar.h"
-#include "ElaTabBarStyle.h"
+#include "ElaTabBar.h"
 #include "ElaTableViewStyle.h"
 #include "ElaTheme.h"
 #include "ElaToolBar.h"
 #include "ElaToolButton.h"
 #include "ElaToolButtonStyle.h"
 #include "ElaTreeViewStyle.h"
+#include "ElaTreeView.h"
 
 #include <QAbstractItemView>
 #include <QActionGroup>
@@ -30,12 +32,14 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QHeaderView>
+#include <QLabel>
 #include <QMainWindow>
 #include <QPainter>
 #include <QPointer>
 #include <QProxyStyle>
 #include <QShowEvent>
 #include <QSettings>
+#include <QSplitter>
 #include <QStyleFactory>
 #include <QStyleHints>
 #include <QStyleOption>
@@ -163,6 +167,7 @@ void showEditMenu(QLineEdit* edit, QContextMenuEvent* event)
 {
     std::unique_ptr<QMenu> standard(edit->createStandardContextMenu());
     ElaMenu popup(edit);
+    popup.setNativeMenuBehavior(true);
     popup.setFont(edit->font());
     popup.setMenuItemHeight(controlHeight(edit));
     // QAction ownership stays with the standard menu until exec returns.
@@ -174,19 +179,40 @@ class LineEdit final : public AccessibleControl<ElaLineEdit> {
 public:
     using AccessibleControl::AccessibleControl;
 protected:
-    // Immediate native editing also honors reduced-motion preferences.
-    void focusInEvent(QFocusEvent* event) override { QLineEdit::focusInEvent(event); }
-    void focusOutEvent(QFocusEvent* event) override { QLineEdit::focusOutEvent(event); }
     void contextMenuEvent(QContextMenuEvent* event) override { showEditMenu(this, event); }
 };
 
-class SpinBox final : public AccessibleControl<ElaSpinBox> {
+template<class Control>
+class NumberBox final : public AccessibleControl<Control> {
 public:
-    using AccessibleControl::AccessibleControl;
+    using AccessibleControl<Control>::AccessibleControl;
+    QSize sizeHint() const override
+    {
+        auto hint = AccessibleControl<Control>::sizeHint();
+        const auto* edit = this->lineEdit();
+        const auto metrics = edit->fontMetrics();
+        int textWidth = metrics.horizontalAdvance(this->specialValueText());
+        for (auto value : {this->minimum(), this->maximum(), this->value()})
+            textWidth = std::max(textWidth, metrics.horizontalAdvance(
+                this->prefix() + this->textFromValue(value) + this->suffix()));
+        QStyleOptionFrame input;
+        input.initFrom(edit);
+        input.lineWidth = edit->style()->pixelMetric(QStyle::PM_DefaultFrameWidth, &input, edit);
+        const QSize content(textWidth + edit->textMargins().left() + edit->textMargins().right() + 4,
+            metrics.height());
+        const int inputWidth = std::max(edit->minimumSizeHint().width(),
+            edit->style()->sizeFromContents(QStyle::CT_LineEdit, &input, content, edit).width());
+        QStyleOptionSpinBox option;
+        this->initStyleOption(&option);
+        option.rect = QRect(QPoint(), hint);
+        const int available = this->style()->subControlRect(
+            QStyle::CC_SpinBox, &option, QStyle::SC_SpinBoxEditField, this).width();
+        hint.rwidth() += std::max(0, inputWidth - available);
+        return hint;
+    }
+    QSize minimumSizeHint() const override { return sizeHint(); }
 protected:
-    void focusInEvent(QFocusEvent* event) override { QSpinBox::focusInEvent(event); }
-    void focusOutEvent(QFocusEvent* event) override { QSpinBox::focusOutEvent(event); }
-    void contextMenuEvent(QContextMenuEvent* event) override { showEditMenu(lineEdit(), event); }
+    void contextMenuEvent(QContextMenuEvent* event) override { showEditMenu(this->lineEdit(), event); }
 };
 
 class ComboBox final : public AccessibleControl<ElaComboBox> {
@@ -195,17 +221,8 @@ public:
     {
         for (auto* bar : findChildren<ElaScrollBar*>()) bar->setIsAnimation(false);
     }
-    void showPopup() override { QComboBox::showPopup(); }
-    void hidePopup() override { QComboBox::hidePopup(); }
-};
-
-class DoubleSpinBox final : public AccessibleControl<ElaDoubleSpinBox> {
-public:
-    using AccessibleControl::AccessibleControl;
-protected:
-    void focusInEvent(QFocusEvent* event) override { QDoubleSpinBox::focusInEvent(event); }
-    void focusOutEvent(QFocusEvent* event) override { QDoubleSpinBox::focusOutEvent(event); }
-    void contextMenuEvent(QContextMenuEvent* event) override { showEditMenu(lineEdit(),event); }
+    void showPopup() override { ElaComboBox::showPopup(); }
+    void hidePopup() override { ElaComboBox::hidePopup(); }
 };
 
 class ScrollBar final : public ElaScrollBar {
@@ -221,9 +238,9 @@ public:
 protected:
     void wheelEvent(QWheelEvent* event) override
     {
-        // Ela animates wheel values even when its range-animation flag is off.
-        // Keep Qt's immediate page steps, fractional deltas and RTL semantics.
-        QScrollBar::wheelEvent(event);
+        if (smoothWheelEnabled() && !qApp->property("waveworkbench.reducedMotion").toBool())
+            ElaScrollBar::wheelEvent(event);
+        else QScrollBar::wheelEvent(event);
     }
     void paintEvent(QPaintEvent* event) override
     {
@@ -244,11 +261,6 @@ public:
     {
         editor_->installEventFilter(this);
         setItemHeight(controlHeight(this));
-    }
-    ~CompletionList() override
-    {
-        // The base owns its style; detach it before the base deletes that style.
-        setStyle(nullptr);
     }
     void syncEditorStyle()
     {
@@ -443,40 +455,65 @@ public:
     }
 };
 
+class BrowsingInputRouter final : public QObject {
+public:
+    explicit BrowsingInputRouter(QAbstractItemView* view) : QObject(view), view_(view)
+    {
+        view->installEventFilter(this);
+        view->viewport()->installEventFilter(this);
+    }
+    bool eventFilter(QObject*, QEvent* event) override
+    {
+        if (event->type() == QEvent::KeyPress || event->type() == QEvent::MouseButtonPress) {
+            if (auto* tree = qobject_cast<QTreeView*>(view_)) ElaTreeView::finishExpansion(tree);
+            for (auto* bar : {view_->horizontalScrollBar(), view_->verticalScrollBar()})
+                if (auto* scroll = qobject_cast<ElaScrollBar*>(bar)) scroll->stopSmoothWheel();
+        }
+        if (event->type() != QEvent::Wheel) return false;
+        auto* wheel = static_cast<QWheelEvent*>(event);
+        const QPoint pixels = wheel->pixelDelta();
+        if (pixels.isNull()) return false;
+        auto* bar = (std::abs(pixels.x()) > std::abs(pixels.y()) || wheel->modifiers().testFlag(Qt::ShiftModifier))
+            ? view_->horizontalScrollBar() : view_->verticalScrollBar();
+        wheel->ignore();
+        QApplication::sendEvent(bar, wheel);
+        return wheel->isAccepted();
+    }
+private:
+    QAbstractItemView* view_;
+};
+
 void prepareView(QAbstractItemView* view)
 {
     view->setProperty("waveEla", true);
     installScrollBars(view);
+    view->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    view->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    for (auto* bar : {view->horizontalScrollBar(), view->verticalScrollBar()}) {
+        auto* scroll = static_cast<ElaScrollBar*>(bar);
+        scroll->setSmoothWheelEnabled(true);
+        scroll->setWheelAnimationDuration(160);
+    }
+    if (auto* tree = qobject_cast<QTreeView*>(view))
+        tree->setAnimated(!qApp->property("waveworkbench.reducedMotion").toBool());
+    new BrowsingInputRouter(view);
     QObject::connect(eTheme, &ElaTheme::themeModeChanged, view,
         [view] { view->viewport()->update(); });
 }
 
-class TabStyle final : public ElaTabBarStyle {
+class Tabs final : public QTabWidget {
 public:
-    void drawControl(ControlElement element, const QStyleOption* option,
-        QPainter* painter, const QWidget* widget) const override
+    explicit Tabs(QWidget* parent) : QTabWidget(parent)
     {
-        if (element == CE_TabBarTabLabel) QProxyStyle::drawControl(element, option, painter, widget);
-        else ElaTabBarStyle::drawControl(element, option, painter, widget);
-    }
-    void drawPrimitive(PrimitiveElement element, const QStyleOption* option,
-        QPainter* painter, const QWidget* widget) const override
-    {
-        if (element == PE_IndicatorArrowLeft || element == PE_IndicatorArrowRight)
-            QProxyStyle::drawPrimitive(element, option, painter, widget);
-        else ElaTabBarStyle::drawPrimitive(element, option, painter, widget);
-    }
-    QSize sizeFromContents(ContentsType type, const QStyleOption* option,
-        const QSize& size, const QWidget* widget) const override
-    {
-        auto result = QProxyStyle::sizeFromContents(type, option, size, widget);
-        if (type == CT_TabBarTab) result.setHeight(std::max(result.height(), controlHeight(widget)));
-        return result;
-    }
-    QRect subElementRect(SubElement element, const QStyleOption* option,
-        const QWidget* widget) const override
-    {
-        return QProxyStyle::subElementRect(element, option, widget);
+        auto* bar = prepare(new ElaTabBar(this));
+        bar->setNativeTabBehavior(true);
+        bar->setSmoothScrollEnabled(!qApp->property("waveworkbench.reducedMotion").toBool());
+        // Fixed review pages are not transferable document tabs.
+        bar->setHostedDragEnabled(false);
+        bar->setTabsClosable(false);
+        bar->setMovable(false);
+        bar->setAcceptDrops(false);
+        setTabBar(bar);
     }
 };
 
@@ -764,8 +801,8 @@ QLineEdit* lineEdit(QWidget* parent)
 }
 QLineEdit* lineEdit(const QString& text, QWidget* parent) { auto* w = lineEdit(parent); w->setText(text); return w; }
 QComboBox* comboBox(QWidget* parent) { initialize(); return prepare(new ComboBox(parent)); }
-QDoubleSpinBox* doubleSpinBox(QWidget* parent) { initialize(); return prepare(new DoubleSpinBox(parent)); }
-QSpinBox* spinBox(QWidget* parent) { initialize(); return prepare(new SpinBox(parent)); }
+QDoubleSpinBox* doubleSpinBox(QWidget* parent) { initialize(); return prepare(new NumberBox<ElaDoubleSpinBox>(parent)); }
+QSpinBox* spinBox(QWidget* parent) { initialize(); return prepare(new NumberBox<ElaSpinBox>(parent)); }
 QCheckBox* checkBox(QWidget* parent) { initialize(); return prepare(new AccessibleControl<ElaCheckBox>(parent)); }
 QCheckBox* checkBox(const QString& text, QWidget* parent) { auto* w = checkBox(parent); w->setText(text); return w; }
 QDialogButtonBox* buttonBox(QDialogButtonBox::StandardButtons buttons, QWidget* parent)
@@ -778,6 +815,7 @@ QMenu* menu(QWidget* parent)
 {
     initialize();
     auto* w = new ElaMenu(parent);
+    w->setNativeMenuBehavior(true);
     w->setProperty("waveEla", true);
     w->setMenuItemHeight(controlHeight(w));
     return w;
@@ -807,9 +845,8 @@ QToolBar* toolBar(QWidget* parent) { return toolBar(QString(), parent); }
 QTabWidget* tabs(QWidget* parent)
 {
     initialize();
-    auto* w = new QTabWidget(parent);
+    auto* w = new Tabs(parent);
     w->setProperty("waveEla", true);
-    attachStyle(w->tabBar(), new TabStyle);
     QObject::connect(eTheme, &ElaTheme::themeModeChanged, w, [w] { w->tabBar()->update(); });
     return w;
 }
@@ -821,6 +858,61 @@ QTreeWidget* tree(QWidget* parent)
     style->setItemHeight(controlHeight(w));
     attachStyle(w, style); w->header()->setStyle(style); prepareView(w);
     return w;
+}
+QWidget* collapsibleSection(const QString& title, QWidget* content,
+    const QString& objectName, QSplitter* parent)
+{
+    initialize();
+    auto* panel = new ElaDrawerArea(parent);
+    panel->setObjectName(objectName);
+    panel->setProperty("waveEla", true);
+    panel->setHeaderHeight(waveformMetrics().panelHeaderHeight);
+    panel->setBorderRadius(4);
+    auto* label = text(title, panel);
+    label->setObjectName(objectName + QStringLiteral("Label"));
+    label->setContentsMargins(8, 0, 8, 0);
+    label->setAttribute(Qt::WA_TransparentForMouseEvents);
+    panel->setDrawerHeader(label);
+    label->parentWidget()->setAccessibleName(title);
+    panel->addDrawer(content);
+    panel->setExpanded(true, false);
+    const auto key = QStringLiteral("waveWorkbench/simulation-layout/v1/") + objectName + QStringLiteral("/expanded");
+    QObject::connect(panel, &ElaDrawerArea::expandStateAboutToChange, panel,
+        [panel, parent](bool expanded) {
+            if (!expanded) panel->setProperty("waveExpandedHeight", panel->height());
+            else {
+                panel->setMaximumHeight(QWIDGETSIZE_MAX);
+                auto sizes = parent->sizes();
+                const int index = parent->indexOf(panel);
+                if (index >= 0 && index < sizes.size()) {
+                    sizes[index] = std::max(panel->getHeaderHeight() + 80,
+                        panel->property("waveExpandedHeight").toInt());
+                    parent->setSizes(sizes);
+                }
+            }
+        });
+    const auto settle = [panel](bool expanded) {
+        panel->setMaximumHeight(expanded ? QWIDGETSIZE_MAX : panel->getHeaderHeight());
+    };
+    QObject::connect(panel, &ElaDrawerArea::drawerAnimationFinished, panel, settle);
+    QObject::connect(panel, &ElaDrawerArea::expandStateChanged, panel,
+        [panel, settle, key](bool expanded) {
+            if (!panel->isDrawerAnimating()) settle(expanded);
+            QSettings{}.setValue(key, expanded);
+        });
+    // Restore after the splitter's initial children and default sizes exist.
+    const bool expanded = QSettings{}.value(key, true).toBool();
+    QTimer::singleShot(0, panel, [panel, expanded] { panel->setExpanded(expanded, false); });
+    return panel;
+}
+
+void rememberSplitterLayout(QSplitter* splitter)
+{
+    const auto key = QStringLiteral("waveWorkbench/simulation-layout/v1/") + splitter->objectName();
+    const auto state = QSettings{}.value(key).toByteArray();
+    if (!state.isEmpty()) splitter->restoreState(state);
+    QObject::connect(splitter, &QSplitter::splitterMoved, splitter,
+        [splitter, key] { QSettings{}.setValue(key, splitter->saveState()); });
 }
 QTableWidget* table(QWidget* parent)
 {

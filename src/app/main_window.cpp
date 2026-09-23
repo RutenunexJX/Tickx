@@ -1969,20 +1969,7 @@ MainWindow::MainWindow(
                                  const QString& title,
                                  QWidget* content,
                                  const QString& objectName) {
-            auto* panel = new QWidget(simulationResultSplitter_);
-            panel->setObjectName(objectName);
-            auto* layout = new QVBoxLayout(panel);
-            layout->setContentsMargins(0, 0, 0, 0);
-            layout->setSpacing(0);
-            auto* label = ui::text(title, panel);
-            label->setObjectName(objectName + QStringLiteral("Label"));
-            label->setProperty("waveSectionHeader", true);
-            label->setProperty("waveRole", QStringLiteral("panelHeader"));
-            label->setMinimumHeight(waveformMetrics().panelHeaderHeight);
-            label->setContentsMargins(8, 0, 8, 0);
-            layout->addWidget(label);
-            layout->addWidget(content, 1);
-            return panel;
+            return ui::collapsibleSection(title, content, objectName, simulationResultSplitter_);
         };
 
         canvas_->setProperty("simulationStimulusCanvas", true);
@@ -1997,6 +1984,7 @@ MainWindow::MainWindow(
         simulationActualSplitter_->setStretchFactor(0, 0);
         simulationActualSplitter_->setStretchFactor(1, 1);
         simulationActualSplitter_->setSizes({260, 1'040});
+        ui::rememberSplitterLayout(simulationActualSplitter_);
 
         comparePanel_ = new QWidget(this);
         comparePanel_->setObjectName(QStringLiteral("SimulationComparisonContent"));
@@ -2205,6 +2193,7 @@ MainWindow::MainWindow(
         simulationResultSplitter_->setStretchFactor(1, 1);
         simulationResultSplitter_->setStretchFactor(2, 0);
         simulationResultSplitter_->setSizes({340, 360, 170});
+        ui::rememberSplitterLayout(simulationResultSplitter_);
         auto* workspace = new QWidget(this);
         auto* layout = new QVBoxLayout(workspace);
         layout->setContentsMargins(0,0,0,0); layout->setSpacing(0);

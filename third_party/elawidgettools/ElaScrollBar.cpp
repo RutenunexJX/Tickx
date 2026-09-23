@@ -1,6 +1,7 @@
 #include "ElaScrollBar.h"
 
 #include <QDebug>
+#include <QApplication>
 #include <QPainter>
 #include <QPointer>
 #include <QPropertyAnimation>
@@ -25,14 +26,32 @@ ElaScrollBar::ElaScrollBar(QWidget* parent)
     d->_pIsAnimation = false;
     connect(this, &ElaScrollBar::rangeChanged, d, &ElaScrollBarPrivate::onRangeChanged);
     ElaScrollBarStyle* scrollBarStyle = new ElaScrollBarStyle(style());
-    _waveOwnedStyle = scrollBarStyle;
+    scrollBarStyle->setParent(this);
     scrollBarStyle->setScrollBar(this);
     setStyle(scrollBarStyle);
-    d->_slideSmoothAnimation = new QPropertyAnimation(this, "value");
+    d->_pWheelValue = 0;
+    d->_slideSmoothAnimation = new QPropertyAnimation(this, "value", this);
     d->_slideSmoothAnimation->setEasingCurve(QEasingCurve::OutSine);
     d->_slideSmoothAnimation->setDuration(300);
     connect(d->_slideSmoothAnimation, &QPropertyAnimation::finished, this, [=]() {
         d->_scrollValue = value();
+    });
+    connect(d, &ElaScrollBarPrivate::pWheelValueChanged, this, [=]() {
+        d->_writingWheelValue = true;
+        setValue(qRound(d->getWheelValue()));
+        d->_writingWheelValue = false;
+    });
+    connect(this, &QScrollBar::valueChanged, this, [=]() {
+        if (d->_smoothWheelEnabled && !d->_writingWheelValue)
+            stopSmoothWheel();
+    });
+    connect(this, &QScrollBar::rangeChanged, this, [=]() {
+        if (d->_smoothWheelEnabled)
+            stopSmoothWheel();
+    });
+    connect(this, &QScrollBar::actionTriggered, this, [=]() {
+        if (d->_smoothWheelEnabled)
+            stopSmoothWheel();
     });
 
     d->_expandTimer = new QTimer(this);
@@ -66,6 +85,12 @@ ElaScrollBar::ElaScrollBar(QScrollBar* originScrollBar, QAbstractScrollArea* par
 
     d->_originScrollBar = originScrollBar;
     d->_initAllConfig();
+    connect(originScrollBar, &QObject::destroyed, this, [this, d] {
+        d->_originScrollBar.clear();
+        if (d->_originScrollArea) d->_originScrollArea->removeEventFilter(this);
+        stopSmoothWheel();
+        hide();
+    });
 
     connect(d->_originScrollBar, &QScrollBar::valueChanged, this, [=](int value) {
         d->_handleScrollBarValueChanged(this, value);
@@ -80,8 +105,80 @@ ElaScrollBar::ElaScrollBar(QScrollBar* originScrollBar, QAbstractScrollArea* par
 
 ElaScrollBar::~ElaScrollBar()
 {
+    stopSmoothWheel();
     setStyle(nullptr);
-    delete _waveOwnedStyle;
+}
+
+void ElaScrollBar::setSmoothWheelEnabled(bool enabled)
+{
+    Q_D(ElaScrollBar);
+    stopSmoothWheel();
+    d->_smoothWheelEnabled = enabled;
+    d->_slideSmoothAnimation->setTargetObject(nullptr);
+    d->_slideSmoothAnimation->setPropertyName(enabled ? "pWheelValue" : "value");
+    d->_slideSmoothAnimation->setTargetObject(enabled ? static_cast<QObject*>(d) : this);
+}
+
+bool ElaScrollBar::smoothWheelEnabled() const
+{
+    return d_ptr->_smoothWheelEnabled;
+}
+
+void ElaScrollBar::setWheelAnimationDuration(int duration)
+{
+    d_ptr->_slideSmoothAnimation->setDuration(qMax(0, duration));
+}
+
+void ElaScrollBar::stopSmoothWheel()
+{
+    Q_D(ElaScrollBar);
+    d->_slideSmoothAnimation->stop();
+    d->_scrollValue = value();
+}
+
+void ElaScrollBar::smoothWheelEvent(QWheelEvent* event)
+{
+    Q_D(ElaScrollBar);
+    const bool horizontal = orientation() == Qt::Horizontal;
+    const QPoint pixels = event->pixelDelta();
+    const int pixelDelta = horizontal
+        ? (pixels.x() ? pixels.x() : event->modifiers().testFlag(Qt::ShiftModifier) ? pixels.y() : 0)
+        : pixels.y();
+    if (!pixels.isNull()) {
+        // Precision gestures already provide a motion curve; apply them directly.
+        stopSmoothWheel();
+        const int next = qBound(minimum(), value() - pixelDelta, maximum());
+        event->setAccepted(next != value());
+        setValue(next);
+        return;
+    }
+    const QPoint angles = event->angleDelta();
+    const int delta = horizontal ? (angles.x() ? angles.x() : angles.y()) : angles.y();
+    if (!delta) {
+        event->ignore();
+        return;
+    }
+    if (event->modifiers().testFlag(Qt::ControlModifier)) {
+        stopSmoothWheel();
+        QScrollBar::wheelEvent(event);
+        return;
+    }
+    const qreal distance = -delta / 120.0 * qMin(pageStep(), singleStep() * QApplication::wheelScrollLines());
+    const bool running = d->_slideSmoothAnimation->state() == QAbstractAnimation::Running;
+    if (!running || (d->_scrollValue - value()) * distance < 0)
+        d->_scrollValue = value();
+    const qreal target = qBound(qreal(minimum()), d->_scrollValue + distance, qreal(maximum()));
+    if (qFuzzyCompare(target + 1, value() + 1)) {
+        stopSmoothWheel();
+        event->ignore();
+        return;
+    }
+    d->_slideSmoothAnimation->stop();
+    d->_scrollValue = target;
+    d->_slideSmoothAnimation->setStartValue(qreal(value()));
+    d->_slideSmoothAnimation->setEndValue(target);
+    d->_slideSmoothAnimation->start();
+    event->accept();
 }
 
 bool ElaScrollBar::event(QEvent* event)
@@ -89,6 +186,11 @@ bool ElaScrollBar::event(QEvent* event)
     Q_D(ElaScrollBar);
     switch (event->type())
     {
+    case QEvent::Hide:
+    case QEvent::EnabledChange:
+        if (d->_smoothWheelEnabled)
+            stopSmoothWheel();
+        break;
     case QEvent::Enter:
     {
         d->_expandTimer->stop();
@@ -162,6 +264,14 @@ void ElaScrollBar::mouseMoveEvent(QMouseEvent* event)
 void ElaScrollBar::wheelEvent(QWheelEvent* event)
 {
     Q_D(ElaScrollBar);
+    if (d->_smoothWheelEnabled) {
+        smoothWheelEvent(event);
+        return;
+    }
+    if (!d->_pIsAnimation) {
+        QScrollBar::wheelEvent(event);
+        return;
+    }
     int verticalDelta = event->angleDelta().y();
     if (d->_slideSmoothAnimation->state() == QAbstractAnimation::Stopped)
     {
@@ -196,22 +306,22 @@ void ElaScrollBar::contextMenuEvent(QContextMenuEvent* event)
     QPointer<ElaMenu> menu = new ElaMenu(this);
     menu->setMenuItemHeight(27);
     // Scroll here
-    QAction* actScrollHere = menu->addElaIconAction(ElaIconType::UpDownLeftRight, tr("滚动到此处"));
+    QAction* actScrollHere = menu->addElaIconAction(ElaIconType::UpDownLeftRight, tr("Scroll here"));
     menu->addSeparator();
     // Left edge Top
-    QAction* actScrollTop = menu->addElaIconAction(horiz ? ElaIconType::ArrowLeftToLine : ElaIconType::ArrowUpToLine, horiz ? tr("左边缘") : tr("顶端"));
+    QAction* actScrollTop = menu->addElaIconAction(horiz ? ElaIconType::ArrowLeftToLine : ElaIconType::ArrowUpToLine, horiz ? tr("Left edge") : tr("Top"));
     // Right edge Bottom
-    QAction* actScrollBottom = menu->addElaIconAction(horiz ? ElaIconType::ArrowRightToLine : ElaIconType::ArrowDownToLine, horiz ? tr("右边缘") : tr("底部"));
+    QAction* actScrollBottom = menu->addElaIconAction(horiz ? ElaIconType::ArrowRightToLine : ElaIconType::ArrowDownToLine, horiz ? tr("Right edge") : tr("Bottom"));
     menu->addSeparator();
     // Page left Page up
-    QAction* actPageUp = menu->addElaIconAction(horiz ? ElaIconType::AnglesLeft : ElaIconType::AnglesUp, horiz ? tr("向左翻页") : tr("向上翻页"));
+    QAction* actPageUp = menu->addElaIconAction(horiz ? ElaIconType::AnglesLeft : ElaIconType::AnglesUp, horiz ? tr("Page left") : tr("Page up"));
     //Page right Page down
-    QAction* actPageDn = menu->addElaIconAction(horiz ? ElaIconType::AnglesRight : ElaIconType::AnglesDown, horiz ? tr("向右翻页") : tr("向下翻页"));
+    QAction* actPageDn = menu->addElaIconAction(horiz ? ElaIconType::AnglesRight : ElaIconType::AnglesDown, horiz ? tr("Page right") : tr("Page down"));
     menu->addSeparator();
     //Scroll left Scroll up
-    QAction* actScrollUp = menu->addElaIconAction(horiz ? ElaIconType::AngleLeft : ElaIconType::AngleUp, horiz ? tr("向左滚动") : tr("向上滚动"));
+    QAction* actScrollUp = menu->addElaIconAction(horiz ? ElaIconType::AngleLeft : ElaIconType::AngleUp, horiz ? tr("Scroll left") : tr("Scroll up"));
     //Scroll right Scroll down
-    QAction* actScrollDn = menu->addElaIconAction(horiz ? ElaIconType::AngleRight : ElaIconType::AngleDown, horiz ? tr("向右滚动") : tr("向下滚动"));
+    QAction* actScrollDn = menu->addElaIconAction(horiz ? ElaIconType::AngleRight : ElaIconType::AngleDown, horiz ? tr("Scroll right") : tr("Scroll down"));
     QAction* actionSelected = menu->exec(event->globalPos());
     delete menu;
     if (!actionSelected)

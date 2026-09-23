@@ -20,6 +20,7 @@ public:
     Q_SLOT void onThemeChanged(ElaThemeType::ThemeMode themeMode);
 
 private:
+    class QPropertyAnimation* _markAnimation{nullptr};
     ElaThemeType::ThemeMode _themeMode;
     ElaEvent* _focusEvent{nullptr};
     qreal _textSpacing{0.5};

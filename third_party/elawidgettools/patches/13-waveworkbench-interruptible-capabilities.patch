@@ -1,0 +1,2347 @@
+diff --git a/Development/ElaCheckBoxStyle.cpp b/Development/ElaCheckBoxStyle.cpp
+index aa4e6ef..70f981e 100644
+--- a/Development/ElaCheckBoxStyle.cpp
++++ b/Development/ElaCheckBoxStyle.cpp
+@@ -75,7 +75,7 @@ void ElaCheckBoxStyle::drawControl(ControlElement element, const QStyleOption* o
+             }
+             painter->drawRoundedRect(checkRect, 2, 2);
+             //图标绘制
+-            painter->setPen(ElaThemeColor(ElaThemeType::Dark, BasicText));
++            painter->setPen(ElaThemeColor(_themeMode, BasicTextInvert));
+             if (bopt->state.testFlag(QStyle::State_On))
+             {
+                 painter->save();
+diff --git a/Development/ElaDrawerContainer.cpp b/Development/ElaDrawerContainer.cpp
+index ffa7b5b..879bd2d 100644
+--- a/Development/ElaDrawerContainer.cpp
++++ b/Development/ElaDrawerContainer.cpp
+@@ -4,6 +4,11 @@
+ 
+ #include <QPainter>
+ #include <QPropertyAnimation>
++#include <QApplication>
++#include <QElapsedTimer>
++#include <QMouseEvent>
++#include <QResizeEvent>
++#include <QScopedValueRollback>
+ ElaDrawerContainer::ElaDrawerContainer(QWidget* parent)
+     : QWidget(parent)
+ {
+@@ -13,10 +18,6 @@ ElaDrawerContainer::ElaDrawerContainer(QWidget* parent)
+     setObjectName("ElaDrawerContainer");
+     setStyleSheet("#ElaDrawerContainer{background-color:transparent;}");
+ 
+-    _mainLayout = new QVBoxLayout(this);
+-    _mainLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
+-    _mainLayout->setContentsMargins(0, 0, 0, 0);
+-
+     _containerWidget = new QWidget(this);
+     _containerWidget->setObjectName("ElaDrawerContainerWidget");
+     _containerWidget->setStyleSheet("#ElaDrawerContainerWidget{background-color:transparent;}");
+@@ -25,8 +26,13 @@ ElaDrawerContainer::ElaDrawerContainer(QWidget* parent)
+     _containerLayout = new QVBoxLayout(_containerWidget);
+     _containerLayout->setContentsMargins(0, 0, 0, 0);
+     _containerLayout->setSpacing(0);
+-
+-    _mainLayout->addWidget(_containerWidget);
++    _containerLayout->setSizeConstraint(QLayout::SetNoConstraint);
++    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
++    setMaximumHeight(0);
++    _animation = new QPropertyAnimation(this, "pOpacity", this);
++    _animation->setEasingCurve(QEasingCurve::OutCubic);
++    connect(_animation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
++    connect(_animation, &QPropertyAnimation::finished, this, &ElaDrawerContainer::finishAnimation);
+ 
+     _themeMode = eTheme->getThemeMode();
+     connect(eTheme, &ElaTheme::themeModeChanged, this, [=](ElaThemeType::ThemeMode themeMode) {
+@@ -37,6 +43,10 @@ ElaDrawerContainer::ElaDrawerContainer(QWidget* parent)
+ 
+ ElaDrawerContainer::~ElaDrawerContainer()
+ {
++    qApp->removeEventFilter(this);
++    _animation->stop();
++    for (const auto& widget : _drawerWidgetList)
++        if (widget) disconnect(widget, nullptr, this, nullptr);
+ }
+ 
+ void ElaDrawerContainer::addWidget(QWidget* widget)
+@@ -45,8 +55,15 @@ void ElaDrawerContainer::addWidget(QWidget* widget)
+     {
+         return;
+     }
++    finishAnimation();
+     _containerLayout->addWidget(widget);
+     _drawerWidgetList.append(widget);
++    connect(widget, &QObject::destroyed, this, [this] {
++        _drawerWidgetList.removeIf([](const auto& item) { return item.isNull(); });
++        finishAnimation();
++        updateGeometry();
++    });
++    updateGeometry();
+ }
+ 
+ void ElaDrawerContainer::removeWidget(QWidget* widget)
+@@ -55,39 +72,146 @@ void ElaDrawerContainer::removeWidget(QWidget* widget)
+     {
+         return;
+     }
++    finishAnimation();
+     _containerLayout->removeWidget(widget);
+     _drawerWidgetList.removeOne(widget);
++    disconnect(widget, nullptr, this, nullptr);
++    updateGeometry();
++}
++
++bool ElaDrawerContainer::isAnimating() const
++{
++    return _animation->state() == QAbstractAnimation::Running;
++}
++
++qint64 ElaDrawerContainer::snapshotBytes() const
++{
++    return qint64(_pContainerPix.width()) * _pContainerPix.height() * 4;
++}
++
++QSize ElaDrawerContainer::sizeHint() const
++{
++    const QSize content = _containerLayout->sizeHint();
++    return _expanded ? content : QSize(0, 0);
++}
++
++QSize ElaDrawerContainer::minimumSizeHint() const
++{
++    const QSize content = _containerLayout->minimumSize();
++    return _expanded ? content : QSize(0, 0);
++}
++
++void ElaDrawerContainer::setEdge(Qt::Edge edge)
++{
++    if (_edge == edge) return;
++    finishAnimation();
++    _edge = edge;
++}
++
++void ElaDrawerContainer::finishAnimation()
++{
++    if (_settling || _preparing) return;
++    _settling = true;
++    const bool wasAnimating = isAnimating() || !_pContainerPix.isNull();
++    _animation->stop();
++    qApp->removeEventFilter(this);
++    _pContainerPix = QPixmap();
++    _pOpacity = _expanded ? 1 : 0;
++    _isShowBorder = _expanded;
++    setMinimumHeight(0);
++    setMaximumHeight(_expanded ? QWIDGETSIZE_MAX : 0);
++    _containerWidget->setVisible(_expanded);
++    _containerWidget->setGeometry(rect());
++    updateGeometry();
++    update();
++    _settling = false;
++    if (wasAnimating) Q_EMIT animationFinished(_expanded);
+ }
+ 
+-void ElaDrawerContainer::doDrawerAnimation(bool isExpand)
++void ElaDrawerContainer::doDrawerAnimation(bool isExpand, bool animate)
+ {
+-    if (_containerLayout->count() == 0)
++    if (_expanded == isExpand) {
++        if (!animate) finishAnimation();
++        return;
++    }
++    _expanded = isExpand;
++    _animation->stop();
++    if (!animate || !isVisible() || _containerLayout->count() == 0) {
++        finishAnimation();
++        return;
++    }
++    QElapsedTimer preparation;
++    preparation.start();
+     {
++        QScopedValueRollback<bool> guard(_preparing, true);
++        if (_pContainerPix.isNull()) {
++            setMinimumHeight(0);
++            setMaximumHeight(QWIDGETSIZE_MAX);
++            updateGeometry();
++            if (parentWidget() && parentWidget()->layout()) parentWidget()->layout()->activate();
++            if (height() <= 0) resize(width(), qMax(1, _containerLayout->sizeHint().height()));
++            _containerWidget->setGeometry(rect());
++            _containerWidget->show();
++            _containerLayout->activate();
++            const qreal scale = devicePixelRatioF();
++            const qint64 bytes = qint64(qCeil(width() * scale)) * qCeil(height() * scale) * 4;
++            if (bytes <= 32 * 1024 * 1024 && width() > 0) {
++                _pContainerPix = _containerWidget->grab();
++            }
++        }
++        _containerWidget->hide();
++        _isShowBorder = false;
++    }
++    _preparationMs = preparation.nsecsElapsed() / 1e6;
++    if (_pContainerPix.isNull()) {
++        finishAnimation();
+         return;
+     }
+-    _containerWidget->setVisible(true);
+-    _mainLayout->setSizeConstraint(QLayout::SetDefaultConstraint);
+-    int expandHeight = height();
+-    _isShowBorder = true;
+-    setFixedHeight(expandHeight);
+-    _pContainerPix = grab(rect());
+-    QPropertyAnimation* opacityAnimation = new QPropertyAnimation(this, "pOpacity");
+-    connect(opacityAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-        update();
+-    });
+-    connect(opacityAnimation, &QPropertyAnimation::finished, this, [=]() {
+-        _pContainerPix = QPixmap();
+-        _isShowBorder = isExpand;
+-        _containerWidget->setVisible(isExpand);
+-        _mainLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
+-    });
+-    opacityAnimation->setEasingCurve(QEasingCurve::OutCubic);
+-    opacityAnimation->setDuration(300);
+-    opacityAnimation->setStartValue(_pOpacity);
+-    opacityAnimation->setEndValue(isExpand ? 1 : 0);
+-    opacityAnimation->start(QPropertyAnimation::DeleteWhenStopped);
+-    _containerWidget->setVisible(false);
+-    _isShowBorder = false;
++    const qreal target = isExpand ? 1 : 0;
++    _animation->setDuration(qMax(1, qRound(300 * qAbs(target - _pOpacity))));
++    _animation->setStartValue(_pOpacity);
++    _animation->setEndValue(target);
++    qApp->installEventFilter(this);
++    _animation->start();
++}
++
++void ElaDrawerContainer::resizeEvent(QResizeEvent* event)
++{
++    QWidget::resizeEvent(event);
++    if (!_preparing) finishAnimation();
++    _containerWidget->setGeometry(rect());
++}
++
++void ElaDrawerContainer::hideEvent(QHideEvent* event)
++{
++    finishAnimation();
++    QWidget::hideEvent(event);
++}
++
++bool ElaDrawerContainer::eventFilter(QObject* watched, QEvent* event)
++{
++    if (!_preparing && isAnimating()) {
++        const auto type = event->type();
++        auto* widget = qobject_cast<QWidget*>(watched);
++        const bool contentInput = widget && (widget == this || widget == _containerWidget || _containerWidget->isAncestorOf(widget))
++            && (type == QEvent::MouseButtonPress || type == QEvent::Wheel);
++        if (type == QEvent::KeyPress || contentInput) {
++            QPointer<ElaDrawerContainer> guard(this);
++            finishAnimation();
++            if (!guard) return false;
++            if (widget == this && type == QEvent::MouseButtonPress && _expanded) {
++                auto* mouse = static_cast<QMouseEvent*>(event);
++                if (auto* target = childAt(mouse->position().toPoint())) {
++                    const QPointF position = target->mapFromGlobal(mouse->globalPosition().toPoint());
++                    QMouseEvent forwarded(mouse->type(), position, mouse->globalPosition(),
++                                          mouse->button(), mouse->buttons(), mouse->modifiers());
++                    QApplication::sendEvent(target, &forwarded);
++                    return true;
++                }
++            }
++        }
++    }
++    return QWidget::eventFilter(watched, event);
+ }
+ 
+ void ElaDrawerContainer::paintEvent(QPaintEvent* event)
+@@ -107,6 +231,7 @@ void ElaDrawerContainer::paintEvent(QPaintEvent* event)
+         for (int i = 0; i < _drawerWidgetList.count() - 1; i++)
+         {
+             QWidget* drawerWidget = _drawerWidgetList[i];
++            if (!drawerWidget) continue;
+             drawerHeight += drawerWidget->height();
+             painter.drawLine(0, drawerHeight, width(), drawerHeight);
+         }
+@@ -114,7 +239,13 @@ void ElaDrawerContainer::paintEvent(QPaintEvent* event)
+     if (!_pContainerPix.isNull())
+     {
+         painter.setOpacity(_pOpacity);
+-        painter.drawPixmap(QRect(0, -height() * (1 - _pOpacity), width(), height()), _pContainerPix);
++        const qreal distance = 1 - _pOpacity;
++        QPointF offset;
++        if (_edge == Qt::TopEdge) offset.setY(-height() * distance);
++        else if (_edge == Qt::BottomEdge) offset.setY(height() * distance);
++        else if (_edge == Qt::LeftEdge) offset.setX(-width() * distance);
++        else offset.setX(width() * distance);
++        painter.drawPixmap(offset, _pContainerPix);
+     }
+     painter.restore();
+ }
+diff --git a/Development/ElaDrawerContainer.h b/Development/ElaDrawerContainer.h
+index 260d719..58b117e 100644
+--- a/Development/ElaDrawerContainer.h
++++ b/Development/ElaDrawerContainer.h
+@@ -7,6 +7,7 @@
+ #include <QVBoxLayout>
+ 
+ #include <QGraphicsOpacityEffect>
++#include <QPointer>
+ class ElaDrawerContainer : public QWidget
+ {
+     Q_OBJECT
+@@ -20,18 +21,37 @@ public:
+     void addWidget(QWidget* widget);
+     void removeWidget(QWidget* widget);
+ 
+-    void doDrawerAnimation(bool isExpand);
++    void doDrawerAnimation(bool isExpand, bool animate = true);
++    void finishAnimation();
++    bool isAnimating() const;
++    bool isExpanded() const { return _expanded; }
++    void setEdge(Qt::Edge edge);
++    qint64 snapshotBytes() const;
++    double preparationMs() const { return _preparationMs; }
++    QSize sizeHint() const override;
++    QSize minimumSizeHint() const override;
++
++signals:
++    void animationFinished(bool expanded);
+ 
+ protected:
+     virtual void paintEvent(QPaintEvent* event) override;
++    void resizeEvent(QResizeEvent* event) override;
++    void hideEvent(QHideEvent* event) override;
++    bool eventFilter(QObject* watched, QEvent* event) override;
+ 
+ private:
+     bool _isShowBorder{true};
+     ElaThemeType::ThemeMode _themeMode;
+-    QVBoxLayout* _mainLayout{nullptr};
+     QVBoxLayout* _containerLayout{nullptr};
+     QWidget* _containerWidget{nullptr};
+-    QList<QWidget*> _drawerWidgetList;
++    QList<QPointer<QWidget>> _drawerWidgetList;
++    class QPropertyAnimation* _animation{nullptr};
++    Qt::Edge _edge{Qt::TopEdge};
++    bool _expanded{false};
++    bool _preparing{false};
++    bool _settling{false};
++    double _preparationMs{0};
+ };
+ 
+ #endif //ELAWORKSPACE_ELAWIDGETTOOLS_DEVELOPERCOMPONENTS_ELADRAWERCONTAINER_H_
+diff --git a/Development/ElaDrawerHeader.cpp b/Development/ElaDrawerHeader.cpp
+index 4e3124c..ea16cb9 100644
+--- a/Development/ElaDrawerHeader.cpp
++++ b/Development/ElaDrawerHeader.cpp
+@@ -2,6 +2,7 @@
+ #include "ElaApplication.h"
+ #include "ElaTheme.h"
+ #include <QEvent>
++#include <QKeyEvent>
+ #include <QMouseEvent>
+ #include <QPainter>
+ #include <QPropertyAnimation>
+@@ -13,12 +14,17 @@ ElaDrawerHeader::ElaDrawerHeader(QWidget* parent)
+     _pExpandIconRotate = 0;
+     setFixedHeight(75);
+     setMouseTracking(true);
++    setFocusPolicy(Qt::StrongFocus);
+     setObjectName("ElaDrawerHeader");
+     setStyleSheet("#ElaDrawerHeader{background-color:transparent;}");
+ 
+     _mainLayout = new QVBoxLayout(this);
+     _mainLayout->setContentsMargins(0, 0, 0, 0);
+     setContentsMargins(0, 0, 30, 0);
++    _rotation = new QPropertyAnimation(this, "pExpandIconRotate", this);
++    _rotation->setDuration(300);
++    _rotation->setEasingCurve(QEasingCurve::InOutSine);
++    connect(_rotation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
+ 
+     _themeMode = eTheme->getThemeMode();
+     connect(eTheme, &ElaTheme::themeModeChanged, this, [=](ElaThemeType::ThemeMode themeMode) {
+@@ -45,23 +51,34 @@ void ElaDrawerHeader::setHeaderWidget(QWidget* widget)
+     _headerWidget = widget;
+ }
+ 
+-void ElaDrawerHeader::doExpandOrCollapseAnimation()
++void ElaDrawerHeader::doExpandOrCollapseAnimation(bool animate)
+ {
+-    QPropertyAnimation* rotateAnimation = new QPropertyAnimation(this, "pExpandIconRotate");
+-    connect(rotateAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
++    _rotation->stop();
++    const qreal target = _pIsExpand ? -180 : 0;
++    if (!animate || !isVisible()) {
++        _pExpandIconRotate = target;
+         update();
+-    });
+-    rotateAnimation->setDuration(300);
+-    rotateAnimation->setEasingCurve(QEasingCurve::InOutSine);
+-    rotateAnimation->setStartValue(_pExpandIconRotate);
+-    rotateAnimation->setEndValue(_pIsExpand ? -180 : 0);
+-    rotateAnimation->start(QAbstractAnimation::DeleteWhenStopped);
++        return;
++    }
++    _rotation->setStartValue(_pExpandIconRotate);
++    _rotation->setEndValue(target);
++    _rotation->start();
+ }
+ 
+ bool ElaDrawerHeader::event(QEvent* event)
+ {
+     switch (event->type())
+     {
++    case QEvent::KeyPress:
++    {
++        const auto key = static_cast<QKeyEvent*>(event)->key();
++        if (key == Qt::Key_Space || key == Qt::Key_Return || key == Qt::Key_Enter) {
++            Q_EMIT drawerHeaderClicked(!_pIsExpand);
++            event->accept();
++            return true;
++        }
++        break;
++    }
+     case QEvent::Enter:
+     case QEvent::Leave:
+     {
+@@ -79,7 +96,7 @@ bool ElaDrawerHeader::event(QEvent* event)
+ void ElaDrawerHeader::mousePressEvent(QMouseEvent* event)
+ {
+     QWidget* posWidget = childAt(event->pos());
+-    if (!posWidget || (posWidget && posWidget->objectName().isEmpty()))
++    if (event->button() == Qt::LeftButton && (!posWidget || posWidget->objectName().isEmpty()))
+     {
+         _isPressed = true;
+         update();
+@@ -89,15 +106,13 @@ void ElaDrawerHeader::mousePressEvent(QMouseEvent* event)
+ 
+ void ElaDrawerHeader::mouseReleaseEvent(QMouseEvent* event)
+ {
+-    QWidget* posWidget = childAt(event->pos());
+-    if (!posWidget || (posWidget && posWidget->objectName().isEmpty()))
++    if (_isPressed && event->button() == Qt::LeftButton && rect().contains(event->pos()))
+     {
+         _isPressed = false;
+-        _pIsExpand = !_pIsExpand;
+-        //指示器动画
+-        doExpandOrCollapseAnimation();
+-        Q_EMIT drawerHeaderClicked(_pIsExpand);
++        Q_EMIT drawerHeaderClicked(!_pIsExpand);
+     }
++    _isPressed = false;
++    update();
+     QWidget::mouseReleaseEvent(event);
+ }
+ 
+@@ -118,6 +133,11 @@ void ElaDrawerHeader::paintEvent(QPaintEvent* event)
+                                                                                                : ElaThemeColor(_themeMode, BasicBaseAlpha));
+     QRect foregroundRect(1, 1, width() - 2, _pIsExpand ? height() + _pBorderRadius : height() - 2);
+     painter.drawRoundedRect(foregroundRect, _pBorderRadius, _pBorderRadius);
++    if (hasFocus()) {
++        painter.setPen(QPen(ElaThemeColor(_themeMode, PrimaryNormal), 2));
++        painter.setBrush(Qt::NoBrush);
++        painter.drawRoundedRect(rect().adjusted(2, 2, -2, -2), _pBorderRadius, _pBorderRadius);
++    }
+     // 底边线绘制
+     if (isUnderMouse)
+     {
+diff --git a/Development/ElaDrawerHeader.h b/Development/ElaDrawerHeader.h
+index 83ba19f..6953b56 100644
+--- a/Development/ElaDrawerHeader.h
++++ b/Development/ElaDrawerHeader.h
+@@ -15,7 +15,7 @@ public:
+     ~ElaDrawerHeader() override;
+ 
+     void setHeaderWidget(QWidget* widget);
+-    void doExpandOrCollapseAnimation();
++    void doExpandOrCollapseAnimation(bool animate = true);
+ Q_SIGNALS:
+     Q_SIGNAL void drawerHeaderClicked(bool isExpand);
+ 
+@@ -31,6 +31,7 @@ private:
+     bool _isPressed{false};
+     QWidget* _headerWidget{nullptr};
+     QVBoxLayout* _mainLayout{nullptr};
++    class QPropertyAnimation* _rotation{nullptr};
+ };
+ 
+ #endif //ELAWORKSPACE_ELAWIDGETTOOLS_DEVELOPERCOMPONENTS_ELADRAWERHEADER_H_
+diff --git a/Development/ElaMenuStyle.cpp b/Development/ElaMenuStyle.cpp
+index 0578460..2187f01 100644
+--- a/Development/ElaMenuStyle.cpp
++++ b/Development/ElaMenuStyle.cpp
+@@ -53,7 +53,7 @@ void ElaMenuStyle::drawPrimitive(PrimitiveElement element, const QStyleOption* o
+ 
+ void ElaMenuStyle::drawControl(ControlElement element, const QStyleOption* option, QPainter* painter, const QWidget* widget) const
+ {
+-    if (element == CE_MenuItem) {
++    if (!_nativeItemContent && element == CE_MenuItem) {
+         const auto* item = qstyleoption_cast<const QStyleOptionMenuItem*>(option);
+         const auto* menu = qobject_cast<const QMenu*>(widget);
+         const auto* action = menu && item ? menu->actionAt(item->rect.center()) : nullptr;
+@@ -79,6 +79,27 @@ void ElaMenuStyle::drawControl(ControlElement element, const QStyleOption* optio
+         //内容绘制 区分类型
+         if (const QStyleOptionMenuItem* mopt = qstyleoption_cast<const QStyleOptionMenuItem*>(option))
+         {
++            if (_nativeItemContent && mopt->menuItemType != QStyleOptionMenuItem::Separator) {
++                painter->save();
++                painter->setRenderHint(QPainter::Antialiasing);
++                if (mopt->state.testFlag(State_Enabled) && mopt->state.testFlag(State_Selected)) {
++                    painter->setPen(Qt::NoPen);
++                    painter->setBrush(ElaThemeColor(_themeMode, PopupHover));
++                    painter->drawRoundedRect(mopt->rect.adjusted(0, 2, 0, -2), 5, 5);
++                }
++                QStyleOptionMenuItem content(*mopt);
++                content.state &= ~(State_Selected | State_MouseOver);
++                for (auto group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
++                    const QColor ink = group == QPalette::Disabled
++                        ? ElaThemeColor(_themeMode, BasicTextDisable) : ElaThemeColor(_themeMode, BasicText);
++                    for (auto role : {QPalette::Text, QPalette::WindowText, QPalette::ButtonText})
++                        content.palette.setColor(group, role, ink);
++                }
++                // Qt retains mnemonics, shortcuts, checked/exclusive actions, QIcon and RTL layout.
++                QProxyStyle::drawControl(element, &content, painter, widget);
++                painter->restore();
++                return;
++            }
+             if (mopt->menuItemType == QStyleOptionMenuItem::Separator)
+             {
+                 QRect separatorRect = mopt->rect;
+@@ -200,6 +221,7 @@ int ElaMenuStyle::pixelMetric(PixelMetric metric, const QStyleOption* option, co
+     {
+     case QStyle::PM_SmallIconSize:
+     {
++        if (_nativeItemContent) return 16;
+         //图标宽度
+         _iconWidth = _pMenuItemHeight * 0.7;
+         return _iconWidth;
+@@ -230,12 +252,17 @@ QSize ElaMenuStyle::sizeFromContents(ContentsType type, const QStyleOption* opti
+                 break;
+             }
+             QSize menuItemSize = QProxyStyle::sizeFromContents(type, option, size, widget);
++            if (_nativeItemContent) {
++                menuItemSize.setHeight(qMax(menuItemSize.height(), qMax(_pMenuItemHeight, mopt->fontMetrics.height() + 12)));
++                return menuItemSize;
++            }
+             const ElaMenu* menu = dynamic_cast<const ElaMenu*>(widget);
+-            if ((menu && menu->isHasIcon()) || mopt->menuHasCheckableItems)
++            if (!menu) return menuItemSize;
++            if (menu->isHasIcon() || mopt->menuHasCheckableItems)
+             {
+                 _isAnyoneItemHasIcon = true;
+             }
+-            if (menu && menu->isHasChildMenu())
++            if (menu->isHasChildMenu())
+             {
+                 return QSize(menuItemSize.width() + 20, _pMenuItemHeight);
+             }
+diff --git a/Development/ElaMenuStyle.h b/Development/ElaMenuStyle.h
+index eaef25c..61b7803 100644
+--- a/Development/ElaMenuStyle.h
++++ b/Development/ElaMenuStyle.h
+@@ -13,12 +13,14 @@ class ElaMenuStyle : public QProxyStyle
+ public:
+     explicit ElaMenuStyle(QStyle* style = nullptr);
+     ~ElaMenuStyle();
++    void setNativeItemContent(bool enabled) { _nativeItemContent = enabled; }
+     void drawPrimitive(PrimitiveElement element, const QStyleOption* option, QPainter* painter, const QWidget* widget = nullptr) const override;
+     void drawControl(ControlElement element, const QStyleOption* option, QPainter* painter, const QWidget* widget = nullptr) const override;
+     int pixelMetric(PixelMetric metric, const QStyleOption* option = nullptr, const QWidget* widget = nullptr) const override;
+     QSize sizeFromContents(ContentsType type, const QStyleOption* option, const QSize& size, const QWidget* widget) const override;
+ 
+ private:
++    bool _nativeItemContent{false};
+     mutable bool _isAnyoneItemHasIcon{false};
+     int _shadowBorderWidth{6};
+     ElaThemeType::ThemeMode _themeMode;
+diff --git a/Development/ElaTabBarStyle.cpp b/Development/ElaTabBarStyle.cpp
+index 907de48..2164bf6 100644
+--- a/Development/ElaTabBarStyle.cpp
++++ b/Development/ElaTabBarStyle.cpp
+@@ -22,6 +22,10 @@ ElaTabBarStyle::~ElaTabBarStyle()
+ 
+ void ElaTabBarStyle::drawPrimitive(PrimitiveElement pe, const QStyleOption* opt, QPainter* p, const QWidget* w) const
+ {
++    if (_nativeTabBehavior && (pe == PE_IndicatorArrowLeft || pe == PE_IndicatorArrowRight || pe == PE_PanelButtonTool)) {
++        QProxyStyle::drawPrimitive(pe, opt, p, w);
++        return;
++    }
+     // qDebug() << pe << opt->rect;
+     switch (pe)
+     {
+@@ -57,11 +61,11 @@ void ElaTabBarStyle::drawPrimitive(PrimitiveElement pe, const QStyleOption* opt,
+             p->setBrush(ElaThemeColor(_themeMode, BasicHoverAlpha));
+             p->drawRoundedRect(opt->rect, 2, 2);
+         }
+-        QFont iconFont = QFont("Font Awesome 6 Free");
+-        iconFont.setPixelSize(eApp->getFontPixelSize() + 3);
+-        p->setFont(iconFont);
+-        p->setPen(ElaThemeColor(_themeMode, BasicText));
+-        p->drawText(opt->rect, Qt::AlignCenter, QChar(static_cast<char32_t>(ElaIconType::Xmark)));
++        p->setPen(QPen(ElaThemeColor(_themeMode, BasicText), 1.4, Qt::SolidLine, Qt::RoundCap));
++        const qreal half = qMin(4.0, qMin(opt->rect.width(), opt->rect.height()) / 4.0);
++        const QPointF center = QRectF(opt->rect).center();
++        p->drawLine(center + QPointF(-half, -half), center + QPointF(half, half));
++        p->drawLine(center + QPointF(half, -half), center + QPointF(-half, half));
+         p->restore();
+         return;
+     }
+@@ -141,6 +145,10 @@ void ElaTabBarStyle::drawControl(ControlElement element, const QStyleOption* opt
+     }
+     case QStyle::CE_TabBarTabLabel:
+     {
++        if (_nativeTabBehavior) {
++            QProxyStyle::drawControl(element, option, painter, widget);
++            return;
++        }
+         //文字和图标绘制
+         if (const QStyleOptionTab* topt = qstyleoption_cast<const QStyleOptionTab*>(option))
+         {
+@@ -191,6 +199,12 @@ QSize ElaTabBarStyle::sizeFromContents(ContentsType type, const QStyleOption* op
+     {
+     case CT_TabBarTab:
+     {
++        if (_nativeTabBehavior) {
++            QSize hint = QProxyStyle::sizeFromContents(type, option, size, widget);
++            hint.setHeight(qMax(hint.height(), option->fontMetrics.height() + 14));
++            hint.setWidth(qMax(hint.width() + 14, 64));
++            return hint;
++        }
+         return _pTabSize;
+     }
+     default:
+@@ -203,6 +217,8 @@ QSize ElaTabBarStyle::sizeFromContents(ContentsType type, const QStyleOption* op
+ 
+ QRect ElaTabBarStyle::subElementRect(SubElement element, const QStyleOption* option, const QWidget* widget) const
+ {
++    if (_nativeTabBehavior)
++        return QProxyStyle::subElementRect(element, option, widget);
+     switch (element)
+     {
+     case QStyle::SE_TabBarScrollLeftButton:
+diff --git a/Development/ElaTabBarStyle.h b/Development/ElaTabBarStyle.h
+index f41c68d..3ee8972 100644
+--- a/Development/ElaTabBarStyle.h
++++ b/Development/ElaTabBarStyle.h
+@@ -11,12 +11,14 @@ class ELA_EXPORT ElaTabBarStyle : public QProxyStyle
+ public:
+     explicit ElaTabBarStyle(QStyle* style = nullptr);
+     ~ElaTabBarStyle() override;
++    void setNativeTabBehavior(bool enabled) { _nativeTabBehavior = enabled; }
+     void drawPrimitive(QStyle::PrimitiveElement pe, const QStyleOption* opt, QPainter* p, const QWidget* w) const override;
+     void drawControl(ControlElement element, const QStyleOption* option, QPainter* painter, const QWidget* widget = nullptr) const override;
+     QSize sizeFromContents(ContentsType type, const QStyleOption* option, const QSize& size, const QWidget* widget) const override;
+     QRect subElementRect(SubElement element, const QStyleOption* option, const QWidget* widget) const override;
+ 
+ private:
++    bool _nativeTabBehavior{false};
+     ElaThemeType::ThemeMode _themeMode;
+ };
+ 
+diff --git a/ElaComboBox.cpp b/ElaComboBox.cpp
+index be2d136..461419c 100644
+--- a/ElaComboBox.cpp
++++ b/ElaComboBox.cpp
+@@ -11,6 +11,9 @@
+ #include <QListView>
+ #include <QMouseEvent>
+ #include <QPropertyAnimation>
++#include <QParallelAnimationGroup>
++#include <QHideEvent>
++#include <QResizeEvent>
+ Q_PROPERTY_CREATE_Q_CPP(ElaComboBox, int, BorderRadius)
+ ElaComboBox::ElaComboBox(QWidget* parent)
+     : QComboBox(parent), d_ptr(new ElaComboBoxPrivate())
+@@ -23,6 +26,16 @@ ElaComboBox::ElaComboBox(QWidget* parent)
+     setFixedHeight(35);
+     d->_comboBoxStyle = new ElaComboBoxStyle(style());
+     setStyle(d->_comboBoxStyle);
++    d->_popupAnimation = new QParallelAnimationGroup(this);
++    connect(d->_popupAnimation, &QParallelAnimationGroup::finished, this, &ElaComboBox::finishPopupAnimation);
++    d->_indicatorAnimation = new QParallelAnimationGroup(this);
++    d->_rotation = new QPropertyAnimation(d->_comboBoxStyle, "pExpandIconRotate", d->_indicatorAnimation);
++    d->_mark = new QPropertyAnimation(d->_comboBoxStyle, "pExpandMarkWidth", d->_indicatorAnimation);
++    for (auto* animation : {d->_rotation, d->_mark}) {
++        animation->setDuration(150);
++        animation->setEasingCurve(QEasingCurve::InOutSine);
++    }
++    connect(d->_rotation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
+ 
+     //调用view 让container初始化
+     setView(new QListView(this));
+@@ -37,9 +50,12 @@ ElaComboBox::ElaComboBox(QWidget* parent)
+     comboBoxView->setObjectName("ElaComboBoxView");
+     comboBoxView->setStyleSheet("#ElaComboBoxView{background-color:transparent;}");
+     comboBoxView->setStyle(d->_comboBoxStyle);
++    comboBoxView->installEventFilter(this);
++    comboBoxView->viewport()->installEventFilter(this);
+     QWidget* container = this->findChild<QFrame*>();
+     if (container)
+     {
++        container->installEventFilter(this);
+         container->setWindowFlags(Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+         container->setAttribute(Qt::WA_TranslucentBackground);
+         container->setObjectName("ElaComboBoxContainer");
+@@ -64,9 +80,9 @@ ElaComboBox::ElaComboBox(QWidget* parent)
+ ElaComboBox::~ElaComboBox()
+ {
+     Q_D(ElaComboBox);
+-    // Keep the shared style alive until the popup/view have been destroyed.
+-    // Reparent last so QWidget tears those children down before their style,
+-    // without repolishing a native popup while it is being destroyed.
++    finishPopupAnimation();
++    d->_indicatorAnimation->stop();
++    // Destroy the shared style after popup/view children, without repolishing.
+     d->_comboBoxStyle->setParent(this);
+ }
+ 
+@@ -81,133 +97,114 @@ void ElaComboBox::setEditable(bool editable)
+     }
+ }
+ 
++bool ElaComboBox::isPopupAnimating() const
++{
++    Q_D(const ElaComboBox);
++    return d->_popupAnimation->state() == QAbstractAnimation::Running;
++}
++
++void ElaComboBox::finishPopupAnimation()
++{
++    Q_D(ElaComboBox);
++    if (d->_settling || !d->_popup) return;
++    d->_settling = true;
++    d->_popupAnimation->stop();
++    auto* layout = d->_popup->layout();
++    d->_popup->setMinimumHeight(0);
++    d->_popup->setMaximumHeight(QWIDGETSIZE_MAX);
++    if (d->_popupHeight > 0) d->_popup->resize(d->_popup->width(), d->_popupHeight);
++    view()->move(d->_viewPosition);
++    if (layout->indexOf(view()) < 0) layout->addWidget(view());
++    layout->activate();
++    d->_settling = false;
++}
++
++void ElaComboBox::animateIndicator(bool expanded)
++{
++    Q_D(ElaComboBox);
++    d->_indicatorAnimation->stop();
++    d->_rotation->setStartValue(d->_comboBoxStyle->getExpandIconRotate());
++    d->_rotation->setEndValue(expanded ? -180 : 0);
++    d->_mark->setStartValue(d->_comboBoxStyle->getExpandMarkWidth());
++    d->_mark->setEndValue(expanded ? qMax(0, width() / 2 - d->_pBorderRadius - 6) : 0);
++    d->_indicatorAnimation->start();
++    if (qApp->property("waveworkbench.reducedMotion").toBool())
++        d->_indicatorAnimation->setCurrentTime(d->_indicatorAnimation->duration());
++}
++
+ void ElaComboBox::showPopup()
+ {
+     Q_D(ElaComboBox);
+-    bool oldAnimationEffects = qApp->isEffectEnabled(Qt::UI_AnimateCombo);
++    finishPopupAnimation();
++    QPointer<ElaComboBox> alive(this);
++    const bool oldEffects = qApp->isEffectEnabled(Qt::UI_AnimateCombo);
+     qApp->setEffectEnabled(Qt::UI_AnimateCombo, false);
+     QComboBox::showPopup();
+-    qApp->setEffectEnabled(Qt::UI_AnimateCombo, oldAnimationEffects);
+-    if (count() > 0)
+-    {
+-        QWidget* container = this->findChild<QFrame*>();
+-        if (container)
+-        {
+-            int containerHeight = 0;
+-            if (count() >= maxVisibleItems())
+-            {
+-                containerHeight = maxVisibleItems() * 35 + 8;
+-            }
+-            else
+-            {
+-                containerHeight = count() * 35 + 8;
+-            }
+-            view()->resize(view()->width(), containerHeight - 8);
+-            container->move(container->x(), container->y() + 3);
+-            QLayout* layout = container->layout();
+-            while (layout->count())
+-            {
+-                layout->takeAt(0);
+-            }
+-            QPropertyAnimation* fixedSizeAnimation = new QPropertyAnimation(container, "maximumHeight");
+-            connect(fixedSizeAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-                container->setFixedHeight(value.toUInt());
+-            });
+-            fixedSizeAnimation->setStartValue(1);
+-            fixedSizeAnimation->setEndValue(containerHeight);
+-            fixedSizeAnimation->setEasingCurve(QEasingCurve::OutCubic);
+-            fixedSizeAnimation->setDuration(400);
+-            fixedSizeAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+-
+-            QPropertyAnimation* viewPosAnimation = new QPropertyAnimation(view(), "pos");
+-            connect(viewPosAnimation, &QPropertyAnimation::finished, this, [=]() {
+-                d->_isAllowHidePopup = true;
+-                layout->addWidget(view());
+-            });
+-            QPoint viewPos = view()->pos();
+-            viewPosAnimation->setStartValue(QPoint(viewPos.x(), viewPos.y() - view()->height()));
+-            viewPosAnimation->setEndValue(viewPos);
+-            viewPosAnimation->setEasingCurve(QEasingCurve::OutCubic);
+-            viewPosAnimation->setDuration(400);
+-            viewPosAnimation->start(QAbstractAnimation::DeleteWhenStopped);
++    qApp->setEffectEnabled(Qt::UI_AnimateCombo, oldEffects);
++    if (!alive || count() == 0 || !view()->isVisible()
++        || qApp->property("waveworkbench.reducedMotion").toBool()) return;
++    d->_popup = view()->window();
++    d->_popupHeight = d->_popup->height();
++    d->_viewPosition = view()->pos();
++    auto* layout = d->_popup->layout();
++    if (!layout) return;
++    layout->removeWidget(view());
++    if (!d->_height) {
++        d->_height = new QPropertyAnimation(d->_popupAnimation);
++        d->_height->setPropertyName("maximumHeight");
++        d->_position = new QPropertyAnimation(d->_popupAnimation);
++        d->_position->setPropertyName("pos");
++        for (auto* animation : {d->_height, d->_position}) {
++            animation->setDuration(180);
++            animation->setEasingCurve(QEasingCurve::OutCubic);
+         }
+-        //指示器动画
+-        QPropertyAnimation* rotateAnimation = new QPropertyAnimation(d->_comboBoxStyle, "pExpandIconRotate");
+-        connect(rotateAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-            update();
++        connect(d->_height, &QPropertyAnimation::valueChanged, this, [this](const QVariant& value) {
++            Q_D(ElaComboBox);
++            if (d->_popup) d->_popup->setFixedHeight(value.toInt());
+         });
+-        rotateAnimation->setDuration(300);
+-        rotateAnimation->setEasingCurve(QEasingCurve::InOutSine);
+-        rotateAnimation->setStartValue(d->_comboBoxStyle->getExpandIconRotate());
+-        rotateAnimation->setEndValue(-180);
+-        rotateAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d->_comboBoxStyle, "pExpandMarkWidth");
+-        markAnimation->setDuration(300);
+-        markAnimation->setEasingCurve(QEasingCurve::InOutSine);
+-        markAnimation->setStartValue(d->_comboBoxStyle->getExpandMarkWidth());
+-        markAnimation->setEndValue(width() / 2 - d->_pBorderRadius - 6);
+-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+     }
++    auto* height = d->_height;
++    height->setTargetObject(d->_popup);
++    height->setStartValue(1);
++    height->setEndValue(d->_popupHeight);
++    auto* position = d->_position;
++    position->setTargetObject(view());
++    position->setStartValue(d->_viewPosition - QPoint(0, view()->height()));
++    position->setEndValue(d->_viewPosition);
++    d->_popupAnimation->start();
++    animateIndicator(true);
+ }
+ 
+ void ElaComboBox::hidePopup()
+ {
+-    Q_D(ElaComboBox);
+-    if (d->_isAllowHidePopup)
+-    {
+-        QWidget* container = this->findChild<QFrame*>();
+-        int containerHeight = container->height();
+-        if (container)
+-        {
+-            QLayout* layout = container->layout();
+-            while (layout->count())
+-            {
+-                layout->takeAt(0);
+-            }
+-            QPropertyAnimation* viewPosAnimation = new QPropertyAnimation(view(), "pos");
+-            connect(viewPosAnimation, &QPropertyAnimation::finished, this, [=]() {
+-                layout->addWidget(view());
+-                QMouseEvent focusEvent(QEvent::MouseButtonPress, QPoint(-1, -1), QPoint(-1, -1), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+-                QApplication::sendEvent(parentWidget(), &focusEvent);
+-                QComboBox::hidePopup();
+-                container->setFixedHeight(containerHeight);
+-            });
+-            QPoint viewPos = view()->pos();
+-            connect(viewPosAnimation, &QPropertyAnimation::finished, this, [=]() {
+-                view()->move(viewPos);
+-            });
+-            viewPosAnimation->setStartValue(viewPos);
+-            viewPosAnimation->setEndValue(QPoint(viewPos.x(), viewPos.y() - view()->height()));
+-            viewPosAnimation->setEasingCurve(QEasingCurve::InCubic);
+-            viewPosAnimation->start(QAbstractAnimation::DeleteWhenStopped);
++    finishPopupAnimation();
++    QComboBox::hidePopup();
++    animateIndicator(false);
++}
+ 
+-            QPropertyAnimation* fixedSizeAnimation = new QPropertyAnimation(container, "maximumHeight");
+-            connect(fixedSizeAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-                container->setFixedHeight(value.toUInt());
+-            });
+-            fixedSizeAnimation->setStartValue(container->height());
+-            fixedSizeAnimation->setEndValue(1);
+-            fixedSizeAnimation->setEasingCurve(QEasingCurve::InCubic);
+-            fixedSizeAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+-            d->_isAllowHidePopup = false;
+-        }
+-        //指示器动画
+-        QPropertyAnimation* rotateAnimation = new QPropertyAnimation(d->_comboBoxStyle, "pExpandIconRotate");
+-        connect(rotateAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-            update();
+-        });
+-        rotateAnimation->setDuration(300);
+-        rotateAnimation->setEasingCurve(QEasingCurve::InOutSine);
+-        rotateAnimation->setStartValue(d->_comboBoxStyle->getExpandIconRotate());
+-        rotateAnimation->setEndValue(0);
+-        rotateAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d->_comboBoxStyle, "pExpandMarkWidth");
+-        markAnimation->setDuration(300);
+-        markAnimation->setEasingCurve(QEasingCurve::InOutSine);
+-        markAnimation->setStartValue(d->_comboBoxStyle->getExpandMarkWidth());
+-        markAnimation->setEndValue(0);
+-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
++bool ElaComboBox::eventFilter(QObject* watched, QEvent* event)
++{
++    Q_D(ElaComboBox);
++    if (watched == d->_popup && event->type() == QEvent::Hide) {
++        finishPopupAnimation();
++        animateIndicator(false);
++    } else if (isPopupAnimating() && (event->type() == QEvent::KeyPress
++        || event->type() == QEvent::MouseButtonPress || event->type() == QEvent::Wheel)) {
++        finishPopupAnimation();
+     }
++    return QComboBox::eventFilter(watched, event);
++}
++
++void ElaComboBox::hideEvent(QHideEvent* event)
++{
++    hidePopup();
++    QComboBox::hideEvent(event);
++}
++
++void ElaComboBox::resizeEvent(QResizeEvent* event)
++{
++    if (isPopupAnimating()) finishPopupAnimation();
++    QComboBox::resizeEvent(event);
+ }
+ 
+ void ElaComboBox::paintEvent(QPaintEvent* event)
+diff --git a/ElaComboBox.h b/ElaComboBox.h
+index 063a81e..681292e 100644
+--- a/ElaComboBox.h
++++ b/ElaComboBox.h
+@@ -17,11 +17,17 @@ public:
+     ~ElaComboBox() override;
+ 
+     void setEditable(bool editable);
++    bool isPopupAnimating() const;
++    void finishPopupAnimation();
+ 
+ protected:
+     virtual void showPopup() override;
+     virtual void hidePopup() override;
+     virtual void paintEvent(QPaintEvent* event) override;
++    bool eventFilter(QObject* watched, QEvent* event) override;
++    void hideEvent(QHideEvent* event) override;
++    void resizeEvent(QResizeEvent* event) override;
++    void animateIndicator(bool expanded);
+ };
+ 
+ #endif // ELAWORKSPACE_ELAWIDGETTOOLS_ELACOMBOBOX_H_
+diff --git a/ElaDoubleSpinBox.cpp b/ElaDoubleSpinBox.cpp
+index 6a8717f..d2d950b 100644
+--- a/ElaDoubleSpinBox.cpp
++++ b/ElaDoubleSpinBox.cpp
+@@ -9,12 +9,15 @@
+ #include <QLineEdit>
+ #include <QPainter>
+ #include <QPropertyAnimation>
++#include <QApplication>
+ ElaDoubleSpinBox::ElaDoubleSpinBox(QWidget* parent)
+     : QDoubleSpinBox(parent), d_ptr(new ElaDoubleSpinBoxPrivate())
+ {
+     Q_D(ElaDoubleSpinBox);
+     d->q_ptr = this;
+     d->_pExpandMarkWidth = 0;
++    d->_markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth", this);
++    connect(d->_markAnimation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
+     setFixedSize(115, 35);
+     d->_style = new ElaSpinBoxStyle(style());
+     setStyle(d->_style);
+@@ -27,6 +30,7 @@ ElaDoubleSpinBox::ElaDoubleSpinBox(QWidget* parent)
+ ElaDoubleSpinBox::~ElaDoubleSpinBox()
+ {
+     Q_D(ElaDoubleSpinBox);
++    d->_markAnimation->stop();
+     setStyle(nullptr);
+     lineEdit()->setStyleSheet(QString());
+     lineEdit()->setStyle(nullptr);
+@@ -74,15 +78,13 @@ void ElaDoubleSpinBox::focusInEvent(QFocusEvent* event)
+     Q_D(ElaDoubleSpinBox);
+     if (event->reason() == Qt::MouseFocusReason)
+     {
+-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth");
+-        connect(markAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-            update();
+-        });
+-        markAnimation->setDuration(300);
++        auto* markAnimation = d->_markAnimation;
++        markAnimation->stop();
++        markAnimation->setDuration(qApp->property("waveworkbench.reducedMotion").toBool() ? 0 : 300);
+         markAnimation->setEasingCurve(QEasingCurve::InOutSine);
+         markAnimation->setStartValue(d->_pExpandMarkWidth);
+         markAnimation->setEndValue(width() / 2 - 3);
+-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
++        markAnimation->start();
+     }
+     QDoubleSpinBox::focusInEvent(event);
+ }
+@@ -92,15 +94,13 @@ void ElaDoubleSpinBox::focusOutEvent(QFocusEvent* event)
+     Q_D(ElaDoubleSpinBox);
+     if (event->reason() != Qt::PopupFocusReason)
+     {
+-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth");
+-        connect(markAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-            update();
+-        });
+-        markAnimation->setDuration(300);
++        auto* markAnimation = d->_markAnimation;
++        markAnimation->stop();
++        markAnimation->setDuration(qApp->property("waveworkbench.reducedMotion").toBool() ? 0 : 300);
+         markAnimation->setEasingCurve(QEasingCurve::InOutSine);
+         markAnimation->setStartValue(d->_pExpandMarkWidth);
+         markAnimation->setEndValue(0);
+-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
++        markAnimation->start();
+     }
+     QDoubleSpinBox::focusOutEvent(event);
+ }
+diff --git a/ElaDrawerArea.cpp b/ElaDrawerArea.cpp
+index 2fe409c..df001cf 100644
+--- a/ElaDrawerArea.cpp
++++ b/ElaDrawerArea.cpp
+@@ -1,6 +1,7 @@
+ #include "ElaDrawerArea.h"
+ #include "ElaDrawerAreaPrivate.h"
+ #include "ElaTheme.h"
++#include <QApplication>
+ ElaDrawerArea::ElaDrawerArea(QWidget* parent)
+     : QWidget(parent), d_ptr(new ElaDrawerAreaPrivate())
+ {
+@@ -12,6 +13,8 @@ ElaDrawerArea::ElaDrawerArea(QWidget* parent)
+     d->_drawerHeader = new ElaDrawerHeader(this);
+     d->_drawerContainer = new ElaDrawerContainer(this);
+     connect(d->_drawerHeader, &ElaDrawerHeader::drawerHeaderClicked, d, &ElaDrawerAreaPrivate::onDrawerHeaderClicked);
++    connect(d->_drawerContainer, &ElaDrawerContainer::animationFinished,
++            this, &ElaDrawerArea::drawerAnimationFinished);
+ 
+     QVBoxLayout* mainLayout = new QVBoxLayout(this);
+     mainLayout->setContentsMargins(0, 0, 0, 0);
+@@ -75,20 +78,68 @@ void ElaDrawerArea::removeDrawer(QWidget* widget)
+ 
+ void ElaDrawerArea::expand()
+ {
+-    Q_D(ElaDrawerArea);
+-    d->_drawerHeader->setIsExpand(true);
+-    d->_drawerHeader->doExpandOrCollapseAnimation();
+-    d->_drawerContainer->doDrawerAnimation(true);
+-    Q_EMIT expandStateChanged(true);
++    setExpanded(true);
+ }
+ 
+ void ElaDrawerArea::collapse()
++{
++    setExpanded(false);
++}
++
++void ElaDrawerArea::setExpanded(bool expanded, bool animate)
++{
++    Q_D(ElaDrawerArea);
++    const bool changed = d->_drawerContainer->isExpanded() != expanded;
++    QPointer<ElaDrawerArea> guard(this);
++    if (changed) Q_EMIT expandStateAboutToChange(expanded);
++    if (!guard) return;
++    animate = animate && !qApp->property("waveworkbench.reducedMotion").toBool();
++    d->_drawerHeader->setIsExpand(expanded);
++    d->_drawerHeader->doExpandOrCollapseAnimation(animate && isVisible());
++    d->_drawerContainer->doDrawerAnimation(expanded, animate);
++    if (guard && changed) Q_EMIT expandStateChanged(expanded);
++}
++
++void ElaDrawerArea::setDrawerHeaderVisible(bool visible)
++{
++    Q_D(ElaDrawerArea);
++    d->_drawerHeader->setVisible(visible);
++}
++
++void ElaDrawerArea::setDrawerEdge(Qt::Edge edge)
++{
++    Q_D(ElaDrawerArea);
++    d->_drawerContainer->setEdge(edge);
++}
++
++bool ElaDrawerArea::isDrawerAnimating() const
++{
++    Q_D(const ElaDrawerArea);
++    return d->_drawerContainer->isAnimating();
++}
++
++void ElaDrawerArea::finishDrawerAnimation()
+ {
+     Q_D(ElaDrawerArea);
+-    d->_drawerHeader->setIsExpand(false);
+-    d->_drawerHeader->doExpandOrCollapseAnimation();
+-    d->_drawerContainer->doDrawerAnimation(false);
+-    Q_EMIT expandStateChanged(false);
++    d->_drawerContainer->finishAnimation();
++}
++
++qint64 ElaDrawerArea::drawerSnapshotBytes() const
++{
++    Q_D(const ElaDrawerArea);
++    return d->_drawerContainer->snapshotBytes();
++}
++
++double ElaDrawerArea::drawerPreparationMs() const
++{
++    Q_D(const ElaDrawerArea);
++    return d->_drawerContainer->preparationMs();
++}
++
++qreal ElaDrawerArea::drawerProgress() const
++{
++    Q_D(const ElaDrawerArea);
++    return d->_drawerContainer->getOpacity();
+ }
+ 
+ bool ElaDrawerArea::getIsExpand() const
+diff --git a/ElaDrawerArea.h b/ElaDrawerArea.h
+index ccfa778..a95b923 100644
+--- a/ElaDrawerArea.h
++++ b/ElaDrawerArea.h
+@@ -24,9 +24,20 @@ public:
+     void expand();
+     void collapse();
+ 
++    void setExpanded(bool expanded, bool animate = true);
++    void setDrawerHeaderVisible(bool visible);
++    void setDrawerEdge(Qt::Edge edge);
++    bool isDrawerAnimating() const;
++    void finishDrawerAnimation();
++    qint64 drawerSnapshotBytes() const;
++    double drawerPreparationMs() const;
++    qreal drawerProgress() const;
++
+     bool getIsExpand() const;
+ Q_SIGNALS:
++    Q_SIGNAL void expandStateAboutToChange(bool isExpand);
+     Q_SIGNAL void expandStateChanged(bool isExpand);
++    Q_SIGNAL void drawerAnimationFinished(bool isExpand);
+ };
+ 
+ #endif //ELAWORKSPACE_ELAWIDGETTOOLS_ELADRAWERAREA_H_
+diff --git a/ElaLineEdit.cpp b/ElaLineEdit.cpp
+index 3709915..d5c6597 100644
+--- a/ElaLineEdit.cpp
++++ b/ElaLineEdit.cpp
+@@ -6,6 +6,7 @@
+ #include <QPainter>
+ #include <QPainterPath>
+ #include <QPropertyAnimation>
++#include <QApplication>
+ 
+ #include "ElaEventBus.h"
+ #include "ElaLineEditStyle.h"
+@@ -24,6 +25,8 @@ ElaLineEdit::ElaLineEdit(QWidget* parent)
+     d->_themeMode = eTheme->getThemeMode();
+     d->_pBorderRadius = 6;
+     d->_pExpandMarkWidth = 0;
++    d->_markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth", this);
++    connect(d->_markAnimation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
+     d->_pIsClearButtonEnable = true;
+     setFocusPolicy(Qt::StrongFocus);
+     // 事件总线
+@@ -42,6 +45,8 @@ ElaLineEdit::ElaLineEdit(QWidget* parent)
+ 
+ ElaLineEdit::~ElaLineEdit()
+ {
++    Q_D(ElaLineEdit);
++    d->_markAnimation->stop();
+     setStyle(nullptr);
+     delete _waveOwnedStyle;
+ }
+@@ -70,15 +75,13 @@ void ElaLineEdit::focusInEvent(QFocusEvent* event)
+         {
+             setClearButtonEnabled(true);
+         }
+-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth");
+-        connect(markAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-            update();
+-        });
+-        markAnimation->setDuration(300);
++        auto* markAnimation = d->_markAnimation;
++        markAnimation->stop();
++        markAnimation->setDuration(qApp->property("waveworkbench.reducedMotion").toBool() ? 0 : 300);
+         markAnimation->setEasingCurve(QEasingCurve::InOutSine);
+         markAnimation->setStartValue(d->_pExpandMarkWidth);
+         markAnimation->setEndValue(width() / 2 - d->_pBorderRadius / 2);
+-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
++        markAnimation->start();
+     }
+     QLineEdit::focusInEvent(event);
+ }
+@@ -93,15 +96,13 @@ void ElaLineEdit::focusOutEvent(QFocusEvent* event)
+         {
+             setClearButtonEnabled(false);
+         }
+-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth");
+-        connect(markAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-            update();
+-        });
+-        markAnimation->setDuration(300);
++        auto* markAnimation = d->_markAnimation;
++        markAnimation->stop();
++        markAnimation->setDuration(qApp->property("waveworkbench.reducedMotion").toBool() ? 0 : 300);
+         markAnimation->setEasingCurve(QEasingCurve::InOutSine);
+         markAnimation->setStartValue(d->_pExpandMarkWidth);
+         markAnimation->setEndValue(0);
+-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
++        markAnimation->start();
+         Q_EMIT wmFocusOut(text());
+     }
+     QLineEdit::focusOutEvent(event);
+diff --git a/ElaListView.cpp b/ElaListView.cpp
+index 408db04..a4e6ef6 100644
+--- a/ElaListView.cpp
++++ b/ElaListView.cpp
+@@ -1,6 +1,7 @@
+ #include "ElaListView.h"
+ 
+ #include <QMouseEvent>
++#include <QApplication>
+ 
+ #include "ElaListViewPrivate.h"
+ #include "ElaListViewStyle.h"
+@@ -13,6 +14,8 @@ ElaListView::ElaListView(QWidget* parent)
+     setObjectName("ElaListView");
+     setStyleSheet("#ElaListView{background-color:transparent;}");
+     d->_listViewStyle = new ElaListViewStyle(style());
++    d->_listViewStyle->setParent(qApp);
++    connect(this, &QObject::destroyed, d->_listViewStyle, &QObject::deleteLater);
+     setStyle(d->_listViewStyle);
+     setMouseTracking(true);
+     setVerticalScrollBar(new ElaScrollBar(this));
+@@ -25,8 +28,6 @@ ElaListView::ElaListView(QWidget* parent)
+ 
+ ElaListView::~ElaListView()
+ {
+-    Q_D(ElaListView);
+-    delete d->_listViewStyle;
+ }
+ 
+ void ElaListView::setItemHeight(int itemHeight)
+diff --git a/ElaMenu.cpp b/ElaMenu.cpp
+index 7fa15ed..a0bced0 100644
+--- a/ElaMenu.cpp
++++ b/ElaMenu.cpp
+@@ -6,7 +6,9 @@
+ #include <QPainter>
+ #include <QPainterPath>
+ #include <QPropertyAnimation>
++#include <QPointer>
+ #include <QVBoxLayout>
++#include <QWidgetAction>
+ 
+ #include "ElaMenuStyle.h"
+ #include "private/ElaMenuPrivate.h"
+@@ -21,6 +23,11 @@ ElaMenu::ElaMenu(QWidget* parent)
+     d->_menuStyle = new ElaMenuStyle(style());
+     setStyle(d->_menuStyle);
+     d->_pAnimationImagePosY = 0;
++    d->_popupAnimation = new QPropertyAnimation(d, "pAnimationImagePosY", this);
++    d->_popupAnimation->setEasingCurve(QEasingCurve::OutCubic);
++    d->_popupAnimation->setDuration(160);
++    connect(d->_popupAnimation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
++    connect(d->_popupAnimation, &QPropertyAnimation::finished, this, &ElaMenu::finishPopupAnimation);
+ }
+ 
+ ElaMenu::ElaMenu(const QString& title, QWidget* parent)
+@@ -32,8 +39,16 @@ ElaMenu::ElaMenu(const QString& title, QWidget* parent)
+ ElaMenu::~ElaMenu()
+ {
+     Q_D(ElaMenu);
+-    setStyle(nullptr);
+-    delete d->_menuStyle;
++    d->_popupAnimation->stop();
++    d->_menuStyle->setParent(this);
++}
++
++void ElaMenu::setNativeMenuBehavior(bool enabled)
++{
++    Q_D(ElaMenu);
++    finishPopupAnimation();
++    _nativeMenuBehavior = enabled;
++    d->_menuStyle->setNativeItemContent(enabled);
+ }
+ 
+ void ElaMenu::setMenuItemHeight(int menuItemHeight)
+@@ -56,6 +71,7 @@ QAction* ElaMenu::addMenu(QMenu* menu)
+ ElaMenu* ElaMenu::addMenu(const QString& title)
+ {
+     ElaMenu* menu = new ElaMenu(title, this);
++    menu->setNativeMenuBehavior(_nativeMenuBehavior);
+     QMenu::addAction(menu->menuAction());
+     return menu;
+ }
+@@ -63,6 +79,7 @@ ElaMenu* ElaMenu::addMenu(const QString& title)
+ ElaMenu* ElaMenu::addMenu(const QIcon& icon, const QString& title)
+ {
+     ElaMenu* menu = new ElaMenu(title, this);
++    menu->setNativeMenuBehavior(_nativeMenuBehavior);
+     menu->setIcon(icon);
+     QMenu::addAction(menu->menuAction());
+     return menu;
+@@ -71,6 +88,7 @@ ElaMenu* ElaMenu::addMenu(const QIcon& icon, const QString& title)
+ ElaMenu* ElaMenu::addMenu(ElaIconType::IconName icon, const QString& title)
+ {
+     ElaMenu* menu = new ElaMenu(title, this);
++    menu->setNativeMenuBehavior(_nativeMenuBehavior);
+     QMenu::addAction(menu->menuAction());
+     menu->menuAction()->setProperty("ElaIconType", QChar(static_cast<char32_t>(icon)));
+     return menu;
+@@ -132,16 +150,81 @@ bool ElaMenu::isHasIcon() const
+     return false;
+ }
+ 
++bool ElaMenu::isPopupAnimating() const
++{
++    Q_D(const ElaMenu);
++    return d->_popupAnimation && d->_popupAnimation->state() == QAbstractAnimation::Running;
++}
++
++void ElaMenu::finishPopupAnimation()
++{
++    Q_D(ElaMenu);
++    if (d->_popupAnimation) d->_popupAnimation->stop();
++    d->_animationPix = QPixmap();
++    d->_pAnimationImagePosY = 0;
++    update();
++}
++
++bool ElaMenu::event(QEvent* event)
++{
++    Q_D(ElaMenu);
++    if (!d->_capturing && isPopupAnimating()) {
++        switch (event->type()) {
++        case QEvent::KeyPress:
++        case QEvent::MouseButtonPress:
++        case QEvent::MouseMove:
++        case QEvent::Wheel:
++        case QEvent::Hide:
++        case QEvent::Resize:
++        case QEvent::ActionAdded:
++        case QEvent::ActionRemoved:
++        case QEvent::ActionChanged:
++        case QEvent::PaletteChange:
++        case QEvent::StyleChange:
++        case QEvent::FontChange:
++            finishPopupAnimation();
++            break;
++        default:
++            break;
++        }
++    }
++    return QMenu::event(event);
++}
++
+ void ElaMenu::showEvent(QShowEvent* event)
+ {
+-    // Do not move an already-positioned popup or retain animated snapshots.
+-    // Qt owns keyboard/popup timing; this also supports reduced motion.
+-    Q_EMIT menuShow();
+-    updateGeometry();
+     QMenu::showEvent(event);
++    QPointer<ElaMenu> alive(this);
++    Q_EMIT menuShow();
++    if (!alive || !isVisible()) return;
++    finishPopupAnimation();
++    Q_D(ElaMenu);
++    if (qApp->property("waveworkbench.reducedMotion").toBool()) return;
++    // Qt keeps popup placement and actionable item semantics. Ela animates its image.
++    // Embedded editors must remain live instead of painting a duplicate snapshot.
++    for (auto* action : actions())
++        if (qobject_cast<QWidgetAction*>(action)) return;
++    const qreal scale = devicePixelRatioF();
++    if (qint64(qCeil(width() * scale)) * qCeil(height() * scale) * 4 > 8 * 1024 * 1024)
++        return;
++    d->_capturing = true;
++    d->_animationPix = grab();
++    d->_capturing = false;
++    if (d->_animationPix.isNull()) return;
++    const int distance = qMin(160, height());
++    const bool fromAbove = pos().y() + d->_menuStyle->getMenuItemHeight() + 9 >= QCursor::pos().y();
++    d->_popupAnimation->setStartValue(fromAbove ? -distance : distance);
++    d->_popupAnimation->setEndValue(0);
++    d->_popupAnimation->start();
+ }
+ 
+ void ElaMenu::paintEvent(QPaintEvent* event)
+ {
+-    QMenu::paintEvent(event);
++    Q_D(ElaMenu);
++    if (!d->_animationPix.isNull() && !d->_capturing) {
++        QPainter painter(this);
++        painter.drawPixmap(QPoint(0, d->_pAnimationImagePosY), d->_animationPix);
++    } else {
++        QMenu::paintEvent(event);
++    }
+ }
+diff --git a/ElaMenu.h b/ElaMenu.h
+index 74c76be..e35c482 100644
+--- a/ElaMenu.h
++++ b/ElaMenu.h
+@@ -19,6 +19,9 @@ public:
+     ~ElaMenu();
+     void setMenuItemHeight(int menuItemHeight);
+     int getMenuItemHeight() const;
++    void setNativeMenuBehavior(bool enabled);
++    bool isPopupAnimating() const;
++    void finishPopupAnimation();
+ 
+     QAction* addMenu(QMenu* menu);
+     ElaMenu* addMenu(const QString& title);
+@@ -34,8 +37,11 @@ Q_SIGNALS:
+     Q_SIGNAL void menuShow();
+ 
+ protected:
++    bool event(QEvent* event) override;
+     virtual void showEvent(QShowEvent* event) override;
+     virtual void paintEvent(QPaintEvent* event) override;
++private:
++    bool _nativeMenuBehavior{false};
+ };
+ 
+ #endif // ELAWORKSPACE_ELAWIDGETTOOLS_ELAMENU_H_
+diff --git a/ElaScrollBar.cpp b/ElaScrollBar.cpp
+index 5c0bdda..dedc7fa 100644
+--- a/ElaScrollBar.cpp
++++ b/ElaScrollBar.cpp
+@@ -1,6 +1,7 @@
+ #include "ElaScrollBar.h"
+ 
+ #include <QDebug>
++#include <QApplication>
+ #include <QPainter>
+ #include <QPointer>
+ #include <QPropertyAnimation>
+@@ -25,15 +26,33 @@ ElaScrollBar::ElaScrollBar(QWidget* parent)
+     d->_pIsAnimation = false;
+     connect(this, &ElaScrollBar::rangeChanged, d, &ElaScrollBarPrivate::onRangeChanged);
+     ElaScrollBarStyle* scrollBarStyle = new ElaScrollBarStyle(style());
+-    _waveOwnedStyle = scrollBarStyle;
++    scrollBarStyle->setParent(this);
+     scrollBarStyle->setScrollBar(this);
+     setStyle(scrollBarStyle);
+-    d->_slideSmoothAnimation = new QPropertyAnimation(this, "value");
++    d->_pWheelValue = 0;
++    d->_slideSmoothAnimation = new QPropertyAnimation(this, "value", this);
+     d->_slideSmoothAnimation->setEasingCurve(QEasingCurve::OutSine);
+     d->_slideSmoothAnimation->setDuration(300);
+     connect(d->_slideSmoothAnimation, &QPropertyAnimation::finished, this, [=]() {
+         d->_scrollValue = value();
+     });
++    connect(d, &ElaScrollBarPrivate::pWheelValueChanged, this, [=]() {
++        d->_writingWheelValue = true;
++        setValue(qRound(d->getWheelValue()));
++        d->_writingWheelValue = false;
++    });
++    connect(this, &QScrollBar::valueChanged, this, [=]() {
++        if (d->_smoothWheelEnabled && !d->_writingWheelValue)
++            stopSmoothWheel();
++    });
++    connect(this, &QScrollBar::rangeChanged, this, [=]() {
++        if (d->_smoothWheelEnabled)
++            stopSmoothWheel();
++    });
++    connect(this, &QScrollBar::actionTriggered, this, [=]() {
++        if (d->_smoothWheelEnabled)
++            stopSmoothWheel();
++    });
+ 
+     d->_expandTimer = new QTimer(this);
+     connect(d->_expandTimer, &QTimer::timeout, this, [=]() {
+@@ -66,6 +85,12 @@ ElaScrollBar::ElaScrollBar(QScrollBar* originScrollBar, QAbstractScrollArea* par
+ 
+     d->_originScrollBar = originScrollBar;
+     d->_initAllConfig();
++    connect(originScrollBar, &QObject::destroyed, this, [this, d] {
++        d->_originScrollBar.clear();
++        if (d->_originScrollArea) d->_originScrollArea->removeEventFilter(this);
++        stopSmoothWheel();
++        hide();
++    });
+ 
+     connect(d->_originScrollBar, &QScrollBar::valueChanged, this, [=](int value) {
+         d->_handleScrollBarValueChanged(this, value);
+@@ -80,8 +105,80 @@ ElaScrollBar::ElaScrollBar(QScrollBar* originScrollBar, QAbstractScrollArea* par
+ 
+ ElaScrollBar::~ElaScrollBar()
+ {
++    stopSmoothWheel();
+     setStyle(nullptr);
+-    delete _waveOwnedStyle;
++}
++
++void ElaScrollBar::setSmoothWheelEnabled(bool enabled)
++{
++    Q_D(ElaScrollBar);
++    stopSmoothWheel();
++    d->_smoothWheelEnabled = enabled;
++    d->_slideSmoothAnimation->setTargetObject(nullptr);
++    d->_slideSmoothAnimation->setPropertyName(enabled ? "pWheelValue" : "value");
++    d->_slideSmoothAnimation->setTargetObject(enabled ? static_cast<QObject*>(d) : this);
++}
++
++bool ElaScrollBar::smoothWheelEnabled() const
++{
++    return d_ptr->_smoothWheelEnabled;
++}
++
++void ElaScrollBar::setWheelAnimationDuration(int duration)
++{
++    d_ptr->_slideSmoothAnimation->setDuration(qMax(0, duration));
++}
++
++void ElaScrollBar::stopSmoothWheel()
++{
++    Q_D(ElaScrollBar);
++    d->_slideSmoothAnimation->stop();
++    d->_scrollValue = value();
++}
++
++void ElaScrollBar::smoothWheelEvent(QWheelEvent* event)
++{
++    Q_D(ElaScrollBar);
++    const bool horizontal = orientation() == Qt::Horizontal;
++    const QPoint pixels = event->pixelDelta();
++    const int pixelDelta = horizontal
++        ? (pixels.x() ? pixels.x() : event->modifiers().testFlag(Qt::ShiftModifier) ? pixels.y() : 0)
++        : pixels.y();
++    if (!pixels.isNull()) {
++        // Precision gestures already provide a motion curve; apply them directly.
++        stopSmoothWheel();
++        const int next = qBound(minimum(), value() - pixelDelta, maximum());
++        event->setAccepted(next != value());
++        setValue(next);
++        return;
++    }
++    const QPoint angles = event->angleDelta();
++    const int delta = horizontal ? (angles.x() ? angles.x() : angles.y()) : angles.y();
++    if (!delta) {
++        event->ignore();
++        return;
++    }
++    if (event->modifiers().testFlag(Qt::ControlModifier)) {
++        stopSmoothWheel();
++        QScrollBar::wheelEvent(event);
++        return;
++    }
++    const qreal distance = -delta / 120.0 * qMin(pageStep(), singleStep() * QApplication::wheelScrollLines());
++    const bool running = d->_slideSmoothAnimation->state() == QAbstractAnimation::Running;
++    if (!running || (d->_scrollValue - value()) * distance < 0)
++        d->_scrollValue = value();
++    const qreal target = qBound(qreal(minimum()), d->_scrollValue + distance, qreal(maximum()));
++    if (qFuzzyCompare(target + 1, value() + 1)) {
++        stopSmoothWheel();
++        event->ignore();
++        return;
++    }
++    d->_slideSmoothAnimation->stop();
++    d->_scrollValue = target;
++    d->_slideSmoothAnimation->setStartValue(qreal(value()));
++    d->_slideSmoothAnimation->setEndValue(target);
++    d->_slideSmoothAnimation->start();
++    event->accept();
+ }
+ 
+ bool ElaScrollBar::event(QEvent* event)
+@@ -89,6 +186,11 @@ bool ElaScrollBar::event(QEvent* event)
+     Q_D(ElaScrollBar);
+     switch (event->type())
+     {
++    case QEvent::Hide:
++    case QEvent::EnabledChange:
++        if (d->_smoothWheelEnabled)
++            stopSmoothWheel();
++        break;
+     case QEvent::Enter:
+     {
+         d->_expandTimer->stop();
+@@ -162,6 +264,14 @@ void ElaScrollBar::mouseMoveEvent(QMouseEvent* event)
+ void ElaScrollBar::wheelEvent(QWheelEvent* event)
+ {
+     Q_D(ElaScrollBar);
++    if (d->_smoothWheelEnabled) {
++        smoothWheelEvent(event);
++        return;
++    }
++    if (!d->_pIsAnimation) {
++        QScrollBar::wheelEvent(event);
++        return;
++    }
+     int verticalDelta = event->angleDelta().y();
+     if (d->_slideSmoothAnimation->state() == QAbstractAnimation::Stopped)
+     {
+@@ -196,22 +306,22 @@ void ElaScrollBar::contextMenuEvent(QContextMenuEvent* event)
+     QPointer<ElaMenu> menu = new ElaMenu(this);
+     menu->setMenuItemHeight(27);
+     // Scroll here
+-    QAction* actScrollHere = menu->addElaIconAction(ElaIconType::UpDownLeftRight, tr("滚动到此处"));
++    QAction* actScrollHere = menu->addElaIconAction(ElaIconType::UpDownLeftRight, tr("Scroll here"));
+     menu->addSeparator();
+     // Left edge Top
+-    QAction* actScrollTop = menu->addElaIconAction(horiz ? ElaIconType::ArrowLeftToLine : ElaIconType::ArrowUpToLine, horiz ? tr("左边缘") : tr("顶端"));
++    QAction* actScrollTop = menu->addElaIconAction(horiz ? ElaIconType::ArrowLeftToLine : ElaIconType::ArrowUpToLine, horiz ? tr("Left edge") : tr("Top"));
+     // Right edge Bottom
+-    QAction* actScrollBottom = menu->addElaIconAction(horiz ? ElaIconType::ArrowRightToLine : ElaIconType::ArrowDownToLine, horiz ? tr("右边缘") : tr("底部"));
++    QAction* actScrollBottom = menu->addElaIconAction(horiz ? ElaIconType::ArrowRightToLine : ElaIconType::ArrowDownToLine, horiz ? tr("Right edge") : tr("Bottom"));
+     menu->addSeparator();
+     // Page left Page up
+-    QAction* actPageUp = menu->addElaIconAction(horiz ? ElaIconType::AnglesLeft : ElaIconType::AnglesUp, horiz ? tr("向左翻页") : tr("向上翻页"));
++    QAction* actPageUp = menu->addElaIconAction(horiz ? ElaIconType::AnglesLeft : ElaIconType::AnglesUp, horiz ? tr("Page left") : tr("Page up"));
+     //Page right Page down
+-    QAction* actPageDn = menu->addElaIconAction(horiz ? ElaIconType::AnglesRight : ElaIconType::AnglesDown, horiz ? tr("向右翻页") : tr("向下翻页"));
++    QAction* actPageDn = menu->addElaIconAction(horiz ? ElaIconType::AnglesRight : ElaIconType::AnglesDown, horiz ? tr("Page right") : tr("Page down"));
+     menu->addSeparator();
+     //Scroll left Scroll up
+-    QAction* actScrollUp = menu->addElaIconAction(horiz ? ElaIconType::AngleLeft : ElaIconType::AngleUp, horiz ? tr("向左滚动") : tr("向上滚动"));
++    QAction* actScrollUp = menu->addElaIconAction(horiz ? ElaIconType::AngleLeft : ElaIconType::AngleUp, horiz ? tr("Scroll left") : tr("Scroll up"));
+     //Scroll right Scroll down
+-    QAction* actScrollDn = menu->addElaIconAction(horiz ? ElaIconType::AngleRight : ElaIconType::AngleDown, horiz ? tr("向右滚动") : tr("向下滚动"));
++    QAction* actScrollDn = menu->addElaIconAction(horiz ? ElaIconType::AngleRight : ElaIconType::AngleDown, horiz ? tr("Scroll right") : tr("Scroll down"));
+     QAction* actionSelected = menu->exec(event->globalPos());
+     delete menu;
+     if (!actionSelected)
+diff --git a/ElaScrollBar.h b/ElaScrollBar.h
+index 9884c64..7af683a 100644
+--- a/ElaScrollBar.h
++++ b/ElaScrollBar.h
+@@ -11,16 +11,22 @@ class ElaScrollBarPrivate;
+ class ELA_EXPORT ElaScrollBar : public QScrollBar
+ {
+     Q_OBJECT
+-    QStyle* _waveOwnedStyle{};
+     Q_Q_CREATE(ElaScrollBar)
+     Q_PROPERTY_CREATE_Q_H(bool, IsAnimation)
+     Q_PROPERTY_CREATE_Q_H(qreal, SpeedLimit)
++    Q_PROPERTY(bool smoothWheelEnabled READ smoothWheelEnabled WRITE setSmoothWheelEnabled)
+ public:
+     explicit ElaScrollBar(QWidget* parent = nullptr);
+     explicit ElaScrollBar(Qt::Orientation orientation, QWidget* parent = nullptr);
+     explicit ElaScrollBar(QScrollBar* originScrollBar, QAbstractScrollArea* parent = nullptr);
+     ~ElaScrollBar() override;
+ 
++    // Animate wheel input without animating the view's scroll range.
++    void setSmoothWheelEnabled(bool enabled);
++    bool smoothWheelEnabled() const;
++    void setWheelAnimationDuration(int duration);
++    void stopSmoothWheel();
++
+ Q_SIGNALS:
+     Q_SIGNAL void rangeAnimationFinished();
+ 
+@@ -32,6 +38,9 @@ protected:
+     virtual void mouseMoveEvent(QMouseEvent* event) override;
+     virtual void wheelEvent(QWheelEvent* event) override;
+     virtual void contextMenuEvent(QContextMenuEvent* event) override;
++
++private:
++    void smoothWheelEvent(QWheelEvent* event);
+ };
+ 
+ #endif // ELAWORKSPACE_ELAWIDGETTOOLS_ELASCROLLBAR_H_
+diff --git a/ElaSpinBox.cpp b/ElaSpinBox.cpp
+index 7e27398..06f8615 100644
+--- a/ElaSpinBox.cpp
++++ b/ElaSpinBox.cpp
+@@ -9,12 +9,15 @@
+ #include <QLineEdit>
+ #include <QPainter>
+ #include <QPropertyAnimation>
++#include <QApplication>
+ ElaSpinBox::ElaSpinBox(QWidget* parent)
+     : QSpinBox(parent), d_ptr(new ElaSpinBoxPrivate())
+ {
+     Q_D(ElaSpinBox);
+     d->q_ptr = this;
+     d->_pExpandMarkWidth = 0;
++    d->_markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth", this);
++    connect(d->_markAnimation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
+     setFixedSize(115, 35);
+     d->_style = new ElaSpinBoxStyle(style());
+     setStyle(d->_style);
+@@ -27,6 +30,7 @@ ElaSpinBox::ElaSpinBox(QWidget* parent)
+ ElaSpinBox::~ElaSpinBox()
+ {
+     Q_D(ElaSpinBox);
++    d->_markAnimation->stop();
+     setStyle(nullptr);
+     lineEdit()->setStyleSheet(QString());
+     lineEdit()->setStyle(nullptr);
+@@ -74,15 +78,13 @@ void ElaSpinBox::focusInEvent(QFocusEvent* event)
+     Q_D(ElaSpinBox);
+     if (event->reason() == Qt::MouseFocusReason)
+     {
+-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth");
+-        connect(markAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-            update();
+-        });
+-        markAnimation->setDuration(300);
++        auto* markAnimation = d->_markAnimation;
++        markAnimation->stop();
++        markAnimation->setDuration(qApp->property("waveworkbench.reducedMotion").toBool() ? 0 : 300);
+         markAnimation->setEasingCurve(QEasingCurve::InOutSine);
+         markAnimation->setStartValue(d->_pExpandMarkWidth);
+         markAnimation->setEndValue(width() / 2 - 3);
+-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
++        markAnimation->start();
+     }
+     QSpinBox::focusInEvent(event);
+ }
+@@ -92,15 +94,13 @@ void ElaSpinBox::focusOutEvent(QFocusEvent* event)
+     Q_D(ElaSpinBox);
+     if (event->reason() != Qt::PopupFocusReason)
+     {
+-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth");
+-        connect(markAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
+-            update();
+-        });
+-        markAnimation->setDuration(300);
++        auto* markAnimation = d->_markAnimation;
++        markAnimation->stop();
++        markAnimation->setDuration(qApp->property("waveworkbench.reducedMotion").toBool() ? 0 : 300);
+         markAnimation->setEasingCurve(QEasingCurve::InOutSine);
+         markAnimation->setStartValue(d->_pExpandMarkWidth);
+         markAnimation->setEndValue(0);
+-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
++        markAnimation->start();
+     }
+     QSpinBox::focusOutEvent(event);
+ }
+diff --git a/ElaTabBar.cpp b/ElaTabBar.cpp
+index 58d1e7f..a6cb41f 100644
+--- a/ElaTabBar.cpp
++++ b/ElaTabBar.cpp
+@@ -4,11 +4,14 @@
+ #include <QDrag>
+ #include <QMimeData>
+ #include <QMouseEvent>
++#include <QPropertyAnimation>
++#include <QToolButton>
+ 
+ #include "ElaTabBarPrivate.h"
+ #include "ElaTabBarStyle.h"
+ #include "private/qtabbar_p.h"
+ #include <QTimer>
++#include <QPointer>
+ ElaTabBar::ElaTabBar(QWidget* parent)
+     : QTabBar(parent), d_ptr(new ElaTabBarPrivate())
+ {
+@@ -21,6 +24,7 @@ ElaTabBar::ElaTabBar(QWidget* parent)
+     setMovable(true);
+     setAcceptDrops(true);
+     d->_style = new ElaTabBarStyle(style());
++    d->_style->setParent(this);
+     setStyle(d->_style);
+ 
+     d->_pTargetScrollOffset = 0;
+@@ -28,21 +32,108 @@ ElaTabBar::ElaTabBar(QWidget* parent)
+     // 关闭自带滚动按钮，避免 layoutTabs 在 tab 溢出时重置 scrollOffset
+     setUsesScrollButtons(false);
+     connect(d, &ElaTabBarPrivate::pScrollOffsetChanged, this, [=]() {
++        if (_nativeTabBehavior && _smoothScrollEnabled) {
++            // A Qt selection, arrow button or layout change takes precedence.
++            if (d->_tabBarPrivate->scrollOffset != _lastScrollOffset) {
++                stopSmoothScroll();
++                return;
++            }
++            const int maximum = smoothScrollMaximum();
++            _lastScrollOffset = qBound(0, qRound(d->getScrollOffset()), maximum);
++            d->_tabBarPrivate->scrollOffset = _lastScrollOffset;
++            d->_tabBarPrivate->layoutWidgets();
++            d->_tabBarPrivate->leftB->setEnabled(_lastScrollOffset > 0);
++            d->_tabBarPrivate->rightB->setEnabled(_lastScrollOffset < maximum);
++            update();
++            return;
++        }
+         // 动画每帧将偏移应用到 QTabBar 官方滚动机制
+         d->_tabBarPrivate->scrollOffset = qRound(d->getScrollOffset());
+         update();
+     });
+     // Qt 内部(refresh/makeVisible 等)修改 scrollOffset 时同步动画状态
+     connect(this, &QTabBar::currentChanged, this, [=]() {
++        if (_nativeTabBehavior) {
++            if (_smoothScrollEnabled && currentIndex() >= 0)
++                d->_tabBarPrivate->makeVisible(currentIndex());
++            stopSmoothScroll();
++            return;
++        }
+         d->setTargetScrollOffset(d->_tabBarPrivate->scrollOffset);
+         d->setScrollOffset(d->_tabBarPrivate->scrollOffset);
+     });
++    connect(this, &QTabBar::tabMoved, this, [=]() { stopSmoothScroll(); });
++    for (auto* button : {d->_tabBarPrivate->leftB, d->_tabBarPrivate->rightB})
++        button->installEventFilter(this);
+ }
+ 
+ ElaTabBar::~ElaTabBar()
++{
++    d_ptr->_scrollAnimation->stop();
++    setStyle(nullptr);
++}
++
++void ElaTabBar::setSmoothScrollEnabled(bool enabled)
++{
++    stopSmoothScroll();
++    _smoothScrollEnabled = enabled;
++    d_ptr->_scrollAnimation->setDuration(enabled ? 160 : 200);
++}
++
++bool ElaTabBar::smoothScrollEnabled() const
++{
++    return _smoothScrollEnabled;
++}
++
++int ElaTabBar::smoothScrollMaximum() const
++{
++    Q_D(const ElaTabBar);
++    auto* tabs = d->_tabBarPrivate;
++    if (tabs->layoutDirty)
++        tabs->layoutTabs();
++    const auto* last = tabs->lastVisibleTab();
++    return last ? qMax(0, last->rect.right() - tabs->normalizedScrollRect().right()) : 0;
++}
++
++void ElaTabBar::stopSmoothScroll()
++{
++    Q_D(ElaTabBar);
++    d->_scrollAnimation->stop();
++    _lastScrollOffset = d->_tabBarPrivate->scrollOffset;
++    d->setTargetScrollOffset(_lastScrollOffset);
++    d->setScrollOffset(_lastScrollOffset);
++}
++
++bool ElaTabBar::event(QEvent* event)
++{
++    if (_smoothScrollEnabled && (event->type() == QEvent::MouseButtonPress
++        || event->type() == QEvent::KeyPress || event->type() == QEvent::Hide
++        || event->type() == QEvent::FontChange || event->type() == QEvent::StyleChange
++        || event->type() == QEvent::LayoutDirectionChange))
++        stopSmoothScroll();
++    return QTabBar::event(event);
++}
++
++bool ElaTabBar::eventFilter(QObject* watched, QEvent* event)
++{
++    if (_smoothScrollEnabled && event->type() == QEvent::MouseButtonPress)
++        stopSmoothScroll();
++    return QTabBar::eventFilter(watched, event);
++}
++
++void ElaTabBar::setNativeTabBehavior(bool enabled)
+ {
+     Q_D(ElaTabBar);
+-    delete d->_style;
++    _nativeTabBehavior = enabled;
++    d->_style->setNativeTabBehavior(enabled);
++    setUsesScrollButtons(enabled);
++    updateGeometry();
++    update();
++}
++
++bool ElaTabBar::nativeTabBehavior() const
++{
++    return _nativeTabBehavior;
+ }
+ 
+ void ElaTabBar::setTabText(int index, const QString& text)
+@@ -65,6 +156,8 @@ QSize ElaTabBar::getTabSize() const
+ 
+ QSize ElaTabBar::sizeHint() const
+ {
++    if (_nativeTabBehavior || !parentWidget())
++        return QTabBar::sizeHint();
+     QSize oldSize = QTabBar::sizeHint();
+     QSize newSize = oldSize;
+     newSize.setWidth(parentWidget()->maximumWidth());
+@@ -73,12 +166,19 @@ QSize ElaTabBar::sizeHint() const
+ 
+ QSize ElaTabBar::minimumSizeHint() const
+ {
++    if (_nativeTabBehavior)
++        return QTabBar::minimumSizeHint();
+     // useScrollButtons=false 时基类会返回全部 tab 宽度总和，会撑大窗口，宽度最小设为 0 由布局分配
+     return {0, QTabBar::minimumSizeHint().height()};
+ }
+ 
+ void ElaTabBar::tabInserted(int index)
+ {
++    if (_nativeTabBehavior) {
++        stopSmoothScroll();
++        QTabBar::tabInserted(index);
++        return;
++    }
+     Q_D(ElaTabBar);
+     // 基类 addTab 内部先执行 refresh/makeVisible 再调用本虚函数，
+     // _tabBarPrivate->scrollOffset 已被重置，动画状态仍是插入前的值
+@@ -89,6 +189,11 @@ void ElaTabBar::tabInserted(int index)
+ 
+ void ElaTabBar::tabRemoved(int index)
+ {
++    if (_nativeTabBehavior) {
++        stopSmoothScroll();
++        QTabBar::tabRemoved(index);
++        return;
++    }
+     Q_D(ElaTabBar);
+     // 记录移除前的偏移，基类 removeTab 的 refresh/makeVisible 会把偏移重置回最左
+     qreal preScrollOffset = d->getScrollOffset();
+@@ -100,6 +205,8 @@ void ElaTabBar::tabRemoved(int index)
+ void ElaTabBar::mouseMoveEvent(QMouseEvent* event)
+ {
+     QTabBar::mouseMoveEvent(event);
++    if (_nativeTabBehavior && !_hostedDragEnabled)
++        return;
+     Q_D(ElaTabBar);
+     if (d->_tabBarPrivate->pressedIndex >= 0)
+     {
+@@ -115,7 +222,9 @@ void ElaTabBar::mouseMoveEvent(QMouseEvent* event)
+                 d->_mimeData->setProperty("IsFloatWidget", true);
+                 QRect currentTabRect = tabRect(currentIndex());
+                 d->_mimeData->setProperty("DragPos", QPoint(currentPos.x() - currentTabRect.x(), currentPos.y() - currentTabRect.y()));
++                QPointer<ElaTabBar> guard(this);
+                 Q_EMIT tabDragCreate(d->_mimeData);
++                if (!guard) return;
+                 d->_mimeData = nullptr;
+             }
+         }
+@@ -155,7 +264,9 @@ void ElaTabBar::mouseMoveEvent(QMouseEvent* event)
+                     d->_mimeData->setProperty("DragType", "ElaTabBarDrag");
+                     d->_mimeData->setProperty("ElaTabBarObject", QVariant::fromValue(this));
+                     d->_mimeData->setProperty("TabSize", d->_style->getTabSize());
++                    QPointer<ElaTabBar> guard(this);
+                     Q_EMIT tabDragCreate(d->_mimeData);
++                    if (!guard) return;
+                     d->_mimeData = nullptr;
+                 }
+             }
+@@ -165,6 +276,14 @@ void ElaTabBar::mouseMoveEvent(QMouseEvent* event)
+ 
+ void ElaTabBar::dragEnterEvent(QDragEnterEvent* event)
+ {
++    if (event->mimeData()->property("ElaHostedTabDrag").toBool() && !_hostedDragEnabled) {
++        event->ignore();
++        return;
++    }
++    if (_nativeTabBehavior && !_hostedDragEnabled) {
++        QTabBar::dragEnterEvent(event);
++        return;
++    }
+     Q_D(ElaTabBar);
+     if (event->mimeData()->property("DragType").toString() == "ElaTabBarDrag")
+     {
+@@ -188,6 +307,10 @@ void ElaTabBar::dragEnterEvent(QDragEnterEvent* event)
+ 
+ void ElaTabBar::dragMoveEvent(QDragMoveEvent* event)
+ {
++    if (_nativeTabBehavior && !_hostedDragEnabled) {
++        QTabBar::dragMoveEvent(event);
++        return;
++    }
+     Q_D(ElaTabBar);
+     if (event->mimeData()->property("DragType").toString() == "ElaTabBarDrag")
+     {
+@@ -199,6 +322,10 @@ void ElaTabBar::dragMoveEvent(QDragMoveEvent* event)
+ 
+ void ElaTabBar::dragLeaveEvent(QDragLeaveEvent* event)
+ {
++    if (_nativeTabBehavior && !_hostedDragEnabled) {
++        QTabBar::dragLeaveEvent(event);
++        return;
++    }
+     Q_D(ElaTabBar);
+     if (d->_mimeData)
+     {
+@@ -212,6 +339,10 @@ void ElaTabBar::dragLeaveEvent(QDragLeaveEvent* event)
+ 
+ void ElaTabBar::dropEvent(QDropEvent* event)
+ {
++    if (_nativeTabBehavior && !_hostedDragEnabled) {
++        QTabBar::dropEvent(event);
++        return;
++    }
+     Q_D(ElaTabBar);
+     d->_mimeData = nullptr;
+     QMouseEvent releaseEvent(QEvent::MouseButtonRelease, QPoint(-1, -1), QPoint(-1, -1), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+@@ -231,6 +362,36 @@ void ElaTabBar::dropEvent(QDropEvent* event)
+ 
+ void ElaTabBar::wheelEvent(QWheelEvent* event)
+ {
++    if (_nativeTabBehavior && _smoothScrollEnabled && !verticalTabs(shape())) {
++        Q_D(ElaTabBar);
++        const int maximum = smoothScrollMaximum();
++        const QPoint pixels = event->pixelDelta();
++        const QPoint angles = event->angleDelta();
++        const qreal distance = !pixels.isNull() ? -(pixels.x() ? pixels.x() : pixels.y())
++            : -(angles.x() ? angles.x() : angles.y()) / 120.0 * 72;
++        if (!maximum || !distance) {
++            event->ignore();
++            return;
++        }
++        const bool running = d->_scrollAnimation->state() == QAbstractAnimation::Running;
++        if (!running || d->_tabBarPrivate->scrollOffset != _lastScrollOffset
++            || (d->getTargetScrollOffset() - d->getScrollOffset()) * distance < 0)
++            stopSmoothScroll();
++        const qreal target = qBound(0.0, d->getTargetScrollOffset() + distance, qreal(maximum));
++        d->setTargetScrollOffset(target);
++        if (!pixels.isNull()) {
++            d->_scrollAnimation->stop();
++            d->setScrollOffset(target);
++        } else {
++            d->startScrollAnimation();
++        }
++        event->accept();
++        return;
++    }
++    if (_nativeTabBehavior) {
++        QTabBar::wheelEvent(event);
++        return;
++    }
+     Q_D(ElaTabBar);
+     // 滚轮平滑横向滚动，不切换 tab
+     int maxOffset = qMax(0, d->_tabBarPrivate->tabList.size() * d->_style->getTabSize().width() - width());
+@@ -242,7 +403,11 @@ void ElaTabBar::wheelEvent(QWheelEvent* event)
+ 
+ void ElaTabBar::resizeEvent(QResizeEvent* event)
+ {
++    if (_smoothScrollEnabled)
++        stopSmoothScroll();
+     QTabBar::resizeEvent(event);
++    if (_nativeTabBehavior)
++        return;
+     Q_D(ElaTabBar);
+     // 窗口变宽时收敛超出的滚动偏移
+     int maxOffset = qMax(0, d->_tabBarPrivate->tabList.size() * d->_style->getTabSize().width() - width());
+@@ -253,6 +418,10 @@ void ElaTabBar::resizeEvent(QResizeEvent* event)
+ 
+ void ElaTabBar::paintEvent(QPaintEvent* event)
+ {
++    if (_nativeTabBehavior) {
++        QTabBar::paintEvent(event);
++        return;
++    }
+     Q_D(ElaTabBar);
+     QSize tabSize = d->_style->getTabSize();
+     for (int i = 0; i < d->_tabBarPrivate->tabList.size(); i++)
+@@ -265,4 +434,4 @@ void ElaTabBar::paintEvent(QPaintEvent* event)
+     }
+     d->_tabBarPrivate->layoutWidgets();
+     QTabBar::paintEvent(event);
+-}
+\ No newline at end of file
++}
+diff --git a/ElaTabBar.h b/ElaTabBar.h
+index 67398d2..579d6a0 100644
+--- a/ElaTabBar.h
++++ b/ElaTabBar.h
+@@ -12,10 +12,18 @@ class ELA_EXPORT ElaTabBar : public QTabBar
+     Q_OBJECT
+     Q_Q_CREATE(ElaTabBar)
+     Q_PROPERTY_CREATE_Q_H(QSize, TabSize)
++    Q_PROPERTY(bool smoothScrollEnabled READ smoothScrollEnabled WRITE setSmoothScrollEnabled)
+ public:
+     explicit ElaTabBar(QWidget* parent = nullptr);
+     ~ElaTabBar() override;
+ 
++    // Hosts with their own document controller retain Qt layout and input semantics.
++    void setNativeTabBehavior(bool enabled);
++    bool nativeTabBehavior() const;
++    // Keep Qt's variable-width layout while using Ela's tear-out gestures.
++    void setHostedDragEnabled(bool enabled) { _hostedDragEnabled = enabled; }
++    void setSmoothScrollEnabled(bool enabled);
++    bool smoothScrollEnabled() const;
+     void setTabText(int index, const QString& text);
+ 
+ Q_SIGNALS:
+@@ -26,6 +34,8 @@ Q_SIGNALS:
+     Q_SIGNAL void tabDragDrop(QMimeData* mimeData);
+ 
+ protected:
++    bool event(QEvent* event) override;
++    bool eventFilter(QObject* watched, QEvent* event) override;
+     QSize sizeHint() const override;
+     QSize minimumSizeHint() const override;
+     void tabInserted(int index) override;
+@@ -38,6 +48,14 @@ protected:
+     void dropEvent(QDropEvent* event) override;
+     void wheelEvent(QWheelEvent* event) override;
+     void paintEvent(QPaintEvent* event) override;
++
++private:
++    bool _nativeTabBehavior{false};
++    bool _hostedDragEnabled{false};
++    bool _smoothScrollEnabled{false};
++    int _lastScrollOffset{0};
++    int smoothScrollMaximum() const;
++    void stopSmoothScroll();
+ };
+ 
+ #endif // ELAWORKSPACE_ELAWIDGETTOOLS_ELATABBAR_H_
+diff --git a/ElaToolBar.cpp b/ElaToolBar.cpp
+index 303f9ad..1c8e665 100644
+--- a/ElaToolBar.cpp
++++ b/ElaToolBar.cpp
+@@ -50,8 +50,8 @@ ElaToolBar::ElaToolBar(const QString& title, QWidget* parent)
+ ElaToolBar::~ElaToolBar()
+ {
+     Q_D(ElaToolBar);
+-    setStyle(nullptr);
+-    delete d->_toolBarStyle;
++    // Action widgets may still share this style during QWidget teardown.
++    d->_toolBarStyle->setParent(this);
+ }
+ 
+ void ElaToolBar::setToolBarSpacing(int spacing)
+diff --git a/ElaTreeView.cpp b/ElaTreeView.cpp
+index 653d5e6..1711a00 100644
+--- a/ElaTreeView.cpp
++++ b/ElaTreeView.cpp
+@@ -1,4 +1,14 @@
+ #include "ElaTreeView.h"
++#include <QtWidgets/private/qtreeview_p.h>
++
++void ElaTreeView::finishExpansion(QTreeView* view)
++{
++    if (!view) return;
++    auto* state = static_cast<QTreeViewPrivate*>(QObjectPrivate::get(view));
++    auto& animation = state->animatedOperation;
++    if (animation.state() == QAbstractAnimation::Running)
++        animation.setCurrentTime(animation.duration());
++}
+ 
+ #include "ElaScrollBar.h"
+ #include "ElaTreeViewPrivate.h"
+diff --git a/ElaTreeView.h b/ElaTreeView.h
+index c18e675..1980e96 100644
+--- a/ElaTreeView.h
++++ b/ElaTreeView.h
+@@ -16,6 +16,7 @@ class ELA_EXPORT ElaTreeView : public QTreeView
+ public:
+     explicit ElaTreeView(QWidget* parent = nullptr);
+     ~ElaTreeView();
++    static void finishExpansion(QTreeView* view);
+ };
+ 
+ #endif // ELAWORKSPACE_ELAWIDGETTOOLS_ELATREEVIEW_H_
+diff --git a/private/ElaComboBoxPrivate.h b/private/ElaComboBoxPrivate.h
+index 34f1166..f3a215c 100644
+--- a/private/ElaComboBoxPrivate.h
++++ b/private/ElaComboBoxPrivate.h
+@@ -2,12 +2,17 @@
+ #define ELAWORKSPACE_ELAWIDGETTOOLS_PRIVATE_ELACOMBOBOXPRIVATE_H_
+ 
+ #include <QObject>
++#include <QPointer>
++#include <QPoint>
+ 
+ #include "ElaWidgetToolsDef.h"
+ 
+ class QLineEdit;
+ class ElaComboBox;
+ class ElaComboBoxStyle;
++class QParallelAnimationGroup;
++class QPropertyAnimation;
++class QWidget;
+ class ElaComboBoxPrivate : public QObject
+ {
+     Q_OBJECT
+@@ -21,7 +26,16 @@ public:
+     Q_SLOT void onThemeChanged(ElaThemeType::ThemeMode themeMode);
+ 
+ private:
+-    bool _isAllowHidePopup{false};
++    QParallelAnimationGroup* _popupAnimation{nullptr};
++    QParallelAnimationGroup* _indicatorAnimation{nullptr};
++    QPropertyAnimation* _rotation{nullptr};
++    QPropertyAnimation* _mark{nullptr};
++    QPropertyAnimation* _height{nullptr};
++    QPropertyAnimation* _position{nullptr};
++    QPointer<QWidget> _popup;
++    QPoint _viewPosition;
++    int _popupHeight{0};
++    bool _settling{false};
+     ElaComboBoxStyle* _comboBoxStyle{nullptr};
+     ElaThemeType::ThemeMode _themeMode;
+ };
+diff --git a/private/ElaDoubleSpinBoxPrivate.h b/private/ElaDoubleSpinBoxPrivate.h
+index 685452e..ed3d746 100644
+--- a/private/ElaDoubleSpinBoxPrivate.h
++++ b/private/ElaDoubleSpinBoxPrivate.h
+@@ -19,6 +19,7 @@ public:
+     Q_SLOT void onThemeChanged(ElaThemeType::ThemeMode themeMode);
+ 
+ private:
++    class QPropertyAnimation* _markAnimation{nullptr};
+     ElaSpinBoxStyle* _style{nullptr};
+     ElaThemeType::ThemeMode _themeMode;
+     ElaMenu* _createStandardContextMenu();
+diff --git a/private/ElaDrawerAreaPrivate.cpp b/private/ElaDrawerAreaPrivate.cpp
+index 9d7231d..9939e61 100644
+--- a/private/ElaDrawerAreaPrivate.cpp
++++ b/private/ElaDrawerAreaPrivate.cpp
+@@ -13,6 +13,5 @@ ElaDrawerAreaPrivate::~ElaDrawerAreaPrivate()
+ void ElaDrawerAreaPrivate::onDrawerHeaderClicked(bool isExpand)
+ {
+     Q_Q(ElaDrawerArea);
+-    _drawerContainer->doDrawerAnimation(isExpand);
+-    Q_EMIT q->expandStateChanged(isExpand);
++    q->setExpanded(isExpand);
+ }
+diff --git a/private/ElaLineEditPrivate.h b/private/ElaLineEditPrivate.h
+index 8755f4a..a219f33 100644
+--- a/private/ElaLineEditPrivate.h
++++ b/private/ElaLineEditPrivate.h
+@@ -20,6 +20,7 @@ public:
+     Q_SLOT void onThemeChanged(ElaThemeType::ThemeMode themeMode);
+ 
+ private:
++    class QPropertyAnimation* _markAnimation{nullptr};
+     ElaThemeType::ThemeMode _themeMode;
+     ElaEvent* _focusEvent{nullptr};
+     qreal _textSpacing{0.5};
+diff --git a/private/ElaMenuPrivate.h b/private/ElaMenuPrivate.h
+index c8c493c..62b2de6 100644
+--- a/private/ElaMenuPrivate.h
++++ b/private/ElaMenuPrivate.h
+@@ -9,6 +9,7 @@
+ #include "ElaPropertyMacro.h"
+ class ElaMenu;
+ class ElaMenuStyle;
++class QPropertyAnimation;
+ class ElaMenuPrivate : public QObject
+ {
+     Q_OBJECT
+@@ -20,6 +21,8 @@ public:
+ 
+ private:
+     QPixmap _animationPix;
++    QPropertyAnimation* _popupAnimation{nullptr};
++    bool _capturing{false};
+     bool _isCloseAnimation{false};
+     QPoint _mousePressPoint;
+     ElaMenuStyle* _menuStyle{nullptr};
+diff --git a/private/ElaScrollBarPrivate.cpp b/private/ElaScrollBarPrivate.cpp
+index 25197ea..964f71f 100644
+--- a/private/ElaScrollBarPrivate.cpp
++++ b/private/ElaScrollBarPrivate.cpp
+@@ -104,6 +104,7 @@ int ElaScrollBarPrivate::_pixelPosToRangeValue(int pos) const
+ void ElaScrollBarPrivate::_initAllConfig()
+ {
+     Q_Q(ElaScrollBar);
++    if (!_originScrollBar) return;
+     _handleScrollBarRangeChanged(_originScrollBar->minimum(), _originScrollBar->maximum());
+     q->setSingleStep(_originScrollBar->singleStep());
+     q->setPageStep(_originScrollBar->pageStep());
+@@ -111,7 +112,7 @@ void ElaScrollBarPrivate::_initAllConfig()
+ 
+ void ElaScrollBarPrivate::_handleScrollBarValueChanged(QScrollBar* scrollBar, int value)
+ {
+-    scrollBar->setValue(value);
++    if (scrollBar) scrollBar->setValue(value);
+ }
+ 
+ void ElaScrollBarPrivate::_handleScrollBarRangeChanged(int min, int max)
+@@ -131,6 +132,10 @@ void ElaScrollBarPrivate::_handleScrollBarRangeChanged(int min, int max)
+ void ElaScrollBarPrivate::_handleScrollBarGeometry()
+ {
+     Q_Q(ElaScrollBar);
++    if (!_originScrollBar || !_originScrollArea) {
++        q->hide();
++        return;
++    }
+     q->raise();
+     q->setSingleStep(_originScrollBar->singleStep());
+     q->setPageStep(_originScrollBar->pageStep());
+diff --git a/private/ElaScrollBarPrivate.h b/private/ElaScrollBarPrivate.h
+index e0f45c3..526fd6f 100644
+--- a/private/ElaScrollBarPrivate.h
++++ b/private/ElaScrollBarPrivate.h
+@@ -4,6 +4,7 @@
+ #include <QAbstractScrollArea>
+ #include <QObject>
+ #include <QScrollBar>
++#include <QPointer>
+ 
+ #include "ElaWidgetToolsExport.h"
+ #include "ElaPropertyMacro.h"
+@@ -17,18 +18,21 @@ class ElaScrollBarPrivate : public QObject
+     Q_PROPERTY_CREATE_D(bool, IsAnimation)
+     Q_PROPERTY_CREATE_D(qreal, SpeedLimit)
+     Q_PROPERTY_CREATE(int, TargetMaximum)
++    Q_PROPERTY_CREATE(qreal, WheelValue)
+ public:
+     explicit ElaScrollBarPrivate(QObject* parent = nullptr);
+     ~ElaScrollBarPrivate();
+     Q_SLOT void onRangeChanged(int min, int max);
+ 
+ private:
+-    QScrollBar* _originScrollBar{nullptr};
+-    QAbstractScrollArea* _originScrollArea{nullptr};
++    QPointer<QScrollBar> _originScrollBar;
++    QPointer<QAbstractScrollArea> _originScrollArea;
+     QTimer* _expandTimer{nullptr};
+     bool _isExpand{false};
+     QPropertyAnimation* _slideSmoothAnimation{nullptr};
+-    int _scrollValue{-1};
++    qreal _scrollValue{-1};
++    bool _smoothWheelEnabled{false};
++    bool _writingWheelValue{false};
+     void _scroll(Qt::KeyboardModifiers modifiers, int value);
+     int _pixelPosToRangeValue(int pos) const;
+ 
+diff --git a/private/ElaSpinBoxPrivate.h b/private/ElaSpinBoxPrivate.h
+index 3917fbe..679f913 100644
+--- a/private/ElaSpinBoxPrivate.h
++++ b/private/ElaSpinBoxPrivate.h
+@@ -19,6 +19,7 @@ public:
+     Q_SLOT void onThemeChanged(ElaThemeType::ThemeMode themeMode);
+ 
+ private:
++    class QPropertyAnimation* _markAnimation{nullptr};
+     ElaSpinBoxStyle* _style{nullptr};
+     ElaThemeType::ThemeMode _themeMode;
+     ElaMenu* _createStandardContextMenu();
+diff --git a/private/ElaTabBarPrivate.cpp b/private/ElaTabBarPrivate.cpp
+index afd0edb..76e061e 100644
+--- a/private/ElaTabBarPrivate.cpp
++++ b/private/ElaTabBarPrivate.cpp
+@@ -9,7 +9,9 @@
+ ElaTabBarPrivate::ElaTabBarPrivate(QObject* parent)
+     : QObject{parent}
+ {
+-    _scrollAnimation = new QPropertyAnimation(this, "pScrollOffset");
++    _pScrollOffset = 0;
++    _pTargetScrollOffset = 0;
++    _scrollAnimation = new QPropertyAnimation(this, "pScrollOffset", this);
+     _scrollAnimation->setDuration(200);
+     _scrollAnimation->setEasingCurve(QEasingCurve::OutCubic);
+ }
+@@ -20,11 +22,11 @@ ElaTabBarPrivate::~ElaTabBarPrivate()
+ 
+ void ElaTabBarPrivate::startScrollAnimation()
+ {
++    _scrollAnimation->stop();
+     if (qFuzzyCompare(_pScrollOffset, _pTargetScrollOffset))
+     {
+         return;
+     }
+-    _scrollAnimation->stop();
+     _scrollAnimation->setStartValue(_pScrollOffset);
+     _scrollAnimation->setEndValue(_pTargetScrollOffset);
+     _scrollAnimation->start();

@@ -1,5 +1,68 @@
 # ElaWidgetTools migration
 
+## Capability acceptance (2026-09-24)
+
+This is an incremental source integration from ZeroSlack
+`75180fad5e5f5142684cf092649deffe5720994d` (p26/p27), plus xIPs p28 ListView
+style-lifetime protection. Wave vendor patch 13 preserves patch 12's native
+teardown/English fixes, exported adapter styles, independent preview colors and
+Qt 6.10.2 private-header pin. No shared DLL or other repository is overwritten.
+
+| Reachable surface | Current behavior and boundaries |
+| --- | --- |
+| ComboBox | Reusable, owned popup height/position and indicator animations; keyboard, mouse, hide, resize and destruction interrupt safely; selection remains Qt-owned. |
+| LineEdit, SpinBox, DoubleSpinBox | One owned/reused focus animation per field, reduced-motion support; numeric width includes the actual editor, suffix and step controls. |
+| Menus | Interruptible 160 ms native popup animation; keyboard/mouse/wheel and action changes settle immediately; QAction identity, submenus, checks and disabled states retained. QWidgetAction editors remain live. Snapshot cap: 8 MiB. |
+| Ordinary tree/table/completion views | 160 ms smooth wheel movement; precision pixel deltas remain immediate. Navigation/selection/programmatic value changes interrupt pending movement. Tree expansion can settle before input. Models and delegates remain Qt-owned. |
+| Professional canvases and embedded previews | Immediate Qt scrolling and exact timeline semantics retained, including per-preview theme. No global smooth-scroll substitution. |
+| Comparison/check/batch tabs | Actual ElaTabBar with Qt geometry and smooth overflow; fixed review pages retain Qt ownership, with no document drag/close/reorder affordances. |
+| Existing simulation sections | Actual ElaDrawerArea for Stimulus/Expected, Actual and Review; interruptible body-only transition, keyboard/focus support, saved collapsed and splitter state. Snapshot cap: 32 MiB, released on settle. |
+| Dialogs, tooltips and notifications | Ela controls inside Qt dialog role maps; existing managed, scoped tooltip/notification lifetime remains. No global animation queue, generic window conversion, new docks or restored status surface. |
+
+An original color-picker screenshot regression exposed an overlay use-after-free:
+`QAbstractSlider::singleStep -> ElaScrollBarPrivate::_handleScrollBarGeometry`.
+The overlay now uses guarded origin/area pointers and removes its event filter,
+stops movement and hides when the origin is destroyed. Color adaptation touches
+only QScrollArea form bodies, not ComboBox-owned popup views. The replacement,
+deferred destruction, resize and grab regression is retained alongside the
+original picker tests. No failed test was removed or weakened.
+
+Release `build/ela-migration` and full CTest **122/122** passed (79.08 seconds).
+Four color-picker/DPI suites also passed three successive executions each.
+Capability suites cover 1x/2x offscreen and hidden Windows windows; the existing
+native style suites cover scale factors 1/1.25/1.5/2. A native scale factor
+multiplies the display's existing DPR and is not an absolute physical DPI claim.
+No desktop input, physical dragging, mixed-monitor or compositor acceptance was
+performed. Existing editing, persistence, conflict, CLI, embedding and ABI tests
+remain passing.
+
+### Measured cost and allocation bounds
+
+The reproducible browsing fixture uses a 1200x800 window, 2112 tree rows, 2048
+table cells and 12 input iterations. The baseline is commit `88b3942` with
+immediate interaction; the final sample is from the full acceptance run.
+Times are milliseconds; CPU is process kernel+user time, not wall-clock time.
+
+| Offscreen DPR | Input dispatch median/max, before → after | Paints, before → after | CPU, before → after | Elapsed, before → after |
+| --- | --- | --- | --- | --- |
+| 1 | 0.8848/2.1176 → 0.6567/1.2218 | 158 → 767 | 234.375 → 1687.5 | 2797.34 → 2827.93 |
+| 2 | 1.2024/2.0679 → 0.6237/1.1509 | 158 → 817 | 156.25 → 546.875 | 2798.50 → 2787.40 |
+
+Layout requests stayed at 55. New continuous animation necessarily paints more
+than the immediate baseline; these single-run, parallel-machine samples do not
+demonstrate an overall CPU improvement or physical display frame rate.
+Reusable popup/focus animation counts remain constant under repeated reversals.
+Body-only drawer snapshots peaked at 1,716,480/6,865,920 bytes (DPR 1/2), with
+preparation maxima 2.8569/4.2165 ms and total dispatch maxima 15.8568/16.5241 ms.
+This bounds memory and avoids snapshotting the whole workspace on each frame.
+
+Logs: `capability-final-ctest.log`, `capability-color-repeat-ctest.log`,
+`capability-scroll-lifetime-ctest.log`, `color-regression-nodebugheap-gdb.log`,
+`ui-capabilities-{1,2}.txt` and `ui-capabilities-before-{1,2}.txt`, all under
+`build/ela-migration`. StageOnly packaging includes build-info.json, complete
+per-file SHA256SUMS.txt, MIT/OFL notices and source patches. It creates neither
+ZIP nor backup and does not replace the suite's formal directory or manifests.
+
 ## Current native follow-up (2026-09-24)
 
 The inventory below describes the original migration baseline. Subsequent compact

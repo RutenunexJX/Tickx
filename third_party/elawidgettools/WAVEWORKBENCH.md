@@ -49,6 +49,22 @@ and numeric editor context menus use English captions, including color-picker
 children. The application retains its existing immediate ComboBox interaction;
 the suite's interruptible-animation migration is separate and must preserve this
 lifetime fix. Native regression windows remain hidden and send no desktop input.
+Patch `patches/13-waveworkbench-interruptible-capabilities.patch` follows patch 12.
+It incrementally integrates the applicable p26/p27 implementation from committed
+ZeroSlack `75180fad5e5f5142684cf092649deffe5720994d`, including interruptible
+ComboBox, Menu, DrawerArea, TabBar and ordinary-view smooth scrolling. Wave's
+exported adapter styles, exact professional scrollbars, per-preview colors,
+English captions, reduced motion and popup teardown fix remain intact. Focus
+animations and ComboBox transitions reuse owned animation objects; drawer header
+keyboard handling and splitter coordination preserve input and model contracts.
+The ListView lifetime change comes from xIPs patch
+`28-xips-list-style-lifetime.patch`, SHA-256
+`5A4E736C208C3584EC637C417534B1C03A583BAEED818C4C0935F7E6A26DF579`.
+Patch 13 also guards floating scrollbar origin/area lifetime after origin
+replacement, with a targeted regression and the original color-picker tests.
+The separate three-file reference fix was supplied to the suite coordinator;
+Wave retains its private runtime and does not replace the shared suite DLL.
+Patch 13 forward/index and reverse/worktree checks pass on the patch-12 baseline.
 See `docs/ela-migration.md` for scope,
 verification and remaining platform checks. Re-audit these changes before any
 dependency update; do not replace the tree with another application's working copy.

@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QChildEvent>
 #include <QFileDialog>
+#include <QScrollArea>
 #include <QHelpEvent>
 #include <QHBoxLayout>
 #include <QMouseEvent>
@@ -374,7 +375,8 @@ QWidget* colorField(QLineEdit* editor, QWidget* parent)
         dialog->setWindowModality(Qt::WindowModal);
         dialog->setCurrentColor(initial.isValid() ? initial : QColor(Qt::black));
         dialog->resize(QSize(720, 680).boundedTo(safeEditor->screen()->availableGeometry().size() - QSize(48, 80)));
-        for (auto* area : dialog->findChildren<QAbstractScrollArea*>()) installScrollBars(area);
+        // Style the scrolling form, not ElaComboBox's privately owned popup views.
+        for (auto* area : dialog->findChildren<QScrollArea*>()) installScrollBars(area);
         installToolTips(dialog);
         const bool accepted = dialog->exec() == QDialog::Accepted;
         if (!dialog) return;

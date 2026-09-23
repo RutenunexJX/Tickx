@@ -50,8 +50,8 @@ ElaToolBar::ElaToolBar(const QString& title, QWidget* parent)
 ElaToolBar::~ElaToolBar()
 {
     Q_D(ElaToolBar);
-    setStyle(nullptr);
-    delete d->_toolBarStyle;
+    // Action widgets may still share this style during QWidget teardown.
+    d->_toolBarStyle->setParent(this);
 }
 
 void ElaToolBar::setToolBarSpacing(int spacing)

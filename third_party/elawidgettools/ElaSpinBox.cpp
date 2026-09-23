@@ -9,12 +9,15 @@
 #include <QLineEdit>
 #include <QPainter>
 #include <QPropertyAnimation>
+#include <QApplication>
 ElaSpinBox::ElaSpinBox(QWidget* parent)
     : QSpinBox(parent), d_ptr(new ElaSpinBoxPrivate())
 {
     Q_D(ElaSpinBox);
     d->q_ptr = this;
     d->_pExpandMarkWidth = 0;
+    d->_markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth", this);
+    connect(d->_markAnimation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
     setFixedSize(115, 35);
     d->_style = new ElaSpinBoxStyle(style());
     setStyle(d->_style);
@@ -27,6 +30,7 @@ ElaSpinBox::ElaSpinBox(QWidget* parent)
 ElaSpinBox::~ElaSpinBox()
 {
     Q_D(ElaSpinBox);
+    d->_markAnimation->stop();
     setStyle(nullptr);
     lineEdit()->setStyleSheet(QString());
     lineEdit()->setStyle(nullptr);
@@ -74,15 +78,13 @@ void ElaSpinBox::focusInEvent(QFocusEvent* event)
     Q_D(ElaSpinBox);
     if (event->reason() == Qt::MouseFocusReason)
     {
-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth");
-        connect(markAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
-            update();
-        });
-        markAnimation->setDuration(300);
+        auto* markAnimation = d->_markAnimation;
+        markAnimation->stop();
+        markAnimation->setDuration(qApp->property("waveworkbench.reducedMotion").toBool() ? 0 : 300);
         markAnimation->setEasingCurve(QEasingCurve::InOutSine);
         markAnimation->setStartValue(d->_pExpandMarkWidth);
         markAnimation->setEndValue(width() / 2 - 3);
-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+        markAnimation->start();
     }
     QSpinBox::focusInEvent(event);
 }
@@ -92,15 +94,13 @@ void ElaSpinBox::focusOutEvent(QFocusEvent* event)
     Q_D(ElaSpinBox);
     if (event->reason() != Qt::PopupFocusReason)
     {
-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth");
-        connect(markAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
-            update();
-        });
-        markAnimation->setDuration(300);
+        auto* markAnimation = d->_markAnimation;
+        markAnimation->stop();
+        markAnimation->setDuration(qApp->property("waveworkbench.reducedMotion").toBool() ? 0 : 300);
         markAnimation->setEasingCurve(QEasingCurve::InOutSine);
         markAnimation->setStartValue(d->_pExpandMarkWidth);
         markAnimation->setEndValue(0);
-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+        markAnimation->start();
     }
     QSpinBox::focusOutEvent(event);
 }

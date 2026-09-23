@@ -7,7 +7,9 @@ param(
     [string]$CMakeExecutable = "cmake",
     [string]$QtBinDirectory,
     [string]$Configuration = "Release",
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$StageOnly,
+    [string]$ValidationSummary
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,11 +38,24 @@ $packageName = "WaveWorkbench-$version-windows-x64"
 $stageDirectory = Join-Path $fullOutputDirectory $packageName
 $archivePath = "$stageDirectory.zip"
 $hashPath = "$archivePath.sha256"
+if ($StageOnly -and (Test-Path -LiteralPath $stageDirectory)) {
+    throw "StageOnly requires a fresh staging directory: $stageDirectory"
+}
 
 $expectedParent = [System.IO.Path]::GetFullPath($fullOutputDirectory).TrimEnd('\') + '\'
 $resolvedStage = [System.IO.Path]::GetFullPath($stageDirectory)
 if (-not $resolvedStage.StartsWith($expectedParent, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Refusing to stage outside the requested output directory: $resolvedStage"
+}
+
+if ($StageOnly) {
+    $revision = (& git -C $sourceDirectory rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "Cannot record the staging source revision." }
+    $branch = (& git -C $sourceDirectory branch --show-current).Trim()
+    $sourceChanges = & git -C $sourceDirectory status --porcelain --untracked-files=no
+    if ($LASTEXITCODE -ne 0 -or $sourceChanges) {
+        throw "StageOnly requires a committed, clean source tree."
+    }
 }
 
 if (-not $SkipBuild) {
@@ -51,9 +66,11 @@ if (-not $SkipBuild) {
     }
 }
 
-foreach ($path in @($stageDirectory, $archivePath, $hashPath)) {
-    if (Test-Path -LiteralPath $path) {
-        Remove-Item -LiteralPath $path -Recurse -Force
+if (-not $StageOnly) {
+    foreach ($path in @($stageDirectory, $archivePath, $hashPath)) {
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Recurse -Force
+        }
     }
 }
 
@@ -105,6 +122,39 @@ foreach ($requiredPath in @(
     if (-not (Test-Path -LiteralPath (Join-Path $stageDirectory $requiredPath))) {
         throw "Portable package contract is incomplete: $requiredPath"
     }
+}
+
+if ($StageOnly) {
+    $metadata = [ordered]@{
+        application = "WaveWorkbench"
+        version = $version
+        revision = $revision
+        branch = $branch
+        configuration = $Configuration
+        platform = "windows-x64"
+        qtVersion = "6.10.2"
+        privateRuntime = "WaveWorkbenchEla.dll"
+        upstreamElaRevision = "454cac2d57a47d3cc28577dc817793aec1881ca7"
+        capabilityReference = "75180fad5e5f5142684cf092649deffe5720994d"
+        listViewLifetimeFix = "xIPs source patch 28; private ABI unchanged"
+        overlayOriginLifetimeFix = "guarded origin/area, replacement teardown regression; Wave vendor patch 13"
+        generatedUtc = [DateTime]::UtcNow.ToString("o")
+        validation = $ValidationSummary
+        archiveCreated = $false
+        formalDirectoryReplaced = $false
+    }
+    $metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $stageDirectory "build-info.json") -Encoding utf8
+    $checksums = Get-ChildItem -LiteralPath $stageDirectory -Recurse -File |
+        Sort-Object FullName | ForEach-Object {
+            $relative = $_.FullName.Substring($stageDirectory.Length + 1).Replace('\', '/')
+            $digest = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$digest  $relative"
+        }
+    $checksums | Set-Content -LiteralPath (Join-Path $stageDirectory "SHA256SUMS.txt") -Encoding ascii
+    Write-Output $stageDirectory
+    Write-Output (Join-Path $stageDirectory "build-info.json")
+    Write-Output (Join-Path $stageDirectory "SHA256SUMS.txt")
+    return
 }
 
 Compress-Archive -LiteralPath $stageDirectory -DestinationPath $archivePath -CompressionLevel Optimal

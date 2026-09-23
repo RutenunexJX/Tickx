@@ -19,6 +19,7 @@ public:
     Q_SLOT void onThemeChanged(ElaThemeType::ThemeMode themeMode);
 
 private:
+    class QPropertyAnimation* _markAnimation{nullptr};
     ElaSpinBoxStyle* _style{nullptr};
     ElaThemeType::ThemeMode _themeMode;
     ElaMenu* _createStandardContextMenu();

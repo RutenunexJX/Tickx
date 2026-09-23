@@ -2,6 +2,18 @@
 
 Current version: `0.12.0`.
 
+## Incremental Ela capabilities — completed locally (2026-09-24)
+
+- [x] Adopt the applicable ZeroSlack p26/p27 native interactions incrementally: interruptible ComboBox and menu popups, owned focus animations, smooth ordinary list/tree/table scrolling, native review TabBar overflow and collapsible simulation sections. Professional waveform scrolling remains exact and immediate; no removed docks, status bar or document-tab behavior was restored.
+- [x] Preserve action identity, model/delegate roles, Qt dialog/page ownership, input interruption, reduced motion, embedding isolation and saved splitter/section state. Include xIPs p28 ListView teardown protection.
+- [x] Fix a second independently reproduced native lifetime fault: replacing a scrollbar left Ela's floating overlay pointing at freed origin storage. Guard both origin and area with QPointer, detach/stop/hide when the origin dies, and limit color-dialog scrollbar adaptation to its scrolling form.
+- [x] Release build succeeded; full CTest **122/122** passed (79.08 seconds). The four previously failing color-picker suites additionally passed three consecutive runs each. Existing model, CLI, file-conflict, embedding and ABI tests remain enabled and passing.
+- [x] Record bounded animation allocations, drawer snapshot limits and measured before/after behavior in `docs/ela-migration.md`. Continuous animation increases painting/CPU compared with the previous immediate baseline; no overall CPU improvement is claimed.
+
+Source reference: ZeroSlack `75180fad5e5f5142684cf092649deffe5720994d`; vendor patch 13 retains Wave-specific contracts and records all incremental changes. Evidence: `build/ela-migration/capability-final-ctest.log`, `capability-color-repeat-ctest.log`, `capability-scroll-lifetime-ctest.log`, `color-regression-nodebugheap-gdb.log` and `ui-capabilities-*.txt`. Native checks use hidden Windows windows; no desktop input or physical compositor acceptance is claimed.
+
+Commit, push and fresh StageOnly packaging are authorized. The staging directory carries build metadata, complete per-file checksums, licenses and vendor patches, without ZIP or backup creation. The suite coordinator alone owns subsequent formal AppSuite directory replacement and shared manifest changes.
+
 ## Native style lifetime, initial chrome and English — completed locally (2026-09-24)
 
 - [x] Reproduced the style-apply crash in the Windows platform plugin: ComboBox teardown repolished a popup being destroyed. Keep its shared style alive until popup/view children have been destroyed, without repolishing from the destructor.

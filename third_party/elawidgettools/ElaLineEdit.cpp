@@ -6,6 +6,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPropertyAnimation>
+#include <QApplication>
 
 #include "ElaEventBus.h"
 #include "ElaLineEditStyle.h"
@@ -24,6 +25,8 @@ ElaLineEdit::ElaLineEdit(QWidget* parent)
     d->_themeMode = eTheme->getThemeMode();
     d->_pBorderRadius = 6;
     d->_pExpandMarkWidth = 0;
+    d->_markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth", this);
+    connect(d->_markAnimation, &QPropertyAnimation::valueChanged, this, [this] { update(); });
     d->_pIsClearButtonEnable = true;
     setFocusPolicy(Qt::StrongFocus);
     // 事件总线
@@ -42,6 +45,8 @@ ElaLineEdit::ElaLineEdit(QWidget* parent)
 
 ElaLineEdit::~ElaLineEdit()
 {
+    Q_D(ElaLineEdit);
+    d->_markAnimation->stop();
     setStyle(nullptr);
     delete _waveOwnedStyle;
 }
@@ -70,15 +75,13 @@ void ElaLineEdit::focusInEvent(QFocusEvent* event)
         {
             setClearButtonEnabled(true);
         }
-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth");
-        connect(markAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
-            update();
-        });
-        markAnimation->setDuration(300);
+        auto* markAnimation = d->_markAnimation;
+        markAnimation->stop();
+        markAnimation->setDuration(qApp->property("waveworkbench.reducedMotion").toBool() ? 0 : 300);
         markAnimation->setEasingCurve(QEasingCurve::InOutSine);
         markAnimation->setStartValue(d->_pExpandMarkWidth);
         markAnimation->setEndValue(width() / 2 - d->_pBorderRadius / 2);
-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+        markAnimation->start();
     }
     QLineEdit::focusInEvent(event);
 }
@@ -93,15 +96,13 @@ void ElaLineEdit::focusOutEvent(QFocusEvent* event)
         {
             setClearButtonEnabled(false);
         }
-        QPropertyAnimation* markAnimation = new QPropertyAnimation(d, "pExpandMarkWidth");
-        connect(markAnimation, &QPropertyAnimation::valueChanged, this, [=](const QVariant& value) {
-            update();
-        });
-        markAnimation->setDuration(300);
+        auto* markAnimation = d->_markAnimation;
+        markAnimation->stop();
+        markAnimation->setDuration(qApp->property("waveworkbench.reducedMotion").toBool() ? 0 : 300);
         markAnimation->setEasingCurve(QEasingCurve::InOutSine);
         markAnimation->setStartValue(d->_pExpandMarkWidth);
         markAnimation->setEndValue(0);
-        markAnimation->start(QAbstractAnimation::DeleteWhenStopped);
+        markAnimation->start();
         Q_EMIT wmFocusOut(text());
     }
     QLineEdit::focusOutEvent(event);
