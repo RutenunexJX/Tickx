@@ -138,6 +138,8 @@ if ($StageOnly) {
         capabilityReference = "75180fad5e5f5142684cf092649deffe5720994d"
         listViewLifetimeFix = "xIPs source patch 28; private ABI unchanged"
         overlayOriginLifetimeFix = "guarded origin/area, replacement teardown regression; Wave vendor patch 13"
+        comboPopupPaddingFix = "ZeroSlack/RegMap patch 30; Wave vendor patch 14"
+        comboPopupSourceSha256 = "e69b815ba035831e2a84484acb0c46f957c83f346fff230a8c2b3034d4a44046"
         generatedUtc = [DateTime]::UtcNow.ToString("o")
         validation = $ValidationSummary
         archiveCreated = $false

@@ -65,6 +65,17 @@ replacement, with a targeted regression and the original color-picker tests.
 The separate three-file reference fix was supplied to the suite coordinator;
 Wave retains its private runtime and does not replace the shared suite DLL.
 Patch 13 forward/index and reverse/worktree checks pass on the patch-12 baseline.
+Patch `patches/14-waveworkbench-combo-popup-padding.patch` follows patch 13 and
+adapts the coordinated ZeroSlack/RegMap source patch
+`30-regmap-combo-popup-padding.patch` (ZeroSlack base `8f7abf6`), SHA-256
+`e69b815ba035831e2a84484acb0c46f957c83f346fff230a8c2b3034d4a44046`.
+It compensates the popup's vertical layout padding after Qt determines geometry,
+clamps to the screen's available vertical bounds and settles repeated visible
+show requests without accumulating height. Wave's animation reuse and destructor
+remain intact; reduced-motion skips animation only after the same geometry fix.
+Only ElaComboBox.cpp production code changes. Public signatures and the upstream
+MIT/OFL license texts are unchanged. Forward/index and reverse/worktree checks
+verify the local adaptation against patch 13.
 See `docs/ela-migration.md` for scope,
 verification and remaining platform checks. Re-audit these changes before any
 dependency update; do not replace the tree with another application's working copy.

@@ -1,5 +1,31 @@
 # ElaWidgetTools migration
 
+## Popup padding follow-up (2026-09-24)
+
+Wave patch 14 adapts the verified ZeroSlack/RegMap patch 30, source SHA-256
+`e69b815ba035831e2a84484acb0c46f957c83f346fff230a8c2b3034d4a44046`.
+The production change is confined to ElaComboBox.cpp: add vertical layout padding
+after Qt computes popup geometry, clamp to available screen bounds and settle
+repeated visible show requests without adding height again. Reduced motion uses
+the same geometry correction before skipping animation; reused animation objects,
+destruction ordering and public signatures remain unchanged.
+
+The added regression first failed for all 12 combinations (1/3/5 rows, normal or
+reduced motion, top or bottom placement), including a 35-pixel row in a 29-pixel
+viewport. After correction, all rows fit, first/last choices work, and four reopen
+cycles plus five repeated visible show calls per cycle retain stable geometry.
+Incremental Release build and **10/10** targeted CTest tests passed (52.15 s):
+control/popup offscreen and hidden Windows suites at scale factors 1/2, plus the
+existing style, color-dialog and waveform UI suites. Capability suites now pass
+23 offscreen / 22 hidden-native QtTest cases at each scale. No existing failure
+case was deleted, no unrelated full audit was repeated, and no desktop input was
+used. Logs: `popup-padding-before-native.txt`, `popup-padding-release-build.log`
+and `popup-padding-targeted-ctest.log` under `build/ela-migration`.
+
+Version stays 0.12.0. Earlier commits/tags/candidates remain unchanged; the new
+StageOnly candidate records patch provenance in build-info.json and complete
+per-file checksums. Formal directory replacement remains coordinator-owned.
+
 ## Capability acceptance (2026-09-24)
 
 This is an incremental source integration from ZeroSlack

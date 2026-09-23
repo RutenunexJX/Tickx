@@ -26,6 +26,7 @@
 #include <QPointer>
 #include <QPropertyAnimation>
 #include <QScopeGuard>
+#include <QScreen>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QStandardItemModel>
@@ -136,6 +137,70 @@ private slots:
             combo->hidePopup(); combo->showPopup();
             const QPointer<QAbstractItemView> popup = combo->view();
             host.reset(); QVERIFY(popup.isNull());
+        }
+    }
+    void comboPopupRowsFit_data()
+    {
+        QTest::addColumn<int>("rows");
+        QTest::addColumn<bool>("reducedMotion");
+        QTest::addColumn<bool>("nearBottom");
+        for (int rows : {1, 3, 5}) for (bool reduced : {false, true})
+            for (bool bottom : {false, true}) {
+                const auto name = QString("%1-%2-%3").arg(rows)
+                    .arg(reduced ? "reduced" : "animated").arg(bottom ? "bottom" : "top");
+                QTest::newRow(qPrintable(name)) << rows << reduced << bottom;
+            }
+    }
+    void comboPopupRowsFit()
+    {
+        QFETCH(int, rows);
+        QFETCH(bool, reducedMotion);
+        QFETCH(bool, nearBottom);
+        const auto previousMotion = qApp->property("waveworkbench.reducedMotion");
+        const auto restoreMotion = qScopeGuard([&] {
+            qApp->setProperty("waveworkbench.reducedMotion", previousMotion);
+        });
+        qApp->setProperty("waveworkbench.reducedMotion", reducedMotion);
+        QWidget host;
+        auto* layout = new QVBoxLayout(&host);
+        auto* combo = wave::ui::comboBox(&host);
+        auto* native = qobject_cast<ElaComboBox*>(combo);
+        QVERIFY(native);
+        layout->addWidget(combo);
+        for (int row = 0; row < rows; ++row) combo->addItem(QString("Option %1").arg(row));
+        host.resize(320, 90);
+        const QRect available = host.screen()->availableGeometry();
+        host.move(available.left() + 60, nearBottom ? available.bottom() - 100 : available.top() + 60);
+        host.show(); QTest::qWait(20);
+        QSize stableSize;
+        for (int cycle = 0; cycle < 4; ++cycle) {
+            combo->showPopup();
+            if (cycle == 0) QTRY_VERIFY_WITH_TIMEOUT(!native->isPopupAnimating(), 1000);
+            else native->finishPopupAnimation();
+            QCoreApplication::processEvents();
+            auto* view = combo->view();
+            auto* popup = view->window();
+            QVERIFY(view->isVisible());
+            if (cycle == 0) stableSize = popup->size();
+            QCOMPARE(popup->size(), stableSize);
+            QVERIFY(available.contains(popup->geometry()));
+            for (int row = 0; row < rows; ++row) {
+                const QRect item = view->visualRect(combo->model()->index(row, 0));
+                QVERIFY2(view->viewport()->rect().contains(item),
+                    qPrintable(QString("row=%1 item=%2,%3 %4x%5 viewport=%6x%7")
+                        .arg(row).arg(item.x()).arg(item.y()).arg(item.width()).arg(item.height())
+                        .arg(view->viewport()->width()).arg(view->viewport()->height())));
+            }
+            const QRect stableGeometry = popup->geometry();
+            for (int repeat = 0; repeat < 5; ++repeat) {
+                combo->showPopup();
+                QVERIFY(!native->isPopupAnimating());
+                QCOMPARE(popup->geometry(), stableGeometry);
+            }
+            QTest::keyClick(view, cycle % 2 ? Qt::Key_End : Qt::Key_Home);
+            QTest::keyClick(view, Qt::Key_Return);
+            QCOMPARE(combo->currentIndex(), cycle % 2 ? rows - 1 : 0);
+            QVERIFY(!view->isVisible());
         }
     }
     void focusAnimationsAreOwned()

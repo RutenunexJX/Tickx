@@ -24,7 +24,7 @@ foreach(_wave_capability_scale IN ITEMS 1 2)
         add_test(NAME wave-ui-capabilities-native-${_wave_capability_scale}
             COMMAND "${CMAKE_COMMAND}"
                 "-DTEST_EXE=$<TARGET_FILE:wave-ui-capabilities-test>"
-                "-DTEST_FUNCTIONS=interruptibleCombo;focusAnimationsAreOwned;focusedViewDestruction;browsingScrollAndExactTimeline;replacedOverlayScrollBarOrigin;tabsKeepQtPageOwnership;menuKeepsActionsAndLiveEditors;simulationDrawersPreserveData"
+                "-DTEST_FUNCTIONS=interruptibleCombo;comboPopupRowsFit;focusAnimationsAreOwned;focusedViewDestruction;browsingScrollAndExactTimeline;replacedOverlayScrollBarOrigin;tabsKeepQtPageOwnership;menuKeepsActionsAndLiveEditors;simulationDrawersPreserveData"
                 "-DLOG_FILE=${CMAKE_BINARY_DIR}/ui-capabilities-native-${_wave_capability_scale}.txt"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
         set_tests_properties(wave-ui-capabilities-native-${_wave_capability_scale} PROPERTIES

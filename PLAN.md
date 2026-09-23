@@ -2,6 +2,14 @@
 
 Current version: `0.12.0`.
 
+## ComboBox popup padding — completed locally (2026-09-24)
+
+- [x] Incrementally adapt the verified ZeroSlack/RegMap patch 30 in ElaComboBox.cpp only: account for the popup layout's vertical padding, clamp available screen bounds and avoid accumulating height on repeated visible show requests. Preserve Wave's owned/reused animations, reduced-motion behavior and teardown fixes.
+- [x] Retain the new failing regression: before the fix, a 35-pixel item had a 29-pixel viewport. Verify 1/3/5 rows, every complete item rectangle, first/last selection, four close/reopen cycles and five visible repeat-show requests per cycle, with animation enabled/disabled and top/bottom placement.
+- [x] Incremental Release build and **10/10** scoped CTest tests passed (52.15 seconds), including 1x/2x hidden Windows and offscreen popup/control suites, real style accept/cancel and color-dialog regressions. No unrelated full audit was repeated; the prior 122/122 result remains baseline evidence.
+
+Evidence: `build/ela-migration/popup-padding-before-native.txt`, `popup-padding-release-build.log` and `popup-padding-targeted-ctest.log`. Wave patch 14 records the local adaptation and original source hash. Version remains `0.12.0`; existing commits, tags and staging directories are retained. Only a new commit and fresh StageOnly candidate are authorized here; the suite coordinator performs any formal replacement.
+
 ## Incremental Ela capabilities — completed locally (2026-09-24)
 
 - [x] Adopt the applicable ZeroSlack p26/p27 native interactions incrementally: interruptible ComboBox and menu popups, owned focus animations, smooth ordinary list/tree/table scrolling, native review TabBar overflow and collapsible simulation sections. Professional waveform scrolling remains exact and immediate; no removed docks, status bar or document-tab behavior was restored.
