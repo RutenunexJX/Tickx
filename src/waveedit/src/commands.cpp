@@ -150,8 +150,12 @@ void applyNewEventToWaveform(Scenario& scenario, Event event)
     event.value = validation.normalizedValue;
     event.linkedSegmentId = segment->id;
     event.waveformLinked = true;
+    const auto addedEventId = event.id;
     scenario.events.push_back(std::move(event));
     synchronizeLaneEventsFromSegments(scenario, lane->id);
+    if (!findEvent(scenario, addedEventId)) {
+        throw std::invalid_argument("event value does not create a distinct waveform transition");
+    }
 }
 
 void applyChangedEventToWaveform(
@@ -4056,7 +4060,9 @@ AddEventCommand::AddEventCommand(Scenario& scenario, Event event)
 void AddEventCommand::redo()
 {
     snapshotRedo(*scenario_, before_, after_, [this] {
-        applyNewEventToWaveform(*scenario_, event_);
+        auto candidate = *scenario_;
+        applyNewEventToWaveform(candidate, event_);
+        *scenario_ = candidate;
     });
 }
 

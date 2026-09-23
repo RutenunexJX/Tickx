@@ -872,7 +872,11 @@ void synchronizeLaneEventsFromSegments(
         }
         return linkedEvents.size();
     };
+    const Segment* previousSegment = nullptr;
     for (const auto& segment : lane->segments) {
+        const auto previousValue = previousSegment && previousSegment->end == segment.start
+            ? std::string_view(previousSegment->value) : std::string_view("0");
+        previousSegment = &segment;
         auto index = reusable([&segment](const Event& event) {
             return event.linkedSegmentId == segment.id;
         });
@@ -885,6 +889,14 @@ void synchronizeLaneEventsFromSegments(
             index = reusable([&segment](const Event& event) {
                 return event.tick == segment.start;
             });
+        }
+
+        const auto eventAction = index == linkedEvents.size() ? action : linkedEvents[index].action;
+        // Bit gaps are implicit 0. A same-value boundary is not a draggable
+        // edge; keep the Segment, initial drive and explicit non-drive actions.
+        if (lane->kind == LaneKind::Bit && segment.start > 0
+            && segment.value == previousValue && eventAction == EventAction::Drive) {
+            continue;
         }
 
         Event event;

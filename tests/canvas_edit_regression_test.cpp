@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace {
 
@@ -109,6 +110,15 @@ void click(wave::WaveCanvas& canvas, const QPoint point)
     mouse(canvas, QEvent::MouseButtonRelease, point);
 }
 
+void hover(wave::WaveCanvas& canvas, const QPoint point)
+{
+    QMouseEvent event(QEvent::MouseMove, QPointF(point),
+        QPointF(canvas.viewport()->mapToGlobal(point)), Qt::NoButton, Qt::NoButton,
+        Qt::NoModifier);
+    QCoreApplication::sendEvent(canvas.viewport(), &event);
+    QCoreApplication::processEvents();
+}
+
 void editBus(wave::WaveCanvas& canvas, const QPoint point)
 {
     click(canvas, point);
@@ -188,6 +198,116 @@ private slots:
         QCOMPARE(f.lane().segments.front().end, finish);
     }
 
+    void toggleBackRemovesVanishedEdgeAndRelation()
+    {
+        Fixture f;
+        auto& scenario = f.project.scenarios.front();
+        wave::setSegmentRange(f.lane(), 140, 150, "1", "other-pulse");
+        wave::setSegmentRange(f.lane(2), 180, 190, "0x2a", "bus-target");
+        wave::synchronizeLaneEventsFromSegments(scenario, "bit");
+        wave::synchronizeLaneEventsFromSegments(scenario, "bus");
+        const auto eventId = [&scenario](const std::string& lane, wave::Tick tick) {
+            const auto it = std::find_if(scenario.events.begin(), scenario.events.end(),
+                [&](const wave::Event& event) { return event.laneId == lane && event.tick == tick; });
+            return it == scenario.events.end() ? std::string{} : it->id;
+        };
+        const auto otherId = eventId("bit", 140);
+        const auto targetId = eventId("bus", 180);
+        QVERIFY(!otherId.empty()); QVERIFY(!targetId.empty());
+        f.show();
+        click(f.canvas, f.point(15));
+        const auto sourceId = eventId("bit", 10);
+        QVERIFY(!sourceId.empty());
+        wave::Relation relation;
+        relation.id = "removed-edge-relation";
+        relation.sourceEventId = sourceId;
+        relation.targetEventId = targetId;
+        relation.maximumDelay = 200;
+        scenario.relations.push_back(relation);
+        relation.id = "other-edge-relation";
+        relation.sourceEventId = otherId;
+        scenario.relations.push_back(relation);
+        f.canvas.refreshModel();
+        const auto before = scenario;
+
+        click(f.canvas, f.point(15));
+        QVERIFY2(!wave::findEvent(scenario, sourceId), "Flat implicit-0 to explicit-0 retained an edge event");
+        QVERIFY(!wave::findRelation(scenario, "removed-edge-relation"));
+        QVERIFY(wave::findRelation(scenario, "other-edge-relation"));
+        QCOMPARE(eventId("bit", 140), otherId);
+        QCOMPARE(eventId("bus", 180), targetId);
+        QVERIFY(eventId("bit", 10).empty());
+        f.canvas.viewport()->grab();
+        QCOMPARE(f.canvas.property("wavewidgets.renderedEventCount").toULongLong(), qulonglong(2));
+        const auto after = scenario;
+        QVERIFY(f.commands.undo()); QCOMPARE(scenario, before);
+        QVERIFY(f.commands.redo()); QCOMPARE(scenario, after);
+        const auto loaded = wave::deserializeProject(wave::serializeProject(f.project));
+        QVERIFY(loaded.ok());
+        QCOMPARE(loaded.project->scenarios.front(), after);
+        savePreview(f.canvas, QStringLiteral("bit-toggle-no-phantom-edge"));
+    }
+
+    void bitEventSynchronizationPreservesRealEdgesAndExplicitActions()
+    {
+        Fixture f;
+        auto& scenario = f.project.scenarios.front();
+        wave::setSegmentRange(f.lane(), 0, 10, "0", "initial");
+        wave::setSegmentRange(f.lane(), 20, 30, "0", "flat");
+        wave::setSegmentRange(f.lane(), 40, 50, "1", "high");
+        wave::setSegmentRange(f.lane(), 50, 60, "0", "falling");
+        wave::setSegmentRange(f.lane(), 70, 80, "X", "unknown");
+        wave::setSegmentRange(f.lane(), 80, 90, "0", "known");
+        wave::Event note;
+        note.id = "independent-note"; note.laneId = "bit"; note.tick = 20;
+        note.action = wave::EventAction::Note;
+        scenario.events.push_back(note);
+        const auto segments = f.lane().segments;
+        wave::synchronizeLaneEventsFromSegments(scenario, "bit");
+        QCOMPARE(f.lane().segments, segments);
+        QCOMPARE(scenario.events.size(), std::size_t(6));
+        QVERIFY(wave::findEvent(scenario, note.id));
+        QVERIFY(std::none_of(scenario.events.begin(), scenario.events.end(),
+            [](const wave::Event& event) { return event.waveformLinked && event.tick == 20; }));
+        for (const auto tick : {0, 40, 50, 70, 80}) {
+            QVERIFY(std::any_of(scenario.events.begin(), scenario.events.end(),
+                [tick](const wave::Event& event) { return event.waveformLinked && event.tick == tick; }));
+        }
+        const auto stable = scenario;
+        wave::synchronizeLaneEventsFromSegments(scenario, "bit");
+        QCOMPARE(scenario, stable);
+
+        wave::Event expectation;
+        expectation.id = "explicit-expect-zero"; expectation.laneId = "bit";
+        expectation.tick = 20; expectation.value = "0";
+        expectation.action = wave::EventAction::Expect;
+        expectation.waveformLinked = true; expectation.linkedSegmentId = "flat";
+        scenario.events.push_back(expectation);
+        wave::synchronizeLaneEventsFromSegments(scenario, "bit");
+        const auto* kept = wave::findEvent(scenario, expectation.id);
+        QVERIFY(kept); QCOMPARE(*kept, expectation);
+        QCOMPARE(f.lane().segments, segments);
+    }
+
+    void noEdgeEventCreationIsAtomic()
+    {
+        Fixture f;
+        auto& scenario = f.project.scenarios.front();
+        const auto before = scenario;
+        wave::Event event;
+        event.id = "no-edge-drive"; event.laneId = "bit";
+        event.tick = 10; event.value = "0";
+        QVERIFY_EXCEPTION_THROWN(f.commands.execute(
+            std::make_unique<wave::AddEventCommand>(scenario, event)), std::invalid_argument);
+        QCOMPARE(scenario, before);
+        QCOMPARE(f.commands.size(), std::size_t(0));
+        event.id = "explicit-expect"; event.action = wave::EventAction::Expect;
+        QVERIFY(f.commands.execute(std::make_unique<wave::AddEventCommand>(scenario, event)));
+        const auto* added = wave::findEvent(scenario, event.id);
+        QVERIFY(added); QVERIFY(added->action == wave::EventAction::Expect);
+        QVERIFY(f.commands.undo()); QCOMPARE(scenario, before);
+    }
+
     void genuineDrag()
     {
         for (const bool reverse : {false, true}) {
@@ -203,6 +323,120 @@ private slots:
             QCOMPARE(f.lane().segments.front().start, wave::Tick{10});
             QCOMPARE(f.lane().segments.front().end, wave::Tick{40});
         }
+    }
+
+    void signalHeaderDoesNotPreviewWaveform_data()
+    {
+        QTest::addColumn<int>("laneIndex");
+        QTest::addColumn<bool>("scrolled");
+        QTest::newRow("clock") << 0 << false;
+        QTest::newRow("bit") << 1 << false;
+        QTest::newRow("bus") << 2 << false;
+        QTest::newRow("clock-scrolled") << 0 << true;
+        QTest::newRow("bit-scrolled") << 1 << true;
+        QTest::newRow("bus-scrolled") << 2 << true;
+    }
+
+    void signalHeaderDoesNotPreviewWaveform()
+    {
+        QFETCH(int, laneIndex);
+        QFETCH(bool, scrolled);
+        Fixture f;
+        f.show();
+        click(f.canvas, f.point(15));
+        if (scrolled) {
+            f.canvas.zoomIn();
+            f.scale *= 1.25;
+            f.canvas.horizontalScrollBar()->setValue(41);
+        }
+        const auto before = f.project.scenarios.front();
+        const auto selection = f.canvas.selectedTimeRange();
+        const auto selectedLane = f.canvas.selectedLaneId();
+        const auto cursor = f.canvas.cursorTick();
+        const auto historySize = f.commands.size();
+        QVERIFY(selection);
+        hover(f.canvas, f.point(35, laneIndex));
+        QVERIFY(f.canvas.hoveredBitBeatRange());
+        QCOMPARE(f.canvas.hoveredBitBeatLaneId(), QString::fromStdString(f.lane(laneIndex).id));
+        for (const auto x : {40, f.canvas.signalHeaderWidth() - 15}) {
+            hover(f.canvas, {x, f.point(35, laneIndex).y()});
+            QVERIFY(!f.canvas.hoveredBitBeatRange());
+            QVERIFY(f.canvas.hoveredBitBeatLaneId().isEmpty());
+            QCOMPARE(f.canvas.selectedTimeRange(), selection);
+            QCOMPARE(f.canvas.selectedLaneId(), selectedLane);
+            QCOMPARE(f.canvas.cursorTick(), cursor);
+            QCOMPARE(f.commands.size(), historySize);
+            QCOMPARE(f.project.scenarios.front(), before);
+        }
+        hover(f.canvas, f.point(35, laneIndex));
+        QVERIFY(f.canvas.hoveredBitBeatRange());
+    }
+
+    void groupedWaveformsKeepTheirFill_data()
+    {
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("light") << false;
+        QTest::newRow("dark") << true;
+    }
+
+    void groupedWaveformsKeepTheirFill()
+    {
+        QFETCH(bool, dark);
+        applyTheme(dark ? wave::WaveformColorScheme::Dark : wave::WaveformColorScheme::Light);
+        Fixture f;
+        auto& scenario = f.project.scenarios.front();
+        wave::setSegmentRange(f.lane(2), 20, 40, "0x2a", "numeric");
+        wave::setSegmentRange(f.lane(2), 60, 80, "text:IDLE", "text");
+        auto secondClock = f.lane(0);
+        secondClock.id = secondClock.name = "second-clock";
+        auto secondBus = f.lane(2);
+        secondBus.id = secondBus.name = "second-bus";
+        for (auto& segment : secondBus.segments) segment.id += "-second";
+        scenario.lanes.push_back(secondClock);
+        scenario.lanes.push_back(secondBus);
+        wave::Lane group;
+        group.id = "signals"; group.name = "Signals";
+        group.kind = wave::LaneKind::Group; group.height = 56;
+        scenario.lanes.push_back(group);
+        f.show();
+        const auto before = scenario;
+        const std::vector<std::string> members{"clock", "bit", "bus", "second-clock", "second-bus"};
+        const auto samples = [&] {
+            const auto image = f.canvas.viewport()->grab().toImage();
+            std::vector<QColor> colors;
+            auto top = 40;
+            for (const auto& lane : scenario.lanes) {
+                if (!f.canvas.isLaneDisplayed(QString::fromStdString(lane.id))) continue;
+                if (lane.kind == wave::LaneKind::Clock || lane.kind == wave::LaneKind::Bus) {
+                    for (const auto tick : {22, 27, 32, 37, 62, 67, 72, 77}) {
+                        colors.push_back(pixel(image, {f.point(tick).x(), top + 17}));
+                    }
+                }
+                top += lane.height;
+            }
+            return colors;
+        };
+        const auto originalFill = samples();
+        QCOMPARE(originalFill.size(), std::size_t(32));
+        QVERIFY(f.commands.execute(std::make_unique<wave::SetLanesGroupCommand>(
+            scenario, members, group.id)));
+        f.canvas.refreshModel();
+        QCOMPARE(samples(), originalFill);
+        QVERIFY(f.canvas.setGroupCollapsed("signals", true));
+        QVERIFY(f.canvas.setGroupCollapsed("signals", false));
+        QCOMPARE(samples(), originalFill);
+        QVERIFY(f.commands.undo());
+        f.canvas.refreshModel();
+        QCOMPARE(scenario, before);
+        QCOMPARE(samples(), originalFill);
+        QVERIFY(f.commands.redo());
+        f.canvas.refreshModel();
+        QCOMPARE(samples(), originalFill);
+        savePreview(f.canvas, dark ? "grouped-dark" : "grouped-light");
+        QVERIFY(f.commands.execute(std::make_unique<wave::SetLanesGroupCommand>(
+            scenario, members, std::string{})));
+        f.canvas.refreshModel();
+        QCOMPARE(samples(), originalFill);
     }
 
     void asynchronousClickKeepsPreview()
@@ -221,6 +455,92 @@ private slots:
         QCOMPARE(f.lane().segments.front().end, preview->second);
         QCOMPARE(f.canvas.hoveredBitBeatRange(), preview);
         QCOMPARE(f.canvas.cursorTick(), preview->first);
+    }
+
+    void signalHeaderLayout_data()
+    {
+        QTest::addColumn<bool>("dark");
+        QTest::addColumn<int>("width");
+        QTest::addColumn<int>("height");
+        for (const auto dark : {false, true}) {
+            for (const auto width : {140, 190, 320}) {
+                for (const auto height : {30, 56}) {
+                    const auto name = QByteArray(dark ? "dark-" : "light-")
+                        + QByteArray::number(width) + '-' + QByteArray::number(height);
+                    QTest::newRow(name.constData()) << dark << width << height;
+                }
+            }
+        }
+    }
+
+    void signalHeaderLayout()
+    {
+        QFETCH(bool, dark);
+        QFETCH(int, width);
+        QFETCH(int, height);
+        applyTheme(dark ? wave::WaveformColorScheme::Dark : wave::WaveformColorScheme::Light);
+        Fixture f;
+        auto& scenario = f.project.scenarios.front();
+        scenario.lanes.clear();
+        std::vector<std::string> ids;
+        for (const auto index : {0, 1, 2}) {
+            wave::Lane lane;
+            lane.id = "data-" + std::to_string(index);
+            lane.name = "request_payload[31:0]";
+            lane.kind = wave::LaneKind::Bus; lane.width = 32;
+            lane.height = height; lane.clockDomainId = "clk";
+            ids.push_back(lane.id);
+            scenario.lanes.push_back(lane);
+        }
+        wave::Lane group;
+        group.id = "request"; group.name = "Request interface";
+        group.kind = wave::LaneKind::Group; group.height = height;
+        scenario.lanes.push_back(group);
+        f.show();
+        f.canvas.setSignalHeaderWidth(width);
+        const auto checkRows = [&](int firstTop) {
+            const auto image = f.canvas.viewport()->grab().toImage();
+            const auto ratio = image.devicePixelRatio();
+            const auto crop = [&](int top) {
+                return image.copy(QRect(qRound(32 * ratio), qRound((top + 5) * ratio),
+                    qRound((width - 42) * ratio), qRound((height - 10) * ratio)));
+            };
+            // Identical signals must not inherit smaller fonts from preceding rows.
+            // Fractional row strides have different subpixel rasterization phases.
+            if (qFuzzyCompare(height * ratio, qreal(qRound(height * ratio)))) {
+                QCOMPARE(crop(firstTop), crop(firstTop + height));
+                QCOMPARE(crop(firstTop), crop(firstTop + 2 * height));
+            }
+        };
+        checkRows(40);
+        QVERIFY(f.commands.execute(std::make_unique<wave::SetLanesGroupCommand>(scenario, ids, group.id)));
+        f.canvas.refreshModel();
+        checkRows(40 + height);
+        f.canvas.selectLaneHeaders({"data-1"}, "data-1");
+        const auto grouped = scenario;
+        const auto image = f.canvas.viewport()->grab().toImage();
+        QCOMPARE(pixel(image, {width - 10, 40 + 2 * height + height / 2}),
+            wave::waveformTheme(dark ? wave::WaveformColorScheme::Dark : wave::WaveformColorScheme::Light).selection);
+        if (width == 190 && height == 56) {
+            savePreview(f.canvas, dark ? "signal-header-dark" : "signal-header-light");
+        }
+        f.canvas.beginLaneRename("data-1", "request_payload[31:0]");
+        auto* rename = f.canvas.findChild<QLineEdit*>("LaneRenameEdit");
+        QVERIFY(rename && rename->isVisible());
+        QVERIFY(rename->font().pointSizeF() >= 11.5);
+        QVERIFY(rename->geometry().left() >= 32);
+        QVERIFY(rename->geometry().right() < width);
+        QVERIFY(rename->geometry().top() >= 40 + 2 * height);
+        QVERIFY(rename->geometry().bottom() < 40 + 3 * height);
+        QTest::keyClick(rename, Qt::Key_Escape);
+        QVERIFY(!f.canvas.hasLaneRename());
+        click(f.canvas, {16, 40 + height / 2});
+        QVERIFY(f.canvas.isGroupCollapsed("request"));
+        QVERIFY(!f.canvas.isLaneDisplayed("data-1"));
+        click(f.canvas, {16, 40 + height / 2});
+        QVERIFY(!f.canvas.isGroupCollapsed("request"));
+        QVERIFY(f.canvas.isLaneDisplayed("data-1"));
+        QCOMPARE(scenario, grouped);
     }
 
     void clockGrid_data()
@@ -272,7 +592,7 @@ private slots:
             f.show();
             f.canvas.selectLaneHeaders({"bit"}, "bit");
             const auto image = f.canvas.viewport()->grab().toImage();
-            QCOMPARE(pixel(image, {3, 40 + 56 + 5}), theme.selection);
+            QCOMPARE(pixel(image, {f.canvas.signalHeaderWidth() - 10, 40 + 56 + 10}), theme.selection);
             QCOMPARE(pixel(image, {f.point(33).x(), 40 + 3 * 56 + 5}), theme.panel);
             QCOMPARE(pixel(image, {f.point(25).x(), 44}), theme.warningSurface);
             QCOMPARE(pixel(image, {f.point(65).x(), 44}), theme.errorSurface);

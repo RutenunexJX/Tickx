@@ -63,6 +63,8 @@ const QString kRangeMimeType = QStringLiteral("application/x-wave-workbench-rang
 constexpr std::string_view kBusPresetExtension = "waveWorkbench.busPreset";
 constexpr int kSoftSnapRadiusPixels = 7;
 constexpr int kTextBusInput = -1;
+constexpr qreal kLaneNamePointSize = 11.5;
+constexpr qreal kLaneDetailPointSize = 9.0;
 
 const WaveformTheme& canvasTheme()
 {
@@ -79,6 +81,46 @@ QColor canvasSelectionColor()
     auto selection = canvasTheme().selection;
     selection.setAlpha(96);
     return selection;
+}
+
+void drawLaneGlyph(QPainter& painter, const LaneKind kind, const QRectF& rect,
+    const QColor& color)
+{
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.translate(rect.topLeft());
+    painter.scale(rect.width() / 24.0, rect.height() / 24.0);
+    painter.setPen(QPen(color, 1.7, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    const auto outline = [&painter](std::initializer_list<QPointF> points) {
+        QPainterPath path;
+        auto first = true;
+        for (const auto& point : points) {
+            if (first) path.moveTo(point);
+            else path.lineTo(point);
+            first = false;
+        }
+        painter.drawPath(path);
+    };
+    switch (kind) {
+    case LaneKind::Clock:
+        outline({{2, 17}, {5, 17}, {5, 7}, {11, 7}, {11, 17}, {17, 17}, {17, 7}, {22, 7}});
+        break;
+    case LaneKind::Bit:
+        outline({{2, 17}, {9, 17}, {9, 7}, {22, 7}});
+        break;
+    case LaneKind::Group:
+        outline({{3, 19}, {3, 5}, {9, 5}, {12, 8}, {21, 8}, {21, 19}, {3, 19}});
+        break;
+    case LaneKind::Event:
+        outline({{5, 21}, {5, 3}, {19, 3}, {15, 8}, {19, 13}, {5, 13}});
+        break;
+    default:
+        outline({{2, 7}, {6, 7}, {10, 17}, {22, 17}});
+        outline({{2, 17}, {6, 17}, {10, 7}, {22, 7}});
+        break;
+    }
+    painter.restore();
 }
 
 void setSemanticState(QWidget* widget, const QString& state)
@@ -404,7 +446,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         button->setAccessibleName(quickLabels.at(index));
         button->setAutoRaise(true);
         button->setCursor(Qt::PointingHandCursor);
-        button->setProperty("waveRole", QStringLiteral("primary"));
+        button->setProperty("waveRole", QStringLiteral("secondary"));
         button->setProperty("waveDensity", QStringLiteral("compact"));
         button->hide();
         addLaneButtons_.at(index) = button;
@@ -6069,8 +6111,8 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
 
     painter.fillRect(QRect(0, 0, headerWidth_, RulerHeight), canvasTheme().panel);
     painter.setPen(canvasTheme().text);
-    QFont titleFont = painter.font();
-    titleFont.setBold(true);
+    QFont titleFont = viewport()->font();
+    titleFont.setWeight(QFont::DemiBold);
     painter.setFont(titleFont);
     if (!signalHeaderWidget_) {
         painter.drawText(
@@ -7466,7 +7508,8 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
                 viewport()->setCursor(Qt::PointingHandCursor);
                 if (changed) viewport()->update();
             }
-        } else if (lane && lane->kind != LaneKind::Group) {
+        } else if (position.x() >= headerWidth_
+                   && lane && lane->kind != LaneKind::Group) {
             const auto hit = segmentHitAtPosition(*lane, position);
             std::optional<std::pair<Tick, Tick>> hoverRange;
             if (hit.segment) {
@@ -8231,6 +8274,7 @@ QRect WaveCanvas::groupDisclosureRect(const Lane& group) const
 int WaveCanvas::fittedSignalHeaderWidth() const
 {
     QFont nameFont = viewport()->font();
+    nameFont.setPointSizeF(std::max(kLaneNamePointSize, nameFont.pointSizeF()));
     nameFont.setBold(true);
     const QFontMetrics nameMetrics(nameFont);
     const QFontMetrics detailMetrics(viewport()->font());
@@ -8238,27 +8282,22 @@ int WaveCanvas::fittedSignalHeaderWidth() const
     if (scenario_) {
         for (const auto& lane : scenario_->lanes) {
             if (!isLaneDisplayed(lane)) continue;
-            const auto memberIndent = visibleParentGroup(lane) ? 20 : 0;
+            const auto textLeft = lane.kind == LaneKind::Group ? 56
+                : visibleParentGroup(lane) ? 58 : 38;
+            const auto trailingWidth = lane.kind == LaneKind::Group ? 46 : 12;
             fitted = std::max(
                 fitted,
                 nameMetrics.horizontalAdvance(QString::fromStdString(lane.name))
-                    + 32
-                    + memberIndent);
+                    + textLeft + trailingWidth);
             auto detail = laneKindLabel(lane.kind);
             if (lane.kind == LaneKind::Group) {
-                detail = tr("Group · %1 signal(s) · %2")
-                             .arg(static_cast<qulonglong>(
-                                 visibleGroupMemberCount(lane.id)))
-                             .arg(
-                                 collapsedGroupIds_.contains(lane.id)
-                                     ? tr("Collapsed")
-                                     : tr("Expanded"));
+                continue;
             } else if (lane.kind == LaneKind::Bus || lane.kind == LaneKind::Enum) {
                 detail += tr(" · %1-bit").arg(lane.width);
             }
             fitted = std::max(
                 fitted,
-                detailMetrics.horizontalAdvance(detail) + 28 + memberIndent);
+                detailMetrics.horizontalAdvance(detail) + textLeft + trailingWidth);
         }
     }
     return std::clamp(fitted, MinimumHeaderWidth, MaximumHeaderWidth);
@@ -8439,7 +8478,15 @@ void WaveCanvas::positionLaneRename()
     }
     const auto laneTop = RulerHeight + layout->top - verticalScrollBar()->value();
     const auto height = std::clamp(layout->height / 2 + 2, 24, 32);
-    laneRenameEdit_->setGeometry(10, laneTop + 3, headerWidth_ - 20, height);
+    auto font = viewport()->font();
+    font.setPointSizeF(std::max(kLaneNamePointSize, font.pointSizeF()));
+    laneRenameEdit_->setFont(font);
+    const auto& lane = scenario_->lanes.at(layout->laneIndex);
+    const auto group = lane.kind == LaneKind::Group;
+    const auto left = (group ? 56 : visibleParentGroup(lane) ? 58 : 38) - 4;
+    const auto top = laneTop + (layout->height - height) / 2
+        - (group || layout->height < 44 ? 0 : 10);
+    laneRenameEdit_->setGeometry(left, top, headerWidth_ - left - 10, height);
     laneRenameEdit_->raise();
 }
 
@@ -21835,6 +21882,7 @@ void WaveCanvas::drawLane(
     const Tick visibleStart,
     const Tick visibleEnd)
 {
+    painter.save();
     const auto y = RulerHeight + layout.top - verticalScrollBar()->value();
     const QRect rowRect(0, y, viewport()->width(), layout.height);
     const QRect waveformRect(headerWidth_, y, waveViewportWidth(), layout.height);
@@ -21844,62 +21892,102 @@ void WaveCanvas::drawLane(
         selectedLaneIds_.end(),
         lane.id) != selectedLaneIds_.end();
     const auto groupHeader = lane.kind == LaneKind::Group;
-    const auto* parentGroup = visibleParentGroup(lane);
-    const auto groupedMember = parentGroup != nullptr;
-    painter.fillRect(
-        QRect(0, y, headerWidth_, layout.height),
-        selected
-            ? canvasTheme().selection
-            : groupHeader
-                ? canvasTheme().raised
-                : canvasTheme().panel);
-    if (groupHeader) {
-        painter.fillRect(waveformRect, QColor(86, 111, 142, 24));
+    const auto groupedMember = visibleParentGroup(lane) != nullptr;
+    const auto& theme = canvasTheme();
+    const auto centerY = y + layout.height / 2;
+    const auto compact = layout.height < 44;
+    const auto textLeft = groupHeader ? 56 : groupedMember ? 58 : 38;
+    QFont nameFont = viewport()->font();
+    nameFont.setPointSizeF(std::max(kLaneNamePointSize, nameFont.pointSizeF()));
+    nameFont.setWeight(selected || groupHeader ? QFont::DemiBold : QFont::Medium);
+    QFont detailFont = nameFont;
+    detailFont.setWeight(QFont::Normal);
+    detailFont.setPointSizeF(std::max(kLaneDetailPointSize, nameFont.pointSizeF() - 2.5));
+
+    painter.save();
+    painter.setClipRect(QRect(0, y, headerWidth_, layout.height));
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.fillRect(QRect(0, y, headerWidth_, layout.height), theme.raised);
+    const auto cardLeft = groupedMember ? 26 : 6;
+    const QRectF card(cardLeft, y + 4, headerWidth_ - cardLeft - 6, layout.height - 8);
+    if (selected || groupHeader) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(selected ? theme.selection : theme.panel);
+        painter.drawRoundedRect(card, 6, 6);
     }
-    if (selected) painter.fillRect(waveformRect, canvasSelectionColor());
+    if (selected) {
+        painter.setPen(QPen(theme.accent, 2.5, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(QPointF(cardLeft + 2, centerY - 9), QPointF(cardLeft + 2, centerY + 9));
+    }
     if (groupedMember) {
-        painter.setPen(QPen(QColor(101, 127, 157, 145), 1.0));
-        painter.drawLine(20, y, 20, y + layout.height);
-        painter.drawLine(20, y + layout.height / 2, 28, y + layout.height / 2);
+        const auto index = laneLayoutIndexById_.find(lane.id);
+        const auto hasNextMember = index != laneLayoutIndexById_.end()
+            && index->second + 1 < laneLayout_.size()
+            && scenario_->lanes.at(laneLayout_[index->second + 1].laneIndex).groupId == lane.groupId;
+        painter.setPen(QPen(theme.gridMinor, 1.0));
+        painter.drawLine(18, y, 18, hasNextMember ? y + layout.height : centerY);
+        painter.drawLine(18, centerY, 25, centerY);
     }
+    const auto foreground = selected ? theme.selectionText : theme.text;
+    drawLaneGlyph(painter, lane.kind,
+        QRectF(groupHeader ? 32 : groupedMember ? 32 : 12, centerY - 10, 20, 20),
+        selected || groupHeader ? foreground : theme.mutedText);
+    auto nameRight = headerWidth_ - 12;
     if (groupHeader) {
         const auto disclosure = groupDisclosureRect(lane);
         if (!disclosure.isEmpty()) {
             const auto center = disclosure.center();
-            painter.setPen(Qt::NoPen);
-            painter.setBrush(
-                selected ? canvasTheme().selectionText : canvasTheme().mutedText);
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(theme.mutedText, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            QPainterPath chevron;
             if (collapsedGroupIds_.contains(lane.id)) {
-                painter.drawPolygon(QPolygon{
-                    QPoint(center.x() - 3, center.y() - 5),
-                    QPoint(center.x() + 4, center.y()),
-                    QPoint(center.x() - 3, center.y() + 5),
-                });
+                chevron.moveTo(center.x() - 2, center.y() - 4);
+                chevron.lineTo(center.x() + 2, center.y());
+                chevron.lineTo(center.x() - 2, center.y() + 4);
             } else {
-                painter.drawPolygon(QPolygon{
-                    QPoint(center.x() - 5, center.y() - 3),
-                    QPoint(center.x() + 5, center.y() - 3),
-                    QPoint(center.x(), center.y() + 4),
-                });
+                chevron.moveTo(center.x() - 4, center.y() - 2);
+                chevron.lineTo(center.x(), center.y() + 2);
+                chevron.lineTo(center.x() + 4, center.y() - 2);
             }
+            painter.drawPath(chevron);
         }
+        painter.setFont(detailFont);
+        const auto count = QString::number(static_cast<qulonglong>(visibleGroupMemberCount(lane.id)));
+        const auto badgeWidth = std::max(22, painter.fontMetrics().horizontalAdvance(count) + 12);
+        const QRect badge(headerWidth_ - 12 - badgeWidth, centerY - 10, badgeWidth, 20);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(theme.raised);
+        painter.drawRoundedRect(badge, 5, 5);
+        painter.setPen(theme.mutedText);
+        painter.drawText(badge, Qt::AlignCenter, count);
+        nameRight = badge.left() - 8;
     }
-    painter.setPen(selected ? canvasTheme().selectionText : canvasTheme().text);
-    QFont nameFont = painter.font();
-    nameFont.setBold(selected || groupHeader);
-    painter.setFont(nameFont);
-    const auto sampledValue = tool_ == Tool::Marker
+    const auto sampledValue = groupHeader ? QString{} : tool_ == Tool::Marker
         ? cursorValue(lane)
         : tool_ == Tool::WaveEdit && selected && !drawing_
             ? laneValueAt(lane, cursorTick_)
             : QString{};
-    const auto valueWidth = sampledValue.isEmpty() ? 0 : 78;
-    const auto textLeft = groupHeader || groupedMember ? 34 : 14;
+    auto detailRight = headerWidth_ - 12;
+    if (!sampledValue.isEmpty()) {
+        painter.setFont(detailFont);
+        const auto valueWidth = std::clamp(painter.fontMetrics().horizontalAdvance(sampledValue) + 12,
+            24, std::max(24, (headerWidth_ - textLeft) / 2));
+        const QRect valueRect(headerWidth_ - 12 - valueWidth,
+            compact ? centerY - 10 : centerY + 1, valueWidth, 20);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(theme.panel);
+        painter.drawRoundedRect(valueRect, 4, 4);
+        painter.setPen(foreground);
+        painter.drawText(valueRect.adjusted(6, 0, -6, 0), Qt::AlignCenter,
+            painter.fontMetrics().elidedText(sampledValue, Qt::ElideRight, valueWidth - 12));
+        detailRight = valueRect.left() - 6;
+        if (compact) nameRight = detailRight;
+    }
+    painter.setFont(nameFont);
+    painter.setPen(foreground);
     const QRect nameRect(
-        textLeft,
-        y + 4,
-        headerWidth_ - textLeft - 14 - valueWidth,
-        layout.height / 2);
+        textLeft, groupHeader || compact ? centerY - 11 : centerY - 21,
+        std::max(0, nameRight - textLeft), 22);
     painter.drawText(
         nameRect,
         Qt::AlignLeft | Qt::AlignVCenter,
@@ -21907,52 +21995,26 @@ void WaveCanvas::drawLane(
             QString::fromStdString(lane.name),
             Qt::ElideMiddle,
             nameRect.width()));
-    if (!sampledValue.isEmpty()) {
-        painter.setPen(kMovableCursor);
-        nameFont.setBold(true);
-        painter.setFont(nameFont);
-        const QRect valueRect(
-            headerWidth_ - 88,
-            y + 4,
-            74,
-            layout.height / 2);
-        painter.drawText(
-            valueRect,
-            Qt::AlignRight | Qt::AlignVCenter,
-            painter.fontMetrics().elidedText(
-                sampledValue,
-                Qt::ElideLeft,
-                valueRect.width()));
+    if (!groupHeader && !compact) {
+        painter.setFont(detailFont);
+        painter.setPen(theme.mutedText);
+        const auto* clock = project_ ? findClock(*project_, lane.clockDomainId) : nullptr;
+        auto detail = laneKindLabel(lane.kind);
+        if (lane.kind == LaneKind::Clock && clock && clock->isValid()) {
+            detail = tr("Clock · %1").arg(QString::fromStdString(formatTick(clock->period, project_->timeBase)));
+        } else if (lane.kind == LaneKind::Bit || lane.kind == LaneKind::Bus || lane.kind == LaneKind::Enum) {
+            detail = tr("%1-bit").arg(lane.width);
+            if (clock) detail += QStringLiteral(" · ") + QString::fromStdString(clock->name);
+        }
+        const QRect detailRect(textLeft, centerY + 1, std::max(0, detailRight - textLeft), 20);
+        painter.drawText(detailRect, Qt::AlignLeft | Qt::AlignVCenter,
+            painter.fontMetrics().elidedText(detail, Qt::ElideRight, detailRect.width()));
     }
-    QFont detailFont = painter.font();
-    detailFont.setBold(false);
-    detailFont.setPointSizeF(std::max(7.0, detailFont.pointSizeF() - 1.5));
-    painter.setFont(detailFont);
-    painter.setPen(canvasTheme().mutedText);
-    auto detail = laneKindLabel(lane.kind);
-    if (groupHeader) {
-        const auto memberCount = visibleGroupMemberCount(lane.id);
-        detail = tr("Group · %1 signal(s) · %2")
-                     .arg(static_cast<qulonglong>(memberCount))
-                     .arg(
-                         collapsedGroupIds_.contains(lane.id)
-                             ? tr("Collapsed")
-                             : tr("Expanded"));
-    } else if (lane.kind == LaneKind::Bus || lane.kind == LaneKind::Enum) {
-        detail += tr(" · %1-bit").arg(lane.width);
-    }
-    painter.drawText(
-        QRect(
-            textLeft,
-            y + layout.height / 2 - 2,
-            headerWidth_ - textLeft - 14,
-            layout.height / 2),
-        Qt::AlignLeft | Qt::AlignVCenter,
-        painter.fontMetrics().elidedText(
-            detail,
-            Qt::ElideRight,
-            headerWidth_ - textLeft - 14));
+    painter.restore();
 
+    if (groupHeader) painter.fillRect(waveformRect, theme.panel);
+    if (selected) painter.fillRect(waveformRect, canvasSelectionColor());
+    painter.setFont(detailFont);
     painter.save();
     painter.setClipRect(waveformRect.adjusted(0, 1, 0, -1));
     switch (lane.kind) {
@@ -21973,7 +22035,8 @@ void WaveCanvas::drawLane(
     }
     painter.restore();
     painter.setPen(canvasTheme().gridMinor);
-    painter.drawLine(0, rowRect.bottom(), viewport()->width(), rowRect.bottom());
+    painter.drawLine(headerWidth_, rowRect.bottom(), viewport()->width(), rowRect.bottom());
+    painter.restore();
 }
 
 void WaveCanvas::drawAddLaneRow(QPainter& painter)
@@ -22142,7 +22205,7 @@ void WaveCanvas::drawClock(
         path.lineTo(fallingX, lowY);
         path.lineTo(nextX, lowY);
     }
-    painter.drawPath(path);
+    painter.strokePath(path, painter.pen());
     drawOverrides();
 }
 
@@ -22338,7 +22401,7 @@ void WaveCanvas::drawBusSegments(
             laneColor(lane),
             1.5,
             preview ? Qt::DashLine : Qt::SolidLine));
-        painter.drawPath(path);
+        painter.strokePath(path, painter.pen());
         if (right - left > 28) {
             painter.setPen(canvasTheme().text);
             painter.drawText(
