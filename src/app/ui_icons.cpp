@@ -132,6 +132,23 @@ void drawIcon(QPainter& painter, Icon name)
     case Icon::Swap:
         outline({{3, 8}, {21, 8}, {17, 4}});
         outline({{21, 16}, {3, 16}, {7, 20}}); break;
+    case Icon::Reserved:
+        box(5, 10, 14, 11);
+        { QPainterPath arch; arch.moveTo(8, 10); arch.lineTo(8, 7);
+          arch.cubicTo(8, 1, 16, 1, 16, 7); arch.lineTo(16, 10); painter.drawPath(arch); }
+        line(12, 14, 12, 17); break;
+    case Icon::DontCare:
+        { QPainterPath eye; eye.moveTo(2, 12); eye.cubicTo(7, 3, 17, 3, 22, 12);
+          eye.cubicTo(17, 21, 7, 21, 2, 12); painter.drawPath(eye); }
+        circle(12, 12, 3); line(3, 3, 21, 21); break;
+    case Icon::Unknown:
+        circle(12, 12, 9); line(8, 8, 16, 16); line(16, 8, 8, 16); break;
+    case Icon::HighImpedance:
+        outline({{7, 6}, {17, 6}, {7, 18}, {17, 18}});
+        line(2, 12, 5, 12); line(19, 12, 22, 12); break;
+    case Icon::WavePattern:
+        outline({{2, 15}, {5, 15}, {5, 5}, {10, 5}, {10, 15}, {15, 15}, {15, 5}, {21, 5}});
+        line(3, 21, 17, 21); outline({{14, 18}, {17, 21}, {14, 24}}); break;
     case Icon::Count: break;
     }
 }
@@ -186,6 +203,20 @@ QIcon icon(Icon name, QWidget* owner)
 {
     return name >= Icon::NewFile && name < Icon::Count
         ? QIcon(new IconEngine(name, owner)) : QIcon{};
+}
+
+void paintIcon(QPainter& painter, Icon name, const QRect& rect, const QColor& color)
+{
+    if (rect.isEmpty()) return;
+    const auto side=qreal(std::min(rect.width(),rect.height()));
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.translate(rect.x()+(rect.width()-side)/2,rect.y()+(rect.height()-side)/2);
+    painter.scale(side/24,side/24);
+    painter.setPen(QPen(color,1.75,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    drawIcon(painter,name);
+    painter.restore();
 }
 
 } // namespace wave::ui

@@ -15,12 +15,14 @@ class QAbstractItemView;
 class QAbstractScrollArea;
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QLineEdit;
 class QLabel;
 class QMainWindow;
 class QMenu;
 class QMenuBar;
 class QProgressBar;
+class QPainter;
 class QSpinBox;
 class QStatusBar;
 class QTabWidget;
@@ -38,6 +40,9 @@ WAVEWIDGETS_API void applyTheme(WaveformColorScheme scheme);
 WAVEWIDGETS_API void initializeApplicationTheme();
 WAVEWIDGETS_API void addAppearanceMenu(QMainWindow* window);
 WAVEWIDGETS_API void prepareWindow(QMainWindow* window);
+WAVEWIDGETS_API void installTitleMenus(QMainWindow* window);
+[[nodiscard]] WAVEWIDGETS_API QFont signalNameFont(const QFont& base, bool group = false);
+[[nodiscard]] WAVEWIDGETS_API QFont captionFont(const QFont& base);
 WAVEWIDGETS_API void polishDialog(QWidget* dialog);
 
 enum class Icon {
@@ -45,9 +50,11 @@ enum class Icon {
     Play, Repeat, Stop, Refresh, Compare, Check, Source,
     ZoomIn, ZoomOut, Fit, Measure, Link, Add, Remove, Close, Copy, Paste,
     Success, Information, Warning,
-    Sync, Async, AddClock, AddBit, AddBus, Search, GoTo, Left, Right, Swap, Count
+    Sync, Async, AddClock, AddBit, AddBus, Search, GoTo, Left, Right, Swap,
+    Reserved, DontCare, Unknown, HighImpedance, WavePattern, Count
 };
 WAVEWIDGETS_API QIcon icon(Icon name, QWidget* owner = nullptr);
+WAVEWIDGETS_API void paintIcon(QPainter& painter, Icon name, const QRect& rect, const QColor& color);
 
 enum class Notice { Success, Information, Warning };
 // Low-frequency feedback only; callers retain full status/error details.
@@ -61,6 +68,7 @@ WAVEWIDGETS_API QToolButton* toolButton(QWidget* parent = nullptr);
 WAVEWIDGETS_API QLineEdit* lineEdit(QWidget* parent = nullptr);
 WAVEWIDGETS_API QLineEdit* lineEdit(const QString& text, QWidget* parent = nullptr);
 WAVEWIDGETS_API QComboBox* comboBox(QWidget* parent = nullptr);
+WAVEWIDGETS_API QDoubleSpinBox* doubleSpinBox(QWidget* parent = nullptr);
 WAVEWIDGETS_API QSpinBox* spinBox(QWidget* parent = nullptr);
 WAVEWIDGETS_API QCheckBox* checkBox(QWidget* parent = nullptr);
 WAVEWIDGETS_API QCheckBox* checkBox(const QString& text, QWidget* parent = nullptr);

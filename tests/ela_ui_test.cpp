@@ -24,6 +24,7 @@
 #include "ElaToolTip.h"
 
 #include <QApplication>
+#include <QFontDatabase>
 #include <QAbstractAnimation>
 #include <QCompleter>
 #include <QDir>
@@ -111,6 +112,8 @@ private slots:
         QCOMPARE(qApp->styleSheet(), sheet);
         QCOMPARE(qApp->testAttribute(Qt::AA_DontCreateNativeWidgetSiblings), siblings);
         // The offscreen Windows platform uses CMake's isolated test-fonts dir.
+        const auto fontPath=QDir(qEnvironmentVariable("QT_QPA_FONTDIR")).filePath("msyh.ttc");
+        if (QFileInfo::exists(fontPath)) QVERIFY(QFontDatabase::addApplicationFont(fontPath)>=0);
         qApp->setFont(QFont(QStringLiteral("Segoe UI"), 9));
         QTest::failOnWarning(QRegularExpression(QStringLiteral("QPainter::.*|QPaintDevice:.*|.*Recursive repaint.*")));
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -529,9 +532,10 @@ private slots:
             QVERIFY(containsColor(body->grab().toImage(), custom));
         }
         wave::MainWindow window(wave::makeDemonstrationProject());
-        QVERIFY(qobject_cast<ElaText*>(window.findChild<QLabel*>(QStringLiteral("PointerStatusLabel"))));
-        auto* save = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
-        QVERIFY(save); QVERIFY(!qobject_cast<ElaText*>(save));
+        QVERIFY(!window.findChild<QLabel*>(QStringLiteral("PointerStatusLabel")));
+        QVERIFY(!window.findChild<QLabel*>(QStringLiteral("SaveStateLabel")));
+        QVERIFY(!window.statusBar()->isVisible());
+        QVERIFY(!window.property("saveStateText").toString().isEmpty());
         auto* error = window.findChild<QLabel*>(QStringLiteral("QuickLaneErrorLabel"));
         if (error) QVERIFY(!qobject_cast<ElaText*>(error));
     }
@@ -671,7 +675,8 @@ private slots:
         QCOMPARE(canvas->cursorTick(), wave::Tick(25'000)); QVERIFY(time->hasFocus());
         QCOMPARE(time->property("waveState").toString(), QStringLiteral("error"));
         QTest::keyClick(time, Qt::Key_Escape); QVERIFY(time->isVisible());
-        QCOMPARE(time->text(), QStringLiteral("25 ns"));
+        QCOMPARE(time->text(), QStringLiteral("25"));
+        QCOMPARE(window.findChild<QComboBox*>(QStringLiteral("GoToTimeUnit"))->currentText(), QStringLiteral("ns"));
 
         canvas->selectEntireTimeline();
         const auto range = canvas->selectedTimeRange();
@@ -941,7 +946,7 @@ private slots:
                 auto* edit = dialog->findChild<QLineEdit*>(QStringLiteral("LanePropertiesColorEdit")); QVERIFY(edit);
                 auto* choose = dialog->findChild<QPushButton*>(QStringLiteral("LanePropertiesColorEditChooseButton"));
                 QVERIFY(qobject_cast<ElaPushButton*>(choose));
-                auto* form = qobject_cast<QFormLayout*>(dialog->layout()); QVERIFY(form);
+                auto* form = dialog->findChild<QFormLayout*>(); QVERIFY(form);
                 auto* caption = qobject_cast<ElaText*>(form->labelForField(edit->parentWidget())); QVERIFY(caption);
                 QCOMPARE(caption->buddy(), edit->parentWidget());
                 auto* error = dialog->findChild<QLabel*>(QStringLiteral("LanePropertiesError")); QVERIFY(error);

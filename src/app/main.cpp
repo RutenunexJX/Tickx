@@ -658,8 +658,7 @@ int main(int argc, char* argv[])
                 };
                 auto* durationEdit = window.findChild<QLineEdit*>(
                     QStringLiteral("TimelineDurationEdit"));
-                auto* saveState = window.findChild<QLabel*>(
-                    QStringLiteral("SaveStateLabel"));
+                auto* saveState = &window;
                 auto* canvas = window.findChild<wave::WaveCanvas*>();
                 auto* fileWatcher = window.findChild<QFileSystemWatcher*>(
                     QStringLiteral("ProjectFileWatcher"));
@@ -995,7 +994,7 @@ int main(int argc, char* argv[])
                     QCoreApplication::processEvents();
                     return !window.project().scenarios.empty()
                         && window.project().scenarios.front().duration == duration
-                        && saveState->text()
+                        && saveState->property("saveStateText").toString()
                             == QStringLiteral("Unsaved changes");
                 };
 
@@ -1031,7 +1030,7 @@ int main(int argc, char* argv[])
                         == "File conflict B"
                     || window.project().scenarios.front().duration
                         != localDuration
-                    || saveState->text()
+                    || saveState->property("saveStateText").toString()
                         != QStringLiteral("Unsaved changes")) {
                     fail(QStringLiteral(
                         "Unsaved GUI changes were overwritten instead of receiving a non-modal conflict"));
@@ -1042,7 +1041,7 @@ int main(int argc, char* argv[])
                 if (conflictBar->isVisibleTo(&window)
                     || window.project().scenarios.front().duration
                         != localDuration
-                    || saveState->text()
+                    || saveState->property("saveStateText").toString()
                         != QStringLiteral("Unsaved changes")) {
                     fail(QStringLiteral(
                         "Keep did not retain the dirty GUI version"));
@@ -1132,7 +1131,7 @@ int main(int argc, char* argv[])
                     || window.project().name != "File conflict B"
                     || window.project().scenarios.front().duration
                         != externalDuration
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || window.windowTitle().contains(QStringLiteral(" *"))
                     || QFileInfo::exists(snapshotPath)
                     || wave::preferredProjectLoadPath(fileConflictSmokePath)
@@ -1193,7 +1192,7 @@ int main(int argc, char* argv[])
                     || QFileInfo::exists(fileConflictSmokePath)
                     || window.project().scenarios.front().duration
                         != missingLocalDuration
-                    || saveState->text()
+                    || saveState->property("saveStateText").toString()
                         != QStringLiteral("Unsaved changes")
                     || !window.windowTitle().contains(QStringLiteral(" *"))) {
                     fail(QStringLiteral(
@@ -1214,7 +1213,7 @@ int main(int argc, char* argv[])
         QTimer::singleShot(2'500, &application, [&application, &window, autosaveSmokePath] {
             const auto snapshotPath = autosaveSmokePath + QStringLiteral(".autosave");
             const auto loaded = wave::loadProjectFile(snapshotPath);
-            auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+            auto* saveState = &window;
             const auto fail = [&application, &window](const QString& message) {
                 qCritical().noquote() << message;
                 window.hide();
@@ -1232,7 +1231,7 @@ int main(int argc, char* argv[])
             const auto saved = wave::loadProjectFile(autosaveSmokePath);
             if (QFileInfo::exists(snapshotPath)
                 || !saved.ok()
-                || saveState->text() != QStringLiteral("Saved")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                 fail(QStringLiteral("Formal save did not remove the completed recovery snapshot"));
                 return;
             }
@@ -1255,7 +1254,7 @@ int main(int argc, char* argv[])
                     const auto savedAfterRace = wave::loadProjectFile(autosaveSmokePath);
                     if (QFileInfo::exists(snapshotPath)
                         || !savedAfterRace.ok()
-                        || saveState->text() != QStringLiteral("Saved")
+                        || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                         || !window.statusBar()->currentMessage().contains(
                             QStringLiteral("Saved"))) {
                         fail(QStringLiteral(
@@ -1296,7 +1295,7 @@ int main(int argc, char* argv[])
                         || crashResumeSpan <= 0
                         || crashResumeSpan
                             >= window.project().scenarios.front().duration
-                        || saveState->text() != QStringLiteral("Saved")) {
+                        || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                         fail(QStringLiteral(
                             "The latest safe waveform location did not settle without changing the saved project"));
                         return;
@@ -1418,7 +1417,7 @@ int main(int argc, char* argv[])
                     if (quickSetupPanel->isVisible()
                         || window.project().scenarios.front().lanes.size()
                             != laneCountBeforePendingQuickAdd
-                        || saveState->text() != QStringLiteral("Saved")) {
+                        || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                         fail(QStringLiteral(
                             "The isolated quick signal draft could not be canceled cleanly"));
                         return;
@@ -1472,8 +1471,7 @@ int main(int argc, char* argv[])
                         selectedPath);
                     recoveredWindow.show();
                     QCoreApplication::processEvents();
-                    auto* recoveredState = recoveredWindow.findChild<QLabel*>(
-                        QStringLiteral("SaveStateLabel"));
+                    auto* recoveredState = &recoveredWindow;
                     auto* recoveredCanvas =
                         recoveredWindow.findChild<wave::WaveCanvas*>();
                     auto* recoveredUndo =
@@ -1482,9 +1480,9 @@ int main(int argc, char* argv[])
                     if (!recoveredState
                         || !recoveredCanvas
                         || !recoveredUndo
-                        || recoveredState->text()
+                        || recoveredState->property("saveStateText").toString()
                             != QStringLiteral("Recovery loaded · Save required")
-                        || recoveredState->toolTip() != autosaveSmokePath
+                        || recoveredState->property("saveStateDetail").toString() != autosaveSmokePath
                         || recoveredWindow.project().scenarios.front().duration
                             != recoveredDuration
                         || recoveredCanvas->selectedLaneId()
@@ -1620,15 +1618,14 @@ int main(int argc, char* argv[])
                     QEventLoop settleLoop;
                     QTimer::singleShot(100, &settleLoop, &QEventLoop::quit);
                     settleLoop.exec();
-                    auto* discardedState = recoveredWindow.findChild<QLabel*>(
-                        QStringLiteral("SaveStateLabel"));
+                    auto* discardedState = &recoveredWindow;
                     if (!discardHandled
                         || QApplication::activeModalWidget()
                         || QFileInfo::exists(snapshotPath)
                         || wave::preferredProjectLoadPath(autosaveSmokePath)
                             != autosaveSmokePath
                         || !discardedState
-                        || discardedState->text() != QStringLiteral("Not saved")
+                        || discardedState->property("saveStateText").toString() != QStringLiteral("Not saved")
                         || recoveredWindow.project().name != "Untitled"
                         || recoveredWindow.project().scenarios.size() != 1
                         || !recoveredWindow.project().scenarios.front().lanes.empty()
@@ -1681,8 +1678,7 @@ int main(int argc, char* argv[])
                     QStringLiteral("MoveScenarioLaterAction"));
                 auto* durationEdit = window.findChild<QLineEdit*>(
                     QStringLiteral("TimelineDurationEdit"));
-                auto* saveState = window.findChild<QLabel*>(
-                    QStringLiteral("SaveStateLabel"));
+                auto* saveState = &window;
                 if (!selector || !selectorAction || !selectorLabel || !canvas
                     || !undoAction || !redoAction
                     || !previousWaveformAction || !nextWaveformAction
@@ -2712,7 +2708,7 @@ int main(int argc, char* argv[])
             auto* canvas = window.findChild<wave::WaveCanvas*>();
             auto* durationEdit = window.findChild<QLineEdit*>(
                 QStringLiteral("TimelineDurationEdit"));
-            auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+            auto* saveState = &window;
             auto* addClock = window.findChild<QToolButton*>(
                 QStringLiteral("CanvasAddClockButton"));
             if (!action || !canvas || !durationEdit || !saveState || !addClock
@@ -2732,7 +2728,7 @@ int main(int argc, char* argv[])
                     && project.scenarios.front().lanes.empty()
                     && canvas->tool() == wave::WaveCanvas::Tool::WaveEdit
                     && durationEdit->text() == QStringLiteral("200 ns")
-                    && saveState->text().startsWith(QStringLiteral("Not saved"))
+                    && saveState->property("saveStateText").toString().startsWith(QStringLiteral("Not saved"))
                     && addClock->isVisible()
                     && addClock->geometry().left() > 190;
             };
@@ -2788,7 +2784,7 @@ int main(int argc, char* argv[])
             QCoreApplication::sendEvent(durationEdit, &commitDuration);
             QCoreApplication::processEvents();
             if (window.project().scenarios.front().duration != 300'000
-                || saveState->text() != QStringLiteral("Not saved · changes")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Not saved · changes")) {
                 fail(QStringLiteral(
                     "An untitled waveform edit did not enter the unsaved state"));
                 return;
@@ -2824,15 +2820,14 @@ int main(int argc, char* argv[])
             wave::MainWindow recoveredWindow(*recoveryLoad.project, selectedPath);
             recoveredWindow.show();
             QCoreApplication::processEvents();
-            auto* recoveredState = recoveredWindow.findChild<QLabel*>(
-                QStringLiteral("SaveStateLabel"));
+            auto* recoveredState = &recoveredWindow;
             auto* recoveredDuration = recoveredWindow.findChild<QLineEdit*>(
                 QStringLiteral("TimelineDurationEdit"));
             if (!recoveredState
                 || !recoveredDuration
-                || recoveredState->text()
+                || recoveredState->property("saveStateText").toString()
                     != QStringLiteral("Recovery loaded · Save required")
-                || !recoveredState->toolTip().contains(
+                || !recoveredState->property("saveStateDetail").toString().contains(
                     QStringLiteral("not been saved"), Qt::CaseInsensitive)
                 || recoveredDuration->text() != QStringLiteral("300 ns")
                 || !recoveredWindow.windowTitle().contains(QStringLiteral(" *"))
@@ -2864,7 +2859,7 @@ int main(int argc, char* argv[])
             QCoreApplication::processEvents();
             if (!saveAsPresented
                 || !QFileInfo::exists(recoveryPath)
-                || recoveredState->text()
+                || recoveredState->property("saveStateText").toString()
                     != QStringLiteral("Recovery loaded · Save required")) {
                 fail(QStringLiteral(
                     "Recovered Untitled did not require a formal Save As destination"));
@@ -2893,14 +2888,13 @@ int main(int argc, char* argv[])
             QEventLoop settleLoop;
             QTimer::singleShot(100, &settleLoop, &QEventLoop::quit);
             settleLoop.exec();
-            auto* discardedState = recoveredWindow.findChild<QLabel*>(
-                QStringLiteral("SaveStateLabel"));
+            auto* discardedState = &recoveredWindow;
             if (!discardHandled
                 || QApplication::activeModalWidget()
                 || QFileInfo::exists(recoveryPath)
                 || !wave::preferredProjectLoadPath({}).isEmpty()
                 || !discardedState
-                || discardedState->text() != QStringLiteral("Not saved")
+                || discardedState->property("saveStateText").toString() != QStringLiteral("Not saved")
                 || recoveredWindow.project().name != "Untitled"
                 || recoveredWindow.project().scenarios.size() != 1
                 || recoveredWindow.project().scenarios.front().duration != 200'000
@@ -2966,12 +2960,11 @@ int main(int argc, char* argv[])
                     QStringLiteral("TimelineDurationEdit"));
                 auto* measureAction = window.findChild<QAction*>(
                     QStringLiteral("MeasureToolAction"));
-                auto* saveState = window.findChild<QLabel*>(
-                    QStringLiteral("SaveStateLabel"));
+                auto* saveState = &window;
                 if (!canvas || !addClock || !addBit || !addBus
                     || !durationEdit || !measureAction || !saveState
                     || !window.project().scenarios.front().lanes.empty()
-                    || !saveState->text().startsWith(QStringLiteral("Not saved"))) {
+                    || !saveState->property("saveStateText").toString().startsWith(QStringLiteral("Not saved"))) {
                     fail(QStringLiteral("User journey did not start from the understandable blank state"));
                     return;
                 }
@@ -3053,7 +3046,7 @@ int main(int argc, char* argv[])
                     || bitLane->clockDomainId != clockLane->clockDomainId
                     || busLane->clockDomainId != clockLane->clockDomainId
                     || busLane->width != 16
-                    || !saveState->text().contains(QStringLiteral("changes"), Qt::CaseInsensitive)) {
+                    || !saveState->property("saveStateText").toString().contains(QStringLiteral("changes"), Qt::CaseInsensitive)) {
                     fail(QStringLiteral("Inline signal details or unsaved feedback were not applied"));
                     return;
                 }
@@ -3212,7 +3205,7 @@ int main(int argc, char* argv[])
                     || QFileInfo::exists(userJourneySavePath)
                     || !palette->isVisible()
                     || !busValue->hasFocus()
-                    || saveState->text() == QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() == QStringLiteral("Saved")) {
                     fail(QStringLiteral("Invalid Bus draft did not block Save in place"));
                     return;
                 }
@@ -3283,7 +3276,7 @@ int main(int argc, char* argv[])
                     || QFileInfo::exists(userJourneySavePath)
                     || window.project().scenarios.front().duration != 200'000
                     || !durationEdit->hasFocus()
-                    || saveState->text() == QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() == QStringLiteral("Saved")) {
                     fail(QStringLiteral("Invalid End draft did not block Save in place"));
                     return;
                 }
@@ -3600,7 +3593,7 @@ int main(int argc, char* argv[])
                     || valueAt(*savedBus, 270'000) != "0xabcd"
                     || saved.project->scenarios.front().lanes.size() != 3
                     || saved.project->scenarios.front().duration != 650'000
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || window.project().name == "Untitled") {
                     fail(QStringLiteral("Save did not produce a valid file and unambiguous Saved state"));
                     return;
@@ -3657,7 +3650,7 @@ int main(int argc, char* argv[])
                     || !window.project().scenarios.front().lanes.empty()
                     || window.project().scenarios.front().duration != 200'000
                     || window.project().name != "Untitled"
-                    || !saveState->text().startsWith(QStringLiteral("Not saved"))) {
+                    || !saveState->property("saveStateText").toString().startsWith(QStringLiteral("Not saved"))) {
                     fail(QStringLiteral(
                         "New did not create a clean blank waveform before reopen"));
                     return;
@@ -3714,7 +3707,7 @@ int main(int argc, char* argv[])
                     || canvas->visibleTimeSpan() != savedResumeVisibleSpan
                     || canvas->selectedTimeRange()
                     || !canvas->selectedSegmentId().isEmpty()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !reopenStatus.startsWith(QStringLiteral("Opened "))
                     || !reopenStatus.contains(
                         QFileInfo(userJourneySavePath).fileName())
@@ -3742,7 +3735,7 @@ int main(int argc, char* argv[])
                 sendKey(durationEdit, Qt::Key_Return);
                 QCoreApplication::processEvents();
                 if (window.project().scenarios.front().duration != 660'000
-                    || saveState->text() != QStringLiteral("Unsaved changes")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")) {
                     fail(QStringLiteral(
                         "User journey could not create a dirty project before Open"));
                     return;
@@ -3782,7 +3775,7 @@ int main(int argc, char* argv[])
                     || !autosaveFinished
                     || autosaveWatcher->isRunning()
                     || window.project().scenarios.front().duration != 650'000
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || window.windowTitle().contains(QStringLiteral(" *"))
                     || QFileInfo::exists(
                         userJourneySavePath + QStringLiteral(".autosave"))
@@ -3794,7 +3787,7 @@ int main(int argc, char* argv[])
                         << "finished=" << autosaveFinished
                         << "running=" << (autosaveWatcher && autosaveWatcher->isRunning())
                         << "duration=" << window.project().scenarios.front().duration
-                        << "state=" << saveState->text()
+                        << "state=" << saveState->property("saveStateText").toString()
                         << "title=" << window.windowTitle()
                         << "snapshot=" << QFileInfo::exists(
                             userJourneySavePath + QStringLiteral(".autosave"))
@@ -3810,7 +3803,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (!savepointRedoAction
                     || window.project().scenarios.front().duration != 660'000
-                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")
                     || !window.windowTitle().contains(QStringLiteral(" *"))
                     || !window.statusBar()->currentMessage().startsWith(
                         QStringLiteral("Redid "))) {
@@ -3830,7 +3823,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (QApplication::activeModalWidget()
                     || window.project().scenarios.front().duration != 660'000
-                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")
                     || !window.statusBar()->currentMessage().startsWith(
                         QStringLiteral("Already open:"))) {
                     fail(QStringLiteral(
@@ -3866,7 +3859,7 @@ int main(int argc, char* argv[])
                     || prematureUnsavedPrompt
                     || QApplication::activeModalWidget()
                     || window.project().scenarios.front().duration != 660'000
-                    || saveState->text() != QStringLiteral("Unsaved changes")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")) {
                     fail(QStringLiteral(
                         "Cancelling Open did not bypass discard confirmation safely"));
                     return;
@@ -3933,7 +3926,7 @@ int main(int argc, char* argv[])
                     || QApplication::activeModalWidget()
                     || window.project().scenarios.front().duration != 650'000
                     || window.project().scenarios.front().lanes.size() != 3
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !dirtyReopenStatus.startsWith(QStringLiteral("Opened "))) {
                     fail(QStringLiteral(
                         "Dirty Open did not confirm discard after file selection"));
@@ -4143,7 +4136,7 @@ int main(int argc, char* argv[])
                 if (!recentAction
                     || !window.project().scenarios.front().lanes.empty()
                     || window.project().scenarios.front().duration != 200'000
-                    || saveState->text() != QStringLiteral("Not saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Not saved")) {
                     fail(QStringLiteral(
                         "A clean New did not retain the recent-project shortcut"));
                     return;
@@ -4155,7 +4148,7 @@ int main(int argc, char* argv[])
                 if (QApplication::activeModalWidget()
                     || window.project().scenarios.front().duration != 650'000
                     || window.project().scenarios.front().lanes.size() != 3
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !recentOpenStatus.startsWith(QStringLiteral("Opened "))
                     || !recentOpenStatus.contains(
                         QFileInfo(userJourneySavePath).fileName())) {
@@ -4207,7 +4200,7 @@ int main(int argc, char* argv[])
                     || window.project().name != "Dropped waveform"
                     || window.project().scenarios.front().duration != 700'000
                     || window.project().scenarios.front().lanes.size() != 3
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !droppedOpenStatus.startsWith(QStringLiteral("Opened "))
                     || !droppedOpenStatus.contains(
                         QFileInfo(userJourneyDropPath).fileName())
@@ -4225,7 +4218,7 @@ int main(int argc, char* argv[])
                         << window.project().name.c_str()
                         << window.project().scenarios.front().duration
                         << window.project().scenarios.front().lanes.size()
-                        << saveState->text()
+                        << saveState->property("saveStateText").toString()
                         << droppedOpenStatus
                         << (droppedRecentAction
                                 ? droppedRecentAction->data().toString()
@@ -4367,8 +4360,7 @@ int main(int argc, char* argv[])
                     QStringLiteral("SelectFullRangeAction"));
                 auto* durationEdit = window.findChild<QLineEdit*>(
                     QStringLiteral("TimelineDurationEdit"));
-                auto* saveState = window.findChild<QLabel*>(
-                    QStringLiteral("SaveStateLabel"));
+                auto* saveState = &window;
                 auto* goToTimeAction = window.findChild<QAction*>(
                     QStringLiteral("GoToTimeAction"));
                 auto* goToTimeToolbarAction = window.findChild<QAction*>(
@@ -4427,7 +4419,7 @@ int main(int argc, char* argv[])
                     || scenario.lanes.at(2).segments.size() != 1
                     || scenario.lanes.back().id != "lane-wave-edit-clock"
                     || window.project().clockDomains.size() != 1
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || undoAction->isEnabled()
                     || selectFullRangeAction->shortcut()
                         != QKeySequence::SelectAll
@@ -4627,7 +4619,7 @@ int main(int argc, char* argv[])
                     || cancelPreview->first <= originalRange.first
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Auto-scroll right"))) {
                     fail(QStringLiteral(
@@ -4641,7 +4633,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedTimeRange()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || canvas->viewport()->cursor().shape()
                         != Qt::PointingHandCursor
                     || !window.statusBar()->currentMessage().contains(
@@ -4676,7 +4668,7 @@ int main(int argc, char* argv[])
                     || movedSegment->end != committedPreview->second
                     || canvas->horizontalScrollBar()->value() <= 0
                     || !undoAction->isEnabled()
-                    || saveState->text()
+                    || saveState->property("saveStateText").toString()
                         != QStringLiteral("Unsaved changes")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("data[7:0] segment moved"))
@@ -4698,7 +4690,7 @@ int main(int argc, char* argv[])
                 undoAction->trigger();
                 QCoreApplication::processEvents();
                 if (scenario != originalScenario
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || window.windowTitle().contains(QStringLiteral(" *"))) {
                     fail(QStringLiteral(
                         "Undo did not restore the exact pre-drag Segment and Saved state"));
@@ -4750,7 +4742,7 @@ int main(int argc, char* argv[])
                     || committedRange->second < rangeStartTick
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || fitAction->text() != QStringLiteral("Fit selection")
                     || !fitAction->toolTip().contains(
                         QStringLiteral("selected time range"))
@@ -4804,7 +4796,7 @@ int main(int argc, char* argv[])
                     || fittedEndX > canvas->viewport()->width() + 2
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || fitAction->text() != QStringLiteral("Fit selection")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Fitted selected range"))) {
@@ -4842,7 +4834,7 @@ int main(int argc, char* argv[])
                         != rangeVerticalScroll
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || fitAction->text() != QStringLiteral("Fit selection")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral(
@@ -4857,7 +4849,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedTimeRange()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || fitAction->text() != QStringLiteral("Fit scenario")
                     || !fitAction->toolTip().contains(
                         QStringLiteral("complete scenario"))) {
@@ -4875,7 +4867,7 @@ int main(int argc, char* argv[])
                     || canvas->horizontalScrollBar()->maximum() != 0
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Fitted complete scenario"))) {
                     fail(QStringLiteral(
@@ -4897,7 +4889,7 @@ int main(int argc, char* argv[])
                         != navigationMaximum
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Timeline end"))
                     || !window.statusBar()->currentMessage().contains(
@@ -4918,7 +4910,7 @@ int main(int argc, char* argv[])
                     || durationEdit->isModified()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Timeline Home intercepted the End text field instead of moving its caret"));
                     return;
@@ -4933,7 +4925,7 @@ int main(int argc, char* argv[])
                         != navigationMaximum
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Timeline start"))
                     || !window.statusBar()->currentMessage().contains(
@@ -4997,8 +4989,8 @@ int main(int argc, char* argv[])
                 if (!goToTimeToolbarAction->isVisible()
                     || !goToTimeBar->isVisibleTo(&window)
                     || !goToTimeEdit->hasFocus()
-                    || goToTimeEdit->text() != QStringLiteral("0 ps")
-                    || goToTimeEdit->selectedText() != QStringLiteral("0 ps")
+                    || goToTimeEdit->text() != QStringLiteral("0")
+                    || goToTimeEdit->selectedText() != QStringLiteral("0")
                     || goToTimeRange->text() != QStringLiteral("0 ps–1 us")
                     || !signalFindToolbarAction->isVisible()
                     || canvas->cursorTick() != 0
@@ -5008,7 +5000,7 @@ int main(int argc, char* argv[])
                     || canvas->horizontalScrollBar()->value() != 0
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || QApplication::activeModalWidget()) {
                     fail(QStringLiteral(
                         "Ctrl+G did not open a focused non-modal exact-time bar at the current cursor"));
@@ -5031,7 +5023,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Use a number"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Invalid time input moved the cursor or failed to preserve an inline correction"));
                     return;
@@ -5048,7 +5040,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("from 0 ps to 1 us"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Out-of-range time did not stay in place with the valid timeline bounds"));
                     return;
@@ -5064,7 +5056,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Tick values must be integers"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Fractional tick input was not rejected without moving the cursor"));
                     return;
@@ -5080,7 +5072,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("cannot be represented exactly"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Sub-timebase decimal input was not rejected without rounding"));
                     return;
@@ -5090,8 +5082,8 @@ int main(int argc, char* argv[])
                 goToTimeGo->click();
                 QCoreApplication::processEvents();
                 if (canvas->cursorTick() != 2'500
-                    || goToTimeEdit->text() != QStringLiteral("2.5 ns")
-                    || goToTimeEdit->selectedText() != QStringLiteral("2.5 ns")
+                    || goToTimeEdit->text() != QStringLiteral("2.5")
+                    || goToTimeEdit->selectedText() != QStringLiteral("2.5")
                     || !goToTimeEdit->property("waveState").toString().isEmpty()
                     || canvas->selectedLaneId()
                         != QStringLiteral("lane-wave-edit-scroll")
@@ -5099,7 +5091,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Edit cursor moved to 2.5 ns"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Exact decimal nanoseconds did not move the cursor without floating-point loss"));
                     return;
@@ -5131,8 +5123,8 @@ int main(int argc, char* argv[])
                     canvas->horizontalScrollBar()->value();
                 if (!goToTimeToolbarAction->isVisible()
                     || !goToTimeEdit->hasFocus()
-                    || goToTimeEdit->text() != QStringLiteral("375 ns")
-                    || goToTimeEdit->selectedText() != QStringLiteral("375 ns")
+                    || goToTimeEdit->text() != QStringLiteral("375")
+                    || goToTimeEdit->selectedText() != QStringLiteral("375")
                     || !goToTimeEdit->property("waveState").toString().isEmpty()
                     || goToTimeRange->text() != QStringLiteral("0 ps–1 us")
                     || canvas->cursorTick() != 375'000
@@ -5148,7 +5140,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Enter jumps again"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || QApplication::activeModalWidget()) {
                     fail(QStringLiteral(
                         "Exact absolute time did not move and reveal the edit cursor without changing its signal"));
@@ -5186,7 +5178,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("edit cursor remains at 375 ns"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Escape did not close time navigation while retaining its result"));
                     return;
@@ -5196,8 +5188,8 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (!goToTimeToolbarAction->isVisible()
                     || !goToTimeEdit->hasFocus()
-                    || goToTimeEdit->text() != QStringLiteral("375 ns")
-                    || goToTimeEdit->selectedText() != QStringLiteral("375 ns")) {
+                    || goToTimeEdit->text() != QStringLiteral("375")
+                    || goToTimeEdit->selectedText() != QStringLiteral("375")) {
                     fail(QStringLiteral(
                         "Ctrl+G did not reopen at the current edit cursor"));
                     return;
@@ -5206,15 +5198,15 @@ int main(int argc, char* argv[])
                 sendKey(goToTimeEdit, Qt::Key_Return);
                 QCoreApplication::processEvents();
                 if (canvas->cursorTick() != 250'000
-                    || goToTimeEdit->text() != QStringLiteral("250 ns")
-                    || goToTimeEdit->selectedText() != QStringLiteral("250 ns")
+                    || goToTimeEdit->text() != QStringLiteral("250")
+                    || goToTimeEdit->selectedText() != QStringLiteral("250")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("cycle 25 on navigation clock"))
                     || canvas->selectedLaneId()
                         != QStringLiteral("lane-wave-edit-scroll")
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Cycle-based time did not use the unambiguous project clock"));
                     return;
@@ -5250,8 +5242,8 @@ int main(int argc, char* argv[])
                     || !goToTimeBar->isVisibleTo(&window)
                     || !goToTimeEdit->hasFocus()
                     || goToTimeLabel->text() != QStringLiteral("Range edge ▾")
-                    || goToTimeEdit->text() != QStringLiteral("10 ns")
-                    || goToTimeEdit->selectedText() != QStringLiteral("10 ns")
+                    || goToTimeEdit->text() != QStringLiteral("10")
+                    || goToTimeEdit->selectedText() != QStringLiteral("10")
                     || goToTimeEdit->accessibleName()
                         != QStringLiteral("Exact selected range edge")
                     || !goToTimeRange->text().contains(
@@ -5268,7 +5260,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("anchor 0 ps"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Ctrl+G did not open the exact active range-edge editor in place"));
                     return;
@@ -5284,12 +5276,12 @@ int main(int argc, char* argv[])
                     || canvas->selectedTimeRange() != exactRange37
                     || canvas->selectedLaneIds() != exactRangeLanes
                     || canvas->cursorTick() != 37'500
-                    || goToTimeEdit->text() != QStringLiteral("37.5 ns")
+                    || goToTimeEdit->text() != QStringLiteral("37.5")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Range edge set to 37.5 ns"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Exact range-edge entry did not update only the active selection edge"));
                     return;
@@ -5307,7 +5299,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Cannot set range edge"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Invalid exact range time did not stay inline with range-specific guidance"));
                     return;
@@ -5325,7 +5317,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("range must remain non-empty"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Anchor-equal range edge did not stay inline without changing the selection"));
                     return;
@@ -5340,13 +5332,13 @@ int main(int argc, char* argv[])
                 if (canvas->selectedTimeRange() != exactRange50
                     || canvas->selectedLaneIds() != exactRangeLanes
                     || canvas->cursorTick() != 50'000
-                    || goToTimeEdit->text() != QStringLiteral("50 ns")
+                    || goToTimeEdit->text() != QStringLiteral("50")
                     || !goToTimeEdit->property("waveState").toString().isEmpty()
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("cycle 5 on navigation clock"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Cycle input did not set the active range edge using the navigation clock"));
                     return;
@@ -5357,12 +5349,12 @@ int main(int argc, char* argv[])
                 if (canvas->selectedTimeRange() != exactRange50
                     || canvas->selectedLaneIds() != exactRangeLanes
                     || canvas->cursorTick() != 0
-                    || goToTimeEdit->text() != QStringLiteral("0 ps")
+                    || goToTimeEdit->text() != QStringLiteral("0")
                     || !goToTimeRange->text().contains(
                         QStringLiteral("Anchor 50 ns"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Other edge did not switch the exact editor while preserving the range"));
                     return;
@@ -5381,7 +5373,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("selection 50 ns"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Exact range edge could not cross its fixed anchor"));
                     return;
@@ -5425,9 +5417,9 @@ int main(int argc, char* argv[])
                         != Qt::PointingHandCursor
                     || !goToTimeLabel->toolTip().contains(
                         QStringLiteral("exact active edge"))
-                    || goToTimeEdit->text() != QStringLiteral("20 ns")
+                    || goToTimeEdit->text() != QStringLiteral("20")
                     || goToTimeEdit->selectedText()
-                        != QStringLiteral("20 ns")
+                        != QStringLiteral("20")
                     || goToTimeEdit->placeholderText()
                         != QStringLiteral("25 ns or cycle 3")
                     || goToTimeEdit->accessibleName()
@@ -5443,7 +5435,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Editing exact range width"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Range mode label did not expose exact width editing in place"));
                     return;
@@ -5458,7 +5450,7 @@ int main(int argc, char* argv[])
                 if (canvas->selectedTimeRange() != decimalWidthRange
                     || canvas->selectedLaneIds() != exactRangeLanes
                     || canvas->cursorTick() != 75'500
-                    || goToTimeEdit->text() != QStringLiteral("25.5 ns")
+                    || goToTimeEdit->text() != QStringLiteral("25.5")
                     || !goToTimeEdit->property("waveState").toString().isEmpty()
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Range width set to 25.5 ns"))
@@ -5466,7 +5458,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("active edge 75.5 ns"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Decimal range width did not move only the active edge from its anchor"));
                     return;
@@ -5481,12 +5473,12 @@ int main(int argc, char* argv[])
                 if (canvas->selectedTimeRange() != cycleWidthRange
                     || canvas->selectedLaneIds() != exactRangeLanes
                     || canvas->cursorTick() != 80'000
-                    || goToTimeEdit->text() != QStringLiteral("30 ns")
+                    || goToTimeEdit->text() != QStringLiteral("30")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("3 cycle(s) on navigation clock"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Cycle-count range width did not use the selected signal clock"));
                     return;
@@ -5556,7 +5548,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedTimeRange() != cycleWidthRange
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Exact range-width controls were clipped or displaced at 960 px"));
                     return;
@@ -5581,6 +5573,9 @@ int main(int argc, char* argv[])
                     }
                 }
                 window.resize(fullWidthWindowSize);
+                QEventLoop resizeFitWait;
+                QTimer::singleShot(150,&resizeFitWait,&QEventLoop::quit);
+                resizeFitWait.exec();
                 QCoreApplication::processEvents();
                 QCoreApplication::processEvents();
 
@@ -5589,14 +5584,14 @@ int main(int argc, char* argv[])
                 if (canvas->selectedTimeRange() != cycleWidthRange
                     || canvas->selectedLaneIds() != exactRangeLanes
                     || canvas->cursorTick() != 50'000
-                    || goToTimeEdit->text() != QStringLiteral("30 ns")
+                    || goToTimeEdit->text() != QStringLiteral("30")
                     || !goToTimeRange->text().contains(
                         QStringLiteral("Anchor 80 ns · to 0"))
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("direction reversed"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Other edge did not reverse exact width direction while preserving the range"));
                     return;
@@ -5615,7 +5610,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("active edge 67.5 ns"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Integer-tick range width did not extend from the fixed right anchor"));
                     return;
@@ -5632,7 +5627,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("width must be greater than zero"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Zero range width did not stay inline without changing selection"));
                     return;
@@ -5651,7 +5646,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("80 ns"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Out-of-bounds range width did not report the directional limit inline"));
                     return;
@@ -5660,7 +5655,7 @@ int main(int argc, char* argv[])
                 clickGoToModeLabel();
                 if (goToTimeLabel->text()
                         != QStringLiteral("Range edge ▾")
-                    || goToTimeEdit->text() != QStringLiteral("67.5 ns")
+                    || goToTimeEdit->text() != QStringLiteral("67.5")
                     || goToTimeEdit->accessibleName()
                         != QStringLiteral("Exact selected range edge")
                     || !window.statusBar()->currentMessage().contains(
@@ -5668,7 +5663,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedTimeRange() != reverseWidthRange
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Range mode label did not return from width to exact edge entry"));
                     return;
@@ -5684,7 +5679,7 @@ int main(int argc, char* argv[])
                     || canvas->cursorTick() != 70'000
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Returning to edge mode did not preserve exact range semantics"));
                     return;
@@ -5704,7 +5699,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("selection remains 50 ns"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Closing exact range edit did not restore the range toolbar and selection"));
                     return;
@@ -5724,7 +5719,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (!goToTimeToolbarAction->isVisible()
                     || !goToTimeEdit->hasFocus()
-                    || goToTimeEdit->text() != QStringLiteral("70 ns")
+                    || goToTimeEdit->text() != QStringLiteral("70")
                     || rangeEditToolbarAction->isVisible()
                     || rangeEditContextLabel->cursor().shape()
                         != Qt::PointingHandCursor
@@ -5733,7 +5728,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedTimeRange() != crossedExactRange
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Clickable range summary did not reopen exact edge editing"));
                     return;
@@ -5747,7 +5742,7 @@ int main(int argc, char* argv[])
                         != QStringLiteral("lane-wave-edit-scroll")
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Retargeting the canvas did not close stale exact range editing"));
                     return;
@@ -5761,7 +5756,7 @@ int main(int argc, char* argv[])
                     || !goToTimeToolbarAction->isVisible()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Exact range navigation did not restore normal edge navigation"));
                     return;
@@ -5774,7 +5769,7 @@ int main(int argc, char* argv[])
                     || canvas->horizontalScrollBar()->value() != 0
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Next edge on data[7:0]"))
                     || !window.statusBar()->currentMessage().contains(
@@ -5789,7 +5784,7 @@ int main(int argc, char* argv[])
                         != QStringLiteral("lane-wave-edit-scroll")
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Next edge on data[7:0]"))
                     || !window.statusBar()->currentMessage().contains(
@@ -5818,7 +5813,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Home jumps to 0"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Bus edge navigation did not report its earlier boundary"));
                     return;
@@ -5829,7 +5824,7 @@ int main(int argc, char* argv[])
                 auto* busPalette = window.findChild<QWidget*>(QStringLiteral("BusPresetPalette"));
                 auto* busValueEdit = window.findChild<QLineEdit*>(QStringLiteral("BusPresetValueEdit"));
                 const std::array<QToolButton*, 4> busPresetButtons{
-                    window.findChild<QToolButton*>(QStringLiteral("BusPresetZeroButton")),
+                    window.findChild<QToolButton*>(QStringLiteral("BusPresetReservedButton")),
                     window.findChild<QToolButton*>(QStringLiteral("BusPresetXButton")),
                     window.findChild<QToolButton*>(QStringLiteral("BusPresetZButton")),
                     window.findChild<QToolButton*>(QStringLiteral("BusPresetDontCareButton")),
@@ -5849,7 +5844,7 @@ int main(int argc, char* argv[])
                     || busValueEdit->text() != QStringLiteral("0x35")
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !busEditEntryStatus.contains(
                         QStringLiteral("Edit data[7:0] at 50 ns"))
                     || !busEditEntryStatus.contains(
@@ -5867,7 +5862,7 @@ int main(int argc, char* argv[])
                         << "cursor" << canvas->cursorTick()
                         << "scenarioChanged" << (scenario != originalScenario)
                         << "undo" << undoAction->isEnabled()
-                        << "save" << saveState->text()
+                        << "save" << saveState->property("saveStateText").toString()
                         << "status" << busEditEntryStatus;
                     fail(QStringLiteral(
                         "Enter did not open the selected Bus value as a reversible inline draft"));
@@ -5897,7 +5892,7 @@ int main(int argc, char* argv[])
                 if (busPalette->isVisible()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Escape did not discard the keyboard Bus value draft without changes"));
                     return;
@@ -5936,7 +5931,7 @@ int main(int argc, char* argv[])
                     || keyboardSelection->second <= 50'000
                     || scenario == originalScenario
                     || !undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")
                     || !window.windowTitle().contains(QStringLiteral(" *"))
                     || !busEditCommitStatus.contains(QStringLiteral("data[7:0]"))
                     || !busEditCommitStatus.contains(QStringLiteral("0x5a"))
@@ -5949,7 +5944,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || window.windowTitle().contains(QStringLiteral(" *"))) {
                     fail(QStringLiteral(
                         "Undo did not restore the exact pre-keyboard-edit Bus and Saved state"));
@@ -6012,7 +6007,7 @@ int main(int argc, char* argv[])
                     || QApplication::activeModalWidget()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !enumEditEntryStatus.contains(
                         QStringLiteral("Edit state at 50 ns"))
                     || !enumEditEntryStatus.contains(
@@ -6080,7 +6075,7 @@ int main(int argc, char* argv[])
                     || !canvas->busEditPreviewChangesModel()
                     || scenario != enumCycleBaseline
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !enumCycleForwardStatus.contains(
                         QStringLiteral("Enum symbol 1 of 3: DONE"))) {
                     fail(QStringLiteral(
@@ -6106,7 +6101,7 @@ int main(int argc, char* argv[])
                     || canvas->busEditPreviewChangesModel()
                     || scenario != enumCycleBaseline
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !enumCycleBackwardStatus.contains(
                         QStringLiteral("Enum symbol 3 of 3: WAIT_ACK"))
                     || !enumCycleBackwardStatus.contains(
@@ -6156,7 +6151,7 @@ int main(int argc, char* argv[])
                     || busValueEdit->text() != QStringLiteral("MISSING")
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !invalidEnumStatus.contains(
                         QStringLiteral("symbols: DONE, IDLE, WAIT_ACK"))) {
                     fail(QStringLiteral(
@@ -6168,7 +6163,7 @@ int main(int argc, char* argv[])
                 if (busPalette->isVisible()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Escape did not discard the invalid Enum draft without changes"));
                     return;
@@ -6198,7 +6193,7 @@ int main(int argc, char* argv[])
                     || !enumEditedValue
                     || scenario == originalScenario
                     || !undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")
                     || !enumCommitStatus.contains(QStringLiteral("state"))
                     || !enumCommitStatus.contains(QStringLiteral("DONE"))
                     || !enumCommitStatus.contains(QStringLiteral("Ctrl+Z"))) {
@@ -6210,7 +6205,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || window.windowTitle().contains(QStringLiteral(" *"))) {
                     fail(QStringLiteral(
                         "Undo did not restore the exact pre-Enum-edit Scenario and Saved state"));
@@ -6309,7 +6304,7 @@ int main(int argc, char* argv[])
                     || QApplication::activeModalWidget()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !enumRangeStatus.contains(
                         QStringLiteral("2 Enum signals"))
                     || !enumRangeStatus.contains(
@@ -6372,10 +6367,8 @@ int main(int argc, char* argv[])
                     || !goToTimeEdit->hasFocus()
                     || !selectedEnumAnchor
                     || !selectedEnumActive
-                    || goToTimeEdit->text()
-                        != QString::fromStdString(wave::formatTick(
-                            *selectedEnumActive,
-                            window.project().timeBase))
+                    || wave::toTicks(goToTimeEdit->text().toStdString(),wave::TimeUnit::Nanosecond,
+                            window.project().timeBase) != selectedEnumActive
                     || !goToTimeRange->text().contains(
                         QStringLiteral("Anchor %1").arg(
                             QString::fromStdString(wave::formatTick(
@@ -6386,7 +6379,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedLaneIds() != selectedEnumLanes
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Exact range-edge editor did not preserve a multi-Enum target"));
                     return;
@@ -6406,7 +6399,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("2 signal(s) kept"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Exact range-edge entry lost part of a multi-signal selection"));
                     return;
@@ -6422,7 +6415,7 @@ int main(int argc, char* argv[])
                     || canvas->cursorTick() != *selectedEnumActive
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Exact range-edge entry could not restore a multi-signal range"));
                     return;
@@ -6435,7 +6428,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedLaneIds() != selectedEnumLanes
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Closing multi-signal exact range editing did not restore its toolbar"));
                     return;
@@ -6455,7 +6448,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedTimeRange() != selectedEnumRange
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !invalidEnumRangeStatus.contains(
                         QStringLiteral("shared symbols: DONE, IDLE"))) {
                     fail(QStringLiteral(
@@ -6475,7 +6468,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("shared symbols: DONE, IDLE"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Exact range-edge entry bypassed an unfinished invalid value draft"));
                     return;
@@ -6519,7 +6512,7 @@ int main(int argc, char* argv[])
                     || !enumRangePalette->isVisibleTo(&window)
                     || scenario == originalScenario
                     || !undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")
                     || !enumRangeCommitStatus.contains(
                         QStringLiteral("2 signals"))
                     || !enumRangeCommitStatus.contains(QStringLiteral("DONE"))
@@ -6534,7 +6527,7 @@ int main(int argc, char* argv[])
                     || !canvas->hasExplicitRangeSelection()
                     || canvas->selectedTimeRange() != selectedEnumRange
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || window.windowTitle().contains(QStringLiteral(" *"))) {
                     fail(QStringLiteral(
                         "Enum range Undo did not restore the exact Scenario and selection"));
@@ -7096,7 +7089,7 @@ int main(int argc, char* argv[])
                             ->rangeSequenceCaretTargetCount()
                         != 2
                     || scenario != originalScenario
-                    || saveState->text()
+                    || saveState->property("saveStateText").toString()
                         != QStringLiteral("Saved")) {
                     qCritical().noquote()
                         << "Typing over a shared Enum token lost the clicked Lane/time anchor"
@@ -7188,7 +7181,7 @@ int main(int argc, char* argv[])
                         != QStringLiteral(
                             "IDLE DONE IDLE DONE IDLE")
                     || scenario != originalScenario
-                    || saveState->text()
+                    || saveState->property("saveStateText").toString()
                         != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Shared Enum text Undo changed the model or lost the draft"));
@@ -7352,7 +7345,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedTimeRange() != selectedEnumRange
                     || canvas->selectedLaneIds() != selectedEnumLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Mapped Enum range sequences were not one atomic Undo with their target kept"));
                     return;
@@ -7374,7 +7367,7 @@ int main(int argc, char* argv[])
                     || !enumRangeContext->text().contains(QStringLiteral("2 Enum"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !keyboardExtendStatus.contains(
                         QStringLiteral("Keyboard range"))
                     || !keyboardExtendStatus.contains(
@@ -7395,7 +7388,7 @@ int main(int argc, char* argv[])
                         << "focus" << enumRangeValueEdit->hasFocus()
                         << "scenarioEqual" << (scenario == originalScenario)
                         << "undo" << undoAction->isEnabled()
-                        << "save" << saveState->text()
+                        << "save" << saveState->property("saveStateText").toString()
                         << "status" << keyboardExtendStatus;
                     fail(QStringLiteral(
                         "Shift+Left did not extend the active Enum range edge without editing the model"));
@@ -7410,7 +7403,7 @@ int main(int argc, char* argv[])
                     || !enumRangePalette->isVisibleTo(&window)
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Shift+Right did not shrink the active Enum range edge back to its original time"));
                     return;
@@ -7422,7 +7415,7 @@ int main(int argc, char* argv[])
                     || enumRangePalette->isVisibleTo(&window)
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Escape did not clear the completed Enum range context"));
                     return;
@@ -7452,7 +7445,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Shift+Up/Down adjusts signals"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !keyboardSingleEnumStatus.contains(
                         QStringLiteral("Shift+Up/Down adjusts signals"))) {
                     fail(QStringLiteral(
@@ -7477,7 +7470,7 @@ int main(int argc, char* argv[])
                     || !enumRangeValueEdit->hasFocus()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !rangeDraftSignalStatus.contains(
                         QStringLiteral("Finish the selected range value"))) {
                     fail(QStringLiteral(
@@ -7528,7 +7521,7 @@ int main(int argc, char* argv[])
                     || QApplication::activeModalWidget()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !keyboardSignalExtendStatus.contains(
                         QStringLiteral("Keyboard signal range"))
                     || !keyboardSignalExtendStatus.contains(
@@ -7589,7 +7582,7 @@ int main(int argc, char* argv[])
                     || !enumRangeContext->text().contains(QStringLiteral("1 Enum"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !keyboardSignalShrinkStatus.contains(
                         QStringLiteral("1 Enum signal(s)"))
                     || !keyboardSignalShrinkStatus.contains(
@@ -7604,7 +7597,7 @@ int main(int argc, char* argv[])
                     || enumRangePalette->isVisibleTo(&window)
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Escape did not clear the keyboard signal range"));
                     return;
@@ -7650,7 +7643,7 @@ int main(int argc, char* argv[])
                             .isEmpty()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !keyboardCreateStatus.contains(
                         QStringLiteral("Keyboard range"))
                     || !keyboardCreateStatus.contains(
@@ -7691,7 +7684,7 @@ int main(int argc, char* argv[])
                     || canvas->cursorTick() != 10'000
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Shift+Home escaped the range value field instead of selecting its text"));
                     return;
@@ -7701,6 +7694,8 @@ int main(int argc, char* argv[])
 
                 canvas->setFocus(Qt::OtherFocusReason);
                 canvas->viewport()->setFocus(Qt::OtherFocusReason);
+                // Resize now fits the full scenario; establish a zoomed view for scrolling assertions.
+                if (canvas->horizontalScrollBar()->maximum() == 0) canvas->zoomIn();
                 const auto boundaryScrollMaximum =
                     canvas->horizontalScrollBar()->maximum();
                 sendKey(canvas, Qt::Key_End, Qt::ShiftModifier);
@@ -7728,7 +7723,7 @@ int main(int argc, char* argv[])
                     || QApplication::activeModalWidget()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !keyboardBoundaryStatus.contains(
                         QStringLiteral("Keyboard range"))
                     || !keyboardBoundaryStatus.contains(
@@ -7781,7 +7776,7 @@ int main(int argc, char* argv[])
                         != boundaryScrollMaximum
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !keyboardBoundaryNoEffectStatus.contains(
                         QStringLiteral("Timeline end reached"))
                     || !keyboardBoundaryNoEffectStatus.contains(
@@ -7806,7 +7801,7 @@ int main(int argc, char* argv[])
                     || canvas->horizontalScrollBar()->value() != 0
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !keyboardBoundaryCollapseStatus.contains(
                         QStringLiteral("Range collapsed"))
                     || !keyboardBoundaryCollapseStatus.contains(
@@ -7826,7 +7821,7 @@ int main(int argc, char* argv[])
                     || !enumRangePalette->isVisibleTo(&window)
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Keyboard range could not restart after boundary collapse"));
                     return;
@@ -7845,7 +7840,7 @@ int main(int argc, char* argv[])
                     || canvas->cursorTick() != 0
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !keyboardCollapseStatus.contains(
                         QStringLiteral("Range collapsed"))
                     || !keyboardCollapseStatus.contains(
@@ -7860,7 +7855,7 @@ int main(int argc, char* argv[])
                     || canvas->selectedLaneId()
                         != QStringLiteral("lane-wave-edit-scroll")
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Collapsed keyboard range left whole-signal Delete armed"));
                     return;
@@ -7893,7 +7888,7 @@ int main(int argc, char* argv[])
                     || QApplication::activeModalWidget()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !singleSignalSelectAllStatus.contains(
                         QStringLiteral("Ctrl+A selected full timeline"))
                     || !singleSignalSelectAllStatus.contains(
@@ -7917,7 +7912,7 @@ int main(int argc, char* argv[])
                         != QStringList{QStringLiteral("lane-wave-edit-scroll")}
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Ctrl+A escaped the range value field instead of selecting its text"));
                     return;
@@ -7959,7 +7954,7 @@ int main(int argc, char* argv[])
                     || QApplication::activeModalWidget()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !multiSignalSelectAllStatus.contains(
                         QStringLiteral("Ctrl+A selected full timeline"))
                     || !multiSignalSelectAllStatus.contains(
@@ -8206,7 +8201,7 @@ int main(int argc, char* argv[])
                     || enumRangePalette->isVisibleTo(&window)
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Escape did not clear the Ctrl+A multi-signal selection"));
                     return;
@@ -8246,7 +8241,7 @@ int main(int argc, char* argv[])
                     || QApplication::activeModalWidget()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !firstBusEdgeStatus.contains(
                         QStringLiteral("Keyboard edge range on data[7:0]"))
                     || !firstBusEdgeStatus.contains(QStringLiteral("50 ns"))) {
@@ -8270,7 +8265,7 @@ int main(int argc, char* argv[])
                     || canvas->cursorTick() != 50'000
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Ctrl+Shift+Left escaped the range value field instead of selecting text"));
                     return;
@@ -8291,7 +8286,7 @@ int main(int argc, char* argv[])
                         != QStringList{QStringLiteral("lane-wave-edit-scroll")}
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Repeated Ctrl+Shift+Right did not extend the Bus range to its next edge"));
                     return;
@@ -8302,7 +8297,7 @@ int main(int argc, char* argv[])
                     || canvas->cursorTick() != 50'000
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Ctrl+Shift+Left did not shrink the Bus range to its previous edge"));
                     return;
@@ -8315,7 +8310,7 @@ int main(int argc, char* argv[])
                     || canvas->cursorTick() != 50'000
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !noEarlierBusEdgeStatus.contains(
                         QStringLiteral("No earlier edge on data[7:0]"))
                     || !noEarlierBusEdgeStatus.contains(
@@ -8350,7 +8345,7 @@ int main(int argc, char* argv[])
                     || enumRangePalette->isVisibleTo(&window)
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Escape did not clear the keyboard edge range"));
                     return;
@@ -8389,7 +8384,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Copied 1 lane(s), 50 ns"))
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Ctrl+C did not copy the selected Bus source range without editing"));
                     return;
@@ -8437,7 +8432,7 @@ int main(int argc, char* argv[])
                     || canvas->cursorTick() != 10'000
                     || scenario == originalScenario
                     || !undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")
                     || !keyboardPasteStatus.contains(QStringLiteral("Pasted"))
                     || !keyboardPasteStatus.contains(QStringLiteral("at 0 ps"))
                     || !keyboardPasteStatus.contains(QStringLiteral("Ctrl+Z"))) {
@@ -8472,7 +8467,7 @@ int main(int argc, char* argv[])
                            5'000)
                         != std::string{}
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Undo did not restore the pre-Paste Bus and Saved state"));
                     return;
@@ -8604,7 +8599,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || canvas->selectedTimeRange()
                         != std::optional<std::pair<wave::Tick, wave::Tick>>{
                             enumContentSourceRange}
@@ -8688,7 +8683,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || canvas->hasExplicitRangeSelection()) {
                     fail(QStringLiteral(
                         "Rejected Enum content preview changed data or left stale selection"));
@@ -8723,7 +8718,7 @@ int main(int argc, char* argv[])
                     || QApplication::activeModalWidget()
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !clockEdgeRangeStatus.contains(
                         QStringLiteral("Keyboard edge range on clk"))
                     || !clockEdgeRangeStatus.contains(QStringLiteral("5 ns"))) {
@@ -8741,7 +8736,7 @@ int main(int argc, char* argv[])
                     || canvas->horizontalScrollBar()->value() != 0
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Next edge on clk"))
                     || !window.statusBar()->currentMessage().contains(
@@ -8769,7 +8764,7 @@ int main(int argc, char* argv[])
                     || canvas->horizontalScrollBar()->value() != 0
                     || scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Previous edge on clk"))
                     || !window.statusBar()->currentMessage().contains(
@@ -8837,7 +8832,7 @@ int main(int argc, char* argv[])
                 QCoreApplication::processEvents();
                 if (scenario != originalScenario
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("select only Clock signals"))) {
                     fail(QStringLiteral(
@@ -8861,7 +8856,7 @@ int main(int argc, char* argv[])
             [&application, &window, laneAutoScrollScreenshotPath] {
                 auto* canvas = window.findChild<wave::WaveCanvas*>();
                 auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
-                auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+                auto* saveState = &window;
                 auto* durationEdit = window.findChild<QLineEdit*>(
                     QStringLiteral("TimelineDurationEdit"));
                 auto* findSignalAction = window.findChild<QAction*>(
@@ -8897,7 +8892,7 @@ int main(int argc, char* argv[])
                         != QStringLiteral("Find visible signal")
                     || findEdit->property("searchResultPosition").toString() != QStringLiteral("0/0")
                     || QApplication::activeModalWidget()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || undoAction->isEnabled()) {
                     fail(QStringLiteral("Lane autoscroll smoke did not start from a long Saved list"));
                     return;
@@ -9006,7 +9001,7 @@ int main(int argc, char* argv[])
                     || canvas->laneDropDestinationIndex()
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || canvas->viewport()->cursor().shape() != Qt::PointingHandCursor
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Move cancelled · signal_00 remains at position 1"))) {
@@ -9034,7 +9029,7 @@ int main(int argc, char* argv[])
                 releaseEdgeDrag(bottomEdge);
                 if (scenario.lanes.back().id != "lane-scroll-00"
                     || !undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Unsaved changes")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")
                     || canvas->viewport()->cursor().shape() != Qt::PointingHandCursor
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Moved signal_00: position 1 -> 20"))
@@ -9045,7 +9040,7 @@ int main(int argc, char* argv[])
                 undoAction->trigger();
                 QCoreApplication::processEvents();
                 if (scenario.lanes != originalLanes
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("Undid Move lane"))
                     || !window.statusBar()->currentMessage().contains(
@@ -9087,7 +9082,7 @@ int main(int argc, char* argv[])
                 undoAction->trigger();
                 QCoreApplication::processEvents();
                 if (scenario.lanes != originalLanes
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || window.windowTitle().contains(QStringLiteral(" *"))) {
                     fail(QStringLiteral("Final Undo did not return to the exact Saved lane order"));
                     return;
@@ -9101,7 +9096,7 @@ int main(int argc, char* argv[])
                     || canvas->verticalScrollBar()->value() != 0
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Keyboard signal navigation did not start from a clean selection"));
                     return;
@@ -9178,7 +9173,7 @@ int main(int argc, char* argv[])
                         != originalHorizontalScroll
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("19 of 19"))
                     || !window.statusBar()->currentMessage().contains(
@@ -9224,7 +9219,7 @@ int main(int argc, char* argv[])
                         != QStringLiteral("lane-scroll-18")
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || window.windowTitle().contains(QStringLiteral(" *"))) {
                     fail(QStringLiteral(
                         "Keyboard signal navigation armed an unintended signal deletion"));
@@ -9237,7 +9232,7 @@ int main(int argc, char* argv[])
                     || !findEdit->isVisible()
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Signal search range guard did not start from a read-only explicit range"));
                     return;
@@ -9250,7 +9245,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("Esc clears the selected range"))
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Ctrl+F discarded an explicit range instead of explaining how to continue"));
                     return;
@@ -9260,7 +9255,7 @@ int main(int argc, char* argv[])
                 if (canvas->hasExplicitRangeSelection()
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(
                         QStringLiteral(
                             "Escape did not safely clear the range before signal search: range=%1 lane=%2 lanesSame=%3 undo=%4 save=%5")
@@ -9268,7 +9263,7 @@ int main(int argc, char* argv[])
                             .arg(canvas->selectedLaneId())
                             .arg(scenario.lanes == originalLanes)
                             .arg(undoAction->isEnabled())
-                            .arg(saveState->text()));
+                            .arg(saveState->property("saveStateText").toString()));
                     return;
                 }
                 const auto selectedBeforeFind = canvas->selectedLaneId();
@@ -9400,7 +9395,7 @@ int main(int argc, char* argv[])
                         QStringLiteral("wrapped"))
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || window.windowTitle().contains(QStringLiteral(" *"))
                     || QApplication::activeModalWidget()) {
                     fail(QStringLiteral(
@@ -9440,7 +9435,7 @@ int main(int argc, char* argv[])
                         != originalHorizontalScroll
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Escape did not leave the persistent signal search while retaining its result safely"));
                     return;
@@ -9462,7 +9457,7 @@ int main(int argc, char* argv[])
                         != QStringLiteral("lane-scroll-10")
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")) {
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                     fail(QStringLiteral(
                         "Signal search Escape did not preserve the selected match and Saved state"));
                     return;
@@ -9566,7 +9561,7 @@ int main(int argc, char* argv[])
                         != QStringList{QStringLiteral("lane-scroll-00")}
                     || scenario.lanes != originalLanes
                     || undoAction->isEnabled()
-                    || saveState->text() != QStringLiteral("Saved")
+                    || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || !window.statusBar()->currentMessage().contains(
                         QStringLiteral("selection and view restored"))) {
                     fail(QStringLiteral(
@@ -9677,7 +9672,7 @@ int main(int argc, char* argv[])
                 QStringLiteral("HideLaneAction"));
             auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
             auto* redoAction = window.findChild<QAction*>(QStringLiteral("RedoAction"));
-            auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+            auto* saveState = &window;
             const auto* initialLane = wave::findLane(
                 window.project().scenarios.front(),
                 "lane-request");
@@ -9690,12 +9685,12 @@ int main(int argc, char* argv[])
                 || !showButton->isVisible() || !showAction->isVisible()
                 || showButton->text() != QStringLiteral("Show 1 hidden item")
                 || showAction->text() != QStringLiteral("Show 1 hidden item")
-                || saveState->text() != QStringLiteral("Saved")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                 qCritical().noquote()
                     << "Hidden-item start diagnostic: canvas=" << (canvas != nullptr)
                     << "button=" << (showButton != nullptr)
                     << "action=" << (showAction != nullptr)
-                    << "saveState=" << (saveState ? saveState->text() : QStringLiteral("<missing>"))
+                    << "saveState=" << (saveState ? saveState->property("saveStateText").toString() : QStringLiteral("<missing>"))
                     << "laneVisible=" << (initialLane && initialLane->visible)
                     << "groupHidden=" << (initialGroup && !initialGroup->visible)
                     << "buttonText=" << (showButton ? showButton->text() : QStringLiteral("<missing>"))
@@ -9802,7 +9797,7 @@ int main(int argc, char* argv[])
                 || showButton->text() != QStringLiteral("Show 2 hidden items")
                 || !showAction->isVisible()
                 || showAction->text() != QStringLiteral("Show 2 hidden items")
-                || saveState->text() != QStringLiteral("Unsaved changes")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Hidden signal req"))
                 || !window.statusBar()->currentMessage().contains(
@@ -9832,7 +9827,7 @@ int main(int argc, char* argv[])
                 || !baselineHiddenGroup || baselineHiddenGroup->visible
                 || !showButton->isVisible()
                 || showButton->text() != QStringLiteral("Show 1 hidden item")
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Undid Hide lane"))) {
                 fail(QStringLiteral("One Undo did not restore the signal and saved baseline"));
@@ -10121,7 +10116,7 @@ int main(int argc, char* argv[])
             if (!restoredLane || !restoredLane->visible
                 || !restoredGroup || !restoredGroup->visible
                 || showButton->isVisible() || showAction->isVisible()
-                || saveState->text() != QStringLiteral("Unsaved changes")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")
                 || !window.statusBar()->currentMessage().startsWith(
                     QStringLiteral("Restored 2 hidden items"))
                 || !window.statusBar()->currentMessage().contains(
@@ -10181,7 +10176,7 @@ int main(int argc, char* argv[])
                 || !baselineGroup || baselineGroup->visible
                 || !showButton->isVisible() || !showAction->isVisible()
                 || showButton->text() != QStringLiteral("Show 1 hidden item")
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || window.windowTitle().contains(QStringLiteral(" *"))
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("back to saved version"))) {
@@ -10205,8 +10200,7 @@ int main(int argc, char* argv[])
                 QStringLiteral("UndoAction"));
             auto* redoAction = window.findChild<QAction*>(
                 QStringLiteral("RedoAction"));
-            auto* saveState = window.findChild<QLabel*>(
-                QStringLiteral("SaveStateLabel"));
+            auto* saveState = &window;
             auto fail = [&application, &window](const QString& message) {
                 qCritical().noquote() << message;
                 if (auto* popup = QApplication::activePopupWidget()) popup->close();
@@ -10224,7 +10218,7 @@ int main(int argc, char* argv[])
             const auto baseline = scenario;
             const auto baselineEvents = scenario.events;
             const auto baselineRelations = scenario.relations;
-            if (saveState->text() != QStringLiteral("Saved")
+            if (saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || undoAction->isEnabled()) {
                 fail(QStringLiteral(
                     "Group creation smoke did not start from the expected Saved baseline"));
@@ -10340,7 +10334,7 @@ int main(int argc, char* argv[])
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("drag signals"))
                 || !undoAction->text().contains(QStringLiteral("Add group"))
-                || saveState->text() != QStringLiteral("Unsaved changes")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")) {
                 fail(QStringLiteral(
                     "Edit > Add group did not use the validated name-only creation path"));
                 return;
@@ -10349,7 +10343,7 @@ int main(int argc, char* argv[])
             undoAction->trigger();
             QCoreApplication::processEvents();
             if (scenario != baseline
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Undid Add group"))) {
                 fail(QStringLiteral(
@@ -10495,7 +10489,7 @@ int main(int argc, char* argv[])
             undoAction->trigger();
             QCoreApplication::processEvents();
             if (scenario != baseline
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Undid Create group with signal"))
                 || !redoAction->isEnabled()) {
@@ -10521,7 +10515,7 @@ int main(int argc, char* argv[])
             undoAction->trigger();
             QCoreApplication::processEvents();
             if (scenario != baseline
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || window.windowTitle().contains(QStringLiteral(" *"))
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("back to saved version"))) {
@@ -10551,8 +10545,7 @@ int main(int argc, char* argv[])
                 QStringLiteral("MoveLaneDownAction"));
             auto* duplicateLaneAction = window.findChild<QAction*>(
                 QStringLiteral("DuplicateLaneAction"));
-            auto* saveState = window.findChild<QLabel*>(
-                QStringLiteral("SaveStateLabel"));
+            auto* saveState = &window;
             auto fail = [&application, &window](const QString& message) {
                 qCritical().noquote() << message;
                 if (auto* popup = QApplication::activePopupWidget()) popup->close();
@@ -10576,7 +10569,7 @@ int main(int argc, char* argv[])
                 scenario,
                 "group-handshake");
             if (!initialGroup || initialGroup->visible
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || undoAction->isEnabled()) {
                 fail(QStringLiteral(
                     "Batch Group smoke did not start from the expected Saved baseline"));
@@ -10783,7 +10776,7 @@ int main(int argc, char* argv[])
                         "Moved 3 selected signals one visible row down"))
                 || !undoAction->text().contains(
                     QStringLiteral("Move selected signals"))
-                || saveState->text()
+                || saveState->property("saveStateText").toString()
                     != QStringLiteral("Unsaved changes")
                 || (!keyboardStepScreenshotPath.isEmpty()
                     && !window.grab().save(
@@ -10798,7 +10791,7 @@ int main(int argc, char* argv[])
                 || canvas->selectedLaneIds() != expectedSelection
                 || canvas->selectedLaneId()
                     != QStringLiteral("lane-ack")
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || !redoAction->isEnabled()
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral(
@@ -10822,7 +10815,7 @@ int main(int argc, char* argv[])
             QCoreApplication::processEvents();
             if (scenario != baseline
                 || canvas->selectedLaneIds() != expectedSelection
-                || saveState->text() != QStringLiteral("Saved")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                 fail(QStringLiteral(
                     "Batch keyboard move did not return to the Saved baseline"));
                 return;
@@ -10873,7 +10866,7 @@ int main(int argc, char* argv[])
             QCoreApplication::processEvents();
             if (scenario != baseline
                 || canvas->selectedLaneIds() != expectedSelection
-                || saveState->text() != QStringLiteral("Saved")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                 fail(QStringLiteral(
                     "Batch keyboard top move Undo did not restore the Saved baseline"));
                 return;
@@ -10986,7 +10979,7 @@ int main(int argc, char* argv[])
             QCoreApplication::processEvents();
             if (scenario != baseline
                 || canvas->selectedLaneIds() != expectedSelection
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || !redoAction->isEnabled()
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Undid Move selected signals"))) {
@@ -11007,7 +11000,7 @@ int main(int argc, char* argv[])
             undoAction->trigger();
             QCoreApplication::processEvents();
             if (scenario != baseline
-                || saveState->text() != QStringLiteral("Saved")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                 fail(QStringLiteral(
                     "Batch signal drag did not finish at the Saved baseline"));
                 return;
@@ -11203,7 +11196,7 @@ int main(int argc, char* argv[])
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral(
                         "Event, Relation, and Trace links not copied"))
-                || saveState->text()
+                || saveState->property("saveStateText").toString()
                     != QStringLiteral("Unsaved changes")
                 || (!duplicateScreenshotPath.isEmpty()
                     && !window.grab().save(
@@ -11227,7 +11220,7 @@ int main(int argc, char* argv[])
                     != expectedSelection
                 || canvas->selectedLaneId()
                     != QStringLiteral("lane-ack")
-                || saveState->text()
+                || saveState->property("saveStateText").toString()
                     != QStringLiteral("Saved")
                 || !redoAction->isEnabled()
                 || !window.statusBar()->currentMessage().contains(
@@ -11264,7 +11257,7 @@ int main(int argc, char* argv[])
                     != expectedSelection
                 || canvas->selectedLaneId()
                     != QStringLiteral("lane-ack")
-                || saveState->text()
+                || saveState->property("saveStateText").toString()
                     != QStringLiteral("Saved")) {
                 fail(QStringLiteral(
                     "Batch duplicate workflow did not return to the exact Saved baseline"));
@@ -11446,7 +11439,7 @@ int main(int argc, char* argv[])
             undoAction->trigger();
             QCoreApplication::processEvents();
             if (scenario != baseline
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || !redoAction->isEnabled()
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral(
@@ -11468,7 +11461,7 @@ int main(int argc, char* argv[])
             undoAction->trigger();
             QCoreApplication::processEvents();
             if (scenario != baseline
-                || saveState->text() != QStringLiteral("Saved")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                 fail(QStringLiteral(
                     "Batch Group creation did not finish at the Saved baseline"));
                 return;
@@ -11478,7 +11471,7 @@ int main(int argc, char* argv[])
             QCoreApplication::processEvents();
             const auto visibleBaseline = scenario;
             if (!wave::findLane(scenario, "group-handshake")->visible
-                || saveState->text() != QStringLiteral("Unsaved changes")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")) {
                 fail(QStringLiteral(
                     "The existing Group could not be restored for batch assignment"));
                 return;
@@ -11702,7 +11695,7 @@ int main(int argc, char* argv[])
             undoAction->trigger();
             QCoreApplication::processEvents();
             if (scenario != baseline
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || window.windowTitle().contains(QStringLiteral(" *"))
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("back to saved version"))) {
@@ -11776,7 +11769,7 @@ int main(int argc, char* argv[])
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral(
                         "signal selection restored to 3 signals"))
-                || saveState->text() != QStringLiteral("Saved")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                 fail(QStringLiteral(
                     "Batch Hide Undo did not restore the exact signals and header selection"));
                 return;
@@ -11848,7 +11841,7 @@ int main(int argc, char* argv[])
                 || scenario != baseline
                 || canvas->selectedLaneIds() != removalSelection
                 || !canvas->hasLaneHeaderSelection()
-                || saveState->text() != QStringLiteral("Saved")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                 fail(QStringLiteral(
                     "Batch removal Cancel changed the model or discarded the selection"));
                 return;
@@ -11916,7 +11909,7 @@ int main(int argc, char* argv[])
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral(
                         "signal selection restored to 2 signals"))
-                || saveState->text() != QStringLiteral("Saved")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                 fail(QStringLiteral(
                     "Batch Delete Undo did not restore the exact model and header selection"));
                 return;
@@ -11937,7 +11930,7 @@ int main(int argc, char* argv[])
             if (scenario != baseline
                 || canvas->selectedLaneIds() != removalSelection
                 || !canvas->hasLaneHeaderSelection()
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || window.windowTitle().contains(QStringLiteral(" *"))) {
                 fail(QStringLiteral(
                     "Batch cleanup workflow did not finish at the exact Saved baseline"));
@@ -11963,8 +11956,7 @@ int main(int argc, char* argv[])
                 QStringLiteral("CanvasShowHiddenLanesButton"));
             auto* undoAction = window.findChild<QAction*>(
                 QStringLiteral("UndoAction"));
-            auto* saveState = window.findChild<QLabel*>(
-                QStringLiteral("SaveStateLabel"));
+            auto* saveState = &window;
             auto fail = [&application, &window](const QString& message) {
                 qCritical().noquote() << message;
                 if (auto* popup = QApplication::activePopupWidget()) popup->close();
@@ -11989,7 +11981,7 @@ int main(int argc, char* argv[])
             if (!initialGroup || initialGroup->visible
                 || !initialReset || !initialReset->groupId.empty()
                 || !showButton->isVisible()
-                || saveState->text() != QStringLiteral("Saved")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")) {
                 fail(QStringLiteral(
                     "Group membership smoke did not start from the expected Saved baseline"));
                 return;
@@ -12041,7 +12033,7 @@ int main(int argc, char* argv[])
             QCoreApplication::processEvents();
             if (!wave::findLane(scenario, "group-handshake")->visible
                 || showButton->isVisible()
-                || saveState->text() != QStringLiteral("Unsaved changes")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")) {
                 fail(QStringLiteral(
                     "The hidden example group could not be restored before membership editing"));
                 return;
@@ -12329,7 +12321,7 @@ int main(int argc, char* argv[])
             QCoreApplication::processEvents();
             if (scenario != baseline
                 || !showButton->isVisible()
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || window.windowTitle().contains(QStringLiteral(" *"))
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("back to saved version"))) {
@@ -12353,7 +12345,7 @@ int main(int argc, char* argv[])
                 QStringLiteral("HideLaneAction"));
             auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
             auto* redoAction = window.findChild<QAction*>(QStringLiteral("RedoAction"));
-            auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+            auto* saveState = &window;
             auto* waveTargetLabel = window.findChild<QLabel*>(
                 QStringLiteral("WaveTargetLabel"));
             auto fail = [&application, &window](const QString& message) {
@@ -12382,7 +12374,7 @@ int main(int argc, char* argv[])
                 window.project().scenarios.front(),
                 "group-handshake");
             if (!shownGroup || !shownGroup->visible || showButton->isVisible()
-                || saveState->text() != QStringLiteral("Unsaved changes")) {
+                || saveState->property("saveStateText").toString() != QStringLiteral("Unsaved changes")) {
                 fail(QStringLiteral("The example group could not be restored for header interaction"));
                 return;
             }
@@ -12524,7 +12516,7 @@ int main(int argc, char* argv[])
             const auto redoTextBeforeCollapse = redoAction->text();
             const auto undoEnabledBeforeCollapse = undoAction->isEnabled();
             const auto redoEnabledBeforeCollapse = redoAction->isEnabled();
-            const auto saveTextBeforeCollapse = saveState->text();
+            const auto saveTextBeforeCollapse = saveState->property("saveStateText").toString();
             const auto titleBeforeCollapse = window.windowTitle();
 
             canvas->revealLocation(QStringLiteral("lane-data"), 90'000);
@@ -12569,7 +12561,7 @@ int main(int argc, char* argv[])
                 || redoAction->text() != redoTextBeforeCollapse
                 || undoAction->isEnabled() != undoEnabledBeforeCollapse
                 || redoAction->isEnabled() != redoEnabledBeforeCollapse
-                || saveState->text() != saveTextBeforeCollapse
+                || saveState->property("saveStateText").toString() != saveTextBeforeCollapse
                 || window.windowTitle() != titleBeforeCollapse
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Collapsed group Handshake signals"))
@@ -12619,7 +12611,7 @@ int main(int argc, char* argv[])
                 || !membersShownAgain
                 || window.project() != projectBeforeCollapse
                 || undoAction->text() != undoTextBeforeCollapse
-                || saveState->text() != saveTextBeforeCollapse
+                || saveState->property("saveStateText").toString() != saveTextBeforeCollapse
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Expanded group Handshake signals"))
                 || !window.statusBar()->currentMessage().contains(
@@ -13062,7 +13054,7 @@ int main(int argc, char* argv[])
                 || groupedMemberCount() != 5
                 || !showButton->isVisible()
                 || showButton->text() != QStringLiteral("Show 1 hidden item")
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || window.windowTitle().contains(QStringLiteral(" *"))
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("back to saved version"))) {
@@ -13077,7 +13069,7 @@ int main(int argc, char* argv[])
         QTimer::singleShot(0, &window, [&application, &window] {
             auto* canvas = window.findChild<wave::WaveCanvas*>();
             auto* undoAction = window.findChild<QAction*>(QStringLiteral("UndoAction"));
-            auto* saveState = window.findChild<QLabel*>(QStringLiteral("SaveStateLabel"));
+            auto* saveState = &window;
             auto fail = [&application, &window](const QString& message) {
                 qCritical().noquote() << message;
                 wave::ui::hideToolTip();
@@ -13095,7 +13087,7 @@ int main(int argc, char* argv[])
             if (!requestLane
                 || requestLane->name.find("distinguishing_suffix") == std::string::npos
                 || canvas->signalHeaderWidth() != 190
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || undoAction->isEnabled()
                 || window.windowTitle().contains(QStringLiteral(" *"))) {
                 fail(QStringLiteral("Signal header smoke did not start from the expected Saved baseline"));
@@ -13148,7 +13140,7 @@ int main(int argc, char* argv[])
                 canvas->viewport()->mapToGlobal(QPoint(40, requestY)));
             QCoreApplication::sendEvent(canvas->viewport(), &nameTip);
             QCoreApplication::processEvents();
-            if (wave::ui::toolTipText() != fullName) {
+            if (!wave::ui::toolTipText().startsWith(fullName)) {
                 fail(QStringLiteral("Signal header tooltip did not expose the complete long name"));
                 return;
             }
@@ -13200,7 +13192,7 @@ int main(int argc, char* argv[])
                 || QSettings{}.value(QStringLiteral("canvas/signalHeaderWidth")).toInt() != 300
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Signal names width 300 px"))
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || undoAction->isEnabled()
                 || window.windowTitle().contains(QStringLiteral(" *"))) {
                 fail(QStringLiteral("Committed signal header width was not persisted as a UI-only preference"));
@@ -13248,7 +13240,7 @@ int main(int argc, char* argv[])
                 || canvas->viewport()->cursor().shape() != Qt::PointingHandCursor
                 || !window.statusBar()->currentMessage().contains(
                     QStringLiteral("Signal names fitted to 480 px"))
-                || saveState->text() != QStringLiteral("Saved")
+                || saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || undoAction->isEnabled()) {
                 fail(QStringLiteral("Double-click did not auto-fit and persist the long-name column"));
                 return;
@@ -13260,7 +13252,7 @@ int main(int argc, char* argv[])
                 canvas->viewport()->mapToGlobal(QPoint(40, requestY)));
             QCoreApplication::sendEvent(canvas->viewport(), &resizedNameTip);
             QCoreApplication::processEvents();
-            if (wave::ui::toolTipText() != fullName) {
+            if (!wave::ui::toolTipText().startsWith(fullName)) {
                 fail(QStringLiteral("Long-name tooltip was lost after signal header resizing"));
                 return;
             }
@@ -13279,7 +13271,7 @@ int main(int argc, char* argv[])
             }
             reopened.hide();
 
-            if (saveState->text() != QStringLiteral("Saved")
+            if (saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                 || undoAction->isEnabled()
                 || window.windowTitle().contains(QStringLiteral(" *"))) {
                 fail(QStringLiteral("Signal header interactions altered project history or dirty state"));
@@ -13342,8 +13334,7 @@ int main(int argc, char* argv[])
                 QStringLiteral("ShowRelationsAction"));
             auto* waveTargetLabel = window.findChild<QLabel*>(
                 QStringLiteral("WaveTargetLabel"));
-            auto* saveState = window.findChild<QLabel*>(
-                QStringLiteral("SaveStateLabel"));
+            auto* saveState = &window;
             auto* segmentMenu = window.findChild<QMenu*>(
                 QStringLiteral("SegmentMenu"));
             auto* selectSegmentAtCursorAction = window.findChild<QAction*>(
@@ -13467,7 +13458,7 @@ int main(int argc, char* argv[])
             const auto undoEnabledBeforeRelationVisibility = undoAction->isEnabled();
             const auto redoTextBeforeRelationVisibility = redoAction->text();
             const auto redoEnabledBeforeRelationVisibility = redoAction->isEnabled();
-            const auto saveTextBeforeRelationVisibility = saveState->text();
+            const auto saveTextBeforeRelationVisibility = saveState->property("saveStateText").toString();
             showRelationsAction->trigger();
             QCoreApplication::processEvents();
             if (!showRelationsAction->isChecked()
@@ -13477,7 +13468,7 @@ int main(int argc, char* argv[])
                 || undoAction->isEnabled() != undoEnabledBeforeRelationVisibility
                 || redoAction->text() != redoTextBeforeRelationVisibility
                 || redoAction->isEnabled() != redoEnabledBeforeRelationVisibility
-                || saveState->text() != saveTextBeforeRelationVisibility) {
+                || saveState->property("saveStateText").toString() != saveTextBeforeRelationVisibility) {
                 fail(QStringLiteral(
                     "Showing Relation constraints changed the model, history, or save state"));
                 return;
@@ -13491,7 +13482,7 @@ int main(int argc, char* argv[])
                 || undoAction->isEnabled() != undoEnabledBeforeRelationVisibility
                 || redoAction->text() != redoTextBeforeRelationVisibility
                 || redoAction->isEnabled() != redoEnabledBeforeRelationVisibility
-                || saveState->text() != saveTextBeforeRelationVisibility) {
+                || saveState->property("saveStateText").toString() != saveTextBeforeRelationVisibility) {
                 fail(QStringLiteral(
                     "Hiding Relation constraints changed the model, history, or save state"));
                 return;
@@ -13513,6 +13504,14 @@ int main(int argc, char* argv[])
                     || !nameEdit->hasFocus()) {
                     fail(QStringLiteral("Quick-add did not open the inline setup row"));
                     return;
+                }
+                if (button != addButtons.front()) {
+                    auto* binding = canvas->findChild<QComboBox*>(QStringLiteral("QuickLaneClockCombo"));
+                    if (!binding || !binding->isVisible() || binding->count()<2) {
+                        fail(QStringLiteral("Quick signal creation has no explicit clock binding control"));
+                        return;
+                    }
+                    binding->setCurrentIndex(binding->findData(QString::fromStdString(window.project().clockDomains.front().id)));
                 }
                 QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
                 QCoreApplication::sendEvent(nameEdit, &enter);
@@ -13711,8 +13710,7 @@ int main(int argc, char* argv[])
                 Qt::LeftButton,
                 Qt::NoButton);
             QCoreApplication::processEvents();
-            const std::array<QToolButton*, 5> presetButtons{
-                window.findChild<QToolButton*>(QStringLiteral("BusPresetZeroButton")),
+            const std::array<QToolButton*, 4> presetButtons{
                 window.findChild<QToolButton*>(QStringLiteral("BusPresetReservedButton")),
                 window.findChild<QToolButton*>(QStringLiteral("BusPresetXButton")),
                 window.findChild<QToolButton*>(QStringLiteral("BusPresetZButton")),
@@ -13812,7 +13810,7 @@ int main(int argc, char* argv[])
                 return;
             }
 
-            presetButtons.at(1)->click();
+            presetButtons.front()->click();
             QCoreApplication::processEvents();
             auto* busAfterButtonClick = wave::findLane(
                 window.project().scenarios.front(), quickBus.id);
@@ -13857,7 +13855,9 @@ int main(int argc, char* argv[])
                 fail(QStringLiteral("Bus editor did not reopen after Reserved Undo"));
                 return;
             }
-            presetButtons.front()->click();
+            directValue->setText(QStringLiteral("0x00"));
+            directValue->setModified(true);
+            applyBusButton->click();
             QCoreApplication::processEvents();
             busAfterButtonClick = wave::findLane(
                 window.project().scenarios.front(), quickBus.id);
@@ -13866,17 +13866,14 @@ int main(int argc, char* argv[])
                       busAfterButtonClick->segments.begin(),
                       busAfterButtonClick->segments.end(),
                       [](const wave::Segment& segment) {
-                          const auto preset = segment.extensions.find(
-                              "waveWorkbench.busPreset");
-                          return preset != segment.extensions.end()
-                              && preset->second == "\"zero\"";
+                          return segment.value == "0x00";
                       })
                 : std::vector<wave::Segment>::iterator{};
             if (!busAfterButtonClick
                 || zeroSegment == busAfterButtonClick->segments.end()
-                || zeroSegment->value != "0b00000000"
+                || zeroSegment->value != "0x00"
                 || !scopeButton->isEnabled()) {
-                fail(QStringLiteral("Bus 0 button did not insert one zero beat"));
+                fail(QStringLiteral("Bus direct zero input did not insert one zero beat"));
                 return;
             }
             closeBusButton->click();
@@ -14773,7 +14770,7 @@ int main(int argc, char* argv[])
             undoAction->trigger();
             QCoreApplication::processEvents();
 
-            auto* rangeDurationEdit = canvas->findChild<QLineEdit*>(
+            auto* rangeDurationEdit = window.findChild<QLineEdit*>(
                 QStringLiteral("TimelineDurationEdit"));
             const auto originalDuration = window.project().scenarios.front().duration;
             const auto extendedDuration = originalDuration + 300'000;
@@ -15431,9 +15428,7 @@ int main(int argc, char* argv[])
                 Qt::NoButton);
             QCoreApplication::processEvents();
             const auto pointerContextStatus =
-                window.findChild<QLabel*>(
-                    QStringLiteral("PointerStatusLabel"))
-                    ->text();
+                window.property("pointerStatus").toString();
             if (window.project().scenarios.front()
                     != beforeExactSegmentSelection
                 || !pointerContextStatus.contains(
@@ -18159,7 +18154,7 @@ int main(int argc, char* argv[])
 
             const auto beforeKeyboardTiming = window.project();
             const auto undoTextBeforeKeyboardTiming = undoAction->text();
-            const auto saveTextBeforeKeyboardTiming = saveState->text();
+            const auto saveTextBeforeKeyboardTiming = saveState->property("saveStateText").toString();
             canvas->revealLocation(
                 QString::fromStdString(quickClock.id),
                 16'000);
@@ -18361,7 +18356,7 @@ int main(int argc, char* argv[])
                     QStringLiteral("Left/Right and Shift+Left/Right follow"))
                 || window.project() != beforeKeyboardTiming
                 || undoAction->text() != undoTextBeforeKeyboardTiming
-                || saveState->text() != saveTextBeforeKeyboardTiming) {
+                || saveState->property("saveStateText").toString() != saveTextBeforeKeyboardTiming) {
                 fail(QStringLiteral(
                     "Keyboard timing navigation changed the model, history, save state, or final timing mode"));
                 return;
@@ -34533,9 +34528,7 @@ int main(int argc, char* argv[])
                     Qt::NoButton);
                 QCoreApplication::processEvents();
                 const auto passivePointerStatus =
-                    window.findChild<QLabel*>(
-                        QStringLiteral("PointerStatusLabel"))
-                        ->text();
+                    window.property("pointerStatus").toString();
                 if (canvas->cursorTick() != cursorBeforePassiveHover
                     || !passivePointerStatus.contains(
                         QStringLiteral("pointer data[7:0]"))
@@ -34645,7 +34638,7 @@ int main(int argc, char* argv[])
             QSpinBox* height{};
             QCheckBox* visible{};
             QLabel* error{};
-            QLabel* saveState{};
+            wave::MainWindow* saveState{};
             QAction* undoAction{};
             QAbstractButton* ok{};
             wave::Lane originalLane;
@@ -34719,8 +34712,7 @@ int main(int argc, char* argv[])
                     ? state->dialog->findChild<QLabel*>(
                           QStringLiteral("LanePropertiesError"))
                     : nullptr;
-                state->saveState = window.findChild<QLabel*>(
-                    QStringLiteral("SaveStateLabel"));
+                state->saveState = &window;
                 state->undoAction = window.findChild<QAction*>(
                     QStringLiteral("UndoAction"));
                 const auto* buttons = state->dialog
@@ -34756,7 +34748,7 @@ int main(int argc, char* argv[])
                     || !state->undoAction
                     || !state->ok
                     || !original
-                    || state->saveState->text() != QStringLiteral("Saved")
+                    || state->saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                     || state->undoAction->isEnabled()) {
                     fail(QStringLiteral("Lane properties smoke did not start from a saved, editable dialog"));
                     return;
@@ -34923,7 +34915,7 @@ int main(int argc, char* argv[])
                     if (QApplication::activeModalWidget()
                         || !lane
                         || *lane != state->originalLane
-                        || state->saveState->text() != QStringLiteral("Saved")
+                        || state->saveState->property("saveStateText").toString() != QStringLiteral("Saved")
                         || state->undoAction->isEnabled()
                         || !window.statusBar()->currentMessage().contains(
                             QStringLiteral("No properties changed for data[7:0]"))) {
@@ -35084,7 +35076,7 @@ int main(int argc, char* argv[])
                 auto* asyncTimingAction = window.findChild<QAction*>(
                     QStringLiteral("AsyncTimingAction"));
                 if (!canvas
-                    || window.centralWidget() != canvas
+                    || !window.centralWidget()->isAncestorOf(canvas)
                     || !canvas->isVisible()
                     || !docks.isEmpty()
                     || modeToolbar

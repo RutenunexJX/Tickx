@@ -4,6 +4,8 @@
 
 #include "wave/commands.h"
 #include "wave/model.h"
+#include "quick_waveform.h"
+#include "signal_style.h"
 
 #include <QAbstractScrollArea>
 #include <QLineF>
@@ -108,6 +110,8 @@ public:
     };
 
     explicit WaveCanvas(QWidget* parent = nullptr);
+    QWidget* takeDurationControl(QWidget* parent);
+    bool applyQuickBitPattern(const QString& laneId, Tick start, const QuickBitPattern& pattern, QString* error = nullptr);
 
     void setDocument(Project* project, Scenario* scenario, CommandStack* commandStack);
     void clearDocumentContexts();
@@ -321,6 +325,10 @@ signals:
     void signalHeaderWidthCommitted(int width);
 
 protected:
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dragLeaveEvent(QDragLeaveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
     bool event(QEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
     bool viewportEvent(QEvent* event) override;
@@ -1029,6 +1037,8 @@ private:
         const std::string& relationId) const noexcept;
     void rebuildOverlayIndexes();
 
+    [[nodiscard]] const WaveformTheme& canvasTheme() const;
+    [[nodiscard]] QColor canvasSelectionColor() const;
     void drawRuler(class QPainter& painter);
     void drawAddLaneRow(class QPainter& painter);
     void drawLane(
@@ -1093,6 +1103,9 @@ private:
     void drawLaneReorderOverlay(class QPainter& painter);
 
     Project* project_{nullptr};
+    SignalBackgroundStyle backgroundStyle_;
+    std::vector<int> backgroundMajorGridX_;
+    bool quickPatternDrop_{false};
     ScenarioRef scenario_;
     CommandStack* commandStack_{nullptr};
     std::array<QToolButton*, 3> addLaneButtons_{};
@@ -1127,7 +1140,7 @@ private:
     QToolButton* busClearButton_{nullptr};
     QToolButton* busApplyButton_{nullptr};
     QToolButton* busCloseButton_{nullptr};
-    std::array<QToolButton*, 5> busPresetButtons_{};
+    std::array<QToolButton*, 4> busPresetButtons_{};
     QCompleter* laneValueCompleter_{nullptr};
     QStringListModel* laneValueCompletionModel_{nullptr};
     std::optional<Tick> busPresetAnchorTick_;
@@ -1209,6 +1222,7 @@ private:
     bool waveEditRangeTargetValid_{true};
     QString waveEditRangeTargetError_;
     std::string waveEditHoverLaneId_;
+    std::string headerHoverLaneId_;
     std::optional<std::pair<Tick, Tick>> waveEditHoverRange_;
     QPoint waveEditPressPosition_;
     Tick waveEditGrabOffset_{0};

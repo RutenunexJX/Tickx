@@ -1,9 +1,11 @@
 #include "ui_controls.h"
 
 #include "ElaApplication.h"
+#include "ElaAppBar.h"
 #include "ElaCheckBox.h"
 #include "ElaComboBox.h"
 #include "ElaComboBoxStyle.h"
+#include "ElaDoubleSpinBox.h"
 #include "ElaLineEdit.h"
 #include "ElaLineEditStyle.h"
 #include "ElaListView.h"
@@ -75,7 +77,10 @@ QString windowStyleSheet(const QWidget* window, WaveformColorScheme scheme)
         ? QString::number(font.pointSizeF()) + QStringLiteral("pt")
         : QString::number(font.pixelSize()) + QStringLiteral("px");
     return waveApplicationStyleSheet(scheme)
-        + QStringLiteral("\nQWidget { font-family: \"%1\"; font-size: %2; }\n").arg(family, size);
+        + QStringLiteral("\nQWidget { font-family: \"%1\"; font-size: %2; }\n").arg(family, size)
+        + QStringLiteral("QLineEdit#LaneRenameEdit { font-size: %1pt; font-weight: 500; }\n"
+                         "QLineEdit#LaneRenameEdit[waveGroupName=\"true\"] { font-weight: 600; }\n")
+              .arg(signalNameFont(font).pointSizeF());
 }
 
 void paintState(QWidget* widget)
@@ -188,6 +193,15 @@ public:
     }
     void showPopup() override { QComboBox::showPopup(); }
     void hidePopup() override { QComboBox::hidePopup(); }
+};
+
+class DoubleSpinBox final : public AccessibleControl<ElaDoubleSpinBox> {
+public:
+    using AccessibleControl::AccessibleControl;
+protected:
+    void focusInEvent(QFocusEvent* event) override { QDoubleSpinBox::focusInEvent(event); }
+    void focusOutEvent(QFocusEvent* event) override { QDoubleSpinBox::focusOutEvent(event); }
+    void contextMenuEvent(QContextMenuEvent* event) override { showEditMenu(lineEdit(),event); }
 };
 
 class ScrollBar final : public ElaScrollBar {
@@ -580,6 +594,38 @@ void prepareWindow(QMainWindow* window)
     new EmbeddedThemeObserver(window);
 }
 
+QFont captionFont(const QFont& base)
+{
+    auto font = base;
+    font.setPointSizeF(std::max(9.5,base.pointSizeF()-1));
+    font.setWeight(QFont::Normal);
+    return font;
+}
+
+QFont signalNameFont(const QFont& base, bool group)
+{
+    auto font = base;
+    font.setPointSizeF(std::max(11.5, base.pointSizeF()));
+    font.setWeight(group ? QFont::DemiBold : QFont::Medium);
+    return font;
+}
+
+void installTitleMenus(QMainWindow* window)
+{
+    if (window->parentWidget() || !qApp->property("waveworkbench.standalone").toBool()) return;
+    auto* original = window->menuBar();
+    auto* bar = new ElaAppBar(window);
+    bar->setObjectName("WaveTitleBar");
+    bar->setAppBarHeight(40);
+    bar->setWindowButtonFlags(ElaAppBarType::MinimizeButtonHint | ElaAppBarType::MaximizeButtonHint | ElaAppBarType::CloseButtonHint);
+    auto* menus = prepare(new ElaMenuBar(bar));
+    menus->setObjectName("TitleMenuBar");
+    menus->addActions(original->actions());
+    bar->setCustomWidget(ElaAppBarType::LeftArea, menus);
+    original->hide();
+    bar->show();
+}
+
 namespace {
 void applyApplicationTheme()
 {
@@ -617,6 +663,10 @@ void applyApplicationTheme()
 void initializeApplicationTheme()
 {
     initialize();
+    QFont font;
+    font.setFamilies({QStringLiteral("Segoe UI"), QStringLiteral("Microsoft YaHei UI"), QStringLiteral("Noto Sans CJK SC")});
+    font.setPointSizeF(10.5);
+    qApp->setFont(font);
     qApp->setProperty("waveworkbench.standalone", true);
     qApp->setProperty("waveworkbench.themePreference", QSettings().value("appearance/colorScheme", "system"));
     const auto metrics = waveformMetrics();
@@ -679,6 +729,7 @@ QLineEdit* lineEdit(QWidget* parent)
 }
 QLineEdit* lineEdit(const QString& text, QWidget* parent) { auto* w = lineEdit(parent); w->setText(text); return w; }
 QComboBox* comboBox(QWidget* parent) { initialize(); return prepare(new ComboBox(parent)); }
+QDoubleSpinBox* doubleSpinBox(QWidget* parent) { initialize(); return prepare(new DoubleSpinBox(parent)); }
 QSpinBox* spinBox(QWidget* parent) { initialize(); return prepare(new SpinBox(parent)); }
 QCheckBox* checkBox(QWidget* parent) { initialize(); return prepare(new AccessibleControl<ElaCheckBox>(parent)); }
 QCheckBox* checkBox(const QString& text, QWidget* parent) { auto* w = checkBox(parent); w->setText(text); return w; }
@@ -702,6 +753,8 @@ QMenu* addMenu(QMenu* parent, const QString& title)
 }
 QMenu* addMenu(QMenuBar* parent, const QString& title)
 {
+    for (auto* action : parent->actions())
+        if (action->menu() && action->text() == title) return action->menu();
     auto* w = menu(parent); w->setTitle(title); parent->addMenu(w); return w;
 }
 QToolBar* toolBar(const QString& title, QWidget* parent)

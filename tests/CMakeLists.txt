@@ -7,6 +7,20 @@ function(wave_add_toolchain_fixture target mode)
 endfunction()
 
 find_package(Qt6 6.10.2 EXACT REQUIRED COMPONENTS Test)
+add_executable(wave-ui-followup-test ui_followup_test.cpp)
+target_link_libraries(wave-ui-followup-test PRIVATE wavewidgets waveproject Qt6::Test)
+wave_enable_warnings(wave-ui-followup-test)
+foreach(_wave_followup_scale IN ITEMS 1 1.25 1.5 2)
+    add_test(NAME wave-ui-followup-${_wave_followup_scale}
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTEST_EXE=$<TARGET_FILE:wave-ui-followup-test>"
+            "-DLOG_FILE=${CMAKE_BINARY_DIR}/ui-followup-${_wave_followup_scale}.txt"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+    set_tests_properties(wave-ui-followup-${_wave_followup_scale} PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=${_wave_followup_scale};WAVEWORKBENCH_REDUCED_MOTION=1;WAVE_FOLLOWUP_PREVIEW_DIR=${CMAKE_BINARY_DIR}/ui-followup-previews/${_wave_followup_scale};WAVEWORKBENCH_RECOVERY_DIR=${CMAKE_BINARY_DIR}/test-recovery/followup-${_wave_followup_scale};WAVEWORKBENCH_SETTINGS_DIR=${CMAKE_BINARY_DIR}/test-settings/followup-${_wave_followup_scale}"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        TIMEOUT 45)
+endforeach()
 add_executable(wave-canvas-edit-regression-test canvas_edit_regression_test.cpp)
 target_link_libraries(wave-canvas-edit-regression-test PRIVATE wavewidgets waveproject wavegenerate Qt6::Test)
 wave_enable_warnings(wave-canvas-edit-regression-test)
@@ -945,7 +959,7 @@ set(_wave_test_environment "QT_QPA_PLATFORM=offscreen")
 if(WIN32 AND EXISTS "C:/Windows/Fonts/segoeui.ttf")
     set(_wave_test_font_dir "${CMAKE_BINARY_DIR}/test-fonts")
     file(MAKE_DIRECTORY "${_wave_test_font_dir}")
-    foreach(_wave_test_font IN ITEMS segoeui.ttf segoeuib.ttf segoeuii.ttf)
+    foreach(_wave_test_font IN ITEMS segoeui.ttf segoeuib.ttf segoeuii.ttf msyh.ttc msyhbd.ttc)
         if(EXISTS "C:/Windows/Fonts/${_wave_test_font}")
             configure_file(
                 "C:/Windows/Fonts/${_wave_test_font}"
@@ -960,6 +974,8 @@ set_property(TEST wave-canvas-edit-regression-test APPEND PROPERTY ENVIRONMENT
     "QT_QPA_FONTDIR=${_wave_test_font_dir}")
 foreach(_wave_ela_scale IN ITEMS 1 1.25 1.5 2)
     set_property(TEST wave-ela-ui-${_wave_ela_scale} APPEND PROPERTY ENVIRONMENT
+        "QT_QPA_FONTDIR=${_wave_test_font_dir}")
+    set_property(TEST wave-ui-followup-${_wave_ela_scale} APPEND PROPERTY ENVIRONMENT
         "QT_QPA_FONTDIR=${_wave_test_font_dir}")
 endforeach()
 foreach(_waveform_scale_test _waveform_scale IN ZIP_LISTS

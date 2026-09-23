@@ -2,6 +2,7 @@
 #include "ElaMenu.h"
 #include "wave_canvas.h"
 #include "waveform_theme.h"
+#include "signal_style.h"
 
 #include "wave/timeline_viewport.h"
 
@@ -12,6 +13,10 @@
 #include <QCompleter>
 #include <QContextMenuEvent>
 #include <QEvent>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDragLeaveEvent>
+#include <QDropEvent>
 #include <QFrame>
 #include <QFocusEvent>
 #include <QFontMetrics>
@@ -63,25 +68,6 @@ const QString kRangeMimeType = QStringLiteral("application/x-wave-workbench-rang
 constexpr std::string_view kBusPresetExtension = "waveWorkbench.busPreset";
 constexpr int kSoftSnapRadiusPixels = 7;
 constexpr int kTextBusInput = -1;
-constexpr qreal kLaneNamePointSize = 11.5;
-constexpr qreal kLaneDetailPointSize = 9.0;
-
-const WaveformTheme& canvasTheme()
-{
-    static const auto light = waveformTheme(WaveformColorScheme::Light);
-    static const auto dark = waveformTheme(WaveformColorScheme::Dark);
-    return waveformColorScheme(QApplication::palette())
-            == WaveformColorScheme::Dark
-        ? dark
-        : light;
-}
-
-QColor canvasSelectionColor()
-{
-    auto selection = canvasTheme().selection;
-    selection.setAlpha(96);
-    return selection;
-}
 
 void drawLaneGlyph(QPainter& painter, const LaneKind kind, const QRectF& rect,
     const QColor& color)
@@ -494,11 +480,9 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     auto* quickLayout = new QHBoxLayout(quickLaneSetupPanel_);
     quickLayout->setContentsMargins(8, 4, 8, 4);
     quickLayout->setSpacing(4);
-    auto* quickPrompt = ui::text(tr("New signal"), quickLaneSetupPanel_);
-    quickPrompt->setObjectName(QStringLiteral("QuickLaneSetupPrompt"));
-    quickLayout->addWidget(quickPrompt);
     quickLaneNameEdit_ = ui::lineEdit(quickLaneSetupPanel_);
     quickLaneNameEdit_->setObjectName(QStringLiteral("QuickLaneNameEdit"));
+    quickLaneNameEdit_->setAccessibleName(tr("Signal name"));
     quickLaneNameEdit_->setPlaceholderText(tr("Signal name"));
     quickLaneNameEdit_->setMinimumWidth(130);
     quickLayout->addWidget(quickLaneNameEdit_, 1);
@@ -514,13 +498,8 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     quickLaneErrorLabel_->setObjectName(QStringLiteral("QuickLaneSetupError"));
     quickLaneErrorLabel_->setProperty("waveState", QStringLiteral("error"));
     quickLaneErrorLabel_->setMaximumWidth(230);
+    quickLaneErrorLabel_->hide();
     quickLayout->addWidget(quickLaneErrorLabel_);
-    auto* quickHint = ui::text(
-        tr("Enter or click the next target to apply · Esc to cancel"),
-        quickLaneSetupPanel_);
-    quickHint->setObjectName(QStringLiteral("QuickLaneSetupHint"));
-    quickHint->setProperty("waveRole", QStringLiteral("muted"));
-    quickLayout->addWidget(quickHint);
     for (auto* editor : {quickLaneNameEdit_, quickLaneParameterEdit_}) {
         editor->installEventFilter(this);
     }
@@ -574,11 +553,14 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     presetControlLayout->setSpacing(4);
     presetLayout->addLayout(presetHeaderLayout);
     presetLayout->addLayout(presetControlLayout);
+    auto* presetActionLayout = new QHBoxLayout;
+    presetActionLayout->setSpacing(6);
+    presetLayout->addLayout(presetActionLayout);
     busPresetContextLabel_ = new QLabel(tr("Bus · Beat"), busPresetPalette_);
     busPresetContextLabel_->setObjectName(QStringLiteral("BusPresetContextLabel"));
     busPresetContextLabel_->setProperty(
         "waveRole", QStringLiteral("accent"));
-    busPresetContextLabel_->setMinimumWidth(180);
+    busPresetContextLabel_->setMinimumWidth(120);
     busPresetContextLabel_->setMaximumWidth(390);
     presetHeaderLayout->addWidget(busPresetContextLabel_, 1);
 
@@ -657,7 +639,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     busRadixCombo_->addItem(QStringLiteral("OCT"), static_cast<int>(Radix::Octal));
     busRadixCombo_->addItem(tr("Text"), kTextBusInput);
     busRadixCombo_->setToolTip(tr("Select a numeric radix or Text for a display-only label without a numeric encoding"));
-    busRadixCombo_->setMaximumWidth(72);
+    busRadixCombo_->setFixedWidth(80);
     presetControlLayout->addWidget(busRadixCombo_);
     connect(
         busRadixCombo_,
@@ -673,7 +655,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     busValueEdit_->setPlaceholderText(tr("Value + Enter"));
     busValueEdit_->setAccessibleName(tr("Bus value"));
     busValueEdit_->setMinimumWidth(160);
-    busValueEdit_->setMaximumWidth(240);
+    busValueEdit_->setMaximumWidth(QWIDGETSIZE_MAX);
     laneValueCompletionModel_ = new QStringListModel(this);
     laneValueCompleter_ = new QCompleter(laneValueCompletionModel_, this);
     laneValueCompleter_->setCaseSensitivity(Qt::CaseInsensitive);
@@ -714,8 +696,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
             busValueEdit_->selectAll();
             updateBusEditActionStates(true);
         });
-    const std::array<std::tuple<QString, QString, QString>, 5> presets{{
-        {QStringLiteral("zero"), QStringLiteral("0"), QStringLiteral("BusPresetZeroButton")},
+    const std::array<std::tuple<QString, QString, QString>, 4> presets{{
         {QStringLiteral("reserved"), tr("Reserved"), QStringLiteral("BusPresetReservedButton")},
         {QStringLiteral("x"), QStringLiteral("X"), QStringLiteral("BusPresetXButton")},
         {QStringLiteral("z"), QStringLiteral("Z"), QStringLiteral("BusPresetZButton")},
@@ -725,6 +706,12 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     for (const auto& [presetId, label, objectName] : presets) {
         auto* button = ui::toolButton(busPresetPalette_);
         button->setText(label);
+        button->setAccessibleName(label);
+        button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+        const auto glyph = presetId == "reserved" ? ui::Icon::Reserved
+            : presetId == "dont-care" ? ui::Icon::DontCare
+            : presetId == "x" ? ui::Icon::Unknown : ui::Icon::HighImpedance;
+        button->setIcon(ui::icon(glyph, this));
         button->setObjectName(objectName);
         button->setAutoRaise(true);
         button->setFocusPolicy(Qt::StrongFocus);
@@ -738,7 +725,7 @@ WaveCanvas::WaveCanvas(QWidget* parent)
                 : presetId == QStringLiteral("x")
                     ? tr("Drive an unknown value; X remains significant unless compare rules ignore it")
                     : tr("Apply %1 to the current Bus target").arg(label));
-        presetControlLayout->addWidget(button);
+        presetActionLayout->addWidget(button);
         connect(button, &QToolButton::clicked, this, [this, presetId] {
             if (!busPresetLaneId_.empty() && busPresetAnchorTick_) {
                 applyBusPreset(busPresetLaneId_, presetId.toStdString(), *busPresetAnchorTick_);
@@ -746,13 +733,16 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         });
         busPresetButtons_.at(presetIndex++) = button;
     }
+    presetActionLayout->addStretch();
     busClearButton_ = makeBusControl(
         tr("Clear"),
         QStringLiteral("BusEditClearButton"),
         tr("Clear Bus or Enum target"),
         tr("Restore the current target to implicit X and keep editing"));
     busClearButton_->installEventFilter(this);
-    presetControlLayout->addWidget(busClearButton_);
+    busClearButton_->setIcon(ui::icon(ui::Icon::Delete, this));
+    busClearButton_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    presetActionLayout->addWidget(busClearButton_);
     connect(
         busClearButton_,
         &QToolButton::clicked,
@@ -764,7 +754,8 @@ WaveCanvas::WaveCanvas(QWidget* parent)
         tr("Apply Bus value"),
         tr("Apply the current value and close the editor (Enter)"));
     busApplyButton_->installEventFilter(this);
-    presetControlLayout->addWidget(busApplyButton_);
+    busApplyButton_->setIcon(ui::icon(ui::Icon::Check, this));
+    presetActionLayout->addWidget(busApplyButton_);
     connect(busApplyButton_, &QToolButton::clicked, this, [this] {
         submitBusValue(BusEditCommitAction::Close);
     });
@@ -1784,24 +1775,21 @@ void WaveCanvas::beginQuickLaneSetup(
     quickLaneParameterEdit_->setText(parameter);
     quickLaneParameterEdit_->setModified(false);
     quickLaneErrorLabel_->clear();
+    quickLaneErrorLabel_->hide();
     quickLaneClockCombo_->clear();
+    quickLaneClockCombo_->addItem(ui::icon(ui::Icon::Async,this), tr("Async"), QString{});
+    quickLaneClockCombo_->setAccessibleName(tr("Signal clock binding"));
+    quickLaneClockCombo_->setToolTip(tr("Choose a clock for a synchronous signal, or Async for no binding"));
     const auto count = std::min(clockLabels.size(), clockIds.size());
     for (qsizetype index = 0; index < count; ++index) {
-        quickLaneClockCombo_->addItem(clockLabels.at(index), clockIds.at(index));
+        quickLaneClockCombo_->addItem(ui::icon(ui::Icon::Sync,this),clockLabels.at(index), clockIds.at(index));
     }
     const auto selectedIndex = quickLaneClockCombo_->findData(selectedClockId);
     if (selectedIndex >= 0) quickLaneClockCombo_->setCurrentIndex(selectedIndex);
-    quickLaneClockCombo_->setVisible(kind != LaneKind::Clock && count > 1);
+    quickLaneClockCombo_->setVisible(kind != LaneKind::Clock);
     quickLaneParameterEdit_->setVisible(kind == LaneKind::Clock || kind == LaneKind::Bus);
     quickLaneParameterEdit_->setPlaceholderText(
         kind == LaneKind::Clock ? tr("Period, e.g. 2.5 ns") : tr("Width, e.g. 8"));
-    if (auto* prompt = quickLaneSetupPanel_->findChild<QLabel*>(
-            QStringLiteral("QuickLaneSetupPrompt"))) {
-        prompt->setText(
-            kind == LaneKind::Clock ? tr("New clock")
-            : kind == LaneKind::Bus ? tr("New bus")
-                                    : tr("New bit"));
-    }
     quickLaneSetupPanel_->show();
     quickLaneSetupPanel_->raise();
     positionQuickLaneSetup();
@@ -1825,6 +1813,7 @@ void WaveCanvas::showQuickLaneSetupError(
 {
     if (!hasQuickLaneSetup()) return;
     quickLaneErrorLabel_->setText(message);
+    quickLaneErrorLabel_->show();
     quickLaneErrorLabel_->setToolTip(message);
     positionQuickLaneSetup();
     auto* target = focusParameter && quickLaneParameterEdit_->isVisible()
@@ -1877,14 +1866,12 @@ bool WaveCanvas::eventFilter(QObject* watched, QEvent* event)
     } else if (watched == busClearButton_) {
         busEditAction = BusEditAction::Clear;
     } else if (watched == busPresetButtons_.at(0)) {
-        busEditAction = BusEditAction::PresetZero;
-    } else if (watched == busPresetButtons_.at(1)) {
         busEditAction = BusEditAction::PresetReserved;
-    } else if (watched == busPresetButtons_.at(2)) {
+    } else if (watched == busPresetButtons_.at(1)) {
         busEditAction = BusEditAction::PresetX;
-    } else if (watched == busPresetButtons_.at(3)) {
+    } else if (watched == busPresetButtons_.at(2)) {
         busEditAction = BusEditAction::PresetZ;
-    } else if (watched == busPresetButtons_.at(4)) {
+    } else if (watched == busPresetButtons_.at(3)) {
         busEditAction = BusEditAction::PresetDontCare;
     }
     if (busEditAction
@@ -4364,6 +4351,12 @@ bool WaveCanvas::viewportEvent(QEvent* event)
                     return true;
                 }
                 auto label = QString::fromStdString(lane->name);
+                if (lane->kind != LaneKind::Clock) {
+                    const auto* clock = project_ ? findClock(*project_,lane->clockDomainId) : nullptr;
+                    label += clock ? tr("\nSynchronous · %1").arg(QString::fromStdString(clock->name))
+                        : lane->clockDomainId.empty() ? tr("\nAsynchronous · no clock binding")
+                        : tr("\nUnresolved clock: %1").arg(QString::fromStdString(lane->clockDomainId));
+                }
                 if (const auto* group = visibleParentGroup(*lane)) {
                     label.append(
                         tr("\nMember of %1")
@@ -4479,7 +4472,9 @@ bool WaveCanvas::viewportEvent(QEvent* event)
     if (event && event->type() == QEvent::Leave) {
         const auto changed = waveEditHoverRange_.has_value()
             || !waveEditHoverLaneId_.empty()
+            || !headerHoverLaneId_.empty()
             || snapGuideTick_.has_value();
+        headerHoverLaneId_.clear();
         waveEditHoverLaneId_.clear();
         waveEditHoverRange_.reset();
         snapGuideTick_.reset();
@@ -5815,9 +5810,22 @@ void WaveCanvas::keyReleaseEvent(QKeyEvent* event)
     QAbstractScrollArea::keyReleaseEvent(event);
 }
 
+const WaveformTheme& WaveCanvas::canvasTheme() const
+{
+    return backgroundStyle_.theme;
+}
+
+QColor WaveCanvas::canvasSelectionColor() const
+{
+    auto selection = canvasTheme().selection;
+    selection.setAlpha(96);
+    return selection;
+}
+
 void WaveCanvas::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event)
+    backgroundStyle_ = resolvedSignalBackground(project_, waveformColorScheme(palette()));
     QPainter painter(viewport());
     painter.setRenderHint(QPainter::Antialiasing, false);
     painter.fillRect(viewport()->rect(), canvasTheme().canvas);
@@ -6144,6 +6152,115 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
     setProperty(
         "wavewidgets.lastPaintViewGeneration",
         static_cast<qulonglong>(lastPaintViewGeneration_));
+}
+
+bool WaveCanvas::applyQuickBitPattern(const QString& laneId, Tick start, const QuickBitPattern& pattern, QString* error)
+{
+    const auto reject = [&](const QString& message) {
+        if (error) *error = message;
+        emit statusMessage(tr("Cannot insert waveform · %1").arg(message));
+        return false;
+    };
+    if (!project_ || !scenario_ || !commandStack_ || !validQuickBitPattern(pattern))
+        return reject(tr("Invalid binary fragment"));
+    if (hasQuickLaneSetup() || hasLaneRename() || hasPendingValueEdit() || drawing_ || laneHeaderDragging_)
+        return reject(tr("Finish or cancel the active edit first"));
+    const auto id = laneId.toStdString();
+    const auto* lane = findLane(*scenario_,id);
+    if (!lane || lane->kind != LaneKind::Bit || !lane->visible)
+        return reject(tr("Drop on a visible Bit signal"));
+    auto step = quickBitPatternStep(pattern,project_->timeBase).value_or(0);
+    if (!lane->clockDomainId.empty()) {
+        const auto* clock = findClock(*project_,lane->clockDomainId);
+        if (!clock || !clock->isValid()) return reject(tr("Target clock is unresolved"));
+        if (pattern.useTargetClock) step = clock->period;
+        start = synchronousBoundaryTick(start,*lane);
+    }
+    if (step <= 0) return reject(tr("Per-bit duration is not exactly representable in the target timebase"));
+    if (start < 0 || start >= scenario_->duration || step <= 0
+        || pattern.bits.size() > (scenario_->duration-start)/step)
+        return reject(tr("Fragment exceeds End; extend End or shorten the fragment"));
+    std::vector<LaneSequenceStep> steps;
+    steps.reserve(static_cast<std::size_t>(pattern.bits.size()));
+    auto cursor = start;
+    for (const auto bit : pattern.bits) {
+        const std::string value(1,bit.toLatin1());
+        if (!steps.empty() && steps.back().value == value) steps.back().end += step;
+        else steps.emplace_back(cursor,cursor+step,value);
+        cursor += step;
+    }
+    const auto relationsBefore = scenario_->relations.size();
+    try {
+        if (!commandStack_->execute(std::make_unique<SetLaneSequenceCommand>(*scenario_,id,std::move(steps)))) return false;
+    } catch (const std::exception& exception) { return reject(QString::fromUtf8(exception.what())); }
+    clearWaveEditState();
+    selectedLaneId_ = id; selectedLaneIds_ = {id}; cursorTick_ = start;
+    selectionRange_ = std::pair{start,cursor};
+    explicitRangeSelection_ = true;
+    refreshModel();
+    emit selectionChanged(laneId,start);
+    emit modelEdited(); emit commandAvailabilityChanged();
+    emit statusMessage(appendRelationAwareUndo(tr("Inserted %1 bits · replaced %2–%3; outside data preserved")
+        .arg(pattern.bits.size()).arg(QString::fromStdString(formatTick(start,project_->timeBase)))
+        .arg(QString::fromStdString(formatTick(cursor,project_->timeBase))),relationsBefore,scenario_->relations.size()));
+    return true;
+}
+
+void WaveCanvas::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (decodeQuickBitPattern(event->mimeData()->data(bitPatternMime))) {
+        event->setDropAction(Qt::CopyAction); event->accept();
+    } else event->ignore();
+}
+
+void WaveCanvas::dragMoveEvent(QDragMoveEvent* event)
+{
+    const auto pattern = decodeQuickBitPattern(event->mimeData()->data(bitPatternMime));
+    const auto position = event->position().toPoint();
+    const auto* lane = laneAtY(position.y());
+    waveEditHoverLaneId_.clear(); waveEditHoverRange_.reset();
+    quickPatternDrop_ = false;
+    if (!pattern || !lane || lane->kind != LaneKind::Bit || position.x() < headerWidth_
+        || position.y() < RulerHeight || !project_ || !scenario_) {
+        event->ignore(); viewport()->update(); return;
+    }
+    auto start = tickAtX(position.x());
+    auto step = quickBitPatternStep(*pattern,project_->timeBase).value_or(0);
+    if (!lane->clockDomainId.empty()) {
+        const auto* clock = findClock(*project_,lane->clockDomainId);
+        if (!clock || !clock->isValid()) { event->ignore(); viewport()->update(); return; }
+        start = synchronousBoundaryTick(start,*lane);
+        if (pattern->useTargetClock) step = clock->period;
+    }
+    if (step <= 0 || start < 0 || start >= scenario_->duration || pattern->bits.size() > (scenario_->duration-start)/step) {
+        event->ignore(); viewport()->update(); return;
+    }
+    quickPatternDrop_ = true;
+    waveEditHoverLaneId_ = lane->id;
+    waveEditHoverRange_ = std::pair{start,start+step*pattern->bits.size()};
+    event->setDropAction(Qt::CopyAction); event->accept(); viewport()->update();
+}
+
+void WaveCanvas::dragLeaveEvent(QDragLeaveEvent* event)
+{
+    if (quickPatternDrop_) { waveEditHoverLaneId_.clear(); waveEditHoverRange_.reset(); }
+    quickPatternDrop_ = false;
+    event->accept(); viewport()->update();
+}
+
+void WaveCanvas::dropEvent(QDropEvent* event)
+{
+    const auto pattern = decodeQuickBitPattern(event->mimeData()->data(bitPatternMime));
+    const auto position = event->position().toPoint();
+    const auto* lane = laneAtY(position.y());
+    const auto id = lane ? QString::fromStdString(lane->id) : QString{};
+    quickPatternDrop_ = false;
+    waveEditHoverLaneId_.clear(); waveEditHoverRange_.reset();
+    if (pattern && position.x() >= headerWidth_ && position.y() >= RulerHeight
+        && applyQuickBitPattern(id,tickAtX(position.x()),*pattern)) {
+        event->setDropAction(Qt::CopyAction); event->accept();
+    } else event->ignore();
+    viewport()->update();
 }
 
 void WaveCanvas::resizeEvent(QResizeEvent* event)
@@ -7056,6 +7173,13 @@ void WaveCanvas::mouseMoveEvent(QMouseEvent* event)
 {
     if (!scenario_) return;
     const auto position = event->position().toPoint();
+    const auto* headerLane = position.x() < headerWidth_ && position.y() >= RulerHeight
+        && event->buttons() == Qt::NoButton ? laneAtY(position.y()) : nullptr;
+    const auto headerId = headerLane ? headerLane->id : std::string{};
+    if (headerHoverLaneId_ != headerId) {
+        headerHoverLaneId_ = headerId;
+        viewport()->update(QRect(0,RulerHeight,headerWidth_,viewport()->height()-RulerHeight));
+    }
     if (rangeSequenceTokenPress_) {
         if (!event->buttons().testFlag(
                 Qt::LeftButton)) {
@@ -8285,9 +8409,7 @@ QRect WaveCanvas::groupDisclosureRect(const Lane& group) const
 
 int WaveCanvas::fittedSignalHeaderWidth() const
 {
-    QFont nameFont = viewport()->font();
-    nameFont.setPointSizeF(std::max(kLaneNamePointSize, nameFont.pointSizeF()));
-    nameFont.setBold(true);
+    const auto nameFont = ui::signalNameFont(viewport()->font(),true);
     const QFontMetrics nameMetrics(nameFont);
     auto fitted = DefaultHeaderWidth;
     if (scenario_) {
@@ -8480,11 +8602,13 @@ void WaveCanvas::positionLaneRename()
     }
     const auto laneTop = RulerHeight + layout->top - verticalScrollBar()->value();
     const auto height = std::clamp(layout->height / 2 + 2, 24, 32);
-    auto font = viewport()->font();
-    font.setPointSizeF(std::max(kLaneNamePointSize, font.pointSizeF()));
-    laneRenameEdit_->setFont(font);
     const auto& lane = scenario_->lanes.at(layout->laneIndex);
     const auto group = lane.kind == LaneKind::Group;
+    laneRenameEdit_->setProperty("waveGroupName", group);
+    laneRenameEdit_->style()->unpolish(laneRenameEdit_);
+    laneRenameEdit_->style()->polish(laneRenameEdit_);
+    laneRenameEdit_->setFont(ui::signalNameFont(viewport()->font(), group));
+    laneRenameEdit_->setTextMargins(0, 0, 0, 0);
     const auto left = (group ? 56 : visibleParentGroup(lane) ? 58 : 38) - 4;
     const auto top = laneTop + (layout->height - height) / 2;
     laneRenameEdit_->setGeometry(left, top, headerWidth_ - left - 10, height);
@@ -8494,6 +8618,7 @@ void WaveCanvas::positionLaneRename()
 void WaveCanvas::positionDurationEditor()
 {
     if (!durationEdit_ || !durationLabel_) return;
+    if (durationEdit_->parentWidget() != viewport()) return;
     constexpr int editWidth = 112;
     constexpr int editHeight = 27;
     const auto editX = std::max(headerWidth_ + 62, viewport()->width() - editWidth - 8);
@@ -8501,6 +8626,25 @@ void WaveCanvas::positionDurationEditor()
     durationLabel_->setGeometry(std::max(headerWidth_ + 4, editX - 38), 6, 34, editHeight);
     durationLabel_->raise();
     durationEdit_->raise();
+}
+
+QWidget* WaveCanvas::takeDurationControl(QWidget* parent)
+{
+    auto* control = new QWidget(parent);
+    control->setObjectName(QStringLiteral("TimelineEndControl"));
+    control->setFixedWidth(170);
+    auto* layout = new QHBoxLayout(control);
+    layout->setContentsMargins(4,0,4,0);
+    layout->setSpacing(6);
+    durationLabel_->setParent(control);
+    durationEdit_->setParent(control);
+    durationLabel_->setMinimumSize(0,0);
+    durationEdit_->setMinimumSize(0,0);
+    durationEdit_->setFixedWidth(112);
+    layout->addWidget(durationLabel_);
+    layout->addWidget(durationEdit_);
+    syncDurationEditor();
+    return control;
 }
 
 WaveCanvas::BusEditActionAssessment
@@ -8989,15 +9133,13 @@ void WaveCanvas::updateBusEditActionStates(const bool announceDraft)
             widget->style()->polish(widget);
             widget->update();
         };
-    const std::array<BusEditAction, 5> presetActions{{
-        BusEditAction::PresetZero,
+    const std::array<BusEditAction, 4> presetActions{{
         BusEditAction::PresetReserved,
         BusEditAction::PresetX,
         BusEditAction::PresetZ,
         BusEditAction::PresetDontCare,
     }};
-    const std::array<QString, 5> presetLabels{{
-        QStringLiteral("0"),
+    const std::array<QString, 4> presetLabels{{
         tr("Reserved"),
         QStringLiteral("X"),
         QStringLiteral("Z"),
@@ -21812,6 +21954,7 @@ QPoint WaveCanvas::eventPoint(const Event& event) const
 
 void WaveCanvas::drawRuler(QPainter& painter)
 {
+    backgroundMajorGridX_.clear();
     painter.fillRect(QRect(headerWidth_, 0, waveViewportWidth(), RulerHeight), canvasTheme().raised);
     painter.setClipRect(QRect(headerWidth_, 0, waveViewportWidth(), viewport()->height()));
     const auto [visibleStart, visibleEnd] = visibleTickRange();
@@ -21849,18 +21992,37 @@ void WaveCanvas::drawRuler(QPainter& painter)
     auto first = visibleStart - (visibleStart - anchor) % minor;
     if (first > visibleStart) first -= minor;
 
-    QFont labelFont = painter.font();
-    labelFont.setPointSizeF(std::max(7.5, labelFont.pointSizeF() - 1.0));
-    painter.setFont(labelFont);
+    if (backgroundStyle_.cycleBand.isValid()) {
+        // Anchor bands to time, not viewport pixels. At low zoom one band spans whole cycles.
+        for (auto tick = first; tick <= visibleEnd;) {
+            const auto next = tick > std::numeric_limits<Tick>::max() - minor
+                ? std::numeric_limits<Tick>::max() : tick + minor;
+            if (((tick - anchor) / minor) % 2 != 0) {
+                const auto left = xAtTick(tick);
+                painter.fillRect(QRect(left, RulerHeight, xAtTick(std::min(next, visibleEnd)) - left,
+                    viewport()->height() - RulerHeight), backgroundStyle_.cycleBand);
+            }
+            if (next <= tick || next == std::numeric_limits<Tick>::max()) break;
+            tick = next;
+        }
+    }
+    painter.setFont(ui::captionFont(viewport()->font()));
     for (auto tick = first; tick <= visibleEnd;) {
         const auto x = xAtTick(tick);
         const auto isMajor = (tick - anchor) % major == 0;
-        painter.setPen(isMajor ? canvasTheme().gridMajor : canvasTheme().gridMinor);
+        if (isMajor) backgroundMajorGridX_.push_back(x);
+        painter.setPen(QPen(isMajor ? canvasTheme().gridMajor : canvasTheme().gridMinor, 1,
+            isMajor ? Qt::SolidLine : backgroundStyle_.minorGrid));
         painter.drawLine(
             x,
             isMajor ? RulerHeight - 13 : RulerHeight - 7,
             x,
             viewport()->height());
+        // The minimal preset retains ruler ticks without adding interior minor grid lines.
+        if (!isMajor && backgroundStyle_.minorGrid == Qt::NoPen) {
+            painter.setPen(canvasTheme().gridMajor);
+            painter.drawLine(x, RulerHeight - 7, x, RulerHeight - 1);
+        }
         if (isMajor && tick >= 0) {
             painter.setPen(canvasTheme().mutedText);
             painter.drawText(
@@ -21897,12 +22059,8 @@ void WaveCanvas::drawLane(
     const auto& theme = canvasTheme();
     const auto centerY = y + layout.height / 2;
     const auto textLeft = groupHeader ? 56 : groupedMember ? 58 : 38;
-    QFont nameFont = viewport()->font();
-    nameFont.setPointSizeF(std::max(kLaneNamePointSize, nameFont.pointSizeF()));
-    nameFont.setWeight(selected || groupHeader ? QFont::DemiBold : QFont::Medium);
-    QFont detailFont = nameFont;
-    detailFont.setWeight(QFont::Normal);
-    detailFont.setPointSizeF(std::max(kLaneDetailPointSize, nameFont.pointSizeF() - 2.5));
+    QFont nameFont = ui::signalNameFont(viewport()->font(), groupHeader);
+    const auto detailFont = ui::captionFont(viewport()->font());
 
     painter.save();
     painter.setClipRect(QRect(0, y, headerWidth_, layout.height));
@@ -21910,9 +22068,14 @@ void WaveCanvas::drawLane(
     painter.fillRect(QRect(0, y, headerWidth_, layout.height), theme.raised);
     const auto cardLeft = groupedMember ? 26 : 6;
     const QRectF card(cardLeft, y + 4, headerWidth_ - cardLeft - 6, layout.height - 8);
-    if (selected || groupHeader) {
+    if (groupHeader) {
+        painter.fillRect(QRect(6,y+4,headerWidth_-12,layout.height-8), theme.panel);
+        painter.setPen(QPen(theme.border,1));
+        painter.drawLine(6,y+layout.height-1,headerWidth_-6,y+layout.height-1);
+    }
+    if (selected || headerHoverLaneId_ == lane.id) {
         painter.setPen(Qt::NoPen);
-        painter.setBrush(selected ? theme.selection : theme.panel);
+        painter.setBrush(selected ? theme.selection : groupHeader ? theme.raised : theme.panel);
         painter.drawRoundedRect(card, 6, 6);
     }
     if (selected) {
@@ -21933,6 +22096,12 @@ void WaveCanvas::drawLane(
         QRectF(groupHeader ? 32 : groupedMember ? 32 : 12, centerY - 10, 20, 20),
         selected || groupHeader ? foreground : theme.mutedText);
     auto nameRight = headerWidth_ - 12;
+    if (!groupHeader && lane.kind != LaneKind::Clock) {
+        const QRect timingRect(headerWidth_-28,centerY-8,16,16);
+        ui::paintIcon(painter, lane.clockDomainId.empty() ? ui::Icon::Async : ui::Icon::Sync,
+            timingRect, foreground);
+        nameRight = timingRect.left()-6;
+    }
     if (groupHeader) {
         const auto disclosure = groupDisclosureRect(lane);
         if (!disclosure.isEmpty()) {
@@ -21971,7 +22140,7 @@ void WaveCanvas::drawLane(
         painter.setFont(detailFont);
         const auto valueWidth = std::clamp(painter.fontMetrics().horizontalAdvance(sampledValue) + 12,
             24, std::max(24, (headerWidth_ - textLeft) / 2));
-        const QRect valueRect(headerWidth_ - 12 - valueWidth, centerY - 10, valueWidth, 20);
+        const QRect valueRect(nameRight - valueWidth, centerY - 10, valueWidth, 20);
         painter.setPen(Qt::NoPen);
         painter.setBrush(theme.panel);
         painter.drawRoundedRect(valueRect, 4, 4);
@@ -21982,9 +22151,10 @@ void WaveCanvas::drawLane(
     }
     painter.setFont(nameFont);
     painter.setPen(foreground);
+    const auto nameHeight = std::max(22,painter.fontMetrics().height()+2);
     const QRect nameRect(
-        textLeft, centerY - 11,
-        std::max(0, nameRight - textLeft), 22);
+        textLeft, centerY - nameHeight/2,
+        std::max(0, nameRight - textLeft), nameHeight);
     painter.drawText(
         nameRect,
         Qt::AlignLeft | Qt::AlignVCenter,
@@ -21995,6 +22165,26 @@ void WaveCanvas::drawLane(
     painter.restore();
 
     if (groupHeader) painter.fillRect(waveformRect, theme.panel);
+    else if (backgroundStyle_.ruling != SignalBackgroundStyle::Ruling::None) {
+        painter.save();
+        painter.setClipRect(waveformRect.adjusted(0, 1, 0, -1));
+        const auto ruling = backgroundStyle_.ruling;
+        painter.setPen(QPen(theme.gridMinor, 1, ruling == SignalBackgroundStyle::Ruling::Ruled
+            ? Qt::DotLine : Qt::SolidLine));
+        if (ruling != SignalBackgroundStyle::Ruling::Crosses) {
+            painter.drawLine(headerWidth_, centerY, viewport()->width(), centerY);
+            if (ruling == SignalBackgroundStyle::Ruling::Graph) {
+                painter.drawLine(headerWidth_, y+layout.height/4, viewport()->width(), y+layout.height/4);
+                painter.drawLine(headerWidth_, y+3*layout.height/4, viewport()->width(), y+3*layout.height/4);
+            }
+        } else {
+            for (const auto x : backgroundMajorGridX_) {
+                painter.drawLine(x-3, centerY, x+3, centerY);
+                painter.drawLine(x, centerY-3, x, centerY+3);
+            }
+        }
+        painter.restore();
+    }
     if (selected) painter.fillRect(waveformRect, canvasSelectionColor());
     painter.setFont(detailFont);
     painter.save();
@@ -22099,10 +22289,9 @@ void WaveCanvas::drawClock(
 
     const auto highY = rect.top() + 12;
     const auto lowY = rect.bottom() - 12;
-    QPen pen(
-        laneColor(lane),
-        2.0,
-        preview ? Qt::DashLine : Qt::SolidLine);
+    const auto style = resolvedSignalStyle(project_, lane, waveformColorScheme(palette()));
+    QPen pen = style.pen(preview);
+    painter.setRenderHint(QPainter::Antialiasing, !style.pixel);
     painter.setPen(pen);
 
     const auto drawOverrides = [&] {
@@ -22153,10 +22342,7 @@ void WaveCanvas::drawClock(
     };
 
     if (static_cast<double>(clock->period) * pixelsPerTick_ < 2.0) {
-        painter.setPen(QPen(
-            laneColor(lane),
-            1.0,
-            preview ? Qt::DashLine : Qt::SolidLine));
+        painter.setPen(style.pen(preview));
         painter.drawLine(rect.left(), (highY + lowY) / 2, rect.right(), (highY + lowY) / 2);
         painter.setPen(canvasTheme().mutedText);
         painter.drawText(rect.adjusted(8, 0, -8, 0), Qt::AlignVCenter, tr("clock density"));
@@ -22187,7 +22373,12 @@ void WaveCanvas::drawClock(
         path.lineTo(fallingX, lowY);
         path.lineTo(nextX, lowY);
     }
-    painter.strokePath(path, painter.pen());
+    if (style.halo) {
+        auto glow = style.color;
+        glow.setAlpha(32);
+        painter.strokePath(path, QPen(glow, style.stroke + 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    }
+    painter.strokePath(path, pen);
     drawOverrides();
 }
 
@@ -22201,43 +22392,16 @@ void WaveCanvas::drawBitSegments(
 {
     const auto highY = rect.top() + 12;
     const auto lowY = rect.bottom() - 12;
-    auto previousY = lowY;
-    auto havePrevious = false;
-    const auto drawInterval = [&](const Tick start, const Tick end, const char rawValue) {
+    const auto style = resolvedSignalStyle(project_, lane, waveformColorScheme(palette()));
+    painter.setRenderHint(QPainter::Antialiasing, !style.pixel);
+    struct Interval { Tick start, end; char value; };
+    std::vector<Interval> intervals;
+    const auto drawInterval = [&](Tick start, Tick end, char value) {
         if (end <= start) return;
-        const auto left = xAtTick(start);
-        const auto right = xAtTick(end);
-        if (right <= left) return;
-        const auto value = rawValue == 'x' ? 'X' : rawValue == 'z' ? 'Z' : rawValue;
-        if (value == 'X' || value == 'Z') {
-            painter.save();
-            QColor fill = value == 'Z' ? canvasTheme().accent : canvasTheme().error;
-            fill.setAlpha(35);
-            painter.fillRect(
-                QRect(left, highY, std::max(1, right - left), lowY - highY),
-                fill);
-            painter.setPen(QPen(
-                value == 'Z' ? canvasTheme().accent : canvasTheme().error,
-                1.25,
-                Qt::DashLine));
-            painter.drawLine(left, (highY + lowY) / 2, right, (highY + lowY) / 2);
-            painter.drawText(
-                QRect(left + 4, highY, std::max(0, right - left - 8), lowY - highY),
-                Qt::AlignCenter,
-                QString(QChar::fromLatin1(value)));
-            painter.restore();
-            havePrevious = false;
-            return;
-        }
-        const auto y = value == '1' ? highY : lowY;
-        painter.setPen(QPen(
-            laneColor(lane),
-            2.0,
-            preview ? Qt::DashLine : Qt::SolidLine));
-        if (havePrevious && previousY != y) painter.drawLine(left, previousY, left, y);
-        painter.drawLine(left, y, right, y);
-        previousY = y;
-        havePrevious = true;
+        value = value == 'x' ? 'X' : value == 'z' ? 'Z' : value;
+        if (!intervals.empty() && intervals.back().end == start && intervals.back().value == value)
+            intervals.back().end = end;
+        else intervals.push_back({start,end,value});
     };
 
     auto iterator = std::lower_bound(
@@ -22259,6 +22423,39 @@ void WaveCanvas::drawBitSegments(
         }
     }
     if (cursor < visibleEnd) drawInterval(cursor, visibleEnd, '0');
+    const auto binary = [](char value) { return value == '0' || value == '1'; };
+    const auto rampAt = [&](std::size_t index) {
+        if (!style.trapezoid || index == 0 || index >= intervals.size()
+            || !binary(intervals[index-1].value) || !binary(intervals[index].value)) return 0.0;
+        const auto before = double(xAtTick(intervals[index-1].end) - xAtTick(intervals[index-1].start));
+        const auto after = double(xAtTick(intervals[index].end) - xAtTick(intervals[index].start));
+        return std::max(0.0, std::min({style.ramp, before*.22, after*.22}));
+    };
+    for (std::size_t i=0; i<intervals.size(); ++i) {
+        const auto& interval = intervals[i];
+        const auto left = xAtTick(interval.start), right = xAtTick(interval.end);
+        if (right <= left) continue;
+        if (!binary(interval.value)) {
+            painter.fillRect(QRect(left, highY, right-left, lowY-highY), style.fill);
+            painter.setPen(QPen(interval.value == 'Z' ? canvasTheme().accent : canvasTheme().error, 1.25, Qt::DashLine));
+            painter.drawLine(left, (highY+lowY)/2, right, (highY+lowY)/2);
+            if (right-left > 20) painter.drawText(QRect(left,highY,right-left,lowY-highY), Qt::AlignCenter, QString(QChar::fromLatin1(interval.value)));
+            continue;
+        }
+        const auto y = interval.value == '1' ? highY : lowY;
+        const auto ramp = rampAt(i);
+        QPainterPath path;
+        if (i > 0 && binary(intervals[i-1].value) && intervals[i-1].value != interval.value) {
+            path.moveTo(left-ramp, intervals[i-1].value == '1' ? highY : lowY);
+            path.lineTo(left+ramp, y);
+        } else path.moveTo(left, y);
+        path.lineTo(right-rampAt(i+1), y);
+        if (style.halo) {
+            auto glow = style.color; glow.setAlpha(32);
+            painter.strokePath(path, QPen(glow, style.stroke+3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        }
+        painter.strokePath(path, style.pen(preview));
+    }
 }
 
 void WaveCanvas::drawBusSegments(
@@ -22272,7 +22469,10 @@ void WaveCanvas::drawBusSegments(
     const auto top = rect.top() + 10;
     const auto bottom = rect.bottom() - 10;
     const auto middle = (top + bottom) / 2;
-    const auto drawUndefined = [this, &painter, top, bottom, middle](
+    const auto style = resolvedSignalStyle(project_, lane, waveformColorScheme(palette()));
+    const auto ink = waveformTheme(style.fill.lightness()<128 ? WaveformColorScheme::Dark : WaveformColorScheme::Light).text;
+    painter.setRenderHint(QPainter::Antialiasing, !style.pixel);
+    const auto drawUndefined = [this, &painter, &style, ink, top, bottom, middle](
                                    const Tick start,
                                    const Tick end,
                                    const QString& label,
@@ -22282,43 +22482,56 @@ void WaveCanvas::drawBusSegments(
         const auto right = xAtTick(end);
         if (right <= left) return;
         const auto color = highImpedance ? canvasTheme().accent : canvasTheme().error;
-        auto fill = color;
-        fill.setAlpha(24);
-        painter.fillRect(QRect(left, top, std::max(1, right - left), bottom - top), fill);
+        painter.fillRect(QRect(left, top, std::max(1, right - left), bottom - top), style.fill);
         painter.setPen(QPen(color, 1.5, Qt::DashLine));
         painter.drawLine(left, middle, right, middle);
         painter.setPen(QPen(color, 1.0, Qt::DashLine));
         painter.drawLine(left, top, left, bottom);
         painter.drawLine(right, top, right, bottom);
         if (right - left > 24) {
-            painter.setPen(color.lighter(135));
+            painter.setPen(ink);
             painter.drawText(
                 QRect(left + 4, top, right - left - 8, bottom - top),
                 Qt::AlignCenter,
                 label);
         }
     };
-    const auto drawDontCare = [this, &painter, top, bottom](
+    const auto drawSpecial = [this, &painter, &style, ink, top, bottom, middle, preview](
                                   const Tick start,
-                                  const Tick end) {
+                                  const Tick end, const bool reserved) {
         if (end <= start) return;
         const auto left = xAtTick(start);
         const auto right = xAtTick(end);
         if (right <= left) return;
-        const QColor color(148, 158, 171);
-        auto fill = color;
-        fill.setAlpha(42);
-        painter.fillRect(
-            QRect(left, top, std::max(1, right - left), bottom - top),
-            QBrush(fill, Qt::BDiagPattern));
-        painter.setPen(QPen(color, 1.25, Qt::DotLine));
-        painter.drawRect(QRect(left, top, std::max(1, right - left), bottom - top));
-        if (right - left > 44) {
-            painter.setPen(color.lighter(145));
-            painter.drawText(
-                QRect(left + 4, top, right - left - 8, bottom - top),
-                Qt::AlignCenter,
-                tr("DON'T CARE"));
+        const auto cut = std::min(6, (right-left)/4);
+        QPainterPath path;
+        if (reserved) {
+            path.moveTo(left, top+5); path.lineTo(left+cut, top+5); path.lineTo(left+cut, top);
+            path.lineTo(right-cut, top); path.lineTo(right-cut, top+5); path.lineTo(right, top+5);
+            path.lineTo(right, bottom-5); path.lineTo(right-cut, bottom-5); path.lineTo(right-cut, bottom);
+            path.lineTo(left+cut, bottom); path.lineTo(left+cut, bottom-5); path.lineTo(left, bottom-5);
+        } else {
+            path.moveTo(left,middle); path.lineTo(left+cut,top); path.lineTo(right-cut,top);
+            path.lineTo(right,middle); path.lineTo(right-cut,bottom); path.lineTo(left+cut,bottom);
+        }
+        path.closeSubpath();
+        painter.fillPath(path, style.fill);
+        if (reserved) {
+            auto hatch = style.color; hatch.setAlpha(70);
+            painter.fillPath(path, QBrush(hatch, Qt::BDiagPattern));
+        }
+        auto pen = style.pen(preview);
+        if (!reserved) pen.setStyle(Qt::DashLine);
+        painter.strokePath(path, pen);
+        if (reserved && right-left > 24) {
+            painter.setPen(QPen(style.color, 1));
+            painter.drawLine(left+10, top+1, left+10, bottom-1);
+            painter.drawLine(right-10, top+1, right-10, bottom-1);
+        }
+        if (right-left > 30) {
+            const QRect symbol((left+right)/2-9,middle-9,18,18);
+            painter.fillRect(symbol.adjusted(-2,-2,2,2),style.fill);
+            ui::paintIcon(painter,reserved ? ui::Icon::Reserved : ui::Icon::DontCare,symbol,ink);
         }
     };
 
@@ -22348,8 +22561,8 @@ void WaveCanvas::drawBusSegments(
         const auto presetLabel = preset.empty()
             ? QString{}
             : busPresetDisplayLabel(preset);
-        if (preset == "dont-care") {
-            drawDontCare(segmentStart, segmentEnd);
+        if (preset == "dont-care" || preset == "reserved") {
+            drawSpecial(segmentStart, segmentEnd, preset == "reserved");
             cursor = std::max(cursor, segmentEnd);
             continue;
         }
@@ -22367,25 +22580,41 @@ void WaveCanvas::drawBusSegments(
 
         const auto left = xAtTick(segmentStart);
         const auto right = xAtTick(segmentEnd);
-        const auto bevel = std::min(7, std::max(0, (right - left) / 3));
+        const auto bevel = std::min(style.bevel, std::max(0.0, (right - left) / 3.0));
         QPainterPath path;
-        path.moveTo(left, middle);
-        path.lineTo(left + bevel, top);
-        path.lineTo(right - bevel, top);
-        path.lineTo(right, middle);
-        path.lineTo(right - bevel, bottom);
-        path.lineTo(left + bevel, bottom);
+        const QPolygonF polygon{{double(left),double(middle)}, {left+bevel,double(top)},
+            {right-bevel,double(top)}, {double(right),double(middle)},
+            {right-bevel,double(bottom)}, {left+bevel,double(bottom)}};
+        if (style.rounded) {
+            for (int i=0;i<polygon.size();++i) {
+                const auto corner = polygon[i];
+                const auto previous = polygon[(i+polygon.size()-1)%polygon.size()];
+                const auto next = polygon[(i+1)%polygon.size()];
+                const auto incoming = QLineF(corner,previous).length();
+                const auto outgoing = QLineF(corner,next).length();
+                const auto radius = std::min({3.5,incoming/2,outgoing/2});
+                const auto before = incoming > 0 ? corner+(previous-corner)*(radius/incoming) : corner;
+                const auto after = outgoing > 0 ? corner+(next-corner)*(radius/outgoing) : corner;
+                if (i==0) path.moveTo(before); else path.lineTo(before);
+                path.quadTo(corner,after);
+            }
+        } else path.addPolygon(polygon);
         path.closeSubpath();
-        QColor fill = laneColor(lane);
-        fill.setAlpha(35);
-        painter.fillPath(path, fill);
-        painter.setPen(QPen(
-            laneColor(lane),
-            1.5,
-            preview ? Qt::DashLine : Qt::SolidLine));
+        painter.fillPath(path, style.fill);
+        painter.setPen(style.pen(preview));
         painter.strokePath(path, painter.pen());
+        if (style.doubleOutline) {
+            painter.setPen(QPen(style.color,.7));
+            painter.drawLine(QPointF(left+bevel+2,top+4),QPointF(right-bevel-2,top+4));
+            painter.drawLine(QPointF(left+bevel+2,bottom-4),QPointF(right-bevel-2,bottom-4));
+        }
+        if (style.facets) {
+            painter.setPen(QPen(style.color,.8));
+            painter.drawLine(QPointF(left+bevel,top),QPointF(left+bevel,bottom));
+            painter.drawLine(QPointF(right-bevel,top),QPointF(right-bevel,bottom));
+        }
         if (right - left > 28) {
-            painter.setPen(canvasTheme().text);
+            painter.setPen(ink);
             painter.drawText(
                 QRect(left + bevel + 4, top, right - left - 2 * bevel - 8, bottom - top),
                 Qt::AlignCenter,

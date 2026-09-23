@@ -207,6 +207,10 @@ target_link_libraries(waveautomation
 wave_enable_warnings(waveautomation)
 
 add_library(wavewidgets SHARED
+    src/app/quick_waveform.cpp
+    src/app/quick_waveform.h
+    src/app/signal_style.cpp
+    src/app/signal_style.h
     src/app/ui_controls.cpp
     src/app/ui_feedback.cpp
     src/app/ui_icons.cpp

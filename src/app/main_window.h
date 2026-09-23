@@ -108,6 +108,10 @@ signals:
         const QString& kind);
 
 protected:
+    void resizeEvent(QResizeEvent* event) override;
+#ifdef Q_OS_WIN
+    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+#endif
     void closeEvent(QCloseEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -448,8 +452,6 @@ private:
     QAction* removeSimulationCheckAction_{nullptr};
     QProgressBar* traceProgress_{nullptr};
     QLabel* traceSummary_{nullptr};
-    QLabel* saveStateLabel_{nullptr};
-    QLabel* pointerStatusLabel_{nullptr};
     QLabel* scenarioSelectorLabel_{nullptr};
     QComboBox* scenarioSelector_{nullptr};
     QAction* scenarioSelectorLabelAction_{nullptr};
@@ -479,6 +481,9 @@ private:
     QWidget* goToTimeWidget_{nullptr};
     QLabel* goToTimeLabel_{nullptr};
     QLineEdit* goToTimeEdit_{nullptr};
+    QComboBox* goToTimeUnit_{nullptr};
+    QTimer* windowFitTimer_{nullptr};
+    [[nodiscard]] QString timeInputNumber(Tick tick) const;
     QLabel* goToTimeRangeLabel_{nullptr};
     QToolButton* goToTimeOtherEdgeButton_{nullptr};
     QToolButton* goToTimeGoButton_{nullptr};

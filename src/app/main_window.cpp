@@ -1,5 +1,6 @@
 #include "ui_controls.h"
 #include "ElaMenu.h"
+#include "ElaAppBar.h"
 #include "main_window.h"
 
 #include "wave/export.h"
@@ -14,6 +15,8 @@
 #include "trace_signal_browser.h"
 #include "wave_canvas.h"
 #include "waveform_theme.h"
+#include "signal_style.h"
+#include "quick_waveform.h"
 
 #include <QAction>
 #include <QApplication>
@@ -58,6 +61,7 @@
 #include <QSaveFile>
 #include <QScopedValueRollback>
 #include <QScrollBar>
+#include <QResizeEvent>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
@@ -865,7 +869,11 @@ std::optional<Lane> promptLaneProperties(
         initial.kind == LaneKind::Group
             ? QObject::tr("Group properties")
             : QObject::tr("Lane properties"));
-    auto* layout = new ui::FormLayout(&dialog);
+    auto* dialogLayout = new QVBoxLayout(&dialog);
+    auto* columns = new QHBoxLayout;
+    dialogLayout->addLayout(columns);
+    auto* layout = new ui::FormLayout;
+    columns->addLayout(layout,1);
     auto* stableId = ui::lineEdit(QString::fromStdString(initial.id));
     stableId->setObjectName(QStringLiteral("LanePropertiesStableId"));
     stableId->setReadOnly(true);
@@ -912,7 +920,7 @@ std::optional<Lane> promptLaneProperties(
     enumMap->setPlaceholderText(QObject::tr("IDLE=0; BUSY=1"));
     auto* clock = ui::comboBox();
     clock->setObjectName(QStringLiteral("LanePropertiesClockCombo"));
-    clock->addItem(QObject::tr("<none>"), QString{});
+    clock->addItem(QObject::tr("Asynchronous (no clock)"), QString{});
     for (const auto& domain : project.clockDomains) {
         clock->addItem(
             QString::fromStdString(domain.name)
@@ -978,16 +986,19 @@ std::optional<Lane> promptLaneProperties(
     layout->addRow(QObject::tr("Color"), ui::colorField(color, &dialog));
     layout->addRow(QObject::tr("Height"), height);
     layout->addRow(QObject::tr("Visible"), visible);
-    layout->addRow(compatibility);
+    auto* styleEditor = new SignalStyleEditor(signalStyleSettings(initial.extensions), true, &dialog);
+    if (initial.kind != LaneKind::Group) columns->addWidget(styleEditor,1);
+    else styleEditor->hide();
+    dialogLayout->addWidget(compatibility);
     auto* error = new QLabel;
     error->setObjectName(QStringLiteral("LanePropertiesError"));
     error->setWordWrap(true);
     error->setProperty("waveState", QStringLiteral("error"));
     error->hide();
-    layout->addRow(error);
+    dialogLayout->addWidget(error);
     auto* buttons = ui::buttonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    layout->addRow(buttons);
+    dialogLayout->addWidget(buttons);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
     const auto updateControls = [=] {
@@ -1001,6 +1012,10 @@ std::optional<Lane> promptLaneProperties(
         enumMap->setEnabled(selectedKind == LaneKind::Enum);
         clock->setEnabled(!groupValue);
         group->setEnabled(!groupValue);
+        layout->setRowVisible(kind,!groupValue || !lockKind);
+        for (auto* field : std::initializer_list<QWidget*>{width,signedValue,radix,enumMap,clock,group})
+            layout->setRowVisible(field,!groupValue);
+        styleEditor->setVisible(!groupValue);
     };
     QObject::connect(kind, &QComboBox::currentIndexChanged, &dialog, [=](int) {
         error->hide();
@@ -1119,6 +1134,14 @@ std::optional<Lane> promptLaneProperties(
             result.color = parsedColor.name(QColor::HexRgb).toStdString();
             result.height = height->value();
             result.visible = visible->isChecked();
+            if (result.kind != LaneKind::Group) {
+                if (!styleEditor->valid()) {
+                    showError(QObject::tr("Use line width 0 (preset) or 0.75–4, and a valid fill color."), styleEditor);
+                    return;
+                }
+                if (styleEditor->settings() != signalStyleSettings(initial.extensions))
+                    storeSignalStyleSettings(result.extensions, styleEditor->settings());
+            }
             if (findLane(scenario, initial.id)) {
                 try {
                     [[maybe_unused]] const ChangeLaneCommand validation(
@@ -1337,7 +1360,7 @@ void MainWindow::initializeProjectFileMonitoring()
         this,
         &MainWindow::tryApplyPendingExternalProjectUpdate);
 
-    externalProjectConflictBar_ = new QFrame(statusBar());
+    externalProjectConflictBar_ = new QFrame(centralWidget());
     externalProjectConflictBar_->setObjectName(
         QStringLiteral("ExternalProjectConflictBar"));
     externalProjectConflictBar_->setFrameShape(QFrame::StyledPanel);
@@ -1391,7 +1414,8 @@ void MainWindow::initializeProjectFileMonitoring()
         &QPushButton::clicked,
         this,
         &MainWindow::saveProjectAs);
-    statusBar()->addWidget(externalProjectConflictBar_, 1);
+    if (auto* layout = qobject_cast<QVBoxLayout*>(centralWidget()->layout()))
+        layout->insertWidget(0, externalProjectConflictBar_);
     externalProjectConflictBar_->hide();
     resetProjectFileMonitoring();
 }
@@ -1930,6 +1954,10 @@ MainWindow::MainWindow(
     resize(1440, 900);
 
     canvas_ = new WaveCanvas(this);
+    windowFitTimer_ = new QTimer(this);
+    windowFitTimer_->setSingleShot(true);
+    windowFitTimer_->setInterval(100);
+    connect(windowFitTimer_, &QTimer::timeout, canvas_, &WaveCanvas::fitScenario);
     compareTraceCanvas_ = new TraceCanvas(this);
     if (simulationResultMode_) {
         simulationResultSplitter_ = new QSplitter(Qt::Vertical, this);
@@ -2177,9 +2205,17 @@ MainWindow::MainWindow(
         simulationResultSplitter_->setStretchFactor(1, 1);
         simulationResultSplitter_->setStretchFactor(2, 0);
         simulationResultSplitter_->setSizes({340, 360, 170});
-        setCentralWidget(simulationResultSplitter_);
+        auto* workspace = new QWidget(this);
+        auto* layout = new QVBoxLayout(workspace);
+        layout->setContentsMargins(0,0,0,0); layout->setSpacing(0);
+        layout->addWidget(simulationResultSplitter_,1);
+        setCentralWidget(workspace);
     } else {
-        setCentralWidget(canvas_);
+        auto* workspace = new QWidget(this);
+        auto* layout = new QVBoxLayout(workspace);
+        layout->setContentsMargins(0,0,0,0); layout->setSpacing(0);
+        layout->addWidget(canvas_,1);
+        setCentralWidget(workspace);
         compareTraceCanvas_->hide();
     }
     canvas_->installEventFilter(this);
@@ -2282,10 +2318,7 @@ MainWindow::MainWindow(
         [this](const QString& message) {
             updateWaveContext();
             scheduleActiveScenarioLocationMemory();
-            if (pointerStatusLabel_) {
-                pointerStatusLabel_->setText(message);
-                pointerStatusLabel_->setToolTip(message);
-            }
+            setProperty("pointerStatus", message);
         });
     connect(
         compareTraceCanvas_,
@@ -2334,10 +2367,46 @@ MainWindow::MainWindow(
 
     createActions();
     ui::addAppearanceMenu(this);
+    auto* styleAction = ui::addMenu(menuBar(), tr("&View"))->addAction(tr("Signal and background styles…"));
+    styleAction->setObjectName(QStringLiteral("SignalStyleDefaultsAction"));
+    connect(styleAction, &QAction::triggered, this, [this] {
+        if (!commitPendingEdits()) return;
+        ui::Dialog dialog(this);
+        dialog.setObjectName(QStringLiteral("SignalStyleDefaultsDialog"));
+        dialog.setWindowTitle(tr("Signal and background styles"));
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* editor = new SignalStyleEditor(signalStyleSettings(project_.extensions), false, &dialog);
+        layout->addWidget(editor);
+        auto* error = ui::text(tr("Use line width 0 (preset) or 0.75–4, and a valid fill color."), &dialog);
+        error->setProperty("waveState", "error"); error->hide(); layout->addWidget(error);
+        auto* buttons = ui::buttonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+            if (editor->valid()) dialog.accept(); else error->show();
+        });
+        if (dialog.exec() != QDialog::Accepted) return;
+        class StyleCommand final : public EditCommand {
+        public:
+            StyleCommand(Project& project, const SignalStyleSettings& settings)
+                : project_(project), before_(project.extensions), after_(before_) { storeSignalStyleSettings(after_,settings); }
+            void redo() override { project_.extensions = after_; }
+            void undo() override { project_.extensions = before_; }
+            std::string description() const override { return "Change signal style defaults"; }
+            bool hasEffect() const noexcept override { return before_ != after_; }
+        private:
+            Project& project_;
+            JsonExtensions before_, after_;
+        };
+        if (commandStack_.execute(std::make_unique<StyleCommand>(project_,editor->settings()))) {
+            canvas_->refreshModel(); markEdited();
+        }
+    });
     if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
         rememberProjectPath(projectFile_);
     }
     createToolBars();
+    ui::installTitleMenus(this);
     if (simulationResultMode_) {
         if (auto* waveformToolbar = findChild<QToolBar*>(
                 QStringLiteral("WaveformToolbar"))) {
@@ -2579,19 +2648,14 @@ MainWindow::MainWindow(
         this,
         &MainWindow::finishAutosave);
     initializeProjectFileMonitoring();
-    pointerStatusLabel_ = ui::text(this);
-    pointerStatusLabel_->setObjectName(QStringLiteral("PointerStatusLabel"));
-    pointerStatusLabel_->setMinimumWidth(210);
-    pointerStatusLabel_->setMaximumWidth(520);
-    pointerStatusLabel_->setText(tr("Pointer: move over a signal"));
-    pointerStatusLabel_->setTextInteractionFlags(Qt::NoTextInteraction);
-    statusBar()->addPermanentWidget(pointerStatusLabel_, 1);
-    pointerStatusLabel_->setVisible(!simulationResultMode_);
-    saveStateLabel_ = new QLabel(this);
-    saveStateLabel_->setObjectName(QStringLiteral("SaveStateLabel"));
-    saveStateLabel_->setMinimumWidth(118);
-    saveStateLabel_->setAlignment(Qt::AlignCenter);
-    statusBar()->addPermanentWidget(saveStateLabel_);
+    statusBar()->hide();
+    connect(statusBar(), &QStatusBar::messageChanged, this, [this](const QString& message) {
+        static const QRegularExpression important(
+            QStringLiteral("cannot|failed|invalid|unavailable|recovery snapshot|externally updated|external/CLI"),
+            QRegularExpression::CaseInsensitiveOption);
+        if (important.match(message).hasMatch())
+            ui::notify(this, ui::Notice::Warning, tr("Waveform"), message, 7000);
+    });
     updateCommandActions();
     updateWindowTitle();
     if (simulationResultMode_) {
@@ -2618,6 +2682,24 @@ MainWindow::MainWindow(
             0, this, &MainWindow::loadFirstTraceReference);
     }
 }
+
+void MainWindow::resizeEvent(QResizeEvent* event)
+{
+    QMainWindow::resizeEvent(event);
+    if (!parentWidget() && windowFitTimer_ && isVisible() && event->oldSize().isValid())
+        windowFitTimer_->start();
+}
+
+#ifdef Q_OS_WIN
+bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result)
+{
+    if (auto* bar = findChild<ElaAppBar*>(QStringLiteral("WaveTitleBar"), Qt::FindDirectChildrenOnly)) {
+        const auto handled = bar->takeOverNativeEvent(eventType,message,result);
+        if (handled >= 0) return bool(handled);
+    }
+    return QMainWindow::nativeEvent(eventType,message,result);
+}
+#endif
 
 MainWindow::~MainWindow()
 {
@@ -4497,6 +4579,24 @@ void MainWindow::showGoToTime()
     }
 }
 
+QString MainWindow::timeInputNumber(const Tick tick) const
+{
+    const auto psPerTick = project_.timeBase.picosecondsPerTick;
+    if (tick < 0 || psPerTick <= 0 || tick > std::numeric_limits<Tick>::max()/psPerTick)
+        return QString::fromStdString(formatTick(tick,project_.timeBase));
+    const auto unit = goToTimeUnit_ ? goToTimeUnit_->currentText() : QStringLiteral("ns");
+    const qint64 scale = unit == "ps" ? 1 : unit == "us" ? 1'000'000 : unit == "ms" ? 1'000'000'000 : 1'000;
+    const auto ps = tick*psPerTick;
+    auto result = QString::number(ps/scale);
+    if (const auto remainder = ps%scale; remainder != 0) {
+        const auto digits = unit == "ps" ? 0 : unit == "us" ? 6 : unit == "ms" ? 9 : 3;
+        auto fraction = QString::number(remainder).rightJustified(digits,QLatin1Char('0'));
+        while (fraction.endsWith(QLatin1Char('0'))) fraction.chop(1);
+        result += QLatin1Char('.') + fraction;
+    }
+    return result;
+}
+
 void MainWindow::syncGoToTimeEditor(const bool replaceInput)
 {
     if (!canvas_ || !goToTimeLabel_ || !goToTimeEdit_
@@ -4538,7 +4638,7 @@ void MainWindow::syncGoToTimeEditor(const bool replaceInput)
             goToTimeEdit_->setAccessibleName(tr("Exact selected range width"));
             goToTimeEdit_->setToolTip(
                 tr("Set a positive width from the fixed anchor using decimal ps, ns, us, or ms, an integer tick, or cycle N"));
-            if (replaceInput) goToTimeEdit_->setText(format(width));
+            if (replaceInput) goToTimeEdit_->setText(timeInputNumber(width));
             goToTimeRangeLabel_->setText(
                 towardEnd
                     ? tr("Anchor %1 · to End").arg(format(*anchor))
@@ -4565,7 +4665,7 @@ void MainWindow::syncGoToTimeEditor(const bool replaceInput)
             goToTimeEdit_->setAccessibleName(tr("Exact selected range edge"));
             goToTimeEdit_->setToolTip(
                 tr("Set the active range edge using decimal ps, ns, us, or ms, an integer tick, or cycle N"));
-            if (replaceInput) goToTimeEdit_->setText(format(*active));
+            if (replaceInput) goToTimeEdit_->setText(timeInputNumber(*active));
             goToTimeRangeLabel_->setText(
                 tr("Anchor %1 · End %2")
                     .arg(format(*anchor))
@@ -4589,7 +4689,7 @@ void MainWindow::syncGoToTimeEditor(const bool replaceInput)
         goToTimeEdit_->setAccessibleName(tr("Exact timeline position"));
         goToTimeEdit_->setToolTip(
             tr("Enter a decimal ps, ns, us, or ms value, an integer tick, or a clock cycle within the scenario"));
-        if (replaceInput) goToTimeEdit_->setText(format(canvas_->cursorTick()));
+        if (replaceInput) goToTimeEdit_->setText(timeInputNumber(canvas_->cursorTick()));
         goToTimeRangeLabel_->setText(
             tr("%1–%2").arg(format(0)).arg(format(scenario->duration)));
         goToTimeRangeLabel_->setAccessibleName(tr("Available timeline range"));
@@ -4667,7 +4767,9 @@ void MainWindow::submitGoToTime()
         clock = &project_.clockDomains.front();
     }
 
-    const auto input = goToTimeEdit_->text().trimmed();
+    auto input = goToTimeEdit_->text().trimmed();
+    static const QRegularExpression number(QStringLiteral("^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$"));
+    if (number.match(input).hasMatch()) input += QLatin1Char(' ') + goToTimeUnit_->currentText();
     std::optional<std::int64_t> cycle;
     QString error;
     const auto editingWidth = editingRange && goToTimeEditsRangeWidth_;
@@ -4686,6 +4788,7 @@ void MainWindow::submitGoToTime()
               error);
     const auto showError = [this](const QString& message) {
         setSemanticState(goToTimeEdit_, QStringLiteral("error"));
+        goToTimeEdit_->setToolTip(message);
         goToTimeEdit_->setFocus(Qt::OtherFocusReason);
         statusBar()->showMessage(message, 6'000);
     };
@@ -4809,7 +4912,7 @@ void MainWindow::submitGoToTime()
     setSemanticState(goToTimeEdit_, {});
     {
         const QSignalBlocker blocker(goToTimeEdit_);
-        goToTimeEdit_->setText(format(*tick));
+        goToTimeEdit_->setText(timeInputNumber(*tick));
     }
     goToTimeEdit_->setFocus(Qt::OtherFocusReason);
     goToTimeEdit_->selectAll();
@@ -5859,9 +5962,7 @@ void MainWindow::addQuickLane(const LaneKind kind)
         clockLabels,
         clockIds,
         QString::fromStdString(lane.clockDomainId));
-    statusBar()->showMessage(
-        tr("Name the new signal, then press Enter · Esc cancels"),
-        6'000);
+    statusBar()->clearMessage();
 }
 
 void MainWindow::completeQuickLaneSetup(
@@ -5945,9 +6046,6 @@ void MainWindow::completeQuickLaneSetup(
                 replacement.width = width;
             }
             auto selectedClockId = clockId.toStdString();
-            if (selectedClockId.empty() && project_.clockDomains.size() == 1) {
-                selectedClockId = project_.clockDomains.front().id;
-            }
             if (!selectedClockId.empty() && !findClock(project_, selectedClockId)) {
                 canvas_->showQuickLaneSetupError(tr("Select an available clock."));
                 return;
@@ -7702,7 +7800,11 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         dialog.setObjectName(QStringLiteral("QuickLaneParametersDialog"));
         dialog.setWindowTitle(
             lane->kind == LaneKind::Bus ? tr("Bus parameters") : tr("Bit parameters"));
-        auto* layout = new ui::FormLayout(&dialog);
+        auto* root = new QVBoxLayout(&dialog);
+        auto* columns = new QHBoxLayout;
+        root->addLayout(columns);
+        auto* layout = new ui::FormLayout;
+        columns->addLayout(layout,1);
         auto* color = ui::lineEdit(QString::fromStdString(lane->color));
         color->setObjectName(QStringLiteral("LaneColorEdit"));
         auto* height = ui::spinBox();
@@ -7711,7 +7813,7 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         height->setValue(lane->height);
         auto* clock = ui::comboBox();
         clock->setObjectName(QStringLiteral("LaneClockDomainCombo"));
-        clock->addItem(tr("None"), QString{});
+        clock->addItem(tr("Asynchronous (no clock)"), QString{});
         for (const auto& domain : project_.clockDomains) {
             clock->addItem(
                 QString::fromStdString(domain.name),
@@ -7722,6 +7824,8 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         layout->addRow(tr("Color"), ui::colorField(color, &dialog));
         layout->addRow(tr("Height"), height);
         layout->addRow(tr("Clock domain"), clock);
+        auto* styleEditor = new SignalStyleEditor(signalStyleSettings(lane->extensions),true,&dialog);
+        columns->addWidget(styleEditor,1);
 
         QSpinBox* width = nullptr;
         QCheckBox* signedValue = nullptr;
@@ -7752,17 +7856,17 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         error->setWordWrap(true);
         error->setProperty("waveState", QStringLiteral("error"));
         error->hide();
-        layout->addRow(error);
+        root->addWidget(error);
         auto* buttons = ui::buttonBox(
             QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-        layout->addRow(buttons);
+        root->addWidget(buttons);
         QColor parsedColor;
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         connect(
             buttons,
             &QDialogButtonBox::accepted,
             &dialog,
-            [color, error, &dialog, &parsedColor] {
+            [color, error, styleEditor, &dialog, &parsedColor] {
                 const QColor candidate(color->text().trimmed());
                 if (!candidate.isValid()) {
                     error->setText(
@@ -7773,6 +7877,10 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
                     return;
                 }
                 parsedColor = candidate;
+                if (!styleEditor->valid()) {
+                    error->setText(tr("Use line width 0 (preset) or 0.75–4, and a valid fill color."));
+                    error->show(); return;
+                }
                 error->hide();
                 dialog.accept();
             });
@@ -7782,6 +7890,8 @@ void MainWindow::editLaneKeyParameters(const QString& laneId)
         replacement.color = parsedColor.name(QColor::HexRgb).toStdString();
         replacement.height = height->value();
         replacement.clockDomainId = clock->currentData().toString().toStdString();
+        if (styleEditor->settings() != signalStyleSettings(lane->extensions))
+            storeSignalStyleSettings(replacement.extensions,styleEditor->settings());
         if (lane->kind == LaneKind::Bus) {
             replacement.width = static_cast<std::uint32_t>(width->value());
             replacement.isSigned = signedValue->isChecked();
@@ -11727,6 +11837,7 @@ void MainWindow::createToolBars()
 
     goToTimeWidget_ = new QFrame(editBar);
     goToTimeWidget_->setObjectName(QStringLiteral("GoToTimeBar"));
+    goToTimeWidget_->setSizePolicy(QSizePolicy::Maximum,QSizePolicy::Preferred);
     auto* goToTimeLayout = new QHBoxLayout(goToTimeWidget_);
     goToTimeLayout->setContentsMargins(0, 0, 0, 0);
     goToTimeLayout->setSpacing(4);
@@ -11744,11 +11855,19 @@ void MainWindow::createToolBars()
     goToTimeEdit_->setToolTip(
         tr("Enter a decimal ps, ns, us, or ms value, an integer tick, or a clock cycle within the scenario"));
     goToTimeEdit_->setClearButtonEnabled(true);
-    goToTimeEdit_->setMinimumWidth(140);
-    goToTimeEdit_->setMaximumWidth(180);
-    goToTimeEdit_->addAction(ui::icon(ui::Icon::GoTo, goToTimeEdit_), QLineEdit::LeadingPosition);
+    goToTimeEdit_->setFixedWidth(94);
     goToTimeEdit_->installEventFilter(this);
     goToTimeLayout->addWidget(goToTimeEdit_);
+    goToTimeUnit_ = ui::comboBox(goToTimeWidget_);
+    goToTimeUnit_->setObjectName(QStringLiteral("GoToTimeUnit"));
+    goToTimeUnit_->setAccessibleName(tr("Time unit"));
+    goToTimeUnit_->addItems({"ps","ns","us","ms"});
+    goToTimeUnit_->setCurrentText("ns");
+    goToTimeUnit_->setFixedWidth(66);
+    goToTimeLayout->addWidget(goToTimeUnit_);
+    connect(goToTimeUnit_, &QComboBox::currentIndexChanged, this, [this] {
+        if (!goToTimeEdit_->isModified()) syncGoToTimeEditor(true);
+    });
 
     goToTimeRangeLabel_ = ui::text(QStringLiteral("0 ps–0 ps"), goToTimeWidget_);
     goToTimeRangeLabel_->setObjectName(QStringLiteral("GoToTimeRangeLabel"));
@@ -11859,7 +11978,6 @@ void MainWindow::createToolBars()
                 closeGoToTime(false);
             }
         });
-    editBar->addSeparator();
     auto* zoomInAction = editBar->addAction(
         ui::icon(ui::Icon::ZoomIn, this),
         tr("Zoom in"));
@@ -11883,6 +12001,30 @@ void MainWindow::createToolBars()
     fitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
     fitAction->setShortcutContext(Qt::WindowShortcut);
     fitAction->setToolTip(tr("Fit the complete scenario"));
+    const auto* firstAction = editBar->actions().front();
+    for (auto* action : {zoomInAction,zoomOutAction,fitAction}) {
+        editBar->removeAction(action);
+        editBar->insertAction(const_cast<QAction*>(firstAction),action);
+    }
+    auto* patternAction = editBar->addAction(ui::icon(ui::Icon::WavePattern,this),tr("Quick Bit waveform"));
+    patternAction->setObjectName(QStringLiteral("QuickWaveformAction"));
+    patternAction->setToolTip(tr("Preview a binary sequence and drag the confirmed fragment onto a Bit signal"));
+    connect(patternAction,&QAction::triggered,this,[this] {
+        if (!commitPendingEdits()) return;
+        if (auto* existing = findChild<QWidget*>(QStringLiteral("QuickWaveformComposer"))) {
+            existing->show(); existing->raise(); return;
+        }
+        const auto* scenario = activeScenario();
+        const auto* lane = scenario ? findLane(*scenario,canvas_->selectedLaneId().toStdString()) : nullptr;
+        const auto* clock = lane ? findClock(project_,lane->clockDomainId) : nullptr;
+        const auto step = clock && clock->isValid() ? clock->period
+            : toTicks(10,TimeUnit::Nanosecond,project_.timeBase).value_or(Tick{1});
+        createQuickWaveformComposer(project_.timeBase,step,clock && clock->isValid(),this);
+    });
+    auto* spacer = new QWidget(editBar);
+    spacer->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Preferred);
+    editBar->addWidget(spacer);
+    editBar->addWidget(canvas_->takeDurationControl(editBar));
     connect(fitAction, &QAction::triggered, this, [this] {
         if (canvas_->hasExplicitRangeSelection()) {
             canvas_->fitSelection();
@@ -12813,8 +12955,6 @@ void MainWindow::updateWindowTitle()
         tr("%1%2 — Wave Workbench")
             .arg(displayName)
             .arg(dirty_ ? QStringLiteral(" *") : QString{}));
-    if (!saveStateLabel_) return;
-
     QString state;
     QString semanticState;
     if (recoveryLoaded_) {
@@ -12832,12 +12972,9 @@ void MainWindow::updateWindowTitle()
         state = tr("Saved");
         semanticState = QStringLiteral("success");
     }
-    saveStateLabel_->setText(state);
-    setSemanticState(saveStateLabel_, semanticState);
-    saveStateLabel_->setToolTip(
-        projectFile_.isEmpty()
-            ? tr("This waveform has not been saved to a file.")
-            : projectFile_);
+    setProperty("saveStateText",state);
+    setProperty("saveStateSemantic",semanticState);
+    setProperty("saveStateDetail",projectFile_.isEmpty() ? tr("This project has not been saved") : projectFile_);
 }
 
 bool MainWindow::loadFromPath(const QString& path, const bool preferRecovery)
