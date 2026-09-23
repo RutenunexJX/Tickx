@@ -35,7 +35,6 @@ ElaAppBar::ElaAppBar(QWidget* parent)
 {
     Q_D(ElaAppBar);
     d->_buttonFlags = ElaAppBarType::RouteBackButtonHint | ElaAppBarType::RouteForwardButtonHint | ElaAppBarType::StayTopButtonHint | ElaAppBarType::ThemeChangeButtonHint | ElaAppBarType::MinimizeButtonHint | ElaAppBarType::MaximizeButtonHint | ElaAppBarType::CloseButtonHint;
-    window()->setAttribute(Qt::WA_Mapped);
     d->_pAppBarHeight = 45;
     d->_pRibbonHeight = 0;
     setFixedHeight(d->_pAppBarHeight);
@@ -140,15 +139,21 @@ ElaAppBar::ElaAppBar(QWidget* parent)
     });
 
     d->_minButton = new ElaToolButton(this);
+    d->_minButton->setObjectName("ElaMinimizeButton");
+    d->_minButton->setAccessibleName(tr("Minimize"));
     d->_minButton->setElaIcon(ElaIconType::Dash);
     d->_minButton->setFixedSize(40, 30);
     connect(d->_minButton, &ElaToolButton::clicked, d, &ElaAppBarPrivate::onMinButtonClicked);
     d->_maxButton = new ElaToolButton(this);
+    d->_maxButton->setObjectName("ElaMaximizeButton");
+    d->_maxButton->setAccessibleName(tr("Maximize or restore"));
     d->_maxButton->setIconSize(QSize(18, 18));
     d->_maxButton->setElaIcon(ElaIconType::Square);
     d->_maxButton->setFixedSize(40, 30);
     connect(d->_maxButton, &ElaToolButton::clicked, d, &ElaAppBarPrivate::onMaxButtonClicked);
     d->_closeButton = new ElaIconButton(ElaIconType::Xmark, 18, 40, 30, this);
+    d->_closeButton->setObjectName("ElaCloseButton");
+    d->_closeButton->setAccessibleName(tr("Close"));
     d->_closeButton->setLightHoverColor(QColor(0xE8, 0x11, 0x23));
     d->_closeButton->setDarkHoverColor(QColor(0xE8, 0x11, 0x23));
     d->_closeButton->setLightHoverIconColor(Qt::white);
@@ -754,9 +759,11 @@ bool ElaAppBar::eventFilter(QObject* obj, QEvent* event)
 #ifdef Q_OS_WIN
     case QEvent::Show:
     {
+        if (QGuiApplication::platformName() != QStringLiteral("windows")) break;
+        const HWND hwnd = reinterpret_cast<HWND>(window()->winId());
+        d->_currentWinID = reinterpret_cast<qint64>(hwnd);
         if (!d->_pIsFixedSize && !d->_pIsOnlyAllowMinAndClose)
         {
-            HWND hwnd = (HWND)d->_currentWinID;
             DWORD style = ::GetWindowLongPtr(hwnd, GWL_STYLE);
             style &= ~WS_SYSMENU;
             ::SetWindowLongPtr(hwnd, GWL_STYLE, style | WS_MAXIMIZEBOX | WS_THICKFRAME);
@@ -766,7 +773,6 @@ bool ElaAppBar::eventFilter(QObject* obj, QEvent* event)
             }
         }
 #if (QT_VERSION >= QT_VERSION_CHECK(6, 5, 3) && QT_VERSION <= QT_VERSION_CHECK(6, 6, 1))
-        HWND hwnd = (HWND)d->_currentWinID;
         ElaWinShadowHelper::getInstance()->setWindowShadow(d->_currentWinID);
         DWORD style = ::GetWindowLongPtr(hwnd, GWL_STYLE);
         bool hasCaption = (style & WS_CAPTION) == WS_CAPTION;
@@ -775,6 +781,11 @@ bool ElaAppBar::eventFilter(QObject* obj, QEvent* event)
             ::SetWindowLongPtr(hwnd, GWL_STYLE, style | WS_CAPTION);
         }
 #endif
+        // Recalculate the client frame after the native dispatcher and window
+        // styles are installed, before Qt paints its first backing store.
+        ::SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER
+                | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOCOPYBITS);
         break;
     }
 #endif

@@ -64,13 +64,10 @@ ElaComboBox::ElaComboBox(QWidget* parent)
 ElaComboBox::~ElaComboBox()
 {
     Q_D(ElaComboBox);
-    // The popup and view share this style. Release their references while it
-    // is still alive, before QWidget closes/deletes the popup during teardown.
-    if (lineEdit()) lineEdit()->setStyle(nullptr);
-    view()->setStyle(nullptr);
-    if (auto* container = findChild<QFrame*>()) container->setStyle(nullptr);
-    setStyle(nullptr);
-    delete d->_comboBoxStyle;
+    // Keep the shared style alive until the popup/view have been destroyed.
+    // Reparent last so QWidget tears those children down before their style,
+    // without repolishing a native popup while it is being destroyed.
+    d->_comboBoxStyle->setParent(this);
 }
 
 void ElaComboBox::setEditable(bool editable)

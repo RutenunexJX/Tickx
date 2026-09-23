@@ -37,11 +37,11 @@ ElaMenu* ElaSpinBoxPrivate::_createStandardContextMenu()
     QAction* action = nullptr;
     if (!lineEdit->isReadOnly())
     {
-        action = menu->addElaIconAction(ElaIconType::ArrowRotateLeft, tr("撤销"), QKeySequence::Undo);
+        action = menu->addElaIconAction(ElaIconType::ArrowRotateLeft, tr("Undo"), QKeySequence::Undo);
         action->setEnabled(lineEdit->isUndoAvailable());
         connect(action, &QAction::triggered, lineEdit, &QLineEdit::undo);
 
-        action = menu->addElaIconAction(ElaIconType::ArrowRotateRight, tr("恢复"), QKeySequence::Redo);
+        action = menu->addElaIconAction(ElaIconType::ArrowRotateRight, tr("Redo"), QKeySequence::Redo);
         action->setEnabled(lineEdit->isRedoAvailable());
         connect(action, &QAction::triggered, lineEdit, &QLineEdit::redo);
         menu->addSeparator();
@@ -49,25 +49,25 @@ ElaMenu* ElaSpinBoxPrivate::_createStandardContextMenu()
 #ifndef QT_NO_CLIPBOARD
     if (!lineEdit->isReadOnly())
     {
-        action = menu->addElaIconAction(ElaIconType::KnifeKitchen, tr("剪切"), QKeySequence::Cut);
+        action = menu->addElaIconAction(ElaIconType::KnifeKitchen, tr("Cut"), QKeySequence::Cut);
         action->setEnabled(!lineEdit->isReadOnly() && lineEdit->hasSelectedText() && lineEdit->echoMode() == QLineEdit::Normal);
         connect(action, &QAction::triggered, lineEdit, &QLineEdit::cut);
     }
 
-    action = menu->addElaIconAction(ElaIconType::Copy, tr("复制"), QKeySequence::Copy);
+    action = menu->addElaIconAction(ElaIconType::Copy, tr("Copy"), QKeySequence::Copy);
     action->setEnabled(lineEdit->hasSelectedText() && lineEdit->echoMode() == QLineEdit::Normal);
     connect(action, &QAction::triggered, lineEdit, &QLineEdit::copy);
 
     if (!lineEdit->isReadOnly())
     {
-        action = menu->addElaIconAction(ElaIconType::Paste, tr("粘贴"), QKeySequence::Paste);
+        action = menu->addElaIconAction(ElaIconType::Paste, tr("Paste"), QKeySequence::Paste);
         action->setEnabled(!lineEdit->isReadOnly() && !QGuiApplication::clipboard()->text().isEmpty());
         connect(action, &QAction::triggered, lineEdit, &QLineEdit::paste);
     }
 #endif
     if (!lineEdit->isReadOnly())
     {
-        action = menu->addElaIconAction(ElaIconType::DeleteLeft, tr("删除"));
+        action = menu->addElaIconAction(ElaIconType::DeleteLeft, tr("Delete"));
         action->setEnabled(!lineEdit->isReadOnly() && !lineEdit->text().isEmpty() && lineEdit->hasSelectedText());
         connect(action, &QAction::triggered, this, [=](bool checked) {
             if (lineEdit->hasSelectedText())
@@ -82,7 +82,7 @@ ElaMenu* ElaSpinBoxPrivate::_createStandardContextMenu()
     {
         menu->addSeparator();
     }
-    action = menu->addAction(tr("全选"));
+    action = menu->addAction(tr("Select all"));
     action->setShortcut(QKeySequence::SelectAll);
     action->setEnabled(!lineEdit->text().isEmpty() && !(lineEdit->selectedText() == lineEdit->text()));
     connect(action, &QAction::triggered, q, &ElaSpinBox::selectAll);

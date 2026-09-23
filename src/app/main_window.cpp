@@ -7411,10 +7411,10 @@ void MainWindow::setLanesGroupById(
     }
     statusBar()->showMessage(
         targetGroup
-            ? tr("Moved %1 to group %2 路 placed after %3 existing member signal(s) 路 Ctrl+Z to undo")
+            ? tr("Moved %1 to group %2 · placed after %3 existing member signal(s) · Ctrl+Z to undo")
                   .arg(laneName, targetGroupName)
                   .arg(static_cast<qulonglong>(existingTargetMembers))
-            : tr("Removed %1 from group %2 路 signal order unchanged 路 Ctrl+Z to undo")
+            : tr("Removed %1 from group %2 · signal order unchanged · Ctrl+Z to undo")
                   .arg(laneName, previousGroupName),
         7'000);
 }
@@ -11863,7 +11863,8 @@ void MainWindow::createToolBars()
     goToTimeUnit_->setAccessibleName(tr("Time unit"));
     goToTimeUnit_->addItems({"ps","ns","us","ms"});
     goToTimeUnit_->setCurrentText("ns");
-    goToTimeUnit_->setFixedWidth(66);
+    goToTimeUnit_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    goToTimeUnit_->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);
     goToTimeLayout->addWidget(goToTimeUnit_);
     connect(goToTimeUnit_, &QComboBox::currentIndexChanged, this, [this] {
         if (!goToTimeEdit_->isModified()) syncGoToTimeEditor(true);

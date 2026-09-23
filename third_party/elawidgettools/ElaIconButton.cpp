@@ -235,6 +235,9 @@ void ElaIconButton::paintEvent(QPaintEvent* event)
     }
     else
     {
+        QFont iconFont = font();
+        iconFont.setFamily(QStringLiteral("Font Awesome 6 Free"));
+        painter.setFont(iconFont);
         painter.setPen(isEnabled() ? d->_themeMode == ElaThemeType::Light ? underMouse() ? d->_pLightHoverIconColor : d->_pLightIconColor : underMouse() ? d->_pDarkHoverIconColor
                                                                                                                                                          : d->_pDarkIconColor
                                    : ElaThemeColor(d->_themeMode, BasicTextDisable));

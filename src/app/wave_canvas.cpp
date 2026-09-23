@@ -18267,7 +18267,7 @@ void WaveCanvas::commitLaneReorder()
                     && lane.kind == LaneKind::Group;
             });
         if (target == scenario_->lanes.end()) {
-            emit statusMessage(tr("Move cancelled 路 the target group no longer exists"));
+            emit statusMessage(tr("Move cancelled · the target group no longer exists"));
             return;
         }
         const auto targetName = QString::fromStdString(target->name);

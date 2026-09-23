@@ -128,9 +128,9 @@ void ElaDoubleSpinBox::contextMenuEvent(QContextMenuEvent* event)
     }
     menu->addSeparator();
     const uint se = stepEnabled();
-    QAction* up = menu->addElaIconAction(ElaIconType::Plus, tr("增加"));
+    QAction* up = menu->addElaIconAction(ElaIconType::Plus, tr("Step up"));
     up->setEnabled(se & StepUpEnabled);
-    QAction* down = menu->addElaIconAction(ElaIconType::Minus, tr("减少"));
+    QAction* down = menu->addElaIconAction(ElaIconType::Minus, tr("Step down"));
     down->setEnabled(se & StepDownEnabled);
     menu->addSeparator();
 

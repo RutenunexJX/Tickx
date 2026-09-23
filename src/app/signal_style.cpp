@@ -76,10 +76,10 @@ QStringList signalStylePresetIds()
 
 QStringList signalStylePresetNames()
 {
-    return {QObject::tr("Academic / 学术"),QObject::tr("Cute / 可爱"),QObject::tr("Minimal / 极简"),
-        QObject::tr("Engineering / 工程"),QObject::tr("Blueprint / 蓝图"),QObject::tr("Retro terminal / 复古终端"),
-        QObject::tr("Oscilloscope / 示波器"),QObject::tr("Paper / 纸本"),QObject::tr("High contrast / 高对比"),
-        QObject::tr("Faceted tech / 棱角科技")};
+    return {QObject::tr("Academic"),QObject::tr("Cute"),QObject::tr("Minimal"),
+        QObject::tr("Engineering"),QObject::tr("Blueprint"),QObject::tr("Retro terminal"),
+        QObject::tr("Oscilloscope"),QObject::tr("Paper"),QObject::tr("High contrast"),
+        QObject::tr("Faceted tech")};
 }
 
 SignalStyleSettings signalStyleSettings(const JsonExtensions& extensions)

@@ -8,7 +8,7 @@ endfunction()
 
 find_package(Qt6 6.10.2 EXACT REQUIRED COMPONENTS Test)
 add_executable(wave-ui-followup-test ui_followup_test.cpp)
-target_link_libraries(wave-ui-followup-test PRIVATE wavewidgets waveproject Qt6::Test)
+target_link_libraries(wave-ui-followup-test PRIVATE wavewidgets waveproject Qt6::Test Ela::WidgetTools)
 wave_enable_warnings(wave-ui-followup-test)
 foreach(_wave_followup_scale IN ITEMS 1 1.25 1.5 2)
     add_test(NAME wave-ui-followup-${_wave_followup_scale}
@@ -21,6 +21,21 @@ foreach(_wave_followup_scale IN ITEMS 1 1.25 1.5 2)
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
         TIMEOUT 45)
 endforeach()
+if(WIN32)
+    foreach(_wave_native_scale IN ITEMS 1 1.25 1.5 2)
+        add_test(NAME wave-ui-native-${_wave_native_scale}
+            COMMAND "${CMAKE_COMMAND}"
+                "-DTEST_EXE=$<TARGET_FILE:wave-ui-followup-test>"
+                "-DTEST_FUNCTIONS=firstShowGeometry;chromeAndExactUnits;resizeFitsAndPreservesContext;styleApplyViaPopupAndButton;englishBuiltInText;titleClosePreservesCancelledDraft"
+                "-DLOG_FILE=${CMAKE_BINARY_DIR}/ui-native-${_wave_native_scale}.txt"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+        set_tests_properties(wave-ui-native-${_wave_native_scale} PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_SCALE_FACTOR=${_wave_native_scale};WAVEWORKBENCH_REDUCED_MOTION=0;WAVE_FOLLOWUP_PREVIEW_DIR=${CMAKE_BINARY_DIR}/ui-native-previews/${_wave_native_scale};WAVEWORKBENCH_RECOVERY_DIR=${CMAKE_BINARY_DIR}/test-recovery/native-${_wave_native_scale};WAVEWORKBENCH_SETTINGS_DIR=${CMAKE_BINARY_DIR}/test-settings/native-${_wave_native_scale}"
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+            TIMEOUT 45
+            RUN_SERIAL TRUE)
+    endforeach()
+endif()
 add_executable(wave-canvas-edit-regression-test canvas_edit_regression_test.cpp)
 target_link_libraries(wave-canvas-edit-regression-test PRIVATE wavewidgets waveproject wavegenerate Qt6::Test)
 wave_enable_warnings(wave-canvas-edit-regression-test)
@@ -977,6 +992,10 @@ foreach(_wave_ela_scale IN ITEMS 1 1.25 1.5 2)
         "QT_QPA_FONTDIR=${_wave_test_font_dir}")
     set_property(TEST wave-ui-followup-${_wave_ela_scale} APPEND PROPERTY ENVIRONMENT
         "QT_QPA_FONTDIR=${_wave_test_font_dir}")
+    if(WIN32)
+        set_property(TEST wave-ui-native-${_wave_ela_scale} APPEND PROPERTY ENVIRONMENT
+            "QT_QPA_FONTDIR=${_wave_test_font_dir}")
+    endif()
 endforeach()
 foreach(_waveform_scale_test _waveform_scale IN ZIP_LISTS
         _waveform_view_scale_tests _waveform_view_scales)

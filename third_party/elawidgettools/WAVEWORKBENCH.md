@@ -39,6 +39,16 @@ content, bounds, deduplication and one timer per workspace; this mode does not
 enter the upstream animation/active-message map or mutate the host font/theme.
 The icon adapter renders with ElaIcon and the pinned Free font's Unicode values,
 not the upstream custom-font PUA assignments; glyph coverage is checked in tests.
+Patch `patches/12-waveworkbench-native-lifetime-english.patch` follows patch 11.
+It keeps the ComboBox shared style alive through native popup/view destruction
+without recursively repolishing during teardown. The AppBar leaves Qt's mapped
+state alone and recalculates the Windows client frame on first show; its window
+buttons have stable accessible names. Icon buttons select their icon font while
+painting so inherited text styles cannot erase the close glyph. Reachable line
+and numeric editor context menus use English captions, including color-picker
+children. The application retains its existing immediate ComboBox interaction;
+the suite's interruptible-animation migration is separate and must preserve this
+lifetime fix. Native regression windows remain hidden and send no desktop input.
 See `docs/ela-migration.md` for scope,
 verification and remaining platform checks. Re-audit these changes before any
 dependency update; do not replace the tree with another application's working copy.

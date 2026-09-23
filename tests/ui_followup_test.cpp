@@ -4,28 +4,44 @@
 #include "quick_waveform.h"
 #include "ui_controls.h"
 #include "wave/project_io.h"
+#include "ElaLineEdit.h"
+#include "ElaSpinBox.h"
+#include "ElaDoubleSpinBox.h"
 
 #include <QApplication>
+#include <QAbstractItemView>
 #include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QContextMenuEvent>
 #include <QDir>
 #include <QFontDatabase>
 #include <QFileInfo>
+#include <QFileDialog>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QEnterEvent>
 #include <QLabel>
 #include <QHelpEvent>
 #include <QLineEdit>
 #include <QMenuBar>
+#include <QMenu>
+#include <QPointer>
+#include <QRegularExpression>
 #include <QMimeData>
 #include <QPushButton>
 #include <QRawFont>
 #include <QScrollBar>
 #include <QStatusBar>
 #include <QSettings>
+#include <QStyleOptionComboBox>
+#include <QWindow>
+#include <QScopeGuard>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
@@ -80,12 +96,24 @@ wave::Project styleProject()
 }
 }
 
+class HiddenNativeWindows final : public QObject {
+    bool eventFilter(QObject* object,QEvent* event) override {
+        if (event->type()==QEvent::Polish) {
+            if (auto* widget=qobject_cast<QWidget*>(object); widget && widget->isWindow())
+                widget->setAttribute(Qt::WA_DontShowOnScreen);
+        }
+        return false;
+    }
+};
+
 class UiFollowupTest : public QObject {
     Q_OBJECT
     QTemporaryDir settings_;
+    HiddenNativeWindows hidden_;
 private slots:
     void initTestCase()
     {
+        if (QGuiApplication::platformName()=="windows") qApp->installEventFilter(&hidden_);
         QVERIFY(settings_.isValid());
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings_.path());
@@ -483,6 +511,162 @@ private slots:
         QVERIFY(!canvas->hasQuickLaneSetup());
         QVERIFY(wave::findLane(window.project().scenarios.front(),canvas->selectedLaneId().toStdString())->clockDomainId.empty());
         undo->trigger(); QVERIFY(window.project()==p);
+    }
+
+    void styleApplyViaPopupAndButton()
+    {
+        const auto motion=qApp->property("waveworkbench.reducedMotion");
+        const auto restoreMotion=qScopeGuard([&] { qApp->setProperty("waveworkbench.reducedMotion",motion); });
+        qApp->setProperty("waveworkbench.reducedMotion",false);
+        wave::MainWindow window(styleProject()); window.show(); QTest::qWait(150);
+        auto* action=window.findChild<QAction*>("SignalStyleDefaultsAction"); QVERIFY(action);
+        QTimer guard; guard.setSingleShot(true);
+        connect(&guard,&QTimer::timeout,&window,[] {
+            if (auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget())) dialog->reject();
+        });
+        for (const auto& id : wave::signalStylePresetIds()) for (const bool accept : {true,false}) {
+            const auto before=window.project();
+            bool clicked=false;
+            QPointer<QComboBox> ownedPreset;
+            QTimer::singleShot(0,&window,[&] {
+                auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+                auto* preset=dialog->findChild<QComboBox*>("SignalStylePreset"); QVERIFY(preset);
+                ownedPreset=preset;
+                QTest::mouseClick(preset,Qt::LeftButton);
+                QTest::qWait(50);
+                QVERIFY(preset->view()->isVisible());
+                QTest::keyClick(preset->view(),Qt::Key_Home);
+                for (int index=0;index<preset->findData(id);++index)
+                    QTest::keyClick(preset->view(),Qt::Key_Down);
+                QTest::keyClick(preset->view(),Qt::Key_Return);
+                QCOMPARE(preset->currentData().toString(),id);
+                QTest::qWait(50);
+                auto* button=dialog->findChild<QDialogButtonBox*>()->button(accept ? QDialogButtonBox::Ok : QDialogButtonBox::Cancel);
+                QEnterEvent hover(button->rect().center(),button->rect().center(),button->mapToGlobal(button->rect().center()));
+                QCoreApplication::sendEvent(button,&hover);
+                QTest::qWait(80);
+                QTest::mouseClick(button,Qt::LeftButton);
+                clicked=true;
+            });
+            guard.start(3000); action->trigger(); guard.stop(); QVERIFY(clicked);
+            QVERIFY(ownedPreset.isNull());
+            if (accept) {
+                QCOMPARE(wave::signalStyleSettings(window.project().extensions).preset,id);
+                const auto after=window.project();
+                window.findChild<QAction*>("UndoAction")->trigger(); QVERIFY(window.project()==before);
+                window.findChild<QAction*>("RedoAction")->trigger(); QVERIFY(window.project()==after);
+            } else QVERIFY(window.project()==before);
+            QTest::qWait(80);
+        }
+    }
+
+    void firstShowGeometry()
+    {
+        wave::MainWindow window(styleProject());
+        QVERIFY(!window.testAttribute(Qt::WA_Mapped));
+        window.resize(1180,760);
+        window.show(); QTest::qWait(200);
+        auto* title=window.findChild<QWidget*>("WaveTitleBar"); QVERIFY(title);
+        auto* bar=window.findChild<QToolBar*>("WaveformToolbar"); QVERIFY(bar);
+#ifdef Q_OS_WIN
+        if (QGuiApplication::platformName()=="windows") {
+            const auto handle=reinterpret_cast<HWND>(window.winId());
+            RECT client{}; POINT origin{};
+            QVERIFY(GetClientRect(handle,&client));
+            QVERIFY(ClientToScreen(handle,&origin));
+            QCOMPARE(qRound((client.right-client.left)/window.devicePixelRatioF()),window.width());
+            QCOMPARE(qRound((client.bottom-client.top)/window.devicePixelRatioF()),window.height());
+        }
+#endif
+        QCOMPARE(title->pos(),QPoint(0,0));
+        QCOMPARE(title->width(),window.width());
+        QVERIFY(bar->geometry().top()>=title->geometry().bottom());
+        auto* close=title->findChild<QPushButton*>("ElaCloseButton"); QVERIFY(close); QVERIFY(close->isVisible());
+        QVERIFY(title->rect().contains(QRect(close->mapTo(title,QPoint()),close->size())));
+        const auto closeImage=close->grab().toImage();
+        int ink=0;
+        for (int y=closeImage.height()/4;y<closeImage.height()*3/4;++y)
+            for (int x=closeImage.width()/4;x<closeImage.width()*3/4;++x)
+                if (qGray(closeImage.pixel(x,y))<100) ++ink;
+        QVERIFY(ink>10);
+        auto* units=window.findChild<QComboBox*>("GoToTimeUnit"); QVERIFY(units);
+        QStyleOptionComboBox option; option.initFrom(units); option.currentText="ns";
+        const auto textRect=units->style()->subControlRect(QStyle::CC_ComboBox,&option,QStyle::SC_ComboBoxEditField,units);
+        QVERIFY(textRect.width()>=units->fontMetrics().horizontalAdvance("ns"));
+        const auto initialSize=window.size();
+        window.resize(initialSize+QSize(100,0)); QTest::qWait(150);
+        window.resize(initialSize); QTest::qWait(150);
+        QCOMPARE(title->width(),window.width());
+        QVERIFY(bar->geometry().top()>=title->geometry().bottom());
+        screenshot(&window,"first-show");
+    }
+
+    void englishBuiltInText()
+    {
+        QVERIFY(QCoreApplication::testAttribute(Qt::AA_DontUseNativeDialogs));
+        QCOMPARE(wave::signalStylePresetNames(),QStringList({"Academic","Cute","Minimal","Engineering","Blueprint",
+            "Retro terminal","Oscilloscope","Paper","High contrast","Faceted tech"}));
+        const QRegularExpression han(QStringLiteral("\\p{sc=Han}"));
+        QVERIFY(han.isValid());
+        QVERIFY(!han.match(QStringLiteral("English · separator")).hasMatch());
+        wave::MainWindow window(styleProject()); window.show(); QTest::qWait(100);
+        for (auto* widget : window.findChildren<QWidget*>())
+            for (const auto* property : {"text","windowTitle","placeholderText","toolTip","accessibleName","accessibleDescription"}) {
+                const auto value=widget->property(property).toString();
+                QVERIFY2(!han.match(value).hasMatch(),qPrintable(widget->objectName()+": "+value));
+            }
+        auto* systemMenu=window.findChild<QMenu*>("WindowSystemMenu"); QVERIFY(systemMenu);
+        QVERIFY(systemMenu->actions().size()>=4);
+        for (auto* action : window.findChildren<QAction*>()) QVERIFY2(!han.match(action->text()).hasMatch(),qPrintable(action->text()));
+        QFileDialog picker(&window,QStringLiteral("Open project"),settings_.path());
+        picker.show(); QCoreApplication::processEvents();
+        auto* fileName=picker.findChild<QLineEdit*>("fileNameEdit"); QVERIFY(fileName);
+        QCOMPARE(picker.labelText(QFileDialog::FileName),QStringLiteral("File &name:"));
+        picker.reject();
+        ElaLineEdit edit; ElaSpinBox spin; ElaDoubleSpinBox decimal;
+        for (QWidget* field : {static_cast<QWidget*>(&edit),static_cast<QWidget*>(&spin),static_cast<QWidget*>(&decimal)}) {
+            field->show(); QStringList labels;
+            QTimer inspectMenu;
+            connect(&inspectMenu,&QTimer::timeout,field,[&] {
+                for (auto* popup : field->findChildren<QMenu*>()) {
+                    if (!popup->isVisible()) continue;
+                    for (auto* action : popup->actions()) if (!action->isSeparator()) labels.append(action->text());
+                    inspectMenu.stop(); popup->close(); break;
+                }
+            });
+            inspectMenu.start(10);
+            QContextMenuEvent context(QContextMenuEvent::Keyboard,QPoint(5,5),field->mapToGlobal(QPoint(5,5)));
+            QCoreApplication::sendEvent(field,&context); QCoreApplication::processEvents();
+            QTRY_VERIFY(!labels.isEmpty());
+            for (const auto& label : labels) QVERIFY2(!han.match(label).hasMatch(),qPrintable(label));
+        }
+        const auto userText=QStringLiteral("用户信号");
+        auto p=styleProject(); p.name=userText.toStdString();
+        const auto loaded=wave::deserializeProject(wave::serializeProject(p));
+        QVERIFY(loaded.ok()); QCOMPARE(QString::fromStdString(loaded.project->name),userText);
+    }
+
+    void titleClosePreservesCancelledDraft()
+    {
+        wave::MainWindow window(styleProject()); window.show(); QTest::qWait(100);
+        auto* end=window.findChild<QLineEdit*>("TimelineDurationEdit"); QVERIFY(end);
+        end->setText("210 ns"); QTest::keyClick(end,Qt::Key_Return);
+        QVERIFY(window.windowTitle().contains('*'));
+        const auto before=window.project();
+        auto* close=window.findChild<QPushButton*>("ElaCloseButton"); QVERIFY(close);
+        bool cancelled=false;
+        QTimer guard; guard.setSingleShot(true);
+        connect(&guard,&QTimer::timeout,&window,[] {
+            if (auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget())) dialog->reject();
+        });
+        QTimer::singleShot(0,&window,[&] {
+            auto* dialog=qobject_cast<QMessageBox*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+            auto* cancel=dialog->button(QMessageBox::Cancel); QVERIFY(cancel);
+            cancel->click(); cancelled=true;
+        });
+        guard.start(3000); close->click(); guard.stop();
+        QVERIFY(cancelled); QVERIFY(window.isVisible()); QVERIFY(window.project()==before);
+        QVERIFY(window.windowTitle().contains('*'));
     }
 };
 QTEST_MAIN(UiFollowupTest)

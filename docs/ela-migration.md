@@ -1,5 +1,33 @@
 # ElaWidgetTools migration
 
+## Current native follow-up (2026-09-24)
+
+The inventory below describes the original migration baseline. Subsequent compact
+UI work introduced an ElaAppBar title/menu layer, hid the bottom status surface
+and moved Scenario End into the single toolbar. The 2026-09-24 follow-up fixes
+native ComboBox destruction, first-show client-frame setup and the close glyph's
+font; the unit selector now measures its text instead of forcing a narrow width.
+Standalone file dialogs deliberately use Qt's English captions, while embedded
+initialization leaves the host's dialog policy unchanged. User-supplied text is
+not translated. Patch 12 records the vendor changes.
+
+Release validation passed **118/118** CTest tests in 64.46 seconds, including four
+hidden Windows-platform suites at scale factors 1/1.25/1.5/2. All ten style presets
+are accepted/cancelled through real popup and button lifecycles; initial client
+geometry, close-glyph pixels, English built-in captions and cancelled dirty close
+are checked. Logs are under `build/ela-migration/style-startup-verified-ctest.log`
+and `style-crash-*.log`. These checks do not constitute physical desktop dragging,
+mixed-monitor DPI or compositor acceptance. No desktop input was injected.
+
+The suite capability follow-up uses the committed ZeroSlack reference
+`3f1c4afab0d0423c04c3c3af4bb3c3d9aabe5cde` incrementally, not a replacement vendor
+tree. Professional timeline/paint/model/embedding contracts remain protected;
+removed docks and status UI must not be reintroduced. Release staging for that
+follow-up will omit ZIP/backup output, and the coordinator owns any later AppSuite
+replacement and shared manifest changes.
+
+## Original migration baseline
+
 Implementation baseline: `e45660dd37024d0b1be3bebf2d1cd936602fc674` (`main`, clean
 before work). Application version remains `0.12.0`. All changes are confined to
 WaveWorkbench. Following implementation validation, commit, push and formal

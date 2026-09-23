@@ -1,4 +1,4 @@
-execute_process(COMMAND "${TEST_EXE}" -o "${LOG_FILE},txt"
+execute_process(COMMAND "${TEST_EXE}" ${TEST_FUNCTIONS} -o "${LOG_FILE},txt"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 25)
 if(EXISTS "${LOG_FILE}")
     file(READ "${LOG_FILE}" report)

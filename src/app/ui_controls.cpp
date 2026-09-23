@@ -45,6 +45,10 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QWheelEvent>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#undef MessageBox
+#endif
 
 #include <algorithm>
 #include <memory>
@@ -618,6 +622,34 @@ void installTitleMenus(QMainWindow* window)
     bar->setObjectName("WaveTitleBar");
     bar->setAppBarHeight(40);
     bar->setWindowButtonFlags(ElaAppBarType::MinimizeButtonHint | ElaAppBarType::MaximizeButtonHint | ElaAppBarType::CloseButtonHint);
+    bar->setIsDefaultClosed(false);
+    QObject::connect(bar, &ElaAppBar::closeButtonClicked, window, &QWidget::close);
+    auto* systemMenu = menu(bar);
+    systemMenu->setObjectName(QStringLiteral("WindowSystemMenu"));
+    auto* restore = systemMenu->addAction(QMainWindow::tr("Restore"), window, &QWidget::showNormal);
+#ifdef Q_OS_WIN
+    const auto nativeCommand = [window](WPARAM command) {
+        if (QGuiApplication::platformName() == QStringLiteral("windows"))
+            ::PostMessageW(reinterpret_cast<HWND>(window->winId()), WM_SYSCOMMAND, command, 0);
+    };
+    auto* move = systemMenu->addAction(QMainWindow::tr("Move"), window, [nativeCommand] { nativeCommand(SC_MOVE); });
+    auto* size = systemMenu->addAction(QMainWindow::tr("Size"), window, [nativeCommand] { nativeCommand(SC_SIZE); });
+#endif
+    auto* minimize = systemMenu->addAction(QMainWindow::tr("Minimize"), window, &QWidget::showMinimized);
+    auto* maximize = systemMenu->addAction(QMainWindow::tr("Maximize"), window, &QWidget::showMaximized);
+    systemMenu->addSeparator();
+    systemMenu->addAction(QMainWindow::tr("Close"), window, &QWidget::close);
+    QObject::connect(systemMenu, &QMenu::aboutToShow, window, [=] {
+        const bool normal = !window->isMaximized() && !window->isMinimized() && !window->isFullScreen();
+        restore->setEnabled(!normal);
+        minimize->setEnabled(!window->isMinimized());
+        maximize->setEnabled(!window->isMaximized() && !window->isFullScreen());
+#ifdef Q_OS_WIN
+        move->setEnabled(normal);
+        size->setEnabled(normal && window->minimumSize() != window->maximumSize());
+#endif
+    });
+    bar->setCustomMenu(systemMenu);
     auto* menus = prepare(new ElaMenuBar(bar));
     menus->setObjectName("TitleMenuBar");
     menus->addActions(original->actions());
@@ -663,6 +695,9 @@ void applyApplicationTheme()
 void initializeApplicationTheme()
 {
     initialize();
+    // Qt-owned dialogs use the application's English captions rather than
+    // the Windows shell language. Embedded clients leave host policy intact.
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QFont font;
     font.setFamilies({QStringLiteral("Segoe UI"), QStringLiteral("Microsoft YaHei UI"), QStringLiteral("Noto Sans CJK SC")});
     font.setPointSizeF(10.5);

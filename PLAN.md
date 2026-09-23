@@ -2,6 +2,15 @@
 
 Current version: `0.12.0`.
 
+## Native style lifetime, initial chrome and English — completed locally (2026-09-24)
+
+- [x] Reproduced the style-apply crash in the Windows platform plugin: ComboBox teardown repolished a popup being destroyed. Keep its shared style alive until popup/view children have been destroyed, without repolishing from the destructor.
+- [x] Leave Qt's mapped state under Qt ownership, recalculate the initial Windows client frame before painting, preserve the title close glyph's icon font, and size the time-unit selector to its content. Cancelling an unsaved close keeps the window and draft intact.
+- [x] Built-in application styles, reachable context menus, window controls and standalone Qt file dialogs use English. User names, values, paths and Unicode project content remain unchanged; embedded initialization does not change host dialog policy.
+- [x] Release build and full CTest **118/118** passed (64.46 seconds). Four new hidden Windows-platform suites exercise style accept/cancel, first-show geometry, English captions and cancelled close at scale factors 1/1.25/1.5/2. The style regression repeatedly selects all ten presets through the real popup and dialog buttons.
+
+Evidence: `build/ela-migration/style-startup-verified-ctest.log`, `style-crash-gdb-detail.log`, `style-crash-owned-gdb.log` and the `ui-followup-previews` directory. These are hidden native-window and offscreen checks, not physical compositor/desktop-mouse acceptance. No formal package replacement is included. The separately authorized Ela capability migration follows incrementally and must retain these fixes.
+
 ## Paired backgrounds — completed locally (2026-09-23)
 
 - [x] All ten signal presets have matching light/dark workspaces: Academic paper-white ruling, Cute pastel dotted grid, Minimal sparse grid, Engineering technical grid, Blueprint graph grid, Retro Terminal phosphor ruling, Oscilloscope graticule, Paper warm ruling, High Contrast strong grid and Faceted Tech segmented grid.
