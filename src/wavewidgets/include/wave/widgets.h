@@ -14,6 +14,7 @@ inline constexpr const char* kSimulationWorkspaceContract =
 inline constexpr const char* kWaveformViewContract =
     "wave-workbench.waveform-view/v1";
 inline constexpr const char* kWavePreviewPayloadContract = "wave-preview/v1";
+inline constexpr const char* kStimulusEditorContract = "wave-workbench.stimulus-editor/v1";
 
 class WaveCanvas;
 using StimulusCanvas = WaveCanvas;
@@ -23,6 +24,17 @@ using StimulusCanvas = WaveCanvas;
 extern "C" {
 
 WAVEWIDGETS_API int wavewidgets_abi_version() noexcept;
+
+// In-memory, single-scenario editor. The host owns persistence and simulation.
+// No runtime service, file monitoring, autosave, or simulator is started.
+WAVEWIDGETS_API int wavewidgets_create_stimulus_editor_v1(
+    const char* projectJson, std::size_t projectSize, const char* hostQtVersion,
+    QWidget* parent, QWidget** editor, char* error, std::size_t errorCapacity) noexcept;
+
+// Query with destination=nullptr/capacity=0 first. required includes the NUL.
+WAVEWIDGETS_API int wavewidgets_stimulus_project_v1(
+    QWidget* editor, char* destination, std::size_t capacity,
+    std::size_t* required, char* error, std::size_t errorCapacity) noexcept;
 
 WAVEWIDGETS_API int wavewidgets_create_simulation_workspace_v1(
     const char* projectPathUtf8,

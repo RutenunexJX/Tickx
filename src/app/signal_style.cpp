@@ -6,6 +6,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLineEdit>
+#include <QLineF>
+#include <QLabel>
 
 #include <algorithm>
 #include <array>
@@ -114,14 +116,15 @@ void storeSignalStyleSettings(JsonExtensions& extensions, const SignalStyleSetti
 SignalStyle resolvedSignalStyle(const Project* project, const Lane& lane, WaveformColorScheme scheme)
 {
     auto settings = signalStyleSettings(lane.extensions);
-    auto defaults = project ? signalStyleSettings(project->extensions) : SignalStyleSettings{};
+    const auto defaults = project ? signalStyleSettings(project->extensions) : SignalStyleSettings{};
+    auto canvasIndex = signalStylePresetIds().indexOf(defaults.preset);
+    if (canvasIndex < 0) canvasIndex = 3;
+    const auto& canvasPreset = presets.at(static_cast<std::size_t>(canvasIndex));
     const auto legacy = !lane.extensions.contains(key) && (!project || !project->extensions.contains(key));
     if (settings.preset == "inherit") {
         settings.preset = defaults.preset;
     }
     if (settings.palette == "inherit") settings.palette = defaults.palette;
-    if (settings.edge == "preset") settings.edge = defaults.edge;
-    if (settings.corners == "preset") settings.corners = defaults.corners;
     if (settings.stroke == 0) settings.stroke = defaults.stroke;
     if (!settings.fill.isValid()) settings.fill = defaults.fill;
     auto index = signalStylePresetIds().indexOf(settings.preset);
@@ -138,13 +141,14 @@ SignalStyle resolvedSignalStyle(const Project* project, const Lane& lane, Wavefo
     result.fill = settings.fill.isValid() ? settings.fill : QColor(dark ? preset.darkFill : preset.lightFill);
     result.fill.setAlpha(255);
     result.stroke = settings.stroke > 0 ? settings.stroke : preset.stroke;
-    result.bevel = preset.bevel;
-    result.trapezoid = settings.edge == "trapezoid" || (settings.edge == "preset" && preset.trapezoid);
-    result.rounded = settings.corners == "round" || (settings.corners == "preset" && preset.rounded);
-    result.doubleOutline = index == 4;
-    result.facets = index == 9;
-    result.halo = index == 6;
-    result.pixel = index == 5;
+    // Geometry belongs to the canvas, including documents with old per-lane overrides.
+    result.trapezoid = defaults.edge == "trapezoid" || (defaults.edge == "preset" && canvasPreset.trapezoid);
+    result.bevel = result.trapezoid ? std::max(3.0, canvasPreset.bevel) : 0.0;
+    result.rounded = defaults.corners == "round" || (defaults.corners == "preset" && canvasPreset.rounded);
+    result.doubleOutline = canvasIndex == 4;
+    result.facets = canvasIndex == 9;
+    result.halo = canvasIndex == 6;
+    result.pixel = canvasIndex == 5;
     result.ramp = result.facets ? 4.5 : 3;
     return result;
 }
@@ -178,8 +182,36 @@ QPen SignalStyle::pen(bool preview) const
         rounded ? Qt::RoundCap : Qt::FlatCap, rounded ? Qt::RoundJoin : Qt::MiterJoin);
 }
 
+QPainterPath SignalStyle::valuePath(const QRectF& rect) const
+{
+    QPainterPath path;
+    if (rect.isEmpty()) return path;
+    const auto cut = trapezoid ? std::min(bevel, rect.width() / 3.0) : 0.0;
+    const QPolygonF polygon = cut > 0
+        ? QPolygonF{{rect.left(), rect.center().y()}, {rect.left()+cut, rect.top()},
+            {rect.right()-cut, rect.top()}, {rect.right(), rect.center().y()},
+            {rect.right()-cut, rect.bottom()}, {rect.left()+cut, rect.bottom()}}
+        : QPolygonF{rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()};
+    if (rounded) {
+        for (int i=0; i<polygon.size(); ++i) {
+            const auto corner = polygon[i];
+            const auto previous = polygon[(i+polygon.size()-1)%polygon.size()];
+            const auto next = polygon[(i+1)%polygon.size()];
+            const auto incoming = QLineF(corner,previous).length();
+            const auto outgoing = QLineF(corner,next).length();
+            const auto radius = std::min({3.5,incoming/2,outgoing/2});
+            const auto before = incoming > 0 ? corner+(previous-corner)*(radius/incoming) : corner;
+            const auto after = outgoing > 0 ? corner+(next-corner)*(radius/outgoing) : corner;
+            if (i==0) path.moveTo(before); else path.lineTo(before);
+            path.quadTo(corner,after);
+        }
+    } else path.addPolygon(polygon);
+    path.closeSubpath();
+    return path;
+}
+
 SignalStyleEditor::SignalStyleEditor(const SignalStyleSettings& initial, bool allowInherit, QWidget* parent)
-    : QWidget(parent)
+    : QWidget(parent), initial_(initial)
 {
     setObjectName("SignalStyleEditor");
     auto* layout = new ui::FormLayout(this);
@@ -190,7 +222,7 @@ SignalStyleEditor::SignalStyleEditor(const SignalStyleSettings& initial, bool al
     const auto ids = signalStylePresetIds(), names = signalStylePresetNames();
     for (int i=0; i<ids.size(); ++i) preset_->addItem(names[i], ids[i]);
     preset_->setCurrentIndex(std::max(0, preset_->findData(initial.preset == "inherit" && !allowInherit ? "engineering" : initial.preset)));
-    layout->addRow(allowInherit ? tr("Style") : tr("Signal + background"), preset_);
+    layout->addRow(allowInherit ? tr("Color / line preset") : tr("Signal + background"), preset_);
     if (!allowInherit) preset_->setToolTip(tr("Pairs the workspace background, clock-cycle shading, grid and selection with the signal style. Individual signal overrides do not change the background."));
     const auto option = [this, layout](const QString& name, const QString& objectName,
                             const QStringList& labels, const QStringList& values, const QString& current) {
@@ -202,8 +234,14 @@ SignalStyleEditor::SignalStyleEditor(const SignalStyleSettings& initial, bool al
         return combo;
     };
     const auto inheritedLabel = allowInherit ? tr("Project / style default") : tr("From style");
-    edge_ = option(tr("Bit edges"), "SignalStyleEdge", {inheritedLabel,tr("Square"),tr("Trapezoid")}, {"preset","square","trapezoid"}, initial.edge);
-    corners_ = option(tr("Corners"), "SignalStyleCorners", {inheritedLabel,tr("Rounded"),tr("Sharp")}, {"preset","round","sharp"}, initial.corners);
+    if (allowInherit) {
+        layout->addRow(tr("Edges / corners"), ui::text(tr("Canvas style"), this));
+        preset_->setToolTip(tr("Changes signal colors and line width. Edges and corners follow the canvas style."));
+    } else {
+        edge_ = option(tr("Waveform edges"), "SignalStyleEdge", {inheritedLabel,tr("Square"),tr("Trapezoid")}, {"preset","square","trapezoid"}, initial.edge);
+        corners_ = option(tr("Corners"), "SignalStyleCorners", {inheritedLabel,tr("Rounded"),tr("Sharp")}, {"preset","round","sharp"}, initial.corners);
+        edge_->setToolTip(tr("Applies to normal clocks, bits and bus values. Special waveforms retain their own shapes."));
+    }
     palette_ = option(tr("Palette"), "SignalStylePalette",
         allowInherit ? QStringList{tr("Project default"),tr("Style colors"),tr("Signal color")} : QStringList{tr("Style colors"),tr("Signal color")},
         allowInherit ? QStringList{"inherit","preset","signal"} : QStringList{"preset","signal"}, initial.palette);
@@ -223,7 +261,8 @@ SignalStyleEditor::SignalStyleEditor(const SignalStyleSettings& initial, bool al
 
 SignalStyleSettings SignalStyleEditor::settings() const
 {
-    return {preset_->currentData().toString(),edge_->currentData().toString(),corners_->currentData().toString(),
+    return {preset_->currentData().toString(),edge_ ? edge_->currentData().toString() : initial_.edge,
+        corners_ ? corners_->currentData().toString() : initial_.corners,
         palette_->currentData().toString(),stroke_->value(),QColor(fill_->text().trimmed())};
 }
 

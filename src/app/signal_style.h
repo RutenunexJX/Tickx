@@ -5,6 +5,7 @@
 
 #include <QWidget>
 #include <QPen>
+#include <QPainterPath>
 #include <QStringList>
 
 class QComboBox;
@@ -36,6 +37,7 @@ struct WAVEWIDGETS_API SignalStyle {
     bool halo{false};
     bool pixel{false};
     [[nodiscard]] QPen pen(bool preview = false) const;
+    [[nodiscard]] QPainterPath valuePath(const QRectF& rect) const;
 };
 
 struct WAVEWIDGETS_API SignalBackgroundStyle {
@@ -61,9 +63,10 @@ public:
     [[nodiscard]] SignalStyleSettings settings() const;
     [[nodiscard]] bool valid() const;
 private:
+    SignalStyleSettings initial_;
     QComboBox* preset_;
-    QComboBox* edge_;
-    QComboBox* corners_;
+    QComboBox* edge_{nullptr};
+    QComboBox* corners_{nullptr};
     QComboBox* palette_;
     QDoubleSpinBox* stroke_;
     QLineEdit* fill_;

@@ -1,6 +1,6 @@
 # Wave Workbench
 
-当前版本：`v0.12.0`
+当前版本：`v0.13.0`
 
 Wave Workbench 是用于 FPGA 数字时序设计与验证场景编排的独立桌面应用。工程中的
 `Project`、`Scenario`、`Lane`、`Segment`、`Event`、`Relation` 是唯一事实源；画布、
@@ -86,6 +86,12 @@ v5 增加结果与源码导航元数据，并将构建或运行错误以源码�
 `View > Appearance` 支持跟随系统、浅色和深色。专用波形画布、整数 tick、撤销/重做、
 CLI 与 `wavewidgets` v1 契约保持不变。迁移范围、许可证与验证边界见
 [Ela 迁移清单](docs/ela-migration.md)。
+
+`View > Signal and background styles` 统一设置画布的方形或梯形边沿及圆角，
+正常 Clock、Bit、Bus 遵循同一规则，Actual 正常波形也使用该工程设置。
+dont-care、reserved、gated、disabled、X/Z 等特殊波形保留各自的轮廓和标记，不受此规则约束。
+单信号可调整配色、线宽和填充；旧工程中的单信号边沿覆盖不再造成混合风格。
+独立的轻量 Wave Preview 统一使用方形边沿。
 
 ## 构建
 

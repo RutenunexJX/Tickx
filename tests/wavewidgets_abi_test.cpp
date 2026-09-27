@@ -50,6 +50,39 @@ int main(int argc, char** argv)
     check(loaded.ok(), "reference project contract loads");
 
     QWidget owner;
+    // The small editor does not open files or start a simulator. Its state crosses
+    // the DLL boundary only through the existing public project JSON contract.
+    if (loaded.ok()) {
+        const auto payload = wave::serializeProject(*loaded.project);
+        QWidget* editor = nullptr;
+        std::array<char, 2048> message{};
+        check(wavewidgets_create_stimulus_editor_v1(payload.constData(), payload.size(),
+                  "incompatible-qt", &owner, &editor, message.data(), message.size()) != 0 && !editor,
+              "stimulus editor rejects a mismatched Qt ABI");
+        check(wavewidgets_create_stimulus_editor_v1(payload.constData(), payload.size(),
+                  QT_VERSION_STR, &owner, &editor, message.data(), message.size()) == 0 && editor,
+              "in-memory stimulus editor is created");
+        if (editor) {
+            check(editor->parentWidget() == &owner && !editor->isWindow(), "stimulus editor is embedded");
+            check(editor->property("wavewidgets.contract").toString() == QString::fromLatin1(wave::kStimulusEditorContract),
+                  "stimulus editor publishes its contract");
+            size_t required = 0;
+            check(wavewidgets_stimulus_project_v1(editor, nullptr, 0, &required, message.data(), message.size()) == 0 && required > 1,
+                  "stimulus snapshot reports buffer size");
+            QByteArray snapshot(static_cast<qsizetype>(required), '\0');
+            check(wavewidgets_stimulus_project_v1(editor, snapshot.data(), 1, &required, message.data(), message.size()) != 0,
+                  "stimulus snapshot rejects a short buffer");
+            check(wavewidgets_stimulus_project_v1(editor, snapshot.data(), snapshot.size(), &required, message.data(), message.size()) == 0,
+                  "stimulus snapshot copies the project");
+            const auto roundTrip = wave::deserializeProject(snapshot.chopped(1));
+            check(roundTrip.ok() && roundTrip.project->scenarios.size() == 1,
+                  "stimulus snapshot remains a valid project");
+            delete editor;
+        }
+        size_t required = 0;
+        check(wavewidgets_stimulus_project_v1(&owner, nullptr, 0, &required, message.data(), message.size()) != 0,
+              "stimulus snapshot rejects a widget from another contract");
+    }
     QWidget* workspace = nullptr;
     std::array<char, 2048> error{};
     const int result = wavewidgets_create_simulation_workspace_v1(

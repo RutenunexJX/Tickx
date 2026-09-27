@@ -1048,27 +1048,17 @@ void WaveformView::paintEvent(QPaintEvent* event)
             fill.setAlpha(scheme == WaveformColorScheme::Dark ? 82 : 52);
             painter.setPen(QPen(color, 1.3));
             painter.setBrush(fill);
-            if (lane.width > 1 && !segment.unknown) {
-                QPolygonF polygon;
-                polygon << QPointF(box.left() + 4, box.top())
-                        << QPointF(box.right() - 4, box.top())
-                        << QPointF(box.right(), box.center().y())
-                        << QPointF(box.right() - 4, box.bottom())
-                        << QPointF(box.left() + 4, box.bottom())
-                        << QPointF(box.left(), box.center().y());
-                painter.drawPolygon(polygon);
-            } else {
-                painter.drawRect(box);
-                if (segment.unknown && box.width() > 10) {
-                    painter.save();
-                    painter.setClipRect(box);
-                    painter.setPen(QPen(color, 0.7));
-                    for (double x = box.left() - box.height(); x < box.right(); x += 8.0) {
-                        painter.drawLine(QPointF(x, box.bottom()),
-                                         QPointF(x + box.height(), box.top()));
-                    }
-                    painter.restore();
+            // Normal preview waveforms use square edges; unknown values retain their hatched boxes.
+            painter.drawRect(box);
+            if (segment.unknown && box.width() > 10) {
+                painter.save();
+                painter.setClipRect(box);
+                painter.setPen(QPen(color, 0.7));
+                for (double x = box.left() - box.height(); x < box.right(); x += 8.0) {
+                    painter.drawLine(QPointF(x, box.bottom()),
+                                     QPointF(x + box.height(), box.top()));
                 }
+                painter.restore();
             }
             if (!data_->compact && box.width() > 32) {
                 painter.setPen(theme.text);

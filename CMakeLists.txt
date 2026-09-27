@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(WaveWorkbench VERSION 0.12.0 LANGUAGES CXX)
+project(WaveWorkbench VERSION 0.13.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -228,6 +228,7 @@ add_library(wavewidgets SHARED
     src/app/wave_canvas.cpp
     src/app/wave_canvas.h
     src/wavewidgets/src/widgets.cpp
+    src/wavewidgets/src/stimulus_editor.cpp
     src/wavewidgets/include/wave/widgets.h
     src/wavewidgets/include/wave/widgets_export.h
 )

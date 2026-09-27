@@ -52,7 +52,7 @@ enum class Icon {
     ZoomIn, ZoomOut, Fit, Measure, Link, Add, Remove, Close, Copy, Paste,
     Success, Information, Warning,
     Sync, Async, AddClock, AddBit, AddBus, Search, GoTo, Left, Right, Swap,
-    Reserved, DontCare, Unknown, HighImpedance, WavePattern, Count
+    Reserved, DontCare, Unknown, HighImpedance, WavePattern, Random, Count
 };
 WAVEWIDGETS_API QIcon icon(Icon name, QWidget* owner = nullptr);
 WAVEWIDGETS_API void paintIcon(QPainter& painter, Icon name, const QRect& rect, const QColor& color);

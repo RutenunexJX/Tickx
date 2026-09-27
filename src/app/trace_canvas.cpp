@@ -1,6 +1,7 @@
 #include "trace_canvas.h"
 
 #include "waveform_theme.h"
+#include "signal_style.h"
 #include "ui_controls.h"
 
 #include <QMouseEvent>
@@ -382,6 +383,7 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
                 viewport()->height() - kRulerHeight));
     }
 
+    const auto canvasStyle = resolvedSignalStyle(project_, Lane{}, scheme);
     const auto verticalOffset = verticalScrollBar()->value();
     const auto firstRow = std::max(0, verticalOffset / kRowHeight);
     const auto lastRow = std::min(
@@ -427,6 +429,19 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
         const auto transitions = signal.visibleTransitions(start, end, true);
         if (transitions.empty()) continue;
         if (signal.width == 1) {
+            const auto rampAt = [&](std::size_t index) {
+                if (!canvasStyle.trapezoid || index == 0 || index >= transitions.size()) return 0.0;
+                const auto& before = transitions[index-1];
+                const auto& after = transitions[index];
+                if ((!isHigh(before.value) && !isLow(before.value))
+                    || (!isHigh(after.value) && !isLow(after.value))
+                    || isHigh(before.value) == isHigh(after.value)) return 0.0;
+                const auto boundary = tickToX(after.tick);
+                const auto beforeWidth = boundary-tickToX(std::max(start,before.tick));
+                const auto afterWidth = tickToX(index+1 < transitions.size()
+                    ? std::min(end,transitions[index+1].tick) : end)-boundary;
+                return std::max(0.0,std::min({canvasStyle.ramp,beforeWidth*.22,afterWidth*.22}));
+            };
             for (std::size_t index = 0; index < transitions.size(); ++index) {
                 const auto& transition = transitions[index];
                 const auto segmentStart = std::max(start, transition.tick);
@@ -438,19 +453,18 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
                 painter.setPen(QPen(color, 1.5));
                 if (isHigh(transition.value) || isLow(transition.value)) {
                     const auto y = isHigh(transition.value) ? top + 11 : bottom - 11;
-                    painter.drawLine(
-                        QPointF(tickToX(segmentStart), y),
-                        QPointF(tickToX(segmentEnd), y));
+                    QPainterPath path;
+                    path.moveTo(tickToX(segmentStart)+rampAt(index), y);
+                    path.lineTo(tickToX(segmentEnd)-rampAt(index+1), y);
                     if (index + 1 < transitions.size()) {
                         const auto nextY = isHigh(transitions[index + 1].value)
                             ? top + 11
                             : isLow(transitions[index + 1].value)
                                 ? bottom - 11
                                 : top + kRowHeight / 2;
-                        painter.drawLine(
-                            QPointF(tickToX(transitions[index + 1].tick), y),
-                            QPointF(tickToX(transitions[index + 1].tick), nextY));
+                        path.lineTo(tickToX(transitions[index+1].tick)+rampAt(index+1), nextY);
                     }
+                    painter.strokePath(path,painter.pen());
                 } else {
                     const QRectF box(
                         tickToX(segmentStart),
@@ -472,18 +486,26 @@ void TraceCanvas::paintEvent(QPaintEvent* event)
                 if (segmentEnd < segmentStart) continue;
                 const auto left = tickToX(segmentStart);
                 const auto right = tickToX(segmentEnd);
-                const auto middle = top + kRowHeight / 2.0;
                 const auto color = valueColor(theme, transition.value, true);
                 painter.setPen(QPen(color, 1.4));
-                painter.setBrush(color.lighter(188));
-                QPolygonF polygon;
-                polygon << QPointF(left + 4, top + 8)
-                        << QPointF(right - 4, top + 8)
-                        << QPointF(right, middle)
-                        << QPointF(right - 4, bottom - 8)
-                        << QPointF(left + 4, bottom - 8)
-                        << QPointF(left, middle);
-                painter.drawPolygon(polygon);
+                const auto valueStart=transition.value.starts_with("0x") || transition.value.starts_with("0X") ? 2u : 0u;
+                if (transition.value.find_first_of("XxZz",valueStart) != std::string::npos) {
+                    const auto middle = top + kRowHeight / 2.0;
+                    painter.setBrush(color.lighter(188));
+                    QPolygonF polygon;
+                    polygon << QPointF(left + 4, top + 8)
+                            << QPointF(right - 4, top + 8)
+                            << QPointF(right, middle)
+                            << QPointF(right - 4, bottom - 8)
+                            << QPointF(left + 4, bottom - 8)
+                            << QPointF(left, middle);
+                    painter.drawPolygon(polygon);
+                } else {
+                    const auto path = canvasStyle.valuePath(
+                        QRectF(left,top+8,std::max(1.0,right-left),kRowHeight-16));
+                    painter.fillPath(path,color.lighter(188));
+                    painter.strokePath(path,painter.pen());
+                }
                 if (right - left > 34) {
                     painter.setPen(theme.text);
                     painter.drawText(

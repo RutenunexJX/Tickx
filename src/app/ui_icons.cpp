@@ -149,6 +149,10 @@ void drawIcon(QPainter& painter, Icon name)
     case Icon::WavePattern:
         outline({{2, 15}, {5, 15}, {5, 5}, {10, 5}, {10, 15}, {15, 15}, {15, 5}, {21, 5}});
         line(3, 21, 17, 21); outline({{14, 18}, {17, 21}, {14, 24}}); break;
+    case Icon::Random:
+        box(3, 3, 18, 18);
+        circle(8, 8, 1); circle(16, 8, 1); circle(12, 12, 1);
+        circle(8, 16, 1); circle(16, 16, 1); break;
     case Icon::Count: break;
     }
 }

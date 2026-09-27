@@ -269,6 +269,8 @@ public slots:
     void zoomOut();
     void fitScenario();
     void fitSelection();
+    void showClockCycles();
+    bool randomizeSelectedRange();
     void refreshModel();
     void revealLocation(const QString& laneId, qint64 tick);
     void revealMarker(const QString& markerId);
@@ -303,6 +305,7 @@ signals:
     void removeLanesRequested(const QStringList& laneIds);
     void editLaneParametersRequested(const QString& laneId, const QPoint& globalPosition);
     void selectionChanged(const QString& laneId, qint64 tick);
+    void rangeSelectionFinished();
     void modelEdited();
     void commandAvailabilityChanged();
     void statusMessage(const QString& message);

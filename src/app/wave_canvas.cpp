@@ -38,6 +38,7 @@
 #include <QPainterPath>
 #include <QPalette>
 #include <QRegularExpression>
+#include <QRandomGenerator>
 #include <QScrollBar>
 #include <QShowEvent>
 #include <QSignalBlocker>
@@ -2217,7 +2218,7 @@ bool WaveCanvas::hasPendingValueEdit() const noexcept
 void WaveCanvas::syncDurationEditor()
 {
     if (!durationEdit_ || !durationLabel_) return;
-    const auto available = project_ && scenario_;
+    const auto available = project_ && scenario_ && !property("wavewidgets.fixedSignals").toBool();
     durationEdit_->setVisible(available);
     durationLabel_->setVisible(available);
     if (!available || durationEdit_->hasFocus() || durationEdit_->isModified()) return;
@@ -3111,6 +3112,94 @@ void WaveCanvas::zoomOut()
                                  formatTick(cursorTick_, project_->timeBase))
                            : QString::number(cursorTick_))
             : tr("Zoomed out around viewport center"));
+}
+
+void WaveCanvas::showClockCycles()
+{
+    if (!project_ || !scenario_) return;
+    const ClockDomain* clock = nullptr;
+    for (const auto& lane : scenario_->lanes) {
+        if (lane.kind != LaneKind::Clock || !isLaneDisplayed(lane)) continue;
+        const auto* candidate = findClock(*project_, lane.clockDomainId);
+        if (!candidate || !candidate->isValid()) continue;
+        if (!clock || candidate->period < clock->period) clock = candidate;
+    }
+    if (!clock) { fitScenario(); return; }
+    const auto span = clock->period > scenario_->duration / 12
+        ? scenario_->duration : clock->period * 12;
+    restoreVisibleTimeSpan(span, cursorTick_);
+}
+
+bool WaveCanvas::randomizeSelectedRange()
+{
+    if (!project_ || !scenario_ || !commandStack_ || !selectionRange_
+        || selectionRange_->second <= selectionRange_->first) return false;
+    if (!commitPendingInlineEdits()) return false;
+    const auto [start, end] = *selectionRange_;
+    if (start < 0 || end > scenario_->duration) return false;
+    std::vector<LaneSequenceAssignment> assignments;
+    std::size_t count = 0;
+    for (const auto& id : selectedLaneIds_) {
+        const auto* lane = findLane(*scenario_, id);
+        // Clocks stay host-controlled, including when a multi-row range covers one.
+        if (!lane || lane->kind == LaneKind::Clock || lane->kind == LaneKind::Group) continue;
+        if ((lane->kind != LaneKind::Bit && lane->kind != LaneKind::Bus && lane->kind != LaneKind::Enum)
+            || lane->width == 0 || lane->width > 64
+            || (lane->kind == LaneKind::Enum && lane->enumMap.empty())) {
+            emit statusMessage(tr("Random fill requires a bit, a bus up to 64 bits, or a declared enum."));
+            return false;
+        }
+        LaneSequenceAssignment assignment;
+        assignment.laneId = id;
+        const auto* clock = findClock(*project_, lane->clockDomainId);
+        for (auto tick = start; tick < end;) {
+            // Use the editor's existing clock grid, preserving phase and clipped
+            // first/last beats. Unclocked inputs receive one value over the range.
+            const auto next = clock && clock->isValid()
+                ? std::min(end, beatRangeAt(tick, *lane).second) : end;
+            if (next <= tick || ++count > 4096) {
+                emit statusMessage(tr("Select a shorter range or fewer signals for random fill (up to 4096 values)."));
+                return false;
+            }
+            std::string value;
+            if (lane->kind == LaneKind::Enum) {
+                auto member = lane->enumMap.begin();
+                std::advance(member, QRandomGenerator::global()->bounded(quint32(lane->enumMap.size())));
+                value = member->first;
+            } else {
+                auto number = QRandomGenerator::global()->generate64();
+                if (lane->width < 64) number &= (quint64(1) << lane->width) - 1;
+                value = lane->kind == LaneKind::Bit ? std::to_string(number & 1)
+                    : (QStringLiteral("0x") + QString::number(number, 16)
+                        .rightJustified(int((lane->width + 3) / 4), QLatin1Char('0'))).toStdString();
+            }
+            assignment.steps.emplace_back(tick, next, std::move(value));
+            tick = next;
+        }
+        assignments.push_back(std::move(assignment));
+    }
+    if (assignments.empty()) {
+        emit statusMessage(tr("The clock is read-only. Select an input value lane for random fill."));
+        return false;
+    }
+    beginCommandSelectionTransition(commandStack_->stateId());
+    try {
+        const auto changed = commandStack_->execute(
+            std::make_unique<SetLaneSequencesCommand>(*scenario_, std::move(assignments)));
+        explicitRangeSelection_ = true;
+        selectedSegmentId_.clear();
+        selectedSegmentLaneId_.clear();
+        refreshModel();
+        finishCommandSelectionTransition(commandStack_->stateId());
+        if (changed) emit modelEdited();
+        emit commandAvailabilityChanged();
+        emit statusMessage(tr("Random fill · %1 values · Ctrl+Z to undo").arg(qulonglong(count)));
+        return true;
+    } catch (const std::exception& error) {
+        cancelCommandSelectionTransition();
+        emit statusMessage(QString::fromUtf8(error.what()));
+        return false;
+    }
 }
 
 void WaveCanvas::fitScenario()
@@ -4486,6 +4575,14 @@ bool WaveCanvas::viewportEvent(QEvent* event)
 
 void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
 {
+    if (property("wavewidgets.fixedSignals").toBool()) {
+        const auto* lane = laneAtY(event->pos().y());
+        if (event->pos().x() < headerWidth_ || (lane && lane->kind == LaneKind::Clock)) {
+            emit statusMessage(tr("Input names and the clock are managed by the host. Use Timing to change the clock."));
+            event->accept();
+            return;
+        }
+    }
     if (!scenario_) {
         QAbstractScrollArea::contextMenuEvent(event);
         return;
@@ -4960,6 +5057,13 @@ void WaveCanvas::contextMenuEvent(QContextMenuEvent* event)
 
 void WaveCanvas::keyPressEvent(QKeyEvent* event)
 {
+    if (property("wavewidgets.fixedSignals").toBool() && laneHeaderSelectionActive_
+        && (event->key() == Qt::Key_F2 || event->key() == Qt::Key_Delete
+            || event->key() == Qt::Key_Backspace
+            || (event->key() == Qt::Key_D && event->modifiers() == Qt::ControlModifier))) {
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_Control
         && !event->isAutoRepeat()
         && drawing_
@@ -6366,6 +6470,14 @@ bool WaveCanvas::beginExplicitRangeMove(
 
 void WaveCanvas::mousePressEvent(QMouseEvent* event)
 {
+    if (property("wavewidgets.fixedSignals").toBool() && tool_ != Tool::Selection) {
+        const auto* lane = laneAtY(event->position().toPoint().y());
+        if (lane && lane->kind == LaneKind::Clock) {
+            emit statusMessage(tr("The clock runs automatically. Use Timing to change its period."));
+            event->accept();
+            return;
+        }
+    }
     if (!scenario_) {
         QAbstractScrollArea::mousePressEvent(event);
         return;
@@ -8015,6 +8127,7 @@ void WaveCanvas::mouseReleaseEvent(QMouseEvent* event)
             drawing_ = false;
             bypassSnap_ = false;
             viewport()->update();
+            if (selectionRange_->second > selectionRange_->first) emit rangeSelectionFinished();
             break;
         }
         bypassSnap_ = false;
@@ -8025,6 +8138,15 @@ void WaveCanvas::mouseReleaseEvent(QMouseEvent* event)
 
 void WaveCanvas::mouseDoubleClickEvent(QMouseEvent* event)
 {
+    if (property("wavewidgets.fixedSignals").toBool()) {
+        const auto* lane = laneAtY(event->position().toPoint().y());
+        if (event->position().x() < headerWidth_ || (lane && lane->kind == LaneKind::Clock)) {
+            if (lane && lane->kind == LaneKind::Clock && event->button() == Qt::LeftButton)
+                showClockCycles();
+            event->accept();
+            return;
+        }
+    }
     if (!scenario_ || !commandStack_) return;
     if (durationEdit_
         && durationEdit_->isVisible()
@@ -8449,6 +8571,7 @@ void WaveCanvas::updateAddLaneButtonGeometry()
     }
     const auto row = addLaneRowRect();
     const auto visible = scenario_
+        && !property("wavewidgets.fixedSignals").toBool()
         && row.bottom() >= RulerHeight
         && row.top() < viewport()->height();
     for (auto* button : addLaneButtons_) {
@@ -9726,15 +9849,22 @@ void WaveCanvas::showBusPresetPalette(
     }
     if (busRecentValuesCombo_) {
         busRecentValuesCombo_->clear();
-        busRecentValuesCombo_->addItem(tr("Recent"));
+        const bool chooseEnum = enumLane && property("wavewidgets.fixedSignals").toBool();
+        busRecentValuesCombo_->addItem(chooseEnum ? tr("Choose value") : tr("Recent"));
+        if (chooseEnum) {
+            for (const auto& symbol : enumSymbols) busRecentValuesCombo_->addItem(symbol, symbol);
+        }
         const auto recent = busRecentValues_.find(lane.id);
-        if (recent != busRecentValues_.end()) {
+        if (!chooseEnum && recent != busRecentValues_.end()) {
             for (const auto& value : recent->second) {
                 busRecentValuesCombo_->addItem(displayLaneValue(lane, value.toStdString()), value);
             }
         }
         busRecentValuesCombo_->setCurrentIndex(0);
         busRecentValuesCombo_->setEnabled(busRecentValuesCombo_->count() > 1);
+        busRecentValuesCombo_->setMaximumWidth(chooseEnum ? 280 : 120);
+        busRecentValuesCombo_->setToolTip(chooseEnum ? tr("Choose a declared enum value, then Apply") : tr("Reuse a recent value for this signal"));
+        if (property("wavewidgets.fixedSignals").toBool()) busValueEdit_->setReadOnly(chooseEnum);
     }
     if (busPresetContextLabel_) {
         const auto scope = busEditScope_ == BusEditScope::Segment
@@ -22342,10 +22472,23 @@ void WaveCanvas::drawClock(
     };
 
     if (static_cast<double>(clock->period) * pixelsPerTick_ < 2.0) {
-        painter.setPen(style.pen(preview));
-        painter.drawLine(rect.left(), (highY + lowY) / 2, rect.right(), (highY + lowY) / 2);
+        auto fill = style.color;
+        fill.setAlpha(45);
+        const QRect activity(rect.left(), highY, rect.width(), lowY - highY);
+        painter.fillRect(activity, fill);
+        painter.setPen(QPen(style.color, 1));
+        painter.drawRect(activity);
+        auto hatch = style.color;
+        hatch.setAlpha(100);
+        painter.fillRect(activity, QBrush(hatch, Qt::Dense4Pattern));
         painter.setPen(canvasTheme().mutedText);
-        painter.drawText(rect.adjusted(8, 0, -8, 0), Qt::AlignVCenter, tr("clock density"));
+        const auto label = tr("Clock · %1 · zoom in for edges")
+            .arg(QString::fromStdString(formatTick(clock->period, project_->timeBase)));
+        const auto labelRect = painter.fontMetrics().boundingRect(label).adjusted(-5, -2, 5, 2);
+        auto background = labelRect;
+        background.moveCenter(QPoint(rect.left() + 8 + background.width() / 2, rect.center().y()));
+        painter.fillRect(background, canvasTheme().canvas);
+        painter.drawText(background, Qt::AlignCenter, label);
         drawOverrides();
         return;
     }
@@ -22364,14 +22507,17 @@ void WaveCanvas::drawClock(
         const auto risingX = xAtTick(*rising);
         const auto fallingX = xAtTick(*falling);
         const auto nextX = xAtTick(*nextRising);
+        const auto ramp = style.trapezoid
+            ? std::max(0.0, std::min({style.ramp, (fallingX-risingX)*.22, (nextX-fallingX)*.22}))
+            : 0.0;
         if (!started) {
-            path.moveTo(risingX, lowY);
+            path.moveTo(risingX-ramp, lowY);
             started = true;
         }
-        path.lineTo(risingX, highY);
-        path.lineTo(fallingX, highY);
-        path.lineTo(fallingX, lowY);
-        path.lineTo(nextX, lowY);
+        path.lineTo(risingX+ramp, highY);
+        path.lineTo(fallingX-ramp, highY);
+        path.lineTo(fallingX+ramp, lowY);
+        path.lineTo(nextX-ramp, lowY);
     }
     if (style.halo) {
         auto glow = style.color;
@@ -22581,25 +22727,7 @@ void WaveCanvas::drawBusSegments(
         const auto left = xAtTick(segmentStart);
         const auto right = xAtTick(segmentEnd);
         const auto bevel = std::min(style.bevel, std::max(0.0, (right - left) / 3.0));
-        QPainterPath path;
-        const QPolygonF polygon{{double(left),double(middle)}, {left+bevel,double(top)},
-            {right-bevel,double(top)}, {double(right),double(middle)},
-            {right-bevel,double(bottom)}, {left+bevel,double(bottom)}};
-        if (style.rounded) {
-            for (int i=0;i<polygon.size();++i) {
-                const auto corner = polygon[i];
-                const auto previous = polygon[(i+polygon.size()-1)%polygon.size()];
-                const auto next = polygon[(i+1)%polygon.size()];
-                const auto incoming = QLineF(corner,previous).length();
-                const auto outgoing = QLineF(corner,next).length();
-                const auto radius = std::min({3.5,incoming/2,outgoing/2});
-                const auto before = incoming > 0 ? corner+(previous-corner)*(radius/incoming) : corner;
-                const auto after = outgoing > 0 ? corner+(next-corner)*(radius/outgoing) : corner;
-                if (i==0) path.moveTo(before); else path.lineTo(before);
-                path.quadTo(corner,after);
-            }
-        } else path.addPolygon(polygon);
-        path.closeSubpath();
+        const auto path = style.valuePath(QRectF(left, top, right-left, bottom-top));
         painter.fillPath(path, style.fill);
         painter.setPen(style.pen(preview));
         painter.strokePath(path, painter.pen());

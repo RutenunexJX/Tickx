@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include "wave_canvas.h"
+#include "trace_canvas.h"
 #include "signal_style.h"
 #include "quick_waveform.h"
 #include "ui_controls.h"
@@ -45,10 +46,12 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
+#include <QtMath>
 #include <QToolBar>
 #include <QToolButton>
 
 #include <limits>
+#include <cmath>
 #include <set>
 
 namespace {
@@ -152,11 +155,190 @@ private slots:
         override.fill = QColor("#557799");
         wave::storeSignalStyleSettings(lane.extensions,override);
         auto resolved = wave::resolvedSignalStyle(&p,lane,wave::WaveformColorScheme::Light);
-        QCOMPARE(resolved.stroke,3.0); QVERIFY(!resolved.trapezoid); QCOMPARE(resolved.fill,QColor("#557799"));
+        QCOMPARE(resolved.stroke,3.0); QVERIFY(resolved.trapezoid); QCOMPARE(resolved.fill,QColor("#557799"));
         QVERIFY(lane.segments == values); QVERIFY(p.scenarios.front().events == events);
         lane.extensions["waveWorkbench.signalAppearance"] = R"({"preset":"bad","stroke":-99,"fill":"invalid"})";
         resolved = wave::resolvedSignalStyle(&p,lane,wave::WaveformColorScheme::Light);
         QVERIFY(resolved.fill.isValid()); QVERIFY(resolved.stroke > 0);
+    }
+
+    void canvasGeometryIgnoresLaneOverrides()
+    {
+        const QStringList slopedPresets{"cute","blueprint","scope","paper","facet"};
+        for (const auto& preset : wave::signalStylePresetIds()) {
+            for (const auto& edge : {QString("preset"),QString("square"),QString("trapezoid")}) {
+                auto p=styleProject();
+                wave::SignalStyleSettings defaults; defaults.preset=preset; defaults.edge=edge;
+                defaults.corners="sharp";
+                wave::storeSignalStyleSettings(p.extensions,defaults);
+                const bool sloped=edge=="trapezoid" || (edge=="preset" && slopedPresets.contains(preset));
+                for (auto& lane : p.scenarios.front().lanes) {
+                    wave::normalizeSegments(lane,true);
+                    wave::SignalStyleSettings override;
+                    override.preset=sloped ? "terminal" : "facet";
+                    override.edge=sloped ? "square" : "trapezoid";
+                    override.corners="round"; override.fill=QColor("#557799"); override.stroke=3;
+                    wave::storeSignalStyleSettings(lane.extensions,override);
+                    for (const auto scheme : {wave::WaveformColorScheme::Light,wave::WaveformColorScheme::Dark}) {
+                        const auto style=wave::resolvedSignalStyle(&p,lane,scheme);
+                        QCOMPARE(style.trapezoid,sloped);
+                        QVERIFY(!style.rounded);
+                        QCOMPARE(style.bevel>0,sloped);
+                        QCOMPARE(style.fill,QColor("#557799")); QCOMPARE(style.stroke,3.0);
+                    }
+                }
+                const auto loaded=wave::deserializeProject(wave::serializeProject(p));
+                QVERIFY(loaded.ok()); QVERIFY(*loaded.project==p);
+            }
+        }
+    }
+
+    void canvasEdgesRenderConsistently_data()
+    {
+        QTest::addColumn<bool>("sloped");
+        QTest::newRow("square") << false;
+        QTest::newRow("trapezoid") << true;
+    }
+
+    void canvasEdgesRenderConsistently()
+    {
+        QFETCH(bool,sloped);
+        auto p=styleProject();
+        p.clockDomains.front().period=120; p.clockDomains.front().phase=40;
+        wave::SignalStyleSettings settings; settings.preset="engineering";
+        settings.edge=sloped ? "trapezoid" : "square"; settings.corners="sharp";
+        settings.palette="signal"; settings.stroke=2; settings.fill=QColor("#f4fff8");
+        wave::storeSignalStyleSettings(p.extensions,settings);
+        for (auto& lane : p.scenarios.front().lanes) {
+            lane.color="#df007f";
+            wave::SignalStyleSettings override; override.preset="cute";
+            override.edge=sloped ? "square" : "trapezoid";
+            wave::storeSignalStyleSettings(lane.extensions,override);
+        }
+        const auto original=p;
+        auto& scenario=p.scenarios.front(); wave::CommandStack commands; wave::WaveCanvas canvas;
+        canvas.resize(1180,650); canvas.setDocument(&p,&scenario,&commands); canvas.show();
+        canvas.rangeEditPaletteWidget()->hide(); QCoreApplication::processEvents(); canvas.fitScenario();
+        screenshot(&canvas,sloped ? "uniform-trapezoid" : "uniform-square");
+        const auto image=canvas.viewport()->grab().toImage();
+        const auto dpr=image.devicePixelRatio();
+        const auto scale=double(canvas.viewport()->width()-canvas.signalHeaderWidth())/200;
+        const auto edgeX=canvas.signalHeaderWidth()+qRound(40*scale);
+        const auto strokeCenter=[&](int row,int dy) {
+            double total=0; int count=0;
+            const int y=qRound((80+row*56+dy)*dpr);
+            for (int x=qFloor((edgeX-7)*dpr); x<=qCeil((edgeX+7)*dpr); ++x) {
+                const auto color=image.pixelColor(x,y);
+                if (color.red()>120 && color.green()<80 && color.blue()>70) { total+=x/dpr; ++count; }
+            }
+            return count ? total/count : std::numeric_limits<double>::quiet_NaN();
+        };
+        for (const auto row : {0,1}) {
+            const auto upper=strokeCenter(row,18), lower=strokeCenter(row,37);
+            QVERIFY(std::isfinite(upper)); QVERIFY(std::isfinite(lower));
+            if (sloped) QVERIFY2(upper-lower>2,qPrintable(QString("row %1 slope %2").arg(row).arg(upper-lower)));
+            else QVERIFY2(std::abs(upper-lower)<.6,qPrintable(QString("row %1 slope %2").arg(row).arg(upper-lower)));
+        }
+        const auto busLeft=canvas.signalHeaderWidth()+qRound(20*scale);
+        const auto edge=image.pixelColor(qRound((busLeft+2)*dpr),qRound((80+2*56+14)*dpr));
+        QCOMPARE(edge==settings.fill,!sloped);
+        QVERIFY(p==original);
+    }
+
+    void specialWaveformsKeepTheirShapes()
+    {
+        auto p=styleProject();
+        p.clockDomains.front().period=120; p.clockDomains.front().phase=40;
+        auto& scenario=p.scenarios.front();
+        scenario.lanes[1].segments={{"gate",20,60,"gated",{}},{"disabled",100,140,"disabled",{}}};
+        for (const auto* value : {"X","Z"}) {
+            wave::Lane lane; lane.id=lane.name=std::string("bit-")+value;
+            lane.kind=wave::LaneKind::Bit; lane.groupId="Interface";
+            lane.segments={{lane.id,0,200,value,{}}};
+            scenario.lanes.push_back(lane);
+        }
+        const auto original=scenario;
+        wave::SignalStyleSettings settings; settings.preset="engineering"; settings.corners="sharp";
+        wave::CommandStack commands; wave::WaveCanvas canvas;
+        canvas.resize(1180,800); canvas.setDocument(&p,&scenario,&commands); canvas.show();
+        canvas.rangeEditPaletteWidget()->hide(); QCoreApplication::processEvents();
+        std::vector<QImage> images;
+        for (const auto* edge : {"square","trapezoid"}) {
+            settings.edge=edge; wave::storeSignalStyleSettings(p.extensions,settings);
+            canvas.refreshModel(); canvas.fitScenario(); QCoreApplication::processEvents();
+            screenshot(&canvas,QString("special-waveforms-")+edge);
+            images.push_back(canvas.viewport()->grab().toImage());
+        }
+        const auto dpr=images.front().devicePixelRatio();
+        const auto scale=double(canvas.viewport()->width()-canvas.signalHeaderWidth())/200;
+        const auto region=[&](double start,double end,int top,int height) {
+            return QRect(qRound((canvas.signalHeaderWidth()+start*scale)*dpr),qRound(top*dpr),
+                qRound((end-start)*scale*dpr),qRound(height*dpr));
+        };
+        for (const auto row : {3,4,5,6,7,8}) {
+            const auto rect=region(1,199,80+row*56+2,52);
+            QVERIFY2(images[0].copy(rect)==images[1].copy(rect),qPrintable(QString("special row %1 changed").arg(row)));
+        }
+        for (const auto start : {20,100}) {
+            const auto rect=region(start+1,start+39,83,49);
+            QVERIFY2(images[0].copy(rect)==images[1].copy(rect),"clock override changed with normal edge style");
+        }
+        QVERIFY(scenario==original);
+    }
+
+    void traceEdgesFollowCanvasStyle_data() { canvasEdgesRenderConsistently_data(); }
+
+    void traceEdgesFollowCanvasStyle()
+    {
+        QFETCH(bool,sloped);
+        auto p=styleProject();
+        wave::SignalStyleSettings settings; settings.preset="engineering";
+        settings.edge=sloped ? "trapezoid" : "square"; settings.corners="sharp";
+        wave::storeSignalStyleSettings(p.extensions,settings);
+        wave::TraceIndex trace; trace.startTick=0; trace.endTick=200;
+        for (const auto width : {1,8,8,1}) {
+            wave::TraceSignal signal; signal.id=signal.fullName=std::to_string(trace.traceSignals.size());
+            signal.width=width;
+            signal.transitions=trace.traceSignals.size()==3 ? std::vector<wave::TraceTransition>{{0,"X"},{40,"Z"}}
+                : width==1 ? std::vector<wave::TraceTransition>{{0,"0"},{40,"1"},{100,"0"}}
+                : trace.traceSignals.size()==1 ? std::vector<wave::TraceTransition>{{0,"00010010"},{40,"0x35"}}
+                : std::vector<wave::TraceTransition>{{0,"00010010"},{40,"XXXXXXXX"},{120,"ZZZZZZZZ"}};
+            trace.traceSignals.push_back(std::move(signal));
+        }
+        wave::TraceCanvas canvas; canvas.resize(1180,300);
+        canvas.setTrace(&p,&p.scenarios.front(),&trace,nullptr); canvas.show();
+        QCoreApplication::processEvents(); canvas.fitTrace();
+        screenshot(&canvas,sloped ? "uniform-trace-trapezoid" : "uniform-trace-square");
+        const auto image=canvas.viewport()->grab().toImage();
+        const auto dpr=image.devicePixelRatio();
+        const auto edgeX=230+40.0*(canvas.viewport()->width()-242)/200;
+        const auto color=wave::waveformTheme(wave::waveformColorScheme(canvas.palette())).bit;
+        const auto strokeCenter=[&](int y) {
+            double total=0, weight=0;
+            for (int x=qFloor((edgeX-7)*dpr); x<=qCeil((edgeX+7)*dpr); ++x) {
+                const auto pixel=image.pixelColor(x,qRound(y*dpr));
+                const auto distance=std::abs(pixel.red()-color.red())+std::abs(pixel.green()-color.green())
+                    +std::abs(pixel.blue()-color.blue());
+                const auto amount=std::max(0.0,1-distance/100.0);
+                total+=x/dpr*amount; weight+=amount;
+            }
+            return weight ? total/weight : std::numeric_limits<double>::quiet_NaN();
+        };
+        const auto upper=strokeCenter(49), lower=strokeCenter(63);
+        QVERIFY(std::isfinite(upper)); QVERIFY(std::isfinite(lower));
+        if (sloped) QVERIFY(upper-lower>2);
+        else QVERIFY(std::abs(upper-lower)<.6);
+        const auto x=qRound((edgeX+2)*dpr);
+        QCOMPARE(image.pixelColor(x,qRound((34+44+11)*dpr))
+            == image.pixelColor(x,qRound((34+44+3)*dpr)),sloped);
+        settings.edge=sloped ? "square" : "trapezoid";
+        wave::storeSignalStyleSettings(p.extensions,settings); canvas.viewport()->update();
+        const auto changed=canvas.viewport()->grab().toImage();
+        for (const auto row : {2,3}) {
+            const QRect rect(qRound((edgeX+2)*dpr),qRound((34+row*44+2)*dpr),
+                qRound((canvas.viewport()->width()-edgeX-4)*dpr),qRound(40*dpr));
+            QVERIFY2(image.copy(rect)==changed.copy(rect),"Actual X/Z shape changed with normal edge style");
+        }
     }
 
     void backgroundContrastPersistenceAndFallback()
@@ -437,7 +619,7 @@ private slots:
                     QCOMPARE(colorAt(35,row,4),background.cycleBand);
                     QCOMPARE(colorAt(85,row,4),background.theme.canvas);
                 }
-                // Geometry/texture differ even when rendered with the same monochrome preset.
+                // State textures and symbols remain distinct within the same canvas geometry.
                 int differences=0;
                 for (int y=10;y<44;++y)
                     for (int sample=105;sample<490;++sample)
@@ -474,7 +656,8 @@ private slots:
                 binding->setCurrentIndex(binding->findData(clockId));
                 auto* preset=dialog->findChild<QComboBox*>("SignalStylePreset"); QVERIFY(preset);
                 preset->setCurrentIndex(preset->findData("cute"));
-                auto* edge=dialog->findChild<QComboBox*>("SignalStyleEdge"); edge->setCurrentIndex(edge->findData("trapezoid"));
+                QVERIFY(!dialog->findChild<QComboBox*>("SignalStyleEdge"));
+                QVERIFY(!dialog->findChild<QComboBox*>("SignalStyleCorners"));
                 screenshot(dialog,"signal-properties"); inspected=true;
                 dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
             });
@@ -482,7 +665,7 @@ private slots:
             const auto changed=window.project(); const auto* lane=wave::findLane(changed.scenarios.front(),"lane-request");
             QCOMPARE(QString::fromStdString(lane->clockDomainId),clockId);
             QCOMPARE(wave::signalStyleSettings(lane->extensions).preset,QString("cute"));
-            QVERIFY(wave::resolvedSignalStyle(&changed,*lane,wave::WaveformColorScheme::Light).trapezoid);
+            QVERIFY(!wave::resolvedSignalStyle(&changed,*lane,wave::WaveformColorScheme::Light).trapezoid);
             const auto loaded=wave::deserializeProject(wave::serializeProject(changed)); QVERIFY(loaded.ok()); QVERIFY(*loaded.project==changed);
             undo->trigger(); QVERIFY(window.project()==p); redo->trigger(); QVERIFY(window.project()==changed); undo->trigger();
         }
@@ -490,7 +673,9 @@ private slots:
         QTimer::singleShot(0,&window,[&] {
             auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
             auto* preset=dialog->findChild<QComboBox*>("SignalStylePreset");
-            preset->setCurrentIndex(preset->findData("academic")); screenshot(dialog,"style-defaults");
+            preset->setCurrentIndex(preset->findData("academic"));
+            auto* edge=dialog->findChild<QComboBox*>("SignalStyleEdge"); QVERIFY(edge);
+            edge->setCurrentIndex(edge->findData("trapezoid")); screenshot(dialog,"style-defaults");
             dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
         });
         guard.start(2000); styleAction->trigger(); guard.stop();
@@ -498,6 +683,8 @@ private slots:
         const auto paired=wave::resolvedSignalBackground(&window.project(),wave::WaveformColorScheme::Light);
         QVERIFY(paired.cycleBand.isValid());
         const auto styled=window.project();
+        for (const auto& lane : styled.scenarios.front().lanes)
+            QVERIFY(wave::resolvedSignalStyle(&styled,lane,wave::WaveformColorScheme::Light).trapezoid);
         undo->trigger(); QVERIFY(window.project()==p);
         QCOMPARE(wave::resolvedSignalBackground(&window.project(),wave::WaveformColorScheme::Light).theme.canvas,
             wave::waveformTheme(wave::WaveformColorScheme::Light).canvas);

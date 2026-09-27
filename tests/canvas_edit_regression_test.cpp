@@ -14,6 +14,7 @@
 #include <QJsonObject>
 #include <QMouseEvent>
 #include <QScrollBar>
+#include <QSignalSpy>
 #include <QTest>
 #include <QToolButton>
 
@@ -145,6 +146,106 @@ void savePreview(wave::WaveCanvas& canvas, const QString& name)
 class CanvasEditRegressionTest final : public QObject {
     Q_OBJECT
 private slots:
+    void randomFillKeepsClocksBoundsAndUndo()
+    {
+        Fixture f;
+        f.project.clockDomains.front().phase = 3;
+        f.lane(1).segments = {{"unknown-bit", 0, 200, "X", {}}};
+        f.lane(2).width = 64;
+        f.lane(2).isSigned = true;
+        f.lane(2).segments = {{"unknown-bus", 0, 200, "0bx", {}}};
+        wave::Lane mode;
+        mode.id = mode.name = "mode";
+        mode.kind = wave::LaneKind::Enum;
+        mode.width = 3;
+        mode.clockDomainId = "clk";
+        mode.enumMap = {{"IDLE", "0"}, {"ACTIVE", "3"}, {"DONE", "5"}};
+        mode.segments = {{"unknown-enum", 0, 200, "0bx", {}}};
+        f.project.scenarios.front().lanes.push_back(mode);
+        f.canvas.setProperty("wavewidgets.fixedSignals", true);
+        f.show();
+        f.canvas.setTool(wave::WaveCanvas::Tool::Selection);
+        mouse(f.canvas, QEvent::MouseButtonPress, f.point(13, 0));
+        mouse(f.canvas, QEvent::MouseMove, f.point(83, 3));
+        mouse(f.canvas, QEvent::MouseButtonRelease, f.point(83, 3));
+        const auto range = f.canvas.selectedTimeRange();
+        QVERIFY(range);
+        const auto before = f.project.scenarios.front().lanes;
+        QSignalSpy status(&f.canvas, &wave::WaveCanvas::statusMessage);
+        const auto randomized = f.canvas.randomizeSelectedRange();
+        QVERIFY2(randomized, status.isEmpty() ? "No random-fill diagnostic" : qPrintable(status.last().first().toString()));
+        QCOMPARE(f.commands.size(), std::size_t{1});
+        QCOMPARE(f.lane(0), before[0]);
+        for (int index = 1; index < 4; ++index) {
+            const auto& lane = f.lane(index);
+            std::size_t filled = 0;
+            for (const auto& segment : lane.segments) {
+                if (segment.end <= range->first || segment.start >= range->second) {
+                    QCOMPARE(segment.value, lane.kind == wave::LaneKind::Bit ? std::string("X") : std::string("0bx"));
+                    continue;
+                }
+                QVERIFY(segment.start >= range->first && segment.end <= range->second);
+                QCOMPARE((segment.start - 3) % 10, wave::Tick{0});
+                if (lane.kind == wave::LaneKind::Enum) QVERIFY(lane.enumMap.contains(segment.value));
+                else if (lane.kind == wave::LaneKind::Bit) QVERIFY(segment.value == "0" || segment.value == "1");
+                else {
+                    const auto bits = wave::laneValueBits(lane, segment.value);
+                    QVERIFY(bits);
+                    QCOMPARE(bits->size(), std::size_t{64});
+                    QVERIFY(bits->find_first_not_of("01") == std::string::npos);
+                }
+                ++filled;
+            }
+            QVERIFY(filled > 0);
+        }
+        const auto after = f.project.scenarios.front().lanes;
+        QVERIFY(f.commands.undo());
+        QCOMPARE(f.project.scenarios.front().lanes, before);
+        QVERIFY(f.commands.redo());
+        QCOMPARE(f.project.scenarios.front().lanes, after);
+        f.canvas.refreshModel();
+        mouse(f.canvas, QEvent::MouseButtonPress, f.point(3, 0));
+        mouse(f.canvas, QEvent::MouseButtonRelease, f.point(43, 0));
+        QVERIFY(!f.canvas.randomizeSelectedRange());
+        QCOMPARE(f.project.scenarios.front().lanes, after);
+        QCOMPARE(f.commands.size(), std::size_t{1});
+        f.project.scenarios.front().duration = 100000;
+        f.canvas.refreshModel();
+        f.canvas.selectLaneHeaders({"bus"}, "bus");
+        f.canvas.selectEntireTimeline();
+        QVERIFY(!f.canvas.randomizeSelectedRange()); // no partial edit on an oversized fill
+        QCOMPARE(f.project.scenarios.front().lanes, after);
+        QCOMPARE(f.commands.size(), std::size_t{1});
+    }
+
+    void readonlyClockRemainsVisible()
+    {
+        Fixture f;
+        f.project.scenarios.front().duration = 1'000'000;
+        f.canvas.setProperty("wavewidgets.fixedSignals", true);
+        f.show();
+        f.canvas.showClockCycles();
+        QCoreApplication::processEvents();
+        QVERIFY(f.canvas.visibleTimeSpan() <= 121);
+        const auto clock = f.lane(0);
+        const auto image = f.canvas.viewport()->grab().toImage();
+        const auto scale = double(f.canvas.viewport()->width() - f.canvas.signalHeaderWidth())
+            / double(f.canvas.visibleTimeSpan());
+        const auto x = f.canvas.signalHeaderWidth() + int(2 * scale);
+        // Actual high and low plateaus differ from their row background.
+        QVERIFY(pixel(image, QPoint(x, 52)) != pixel(image, QPoint(x, 68)));
+        f.canvas.fitScenario();
+        QCoreApplication::processEvents();
+        savePreview(f.canvas, "readonly-clock-overview");
+        mouse(f.canvas, QEvent::MouseButtonDblClick,
+            QPoint(f.canvas.signalHeaderWidth() + 50, 68));
+        QCoreApplication::processEvents();
+        QVERIFY(f.canvas.visibleTimeSpan() <= 121);
+        QCOMPARE(f.lane(0), clock);
+        QVERIFY(!f.commands.canUndo());
+        savePreview(f.canvas, "readonly-clock-cycles");
+    }
+
     void init()
     {
         applyTheme(wave::WaveformColorScheme::Light);
