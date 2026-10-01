@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/automation/v1/operation-batch.schema.json",
-  "title": "Wave Workbench automation operation batch v1",
-  "description": "Atomic Wave Workbench edit batch. Operation-specific conditional constraints are enforced by the automation library; each definition publishes the accepted fields and unconditional requirements.",
+  "title": "Tickx automation operation batch v1",
+  "description": "Atomic Tickx edit batch. Operation-specific conditional constraints are enforced by the automation library; each definition publishes the accepted fields and unconditional requirements.",
   "type": "object",
   "required": ["schema", "operations"],
   "properties": {

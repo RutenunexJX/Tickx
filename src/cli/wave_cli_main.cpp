@@ -91,7 +91,7 @@ int fail(
 void printUsage()
 {
     QTextStream(stdout)
-        << "Wave Workbench headless CLI\n"
+        << "Tickx headless CLI\n"
            "Usage:\n"
            "  wave-cli capabilities [--pretty]\n"
            "  wave-cli new <output.wave.json> [--name=NAME] "

@@ -21,7 +21,7 @@ wave-sim-runner probe `
 3. 当前进程 `PATH`。编译器按平台从 `g++`、`clang++`、`cl` 或 `c++` 中选择。
 
 显式配置不存在时不会猜测相似目录。runner 不经过 shell，不读取 SystemVerilog，
-也不访问 ZeroSlack 或 Wave Workbench 的内部状态。
+也不访问 ZeroSlack 或 Tickx 的内部状态。
 
 当前最低兼容版本为：
 
@@ -102,7 +102,7 @@ wave-sim-runner run-module `
 
 `run-module` 与固定 fixture 共用同一个异步流水线，但要求输出结果工程。成功后工程包含
 相对 VCD 引用和自动信号映射，可由
-`wave-workbench --load-first-trace result.wave.json` 直接打开结果波形。输入
+`Tickx --load-first-trace result.wave.json` 直接打开结果波形。输入
 Manifest、Stimulus 与源码镜像由宿主负责生成；runner 仍严格校验三者契约，不读取宿主
 编辑器状态，也不回退到磁盘中的其他源码。
 
@@ -171,7 +171,7 @@ Stimulus、契约、能力限制、工具链、harness、构建、运行、VCD �
 | 7 | cancelled |
 | 8 | superseded |
 
-宿主以 `wave-workbench --load-first-trace result.wave.json` 打开结果时，WaveWorkbench
+宿主以 `Tickx --load-first-trace result.wave.json` 打开结果时，Tickx
 会异步载入首个 trace 引用，不阻塞窗口创建；普通项目打开行为不受影响。结果工作区上方
 为可编辑的 `Stimulus`，下方为只读的 `Actual`，并提供 `Run`、`Stop`、`Rerun` 和
 `Ready`、`Compiling`、`Running`、`Current`、`Stale`、`Failed` 六种可见状态。

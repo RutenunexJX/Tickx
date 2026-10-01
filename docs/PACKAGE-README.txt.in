@@ -1,7 +1,13 @@
-Wave Workbench @PROJECT_VERSION@ - Windows x64 portable package
+Tickx @PROJECT_VERSION@ - Windows x64 portable package
 
 Desktop application
-  wave-workbench.exe
+  Tickx.exe
+  Tickx.exe --version
+  Repository: https://github.com/RutenunexJX/Tickx
+
+Existing user data
+  The legacy WaveWorkbench / Wave Workbench settings and recovery identity is retained.
+  Existing .wave.json projects, CLI commands, environment variables and wavewidgets ABI are compatible.
 
 Private UI runtime
   wavewidgets.dll and WaveWorkbenchEla.dll must be deployed together.

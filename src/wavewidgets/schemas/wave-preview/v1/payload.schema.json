@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://waveworkbench.local/schemas/wave-preview/v1/payload.schema.json",
-  "title": "WaveWorkbench Wave Preview v1",
+  "title": "Tickx Wave Preview v1",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract", "generation", "mode", "timebase", "lanes"],

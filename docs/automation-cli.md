@@ -1,4 +1,4 @@
-# Wave Workbench 自动化 API 与统一 CLI
+# Tickx 自动化 API 与统一 CLI
 
 ## 分层
 

@@ -3854,7 +3854,7 @@ void WaveCanvas::pasteAtCursor()
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(content, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        emit statusMessage(tr("Clipboard does not contain a Wave Workbench range."));
+        emit statusMessage(tr("Clipboard does not contain a Tickx range."));
         return;
     }
     const auto root = document.object();
@@ -13345,7 +13345,7 @@ WaveCanvas::RangePasteAvailability WaveCanvas::pasteAvailabilityForTargets(
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(content, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        return unavailable(tr("clipboard does not contain a Wave Workbench range"));
+        return unavailable(tr("clipboard does not contain a Tickx range"));
     }
     const auto root = document.object();
     const auto schemaVersion =

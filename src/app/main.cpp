@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "application_identity.h"
 #ifdef WAVEWORKBENCH_HAS_SUITEAPP
 #include "suite_integration.h"
 #endif
@@ -82,10 +83,12 @@ int main(int argc, char* argv[])
             std::fflush(stderr);
         });
     }
-    QCoreApplication::setOrganizationName(QStringLiteral("WaveWorkbench"));
-    QCoreApplication::setApplicationName(QStringLiteral("Wave Workbench"));
-    QCoreApplication::setApplicationVersion(
-        QStringLiteral(WAVEWORKBENCH_VERSION));
+    wave::configureStandaloneIdentity(QStringLiteral(WAVEWORKBENCH_VERSION));
+    if (application.arguments().contains(QStringLiteral("--version"))) {
+        std::fprintf(stdout, "Tickx %s\n", WAVEWORKBENCH_VERSION);
+        std::fflush(stdout);
+        return 0;
+    }
     const auto testSettingsDirectory =
         qEnvironmentVariable("WAVEWORKBENCH_SETTINGS_DIR");
     if (!testSettingsDirectory.isEmpty()) {
@@ -279,7 +282,7 @@ int main(int argc, char* argv[])
                 qCritical().noquote() << parsed.error;
                 return 2;
             }
-            wave::ui::MessageBox::critical(nullptr, QObject::tr("Invalid Wave Workbench URI"), parsed.error);
+            wave::ui::MessageBox::critical(nullptr, QObject::tr("Invalid Tickx URI"), parsed.error);
             return 2;
         }
         launchRequest = *parsed.request;
@@ -425,7 +428,7 @@ int main(int argc, char* argv[])
                 } else {
                     wave::ui::MessageBox::critical(
                         nullptr,
-                        QObject::tr("Invalid Wave Workbench URI"),
+                        QObject::tr("Invalid Tickx URI"),
                         message);
                 }
             };
@@ -27803,7 +27806,7 @@ int main(int argc, char* argv[])
                     return;
                 }
                 const auto duplicateClipboardSentinel =
-                    QStringLiteral("Wave Workbench clipboard sentinel");
+                    QStringLiteral("Tickx clipboard sentinel");
                 QApplication::clipboard()->setText(duplicateClipboardSentinel);
                 const auto beforeRangeDuplicate = scenario;
                 const auto duplicateContextPoint = QPoint(

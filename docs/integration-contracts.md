@@ -1,4 +1,4 @@
-# Wave Workbench 跨应用接口
+# Tickx 跨应用接口
 
 当前 Module Manifest schema 版本：`3`（兼容读取 `1`、`2`）
 
@@ -50,7 +50,7 @@ wave-bridge import-module module-manifest.json output.wave.json
 ```
 
 该命令严格读取 ZeroSlack 输出的版本化 Module Manifest，并创建一个可直接在
-Wave Workbench 中打开的未保存仿真目标工程。它不读取 ZeroSlack 内部数据库，也不重新解释
+Tickx 中打开的未保存仿真目标工程。它不读取 ZeroSlack 内部数据库，也不重新解释
 SystemVerilog：
 
 - 唯一 clock candidate 转换为可见 Clock lane 和显式 ClockDomain；多个候选保持
@@ -68,7 +68,7 @@ SystemVerilog：
 - v3 的 `editableLeaves` 由 ZeroSlack 的 Slang elaboration 生成。packed struct member、
   固定 unpacked array element 和显式 modport interface member 作为分组 leaf lane 导入；
   selector、成员方向、enum map、packed bit offset、source/storage index 和稳定 trace 名均
-  保存在扩展字段中。WaveWorkbench 不重新解析 SystemVerilog。
+  保存在扩展字段中。Tickx 不重新解析 SystemVerilog。
 - 结构化事实缺失或形态不安全时跳过该输入并返回明确 warning，不退回到按总位宽扁平化。
   当前 runner 仅重建无构造端口的 interface，且拒绝 `inout/ref`、动态数组和宽度超过
   64 bit 的 leaf。
@@ -155,7 +155,7 @@ wave-bridge import-signals project.wave.json signals.json output.wave.json `
 }
 ```
 
-已有稳定 ID 不重复创建。若已有 lane 的 kind/width 冲突，则保留 Wave Workbench 中的定义并
+已有稳定 ID 不重复创建。若已有 lane 的 kind/width 冲突，则保留 Tickx 中的定义并
 输出诊断。多 Scenario 工程必须显式选择；单 Scenario 工程可省略。选择失败发生在读取
 `signals.json` 和写出工程之前。命令始终写到显式输出工程，不覆盖输入文件。
 
@@ -201,7 +201,7 @@ wave-bridge pinloom-entry project.wave.json exports pinloom-entry.json `
 URI handler 时，JSON 归档条目仍保留。多 Scenario 工程必须显式选择，单 Scenario 工程可
 省略；成功输出回显最终 Scenario 名称与稳定 ID。
 
-## Wave Workbench URI
+## Tickx URI
 
 ```text
 waveworkbench://open?project=<path>&scenario=<stable-id>&lane=<stable-id>&tick=<integer>
@@ -228,7 +228,7 @@ Segment 或时间范围。URI 中有效的显式 `lane`/`tick` 在该恢复之�
 `wave-compare` 提供。等价命令行形式：
 
 ```powershell
-wave-workbench --uri="<waveworkbench URI>"
+Tickx --uri="<waveworkbench URI>"
 ```
 
 未知 action、缺失 project、非法 tick、不存在或重复的 scenario ID 会明确失败，不回退到

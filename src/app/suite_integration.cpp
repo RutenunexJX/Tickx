@@ -128,7 +128,7 @@ QJsonObject WaveSuiteIntegration::appDescriptor(
 {
     return {
         {QStringLiteral("appId"), QStringLiteral("wave")},
-        {QStringLiteral("displayName"), QStringLiteral("WaveWorkbench")},
+        {QStringLiteral("displayName"), QStringLiteral("Tickx")},
         {QStringLiteral("version"), version.isEmpty()
              ? QStringLiteral("0.0.0") : version},
         {QStringLiteral("processId"),
@@ -196,7 +196,7 @@ QJsonObject WaveSuiteIntegration::processRequest(
             != QString::fromLatin1(kOpenAction)) {
             return SuiteApp::errorResponse(
                 request, QStringLiteral("action_not_supported"),
-                QStringLiteral("Unknown WaveWorkbench action"));
+                QStringLiteral("Unknown Tickx action"));
         }
         const bool opened = window_ && window_->openSuiteProject(target.path);
         return opened
@@ -204,14 +204,14 @@ QJsonObject WaveSuiteIntegration::processRequest(
                   request, {{QStringLiteral("opened"), true}})
             : SuiteApp::errorResponse(
                   request, QStringLiteral("project_open_cancelled"),
-                  QStringLiteral("WaveWorkbench did not replace the current project"));
+                  QStringLiteral("Tickx did not replace the current project"));
     }
 
     if (params.value(QStringLiteral("surfaceId")).toString()
         != QString::fromLatin1(kWaveformSurface)) {
         return SuiteApp::errorResponse(
             request, QStringLiteral("surface_not_supported"),
-            QStringLiteral("Unknown WaveWorkbench surface"));
+            QStringLiteral("Unknown Tickx surface"));
     }
     if (method == QStringLiteral("surface.describe")) {
         return SuiteApp::successResponse(
@@ -233,11 +233,11 @@ QJsonObject WaveSuiteIntegration::processRequest(
                   request, {{QStringLiteral("opened"), true}})
             : SuiteApp::errorResponse(
                   request, QStringLiteral("project_open_cancelled"),
-                  QStringLiteral("WaveWorkbench did not open the project"));
+                  QStringLiteral("Tickx did not open the project"));
     }
     return SuiteApp::errorResponse(
         request, QStringLiteral("method_not_supported"),
-        QStringLiteral("WaveWorkbench does not implement this provider method"));
+        QStringLiteral("Tickx does not implement this provider method"));
 }
 
 } // namespace wave

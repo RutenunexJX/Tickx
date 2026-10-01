@@ -1,7 +1,7 @@
 # Embedded stimulus editor
 
 `wave-workbench.stimulus-editor/v1` is an additive interface in `wavewidgets` ABI 1.
-The implementation and canvas remain in WaveWorkbench. It requires the same Qt
+The implementation and canvas remain in Tickx. It requires the same Qt
 build and compatible C++ runtime as the host (currently Qt 6.10.2 / MinGW 13.1 on
 Windows). Deploy `wavewidgets.dll`, `WaveWorkbenchEla.dll` and their Qt dependencies
 beside the host executable. SuiteApp and SuiteRuntime are not required.

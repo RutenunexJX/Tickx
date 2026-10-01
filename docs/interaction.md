@@ -1,4 +1,4 @@
-# WaveWorkbench interaction
+# Tickx interaction
 
 Applies to 0.12.0. The following is usage documentation, not an iteration backlog.
 

@@ -901,12 +901,12 @@ std::string compareResultHtml(
 {
     std::ostringstream output;
     output << "<!doctype html><html><head><meta charset=\"utf-8\">"
-           << "<title>Wave Workbench Compare Report</title>"
+           << "<title>Tickx Compare Report</title>"
            << "<style>body{font:14px system-ui,sans-serif;color:#273142;margin:32px}"
            << "h1{margin:0 0 6px}p{color:#596579}table{border-collapse:collapse;width:100%}"
            << "th,td{border:1px solid #d8dee8;padding:7px;text-align:left}"
            << "th{background:#eef2f7}.ok{color:#16845b}.bad{color:#c62828}</style>"
-           << "</head><body><h1>Wave Workbench Compare Report</h1><p>"
+           << "</head><body><h1>Tickx Compare Report</h1><p>"
            << htmlEscape(project.name) << " / " << htmlEscape(scenario.name)
            << " &middot; trace " << htmlEscape(result.traceId)
            << " &middot; " << result.start << ".." << result.end << " tick</p><h2 class=\""

@@ -29,7 +29,7 @@ Preferences > Kits 中选择其本机 Qt Desktop Kit。
 1. 在 Qt Creator 中打开仓库根目录的 `CMakeLists.txt`。
 2. 在 Configure Project 页面选择 Qt Desktop Kit。
 3. 选择 `Qt Creator - Debug` configure preset。
-4. 完成配置后，将运行目标设为 `wave-workbench`。
+4. 完成配置后，将运行目标设为 `Tickx`。
 
 若 Qt Creator 未显示 preset，可在项目 Build Settings 中使用等价配置：
 
@@ -46,7 +46,7 @@ Qt 的 CMake 前缀、编译器、调试器、CMake 和 Ninja 均由所选 Kit �
 ## Build 与 Debug
 
 - 点击 Build 或按 `Ctrl+B` 构建当前项目。
-- 选择 `wave-workbench` 后点击 Run，可启动内置演示场景。
+- 选择 `Tickx` 后点击 Run，可启动内置演示场景。
 - 点击 Start Debugging 或按 `F5`，可在 `src/app/main.cpp` 等源码中设置断点并调试。
 - 调试多 Scenario 工程时，运行后的工具栏会显示 `Waveform` 选择器；切换不修改工程文件，
   `Ctrl+PageUp` / `Ctrl+PageDown` 可在画布内前后切换。正式工程重新打开时恢复最后一个唯一
@@ -71,7 +71,7 @@ Working directory:      <source>
 
 | 目标 | 类型 | 用途 |
 |---|---|---|
-| `wave-workbench` | GUI 可执行程序 | 主桌面应用，默认调试目标 |
+| `Tickx` | GUI 可执行程序 | 主桌面应用，默认调试目标 |
 | `wave-generate` | CLI 可执行程序 | 生成 HDL、Python 和图形派生产物；多 Scenario 时使用 `--scenario` |
 | `wave-compare` | CLI 可执行程序 | 无界面 Expected/Actual 对比；多 Scenario 时使用 `--scenario` |
 | `wave-bridge` | CLI 可执行程序 | 跨应用文件与 URI 契约；Scenario 级子命令支持 `--scenario` |
@@ -80,7 +80,7 @@ Working directory:      <source>
 | `test` | CMake/CTest 目标 | 运行已登记的完整测试集 |
 
 CLI 目标需要命令行参数，具体用法见根目录 `README.md`。调试主应用时应选择
-`wave-workbench`，不要选择静态库目标。
+`Tickx`，不要选择静态库目标。
 
 ## 命令行等价验证
 

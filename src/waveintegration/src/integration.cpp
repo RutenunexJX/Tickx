@@ -349,7 +349,7 @@ QByteArray makeWorkspaceManifest(
 {
     QJsonObject root;
     root.insert(QStringLiteral("schemaVersion"), 1);
-    root.insert(QStringLiteral("producer"), QStringLiteral("Wave Workbench"));
+    root.insert(QStringLiteral("producer"), QStringLiteral("Tickx"));
     root.insert(QStringLiteral("projectId"), qString(project.id));
     root.insert(QStringLiteral("projectName"), qString(project.name));
     root.insert(
@@ -393,7 +393,7 @@ PinloomEntry makePinloomEntry(
 {
     QJsonObject root;
     root.insert(QStringLiteral("schemaVersion"), 1);
-    root.insert(QStringLiteral("producer"), QStringLiteral("Wave Workbench"));
+    root.insert(QStringLiteral("producer"), QStringLiteral("Tickx"));
     root.insert(QStringLiteral("projectId"), qString(project.id));
     root.insert(QStringLiteral("scenarioId"), qString(scenario.id));
     root.insert(QStringLiteral("title"), qString(project.name + " / " + scenario.name));

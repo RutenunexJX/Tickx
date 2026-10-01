@@ -1,6 +1,6 @@
 # FST 按需读取
 
-Wave Workbench 默认构建 `wave-wellen-reader` 辅助程序，并将其与独立应用和
+Tickx 默认构建 `wave-wellen-reader` 辅助程序，并将其与独立应用和
 `wavewidgets` 共享库放在同一目录。辅助程序使用 Wellen 0.25.6 读取标准 FST；项目不包含
 自定义 FST 解析器。
 

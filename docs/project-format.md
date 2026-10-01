@@ -1,4 +1,4 @@
-# Wave Workbench 工程格式
+# Tickx 工程格式
 
 当前 schema 版本：`1`
 

@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "application_identity.h"
 #include "wave_canvas.h"
 #include "trace_canvas.h"
 #include "signal_style.h"
@@ -37,6 +38,7 @@
 #include <QScrollBar>
 #include <QStatusBar>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QStyleOptionComboBox>
 #include <QWindow>
 #include <QScopeGuard>
@@ -130,6 +132,55 @@ private slots:
         for (const auto character : QStringLiteral("Wave clk_2 [7:0] 10.5 ns"))
             QVERIFY2(font.supportsCharacter(character),qPrintable(font.familyName()));
         if (QFileInfo::exists(fontPath)) QVERIFY(QFontMetrics(qApp->font()).inFont(QChar(u'信')));
+    }
+
+    void brandingPreservesLegacySettings()
+    {
+        const auto organization=QCoreApplication::organizationName();
+        const auto application=QCoreApplication::applicationName();
+        const auto display=QGuiApplication::applicationDisplayName();
+        const auto version=QCoreApplication::applicationVersion();
+        const auto recoveryEnvironment=qgetenv("WAVEWORKBENCH_RECOVERY_DIR");
+        auto restore=qScopeGuard([&] {
+            QCoreApplication::setOrganizationName(organization);
+            QCoreApplication::setApplicationName(application);
+            QGuiApplication::setApplicationDisplayName(display);
+            QCoreApplication::setApplicationVersion(version);
+            if (recoveryEnvironment.isNull()) qunsetenv("WAVEWORKBENCH_RECOVERY_DIR");
+            else qputenv("WAVEWORKBENCH_RECOVERY_DIR",recoveryEnvironment);
+            wave::ui::initializeApplicationTheme();
+        });
+        QCoreApplication::setOrganizationName("WaveWorkbench");
+        QCoreApplication::setApplicationName("Wave Workbench");
+        QSettings legacy;
+        legacy.setValue("appearance/colorScheme","dark");
+        legacy.setValue("canvas/signalHeaderWidth",312);
+        legacy.sync();
+        QCOMPARE(legacy.status(),QSettings::NoError);
+        const auto settingsFile=legacy.fileName();
+        const auto dataDirectory=QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        qunsetenv("WAVEWORKBENCH_RECOVERY_DIR");
+        const auto recoveryPath=wave::untitledRecoveryPath();
+
+        wave::configureStandaloneIdentity("test-version");
+        QCOMPARE(QGuiApplication::applicationDisplayName(),QString("Tickx"));
+        QCOMPARE(QCoreApplication::applicationVersion(),QString("test-version"));
+        QCOMPARE(QSettings{}.fileName(),settingsFile);
+        QCOMPARE(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation),dataDirectory);
+        QCOMPARE(wave::untitledRecoveryPath(),recoveryPath);
+        QCOMPARE(QSettings{}.value("appearance/colorScheme").toString(),QString("dark"));
+        qputenv("WAVEWORKBENCH_RECOVERY_DIR",(settings_.path()+"/branding-recovery").toUtf8());
+        wave::ui::initializeApplicationTheme();
+        wave::MainWindow window(project()); window.show(); QCoreApplication::processEvents();
+        QVERIFY(window.windowTitle().endsWith(QStringLiteral(" — Tickx")));
+        auto* canvas=window.findChild<wave::WaveCanvas*>(); QVERIFY(canvas);
+        QCOMPARE(canvas->signalHeaderWidth(),312);
+        QTest::mousePress(canvas->viewport(),Qt::LeftButton,Qt::NoModifier,QPoint(312,60));
+        QTest::mouseMove(canvas->viewport(),QPoint(384,60));
+        QTest::mouseRelease(canvas->viewport(),Qt::LeftButton,Qt::NoModifier,QPoint(384,60));
+        QCOMPARE(canvas->signalHeaderWidth(),384);
+        legacy.sync(); QCOMPARE(legacy.value("canvas/signalHeaderWidth").toInt(),384);
+        screenshot(&window,"tickx-branding-legacy-settings");
     }
 
     void styleRoundTripAndInheritance()

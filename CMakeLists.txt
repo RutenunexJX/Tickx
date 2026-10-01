@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(WaveWorkbench VERSION 0.13.0 LANGUAGES CXX)
+project(Tickx VERSION 0.14.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -258,21 +258,23 @@ set_target_properties(wavewidgets PROPERTIES
 )
 wave_enable_warnings(wavewidgets)
 
-add_executable(wave-workbench WIN32
+add_executable(Tickx WIN32
     src/app/main.cpp
     resources/wave-workbench.qrc
 )
 if(WIN32)
-    target_sources(wave-workbench PRIVATE resources/wave-workbench.rc)
+    target_sources(Tickx PRIVATE resources/wave-workbench.rc)
+    configure_file(resources/tickx-version.rc.in "${CMAKE_CURRENT_BINARY_DIR}/tickx-version.rc" @ONLY)
+    target_sources(Tickx PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/tickx-version.rc")
 endif()
-target_link_libraries(wave-workbench PRIVATE wavewidgets)
-target_compile_definitions(wave-workbench
+target_link_libraries(Tickx PRIVATE wavewidgets)
+target_compile_definitions(Tickx
     PRIVATE WAVEWORKBENCH_VERSION="${PROJECT_VERSION}")
 if(SuiteApp_FOUND)
-    target_compile_definitions(wave-workbench
+    target_compile_definitions(Tickx
         PRIVATE WAVEWORKBENCH_HAS_SUITEAPP=1)
 endif()
-wave_enable_warnings(wave-workbench)
+wave_enable_warnings(Tickx)
 
 add_executable(wave-generate
     src/cli/generate_main.cpp
@@ -322,13 +324,16 @@ wave_enable_warnings(wave-cli)
 set(WAVEWORKBENCH_PORTABLE_TARGETS
     ElaWidgetTools
     wavewidgets
-    wave-workbench
+    Tickx
     wave-cli
     wave-generate
     wave-compare
     wave-bridge
     wave-sim-runner
 )
+
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/tickx-build-config.json" CONTENT
+    "{\"application\":\"Tickx\",\"version\":\"${PROJECT_VERSION}\",\"suiteApp\":$<IF:$<BOOL:${SuiteApp_FOUND}>,true,false>,\"wellen\":$<IF:$<BOOL:${WAVEWORKBENCH_ENABLE_WELLEN}>,true,false>}\n")
 
 configure_file(
     "${CMAKE_SOURCE_DIR}/docs/PACKAGE-README.txt.in"
@@ -404,7 +409,7 @@ install(
 )
 
 if(WIN32)
-    set_property(TARGET wave-workbench PROPERTY WIN32_EXECUTABLE TRUE)
+    set_property(TARGET Tickx PROPERTY WIN32_EXECUTABLE TRUE)
 endif()
 
 if(WAVEWORKBENCH_BUILD_TESTS)

@@ -687,7 +687,7 @@ TextGenerationResult generateSystemVerilogAssertionBody(const GenerationPlan& pl
 {
     TextGenerationResult result;
     std::ostringstream output;
-    output << "// Assertions generated from losslessly representable Wave Workbench relations.\n";
+    output << "// Assertions generated from losslessly representable Tickx relations.\n";
     for (const auto& relation : plan.relations) {
         const auto* source = findStep(plan, relation.sourceEventId);
         const auto* target = findStep(plan, relation.targetEventId);
@@ -953,7 +953,7 @@ TextGenerationResult generateSystemVerilog(const GenerationPlan& plan)
     }
 
     output << "  initial begin : execute_" << sanitizeIdentifier(plan.scenarioId) << "\n"
-           << "    $display(\"Wave Workbench scenario: "
+           << "    $display(\"Tickx scenario: "
            << escapeComment(plan.scenarioName) << "\");\n"
            << "    fork : scenario_and_timeout\n"
            << "      begin : scenario_steps\n"
@@ -1029,7 +1029,7 @@ TextGenerationResult generateSystemVerilog(const GenerationPlan& plan)
            << "            #" << duration << ";\n"
            << "          end\n"
            << "        join\n"
-           << "        $display(\"Wave Workbench scenario completed\");\n"
+           << "        $display(\"Tickx scenario completed\");\n"
            << "        $finish;\n"
            << "      end\n"
            << "      begin : timeout_guard\n"
@@ -1037,7 +1037,7 @@ TextGenerationResult generateSystemVerilog(const GenerationPlan& plan)
                                  ? duration
                                  : std::max<std::int64_t>(duration + 1, duration * 2))
            << ";\n"
-           << "        $fatal(1, \"Wave Workbench scenario timeout\");\n"
+           << "        $fatal(1, \"Tickx scenario timeout\");\n"
            << "      end\n"
            << "    join_any\n"
            << "    disable scenario_and_timeout;\n"
@@ -1245,7 +1245,7 @@ TextGenerationResult generateCocotb(const GenerationPlan& plan)
            << "@cocotb.test()\n"
            << "async def test_" << sanitizeIdentifier(plan.scenarioId) << "(dut):\n"
            << "    \"\"\"" << escapePython(plan.scenarioName) << "\"\"\"\n"
-           << "    dut._log.info(\"Wave Workbench scenario: "
+           << "    dut._log.info(\"Tickx scenario: "
            << escapePython(plan.scenarioName) << "\")\n";
     for (const auto& clock : plan.clocks) {
         const auto signal = std::find_if(
@@ -1272,7 +1272,7 @@ TextGenerationResult generateCocotb(const GenerationPlan& plan)
     output << "        cocotb.start_soon(scenario_duration()),\n";
     output << "    ]\n"
            << "    await with_timeout(Combine(*tasks), " << timeout << ", \"ps\")\n"
-           << "    dut._log.info(\"Wave Workbench scenario completed\")\n";
+           << "    dut._log.info(\"Tickx scenario completed\")\n";
     result.text = output.str();
     return result;
 }

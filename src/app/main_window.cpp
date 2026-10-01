@@ -2649,7 +2649,7 @@ MainWindow::MainWindow(
     updateWindowTitle();
     if (simulationResultMode_) {
         setWindowTitle(
-            tr("%1 - Simulation Result - Wave Workbench")
+            tr("%1 - Simulation Result - Tickx")
                 .arg(QString::fromStdString(project_.name)));
     }
     auto initialStatus = recoveredSnapshot
@@ -5178,9 +5178,9 @@ void MainWindow::openProject()
     if (!pendingQuickLaneId_.isEmpty()) cancelQuickLaneSetup(pendingQuickLaneId_);
     const auto path = QFileDialog::getOpenFileName(
         this,
-        tr("Open Wave Workbench project"),
+        tr("Open Tickx project"),
         projectDialogDirectory(),
-        tr("Wave Workbench project (*.wave.json);;Recovery snapshot (*.autosave);;JSON files (*.json)"));
+        tr("Tickx project (*.wave.json);;Recovery snapshot (*.autosave);;JSON files (*.json)"));
     if (path.isEmpty() || !confirmDiscardChanges()) return;
     if (!loadFromPath(path) && dirty_) scheduleAutosave();
 }
@@ -5213,9 +5213,9 @@ void MainWindow::saveProjectAs()
         : projectFile_;
     auto path = QFileDialog::getSaveFileName(
         this,
-        tr("Save Wave Workbench project"),
+        tr("Save Tickx project"),
         suggested,
-        tr("Wave Workbench project (*.wave.json);;JSON files (*.json)"));
+        tr("Tickx project (*.wave.json);;JSON files (*.json)"));
     if (path.isEmpty()) return;
     if (QFileInfo(path).suffix().isEmpty()) {
         path += QStringLiteral(".wave.json");
@@ -8926,7 +8926,7 @@ void MainWindow::exportArtifacts()
     QDir().mkpath(suggestedDirectory);
     const auto directory = QFileDialog::getExistingDirectory(
         this,
-        tr("Export Wave Workbench artifacts"),
+        tr("Export Tickx artifacts"),
         suggestedDirectory,
         QFileDialog::ShowDirsOnly);
     if (directory.isEmpty()) return;
@@ -12942,7 +12942,7 @@ void MainWindow::updateWindowTitle()
         ? tr("%1 · %2").arg(name, activeScenarioLabel())
         : name;
     setWindowTitle(
-        tr("%1%2 — Wave Workbench")
+        tr("%1%2 — Tickx")
             .arg(displayName)
             .arg(dirty_ ? QStringLiteral(" *") : QString{}));
     QString state;

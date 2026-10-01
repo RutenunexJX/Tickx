@@ -13,7 +13,7 @@ namespace {
 void usage(QTextStream& stream)
 {
     stream
-        << "Wave Workbench simulation runner (experimental)\n"
+        << "Tickx simulation runner (experimental)\n"
            "Usage:\n"
            "  wave-sim-runner probe [--verilator=PATH] [--cxx=PATH] "
            "[--timeout-ms=N] [--cancel-after-ms=N] [--pretty]\n"

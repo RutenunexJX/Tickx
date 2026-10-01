@@ -1,4 +1,4 @@
-# Wave Workbench CLI 快速开始
+# Tickx CLI 快速开始
 
 便携包中的主自动化入口是 `wave-cli.exe`。该程序不创建窗口，可供 Codex、脚本和 CI 直接调用。
 
@@ -54,7 +54,7 @@
 
 ## 5. 在源码仓库中生成 Windows 便携包
 
-以下命令只在 Wave Workbench 源码仓库根目录中执行；已生成的便携包不包含
+以下命令只在 Tickx 源码仓库根目录中执行；已生成的便携包不包含
 `scripts/package-windows.ps1`。从 Release 构建树生成可复现的便携目录、ZIP 和 SHA-256 文件：
 
 ```powershell

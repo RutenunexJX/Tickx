@@ -9,6 +9,7 @@ param(
     [string]$Configuration = "Release",
     [switch]$SkipBuild,
     [switch]$StageOnly,
+    [switch]$DevelopmentPreview,
     [string]$ValidationSummary
 )
 
@@ -20,6 +21,13 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $resolvedBuildDirectory "package"
 }
 $fullOutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
+if ($DevelopmentPreview) {
+    if (-not $StageOnly) { throw "DevelopmentPreview requires -StageOnly." }
+    $previewRoot = [System.IO.Path]::GetFullPath((Join-Path $sourceDirectory "build")).TrimEnd('\') + '\'
+    if (-not $fullOutputDirectory.StartsWith($previewRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "DevelopmentPreview must stay under this repository's build directory."
+    }
+}
 New-Item -ItemType Directory -Force -Path $fullOutputDirectory | Out-Null
 $fullOutputDirectory = (Resolve-Path -LiteralPath $fullOutputDirectory).Path
 
@@ -29,12 +37,12 @@ if (-not (Test-Path -LiteralPath $cmakeCache -PathType Leaf)) {
 }
 
 $versionMatch = Select-String -LiteralPath (Join-Path $sourceDirectory "CMakeLists.txt") `
-    -Pattern 'project\(WaveWorkbench VERSION ([0-9]+\.[0-9]+\.[0-9]+)' | Select-Object -First 1
+    -Pattern 'project\(Tickx VERSION ([0-9]+\.[0-9]+\.[0-9]+)' | Select-Object -First 1
 if ($null -eq $versionMatch) {
-    throw "Cannot determine the Wave Workbench version from CMakeLists.txt."
+    throw "Cannot determine the Tickx version from CMakeLists.txt."
 }
 $version = $versionMatch.Matches[0].Groups[1].Value
-$packageName = "WaveWorkbench-$version-windows-x64"
+$packageName = if ($DevelopmentPreview) { "Tickx-$version-development-windows-x64" } else { "Tickx-$version-windows-x64" }
 $stageDirectory = Join-Path $fullOutputDirectory $packageName
 $archivePath = "$stageDirectory.zip"
 $hashPath = "$archivePath.sha256"
@@ -48,26 +56,39 @@ if (-not $resolvedStage.StartsWith($expectedParent, [System.StringComparison]::O
     throw "Refusing to stage outside the requested output directory: $resolvedStage"
 }
 
-if ($StageOnly) {
-    $revision = (& git -C $sourceDirectory rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0) { throw "Cannot record the staging source revision." }
-    $branch = (& git -C $sourceDirectory branch --show-current).Trim()
-    $sourceChanges = & git -C $sourceDirectory status --porcelain --untracked-files=no
-    if ($LASTEXITCODE -ne 0 -or $sourceChanges) {
-        throw "StageOnly requires a committed, clean source tree."
-    }
+$revision = (& git -C $sourceDirectory rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Cannot record the staging source revision." }
+$branch = (& git -C $sourceDirectory branch --show-current).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Cannot record the source branch." }
+$sourceChanges = @(& git -C $sourceDirectory status --porcelain --untracked-files=normal)
+if ($LASTEXITCODE -ne 0) { throw "Cannot record the source changes." }
+$sourceDirty = $sourceChanges.Count -ne 0
+if ($sourceDirty -and -not $DevelopmentPreview) {
+    throw "Release packaging requires a committed, clean source tree. Use -StageOnly -DevelopmentPreview for local development."
 }
 
 if (-not $SkipBuild) {
     & $CMakeExecutable --build $resolvedBuildDirectory --config $Configuration `
-        --target wave-workbench wave-cli wave-generate wave-compare wave-bridge
+        --target Tickx wave-cli wave-generate wave-compare wave-bridge wave-sim-runner
     if ($LASTEXITCODE -ne 0) {
         throw "CMake build failed with exit code $LASTEXITCODE."
     }
 }
 
+$buildConfigPath = Join-Path $resolvedBuildDirectory "tickx-build-config.json"
+if (-not (Test-Path -LiteralPath $buildConfigPath -PathType Leaf)) {
+    throw "Reconfigure this build for Tickx before packaging."
+}
+$buildConfig = Get-Content -LiteralPath $buildConfigPath -Raw | ConvertFrom-Json
+if ($buildConfig.application -ne "Tickx" -or $buildConfig.version -ne $version) {
+    throw "The configured build does not match the Tickx source version."
+}
+
 if (-not $StageOnly) {
     foreach ($path in @($stageDirectory, $archivePath, $hashPath)) {
+        if (-not [System.IO.Path]::GetFullPath($path).StartsWith($expectedParent, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove a path outside the requested output directory: $path"
+        }
         if (Test-Path -LiteralPath $path) {
             Remove-Item -LiteralPath $path -Recurse -Force
         }
@@ -94,11 +115,12 @@ if ([string]::IsNullOrWhiteSpace($QtBinDirectory)) {
 }
 
 foreach ($executable in @(
-    "wave-workbench.exe",
+    "Tickx.exe",
     "wave-cli.exe",
     "wave-generate.exe",
     "wave-compare.exe",
-    "wave-bridge.exe"
+    "wave-bridge.exe",
+    "wave-sim-runner.exe"
 )) {
     $executablePath = Join-Path $stageDirectory $executable
     if (-not (Test-Path -LiteralPath $executablePath -PathType Leaf)) {
@@ -107,6 +129,12 @@ foreach ($executable in @(
     & $windeployqt --release --dir $stageDirectory $executablePath
     if ($LASTEXITCODE -ne 0) {
         throw "windeployqt failed for $executable with exit code $LASTEXITCODE."
+    }
+}
+
+foreach ($obsoleteExecutable in @("wave-workbench.exe", "WaveWorkbench.exe")) {
+    if (Test-Path -LiteralPath (Join-Path $stageDirectory $obsoleteExecutable)) {
+        throw "An obsolete GUI executable entered the Tickx package: $obsoleteExecutable"
     }
 }
 
@@ -124,35 +152,43 @@ foreach ($requiredPath in @(
     }
 }
 
-if ($StageOnly) {
-    $metadata = [ordered]@{
-        application = "WaveWorkbench"
-        version = $version
-        revision = $revision
-        branch = $branch
-        configuration = $Configuration
-        platform = "windows-x64"
-        qtVersion = "6.10.2"
-        privateRuntime = "WaveWorkbenchEla.dll"
-        upstreamElaRevision = "454cac2d57a47d3cc28577dc817793aec1881ca7"
-        capabilityReference = "75180fad5e5f5142684cf092649deffe5720994d"
-        listViewLifetimeFix = "xIPs source patch 28; private ABI unchanged"
-        overlayOriginLifetimeFix = "guarded origin/area, replacement teardown regression; Wave vendor patch 13"
-        comboPopupPaddingFix = "ZeroSlack/RegMap patch 30; Wave vendor patch 14"
-        comboPopupSourceSha256 = "e69b815ba035831e2a84484acb0c46f957c83f346fff230a8c2b3034d4a44046"
-        generatedUtc = [DateTime]::UtcNow.ToString("o")
-        validation = $ValidationSummary
-        archiveCreated = $false
-        formalDirectoryReplaced = $false
+$metadata = [ordered]@{
+    application = "Tickx"
+    executable = "Tickx.exe"
+    repository = "https://github.com/RutenunexJX/Tickx"
+    version = $version
+    revision = $revision
+    branch = $branch
+    sourceDirty = $sourceDirty
+    sourceChanges = $sourceChanges
+    developmentPreview = [bool]$DevelopmentPreview
+    suiteAppEnabled = [bool]$buildConfig.suiteApp
+    wellenEnabled = [bool]$buildConfig.wellen
+    configuration = $Configuration
+    platform = "windows-x64"
+    qtVersion = "6.10.2"
+    privateRuntime = "WaveWorkbenchEla.dll"
+    upstreamElaRevision = "454cac2d57a47d3cc28577dc817793aec1881ca7"
+    capabilityReference = "75180fad5e5f5142684cf092649deffe5720994d"
+    listViewLifetimeFix = "xIPs source patch 28; private ABI unchanged"
+    overlayOriginLifetimeFix = "guarded origin/area, replacement teardown regression; Wave vendor patch 13"
+    comboPopupPaddingFix = "ZeroSlack/RegMap patch 30; Wave vendor patch 14"
+    comboPopupSourceSha256 = "e69b815ba035831e2a84484acb0c46f957c83f346fff230a8c2b3034d4a44046"
+    generatedUtc = [DateTime]::UtcNow.ToString("o")
+    validation = $ValidationSummary
+    archiveCreated = -not $StageOnly
+    formalDirectoryReplaced = $false
+}
+$metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $stageDirectory "build-info.json") -Encoding utf8
+$checksums = Get-ChildItem -LiteralPath $stageDirectory -Recurse -File |
+    Sort-Object FullName | ForEach-Object {
+        $relative = $_.FullName.Substring($stageDirectory.Length + 1).Replace('\', '/')
+        $digest = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$digest  $relative"
     }
-    $metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $stageDirectory "build-info.json") -Encoding utf8
-    $checksums = Get-ChildItem -LiteralPath $stageDirectory -Recurse -File |
-        Sort-Object FullName | ForEach-Object {
-            $relative = $_.FullName.Substring($stageDirectory.Length + 1).Replace('\', '/')
-            $digest = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$digest  $relative"
-        }
-    $checksums | Set-Content -LiteralPath (Join-Path $stageDirectory "SHA256SUMS.txt") -Encoding ascii
+$checksums | Set-Content -LiteralPath (Join-Path $stageDirectory "SHA256SUMS.txt") -Encoding ascii
+
+if ($StageOnly) {
     Write-Output $stageDirectory
     Write-Output (Join-Path $stageDirectory "build-info.json")
     Write-Output (Join-Path $stageDirectory "SHA256SUMS.txt")

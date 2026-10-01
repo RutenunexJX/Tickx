@@ -320,47 +320,54 @@ foreach(_waveform_scale IN LISTS _waveform_view_scales)
     )
     list(APPEND _waveform_view_scale_tests ${_waveform_scale_test})
 endforeach()
-add_test(NAME wave-app-smoke COMMAND wave-workbench --smoke-test)
+add_test(NAME wave-app-smoke COMMAND Tickx --smoke-test)
+add_test(NAME tickx-branding-contract
+    COMMAND "${CMAKE_COMMAND}" "-DAPP=$<TARGET_FILE:Tickx>" "-DEXPECTED_VERSION=${PROJECT_VERSION}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tickx_branding_contract.cmake")
+set_tests_properties(tickx-branding-contract PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+    TIMEOUT 15)
 add_test(
     NAME wave-example-smoke
-    COMMAND wave-workbench --smoke-test "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
+    COMMAND Tickx --smoke-test "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(
     NAME wave-simulation-result-window-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             --load-first-trace
             "--screenshot=${CMAKE_BINARY_DIR}/simulation-result-window-smoke.png"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(
     NAME wave-autosave-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--autosave-smoke=${CMAKE_BINARY_DIR}/autosave-recovery.wave.json"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(
     NAME wave-file-conflict-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             # Other tests' build-root output must not reset the directory debounce.
             "--file-conflict-smoke=${CMAKE_BINARY_DIR}/test-projects/file-conflict/project.wave.json"
 )
 add_test(
     NAME wave-lane-dialog-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--lane-dialog-screenshot=${CMAKE_BINARY_DIR}/lane-dialog-smoke.png"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(
     NAME wave-lane-removal-smoke
-    COMMAND wave-workbench --lane-removal-smoke
+    COMMAND Tickx --lane-removal-smoke
 )
 add_test(
     NAME wave-lane-reorder-smoke
-    COMMAND wave-workbench --lane-reorder-smoke
+    COMMAND Tickx --lane-reorder-smoke
 )
 add_test(
     NAME wave-lane-autoscroll-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--lane-autoscroll-smoke=${CMAKE_BINARY_DIR}/lane-autoscroll-smoke.png"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
@@ -370,94 +377,94 @@ configure_file(
     COPYONLY)
 add_test(
     NAME wave-hidden-lane-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--hidden-lane-smoke=${CMAKE_BINARY_DIR}/hidden-lane-smoke-quick-hide.png"
             "${CMAKE_BINARY_DIR}/hidden-lane-smoke-project.wave.json"
 )
 add_test(
     NAME wave-group-header-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--group-header-smoke=${CMAKE_BINARY_DIR}/group-collapse-smoke.png"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(
     NAME wave-group-creation-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--group-creation-smoke=${CMAKE_BINARY_DIR}/group-creation-smoke.png"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(
     NAME wave-group-batch-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--group-batch-smoke=${CMAKE_BINARY_DIR}/group-batch-smoke.png"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(
     NAME wave-group-membership-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--group-membership-smoke=${CMAKE_BINARY_DIR}/group-membership-smoke.png"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(
     NAME wave-signal-header-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             --signal-header-smoke
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(
     NAME wave-canvas-add-lane-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--canvas-add-lane-smoke=${CMAKE_BINARY_DIR}/canvas-signal-management-smoke.png"
 )
 add_test(
     NAME wave-cursor-mode-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--cursor-mode-smoke=${CMAKE_BINARY_DIR}/cursor-mode-smoke.png"
 )
 add_test(
     NAME wave-wave-edit-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--wave-edit-smoke=${CMAKE_BINARY_DIR}/wave-edit-smoke.png"
 )
 add_test(
     NAME wave-wave-edit-autoscroll-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--wave-edit-autoscroll-smoke=${CMAKE_BINARY_DIR}/wave-edit-autoscroll-smoke.png"
             "${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 add_test(
     NAME wave-new-project-smoke
-    COMMAND wave-workbench --new-project-smoke
+    COMMAND Tickx --new-project-smoke
 )
 add_test(
     NAME wave-user-journey-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--user-journey-smoke=${CMAKE_BINARY_DIR}/user-journey.wave.json"
 )
 add_test(
     NAME wave-edit-menu-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--edit-menu-screenshot=${CMAKE_BINARY_DIR}/edit-menu-smoke.png"
 )
 add_test(
     NAME wave-waveform-only-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--waveform-only-smoke=${CMAKE_BINARY_DIR}/waveform-only-smoke.png"
 )
 add_test(
     NAME wave-uri-smoke
-    COMMAND wave-workbench --smoke-test
+    COMMAND Tickx --smoke-test
             "wave://scenario/scenario-handshake?project=${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json&lane=lane-data&marker=marker-transfer"
 )
 add_test(
     NAME wave-uri-invalid-id-smoke
-    COMMAND wave-workbench --smoke-test
+    COMMAND Tickx --smoke-test
             "wave://scenario/missing-scenario?project=${CMAKE_SOURCE_DIR}/examples/handshake/project.wave.json"
 )
 set_tests_properties(wave-uri-invalid-id-smoke PROPERTIES WILL_FAIL TRUE)
 add_test(
     NAME wave-scenario-switch-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             "--scenario-switch-smoke=${CMAKE_BINARY_DIR}/scenario-switch-smoke.png"
 )
 add_test(
@@ -935,14 +942,14 @@ add_test(
 )
 add_test(
     NAME wave-simulation-controls-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             --load-first-trace
             --simulation-controls-smoke
             "${CMAKE_BINARY_DIR}/fixed-fixture-cli/result.wave.json"
 )
 add_test(
     NAME wave-simulation-stop-smoke
-    COMMAND wave-workbench
+    COMMAND Tickx
             --load-first-trace
             --simulation-stop-smoke
             "${CMAKE_BINARY_DIR}/fixed-fixture-cli/result.wave.json"

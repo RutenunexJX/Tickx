@@ -27,11 +27,17 @@ else()
     set(executable_suffix "")
 endif()
 foreach(executable IN ITEMS
-    wave-workbench wave-cli wave-generate wave-compare wave-bridge wave-sim-runner
+    Tickx wave-cli wave-generate wave-compare wave-bridge wave-sim-runner
     wave-wellen-reader)
     if(NOT EXISTS "${OUTPUT}/${executable}${executable_suffix}")
         message(FATAL_ERROR
             "Portable install omitted ${executable}${executable_suffix}")
+    endif()
+endforeach()
+
+foreach(obsolete_gui IN ITEMS wave-workbench WaveWorkbench)
+    if(EXISTS "${OUTPUT}/${obsolete_gui}${executable_suffix}")
+        message(FATAL_ERROR "Portable install retained obsolete GUI ${obsolete_gui}")
     endif()
 endforeach()
 

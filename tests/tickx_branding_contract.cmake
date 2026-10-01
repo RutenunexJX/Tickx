@@ -1,0 +1,10 @@
+get_filename_component(app_name "${APP}" NAME_WE)
+if(NOT app_name STREQUAL "Tickx")
+    message(FATAL_ERROR "The GUI executable must be named Tickx: ${APP}")
+endif()
+execute_process(COMMAND "${APP}" --version
+    RESULT_VARIABLE result OUTPUT_VARIABLE version ERROR_VARIABLE error TIMEOUT 10)
+string(STRIP "${version}" version)
+if(NOT result EQUAL 0 OR NOT version STREQUAL "Tickx ${EXPECTED_VERSION}")
+    message(FATAL_ERROR "Tickx --version failed: ${result}; ${version}; ${error}")
+endif()

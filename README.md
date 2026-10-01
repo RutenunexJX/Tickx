@@ -1,8 +1,14 @@
-# Wave Workbench
+# Tickx
 
-当前版本：`v0.13.0`
+源码仓库：[RutenunexJX/Tickx](https://github.com/RutenunexJX/Tickx)。
 
-Wave Workbench 是用于 FPGA 数字时序设计与验证场景编排的独立桌面应用。工程中的
+当前版本：`v0.14.0`
+
+Tickx 是 WaveWorkbench 的新名称，桌面程序为 `Tickx.exe`。设置和恢复数据继续使用原来的
+`WaveWorkbench / Wave Workbench` 存储身份；工程格式、`wave-*` CLI、环境变量、URI、
+协议标识，以及 `wavewidgets.dll` / `WaveWorkbenchEla.dll` 的名称和接口保持兼容。
+
+Tickx 是用于 FPGA 数字时序设计与验证场景编排的独立桌面应用。工程中的
 `Project`、`Scenario`、`Lane`、`Segment`、`Event`、`Relation` 是唯一事实源；画布、
 步骤表和后续生成文件均为该模型的视图或派生产物。
 
@@ -124,19 +130,19 @@ E:\QT6\Tools\CMake_64\bin\ctest.exe --test-dir build --output-on-failure
 
 仓库提供 `Qt Creator - Debug` 和 `Qt Creator - Release` CMake presets。使用 Qt Creator
 打开根目录 `CMakeLists.txt`，选择 Qt 6.10.2 Desktop Kit 和 Debug preset，即可点击 Build；
-将运行目标设为 `wave-workbench` 后可直接 Run 或按 `F5` 调试。Qt Kit 配置、可用目标、
+将运行目标设为 `Tickx` 后可直接 Run 或按 `F5` 调试。Qt Kit 配置、可用目标、
 示例工程参数及命令行等价验证见 [docs/qt-creator.md](docs/qt-creator.md)。
 
 启动内置演示场景：
 
 ```powershell
-.\build\wave-workbench.exe
+.\build\Tickx.exe
 ```
 
 打开示例工程：
 
 ```powershell
-.\build\wave-workbench.exe .\examples\handshake\project.wave.json
+.\build\Tickx.exe .\examples\handshake\project.wave.json
 ```
 
 从工程生成 HDL、Python 和图形派生产物：
@@ -286,7 +292,7 @@ they are not evidence of a test run against today's checkout.
 
 ## Suite application protocol
 
-WaveWorkbench provides `wave://project?...` resources through
+Tickx provides `wave://project?...` resources through
 `suite-app/v1`, exposes `wave.project.open`, and publishes the
 `wave.waveform` Surface. The Surface uses native mode with ABI version 1,
 library `wavewidgets`, and factory
@@ -295,7 +301,7 @@ always declared as the fallback.
 
 The adapter delegates project parsing and opening to the existing Wave model
 and window APIs. The neutral Runtime does not duplicate wave-project state,
-and other applications do not include WaveWorkbench private headers. When the
+and other applications do not include Tickx private headers. When the
 Runtime is missing, the standalone editor, CLI, bridge, and widget ABI remain
 unchanged.
 

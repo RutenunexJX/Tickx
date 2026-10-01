@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/automation/v1/report.schema.json",
-  "title": "Wave Workbench automation report v1",
+  "title": "Tickx automation report v1",
   "description": "Stable top-level contract shared by successful and failed automation command reports.",
   "type": "object",
   "required": ["schema", "command", "ok"],

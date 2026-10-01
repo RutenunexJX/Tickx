@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/automation/v1/capabilities.schema.json",
-  "title": "Wave Workbench automation capabilities v1",
+  "title": "Tickx automation capabilities v1",
   "description": "Machine-readable feature and operation discovery returned by capabilities.",
   "type": "object",
   "required": [
