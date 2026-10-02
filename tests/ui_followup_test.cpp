@@ -46,6 +46,7 @@
 #include <qt_windows.h>
 #endif
 #include <QTemporaryDir>
+#include <QTabWidget>
 #include <QTest>
 #include <QTimer>
 #include <QtMath>
@@ -795,6 +796,81 @@ private slots:
                 window.findChild<QAction*>("RedoAction")->trigger(); QVERIFY(window.project()==after);
             } else QVERIFY(window.project()==before);
             QTest::qWait(80);
+        }
+    }
+
+    void stylePreviewIsLiveAndIsolated()
+    {
+        wave::MainWindow window(styleProject()); window.show();
+        const auto before=window.project();
+        const auto palette=qApp->palette();
+        const auto appearance=QSettings{}.value("appearance/colorScheme");
+        auto* action=window.findChild<QAction*>("SignalStyleDefaultsAction"); QVERIFY(action);
+        QTimer guard; guard.setSingleShot(true);
+        connect(&guard,&QTimer::timeout,&window,[] {
+            if (auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget())) dialog->reject();
+        });
+        for (const bool accept : {false,true}) {
+            bool inspected=false;
+            QPointer<wave::WaveCanvas> previewOwner;
+            QTimer::singleShot(0,&window,[&] {
+                auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+                auto* pages=dialog->findChild<QTabWidget*>("SignalStylePages"); QVERIFY(pages);
+                QCOMPARE(pages->count(),2);
+                pages->setCurrentIndex(1);
+                auto* canvas=dialog->findChild<wave::WaveCanvas*>("SignalStylePreviewCanvas"); QVERIFY(canvas);
+                previewOwner=canvas;
+                QVERIFY(!canvas->viewport()->isEnabled());
+                auto* preset=dialog->findChild<QComboBox*>("SignalStylePreviewPreset"); QVERIFY(preset);
+                auto* source=dialog->findChild<QComboBox*>("SignalStylePreset"); QVERIFY(source);
+                auto* edge=dialog->findChild<QComboBox*>("SignalStyleEdge"); QVERIFY(edge);
+                auto* scheme=dialog->findChild<QComboBox*>("SignalStylePreviewTheme"); QVERIFY(scheme);
+                auto* fill=dialog->findChild<QLineEdit*>("SignalStyleFill"); QVERIFY(fill);
+                auto* status=dialog->findChild<QLabel*>("SignalStylePreviewStatus"); QVERIFY(status);
+                auto* note=dialog->findChild<QLabel*>("SignalStylePreviewNote"); QVERIFY(note);
+                source->setCurrentIndex(source->findData("engineering"));
+                edge->setCurrentIndex(edge->findData("square"));
+                scheme->setCurrentIndex(0);
+                QTest::qWait(30);
+                screenshot(dialog,"style-preview-square-light");
+                QVERIFY2(canvas->geometry().bottom()<note->geometry().top(),"Preview must not overlap its explanation");
+                const auto square=canvas->viewport()->grab().toImage();
+                edge->setCurrentIndex(edge->findData("trapezoid"));
+                QCoreApplication::processEvents();
+                QVERIFY(square!=canvas->viewport()->grab().toImage());
+                preset->setCurrentIndex(preset->findData("cute"));
+                QCOMPARE(source->currentData().toString(),QString("cute"));
+                const auto light=canvas->viewport()->grab().toImage();
+                scheme->setCurrentIndex(1);
+                QCoreApplication::processEvents();
+                QCOMPARE(wave::waveformColorScheme(canvas->palette()),wave::WaveformColorScheme::Dark);
+                QVERIFY(light!=canvas->viewport()->grab().toImage());
+                QCOMPARE(qApp->palette(),palette);
+                QCOMPARE(QSettings{}.value("appearance/colorScheme"),appearance);
+                fill->setText("invalid-color");
+                QCOMPARE(status->property("waveState").toString(),QString("error"));
+                QCoreApplication::processEvents();
+                QVERIFY2(canvas->geometry().bottom()<note->geometry().top(),"Validation messages must not overlap the preview");
+                fill->clear();
+                QVERIFY(status->property("waveState").toString().isEmpty());
+                QVERIFY(window.project()==before);
+                QTest::qWait(30);
+                screenshot(dialog,"style-preview-trapezoid-dark");
+                inspected=true;
+                QTest::mouseClick(dialog->findChild<QDialogButtonBox*>()->button(
+                    accept ? QDialogButtonBox::Ok : QDialogButtonBox::Cancel),Qt::LeftButton);
+            });
+            guard.start(3000); action->trigger(); guard.stop();
+            QVERIFY(inspected); QVERIFY(previewOwner.isNull());
+            if (accept) {
+                QCOMPARE(wave::signalStyleSettings(window.project().extensions).preset,QString("cute"));
+                QCOMPARE(wave::signalStyleSettings(window.project().extensions).edge,QString("trapezoid"));
+                const auto after=window.project();
+                window.findChild<QAction*>("UndoAction")->trigger(); QVERIFY(window.project()==before);
+                window.findChild<QAction*>("RedoAction")->trigger(); QVERIFY(window.project()==after);
+                window.findChild<QAction*>("UndoAction")->trigger();
+            }
+            QVERIFY(window.project()==before);
         }
     }
 

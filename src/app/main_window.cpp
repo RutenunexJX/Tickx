@@ -2,6 +2,8 @@
 #include "ElaMenu.h"
 #include "ElaAppBar.h"
 #include "main_window.h"
+#include "signal_style_preview.h"
+#include <QScreen>
 
 #include "wave/export.h"
 #include "wave/integration.h"
@@ -2364,8 +2366,17 @@ MainWindow::MainWindow(
         dialog.setObjectName(QStringLiteral("SignalStyleDefaultsDialog"));
         dialog.setWindowTitle(tr("Signal and background styles"));
         auto* layout = new QVBoxLayout(&dialog);
-        auto* editor = new SignalStyleEditor(signalStyleSettings(project_.extensions), false, &dialog);
-        layout->addWidget(editor);
+        auto* pages = ui::tabs(&dialog);
+        pages->setObjectName(QStringLiteral("SignalStylePages"));
+        auto* settingsPage = new QWidget(pages);
+        auto* settingsLayout = new QVBoxLayout(settingsPage);
+        auto* editor = new SignalStyleEditor(signalStyleSettings(project_.extensions), false, settingsPage);
+        settingsLayout->addWidget(editor);
+        settingsLayout->addStretch();
+        pages->addTab(settingsPage, tr("Settings"));
+        pages->addTab(createSignalStylePreviewPage(editor, pages), tr("Preview"));
+        layout->addWidget(pages, 1);
+        dialog.resize(QSize(860, 650).boundedTo(dialog.screen()->availableGeometry().size() - QSize(40, 60)));
         auto* error = ui::text(tr("Use line width 0 (preset) or 0.75–4, and a valid fill color."), &dialog);
         error->setProperty("waveState", "error"); error->hide(); layout->addWidget(error);
         auto* buttons = ui::buttonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);

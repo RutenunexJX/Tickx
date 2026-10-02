@@ -2,7 +2,11 @@
 
 源码仓库：[RutenunexJX/Tickx](https://github.com/RutenunexJX/Tickx)。
 
-当前版本：`v0.14.0`
+当前版本：`v0.15.0`
+
+风格配置新增实时预览页，可直接切换预设并查看亮色、暗色效果。正常波形统一使用所选的
+方形或梯形边缘；dont-care、reserved、gated、disabled、X/Z 保留各自画法。
+预览不会修改当前工程，点击 OK 后应用，Cancel 放弃，应用后支持撤销和重做。
 
 Tickx 是 WaveWorkbench 的新名称，桌面程序为 `Tickx.exe`。设置和恢复数据继续使用原来的
 `WaveWorkbench / Wave Workbench` 存储身份；工程格式、`wave-*` CLI、环境变量、URI、

@@ -52,7 +52,7 @@ if(WIN32)
         add_test(NAME wave-ui-native-${_wave_native_scale}
             COMMAND "${CMAKE_COMMAND}"
                 "-DTEST_EXE=$<TARGET_FILE:wave-ui-followup-test>"
-                "-DTEST_FUNCTIONS=firstShowGeometry;chromeAndExactUnits;resizeFitsAndPreservesContext;styleApplyViaPopupAndButton;englishBuiltInText;titleClosePreservesCancelledDraft"
+                "-DTEST_FUNCTIONS=firstShowGeometry;chromeAndExactUnits;resizeFitsAndPreservesContext;styleApplyViaPopupAndButton;stylePreviewIsLiveAndIsolated;englishBuiltInText;titleClosePreservesCancelledDraft"
                 "-DLOG_FILE=${CMAKE_BINARY_DIR}/ui-native-${_wave_native_scale}.txt"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
         set_tests_properties(wave-ui-native-${_wave_native_scale} PROPERTIES

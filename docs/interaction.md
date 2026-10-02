@@ -1,9 +1,14 @@
 # Tickx interaction
 
-Applies to 0.12.0. The following is usage documentation, not an iteration backlog.
+Current interaction guide. The following is usage documentation, not an iteration backlog.
 
 ## 当前交互
 
+- `View > Signal and background styles…` 提供 `Settings` 和 `Preview` 两页。
+  预览页使用真实画布展示 Clock、Bit、Bus 和 dont-care、reserved、gated、disabled、X/Z 示例；
+  配置修改实时更新示例，预览页也可直接切换风格预设，Light/Dark 仅改变预览效果。
+  正常波形保持同一边缘风格，特殊波形保留各自画法。点击 OK 后才写入工程并可 Undo/Redo，
+  Cancel 放弃此次配置；无效填色或线宽会提示修正，并保留上次有效的预览。
 - 主窗口中央组件直接为 WaveCanvas；不创建 Project、Inspector、Scenario Dock 或独立 Modes
   工具栏。波形始终可直接编辑，顶栏以图标显示 Measure、关系编辑、同步/异步、缩放和
   Fit，并常驻精确时间输入框；各图标保留悬停说明、模式状态和快捷键。Measure 中的 Ctrl 点击/拖动会建立持久 Marker；

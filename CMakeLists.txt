@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Tickx VERSION 0.14.0 LANGUAGES CXX)
+project(Tickx VERSION 0.15.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -211,6 +211,8 @@ add_library(wavewidgets SHARED
     src/app/quick_waveform.h
     src/app/signal_style.cpp
     src/app/signal_style.h
+    src/app/signal_style_preview.cpp
+    src/app/signal_style_preview.h
     src/app/ui_controls.cpp
     src/app/ui_feedback.cpp
     src/app/ui_icons.cpp
