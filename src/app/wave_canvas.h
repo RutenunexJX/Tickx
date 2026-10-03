@@ -389,7 +389,14 @@ private:
         Tick start{0};
         Tick end{0};
         Tick prefixMaximumEnd{0};
+        // Used by relation overlays only. Model edits, including equal-size
+        // replacements, rebuild these via refreshModel()/rebuildLaneLayout().
+        // Capacity-only event-vector reallocation leaves indices valid.
+        std::size_t sourceEventIndex{0};
+        std::size_t targetEventIndex{0};
     };
+
+    friend class CanvasOverlayTestAccess;
 
     enum class CursorInteraction {
         None,

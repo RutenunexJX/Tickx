@@ -74,6 +74,18 @@ set_tests_properties(wave-canvas-edit-regression-test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1;WAVEWORKBENCH_REDUCED_MOTION=1;WAVE_CANVAS_PREVIEW_DIR=${CMAKE_BINARY_DIR}/canvas-previews"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
     TIMEOUT 30)
+add_executable(wave-canvas-overlay-index-test canvas_overlay_index_test.cpp)
+target_link_libraries(wave-canvas-overlay-index-test PRIVATE wavewidgets waveproject Qt6::Test)
+wave_enable_warnings(wave-canvas-overlay-index-test)
+add_test(NAME wave-canvas-overlay-index-test
+    COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_EXE=$<TARGET_FILE:wave-canvas-overlay-index-test>"
+        "-DLOG_FILE=${CMAKE_BINARY_DIR}/canvas-overlay-index.txt"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+set_tests_properties(wave-canvas-overlay-index-test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1;WAVEWORKBENCH_REDUCED_MOTION=1;QT_QPA_FONTDIR=${CMAKE_BINARY_DIR}/test-fonts;WAVE_OVERLAY_EVIDENCE_DIR=${CMAKE_BINARY_DIR}/overlay-index-evidence"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+    TIMEOUT 30)
 add_executable(wave-ela-ui-test ela_ui_test.cpp)
 target_link_libraries(wave-ela-ui-test PRIVATE wavewidgets Qt6::Test Ela::WidgetTools)
 wave_enable_warnings(wave-ela-ui-test)

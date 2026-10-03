@@ -174,6 +174,10 @@ int main(int argc, char* argv[])
     application.processEvents();
     const auto coldOpenMs = coldTimer.elapsed();
 
+    const auto overlayBuildsBeforeNavigation = canvas.property(
+        "wavewidgets.overlayIndexBuildCount").toULongLong();
+    const auto snapBuildsBeforeNavigation = canvas.property(
+        "wavewidgets.snapIndexBuildCount").toULongLong();
     QElapsedTimer navigationTimer;
     navigationTimer.start();
     for (int step = 0; step < 32; ++step) {
@@ -214,6 +218,22 @@ int main(int argc, char* argv[])
         "wavewidgets.viewGeneration").toULongLong();
     const auto paintGeneration = canvas.property(
         "wavewidgets.lastPaintViewGeneration").toULongLong();
+    const auto relationCandidates = canvas.property(
+        "wavewidgets.relationCandidateCount").toULongLong();
+    const auto endpointAccesses = canvas.property(
+        "wavewidgets.relationEndpointAccessCount").toULongLong();
+    const auto overlayBuilds = canvas.property(
+        "wavewidgets.overlayIndexBuildCount").toULongLong();
+    const auto indexEndpointLookups = canvas.property(
+        "wavewidgets.overlayIndexEndpointLookupCount").toULongLong();
+    const auto snapBuilds = canvas.property(
+        "wavewidgets.snapIndexBuildCount").toULongLong();
+    const auto snapReserveCalls = canvas.property(
+        "wavewidgets.snapIndexReserveCalls").toULongLong();
+    const auto snapCapacityGrowths = canvas.property(
+        "wavewidgets.snapIndexCapacityGrowths").toULongLong();
+    const auto snapEndpoints = canvas.property(
+        "wavewidgets.snapIndexEndpointCount").toULongLong();
 
     std::cout
         << "[METRIC] lanes=" << LaneCount
@@ -227,7 +247,15 @@ int main(int argc, char* argv[])
         << "[METRIC] rendered_lanes=" << renderedLanes
         << " rendered_markers=" << renderedMarkers
         << " rendered_relations=" << renderedRelations
-        << " rendered_events=" << renderedEvents << '\n';
+        << " rendered_events=" << renderedEvents << '\n'
+        << "[METRIC] relation_candidates=" << relationCandidates
+        << " relation_endpoint_accesses=" << endpointAccesses
+        << " overlay_index_builds=" << overlayBuilds
+        << " last_index_endpoint_lookups=" << indexEndpointLookups << '\n'
+        << "[METRIC] snap_index_builds=" << snapBuilds
+        << " last_snap_reserve_calls=" << snapReserveCalls
+        << " last_snap_capacity_growths=" << snapCapacityGrowths
+        << " last_snap_endpoints=" << snapEndpoints << '\n';
 
     auto passed = true;
     passed &= check(coldOpenMs < 8'000, "cold open exceeded 8 seconds");
@@ -249,5 +277,23 @@ int main(int argc, char* argv[])
         "model generation did not advance");
     passed &= check(viewGeneration == paintGeneration,
         "paint did not consume the latest viewport generation");
+    // The preserved baseline DLL has no new counters; correctness/timing checks
+    // above remain active when the same harness is used for baseline comparison.
+    if (!qEnvironmentVariableIsSet("WAVE_OVERLAY_BASELINE")) {
+        passed &= check(endpointAccesses == 2 * relationCandidates,
+            "relation endpoints were not resolved once per candidate");
+        passed &= check(indexEndpointLookups == 2 * project.scenarios.front().relations.size(),
+            "overlay rebuild endpoint lookup count is inconsistent");
+        passed &= check(overlayBuilds > 0 && overlayBuilds == overlayBuildsBeforeNavigation,
+            "viewport-only navigation rebuilt the overlay index");
+    }
+    if (!qEnvironmentVariableIsSet("WAVE_OVERLAY_BASELINE")
+        && !qEnvironmentVariableIsSet("WAVE_SNAP_BASELINE")) {
+        passed &= check(snapBuilds > 0 && snapBuilds == snapBuildsBeforeNavigation,
+            "viewport-only navigation rebuilt the snap index");
+        passed &= check(snapReserveCalls == 1 && snapCapacityGrowths <= 1
+                && snapEndpoints == LaneCount * SegmentsPerLane * 2,
+            "snap capacity was not reserved once for the complete endpoint set");
+    }
     return passed ? 0 : 1;
 }

@@ -2,7 +2,10 @@
 
 源码仓库：[RutenunexJX/Tickx](https://github.com/RutenunexJX/Tickx)。
 
-当前版本：`v0.15.0`
+当前版本：`v0.15.1`
+
+0.15.1 使用稳定 ID 索引和画布覆盖项索引，减少大型场景中关系端点、命中及吸附查询的重复扫描，
+保留绘图、选择、命中和导出结果；`wavewidgets.dll` 的接口保持兼容。
 
 风格配置新增实时预览页，可直接切换预设并查看亮色、暗色效果。正常波形统一使用所选的
 方形或梯形边缘；dont-care、reserved、gated、disabled、X/Z 保留各自画法。

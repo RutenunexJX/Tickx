@@ -54,6 +54,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -8332,12 +8333,32 @@ void WaveCanvas::sanitizeCollapsedGroups()
 
 void WaveCanvas::rebuildSnapIndex()
 {
+    setProperty("wavewidgets.snapIndexBuildCount",
+        property("wavewidgets.snapIndexBuildCount").toULongLong() + 1);
+    setProperty("wavewidgets.snapIndexReserveCalls", qulonglong{0});
+    setProperty("wavewidgets.snapIndexCapacityGrowths", qulonglong{0});
+    setProperty("wavewidgets.snapIndexEndpointCount", qulonglong{0});
+    setProperty("wavewidgets.snapIndexUniqueCount", qulonglong{0});
     signalEdgeIndex_.clear();
     if (!scenario_) return;
 
+    std::size_t endpointCount = 0;
     for (const auto& lane : scenario_->lanes) {
         if (!isLaneDisplayed(lane) || lane.kind == LaneKind::Group) continue;
-        signalEdgeIndex_.reserve(signalEdgeIndex_.size() + lane.segments.size() * 2);
+        if (lane.segments.size() > (signalEdgeIndex_.max_size() - endpointCount) / 2) {
+            throw std::length_error("Signal edge index exceeds vector capacity");
+        }
+        endpointCount += lane.segments.size() * 2;
+    }
+    if (endpointCount > 0) {
+        const auto previousCapacity = signalEdgeIndex_.capacity();
+        signalEdgeIndex_.reserve(endpointCount);
+        setProperty("wavewidgets.snapIndexReserveCalls", qulonglong{1});
+        setProperty("wavewidgets.snapIndexCapacityGrowths",
+            static_cast<qulonglong>(signalEdgeIndex_.capacity() > previousCapacity));
+    }
+    for (const auto& lane : scenario_->lanes) {
+        if (!isLaneDisplayed(lane) || lane.kind == LaneKind::Group) continue;
         for (const auto& segment : lane.segments) {
             signalEdgeIndex_.push_back(segment.start);
             signalEdgeIndex_.push_back(segment.end);
@@ -8347,12 +8368,20 @@ void WaveCanvas::rebuildSnapIndex()
     signalEdgeIndex_.erase(
         std::unique(signalEdgeIndex_.begin(), signalEdgeIndex_.end()),
         signalEdgeIndex_.end());
-
-
+    setProperty("wavewidgets.snapIndexEndpointCount",
+        static_cast<qulonglong>(endpointCount));
+    setProperty("wavewidgets.snapIndexUniqueCount",
+        static_cast<qulonglong>(signalEdgeIndex_.size()));
 }
 
 void WaveCanvas::rebuildOverlayIndexes()
 {
+    setProperty("wavewidgets.overlayIndexBuildCount",
+        property("wavewidgets.overlayIndexBuildCount").toULongLong() + 1);
+    setProperty("wavewidgets.overlayIndexEventCount",
+        static_cast<qulonglong>(scenario_ ? scenario_->events.size() : 0));
+    setProperty("wavewidgets.overlayIndexEndpointLookupCount",
+        static_cast<qulonglong>(scenario_ ? scenario_->relations.size() * 2 : 0));
     markerOverlayIndex_.clear();
     relationOverlayIndex_.clear();
     eventOverlayIndex_.clear();
@@ -8369,10 +8398,16 @@ void WaveCanvas::rebuildOverlayIndexes()
         markerOverlayIndex_.push_back({index, start, end, end});
     }
 
-    std::unordered_map<std::string, const Event*> eventsById;
+    struct EventIndices {
+        std::size_t first;
+        std::size_t last;
+    };
+    std::unordered_map<std::string, EventIndices> eventsById;
     eventsById.reserve(scenario_->events.size());
-    for (const auto& event : scenario_->events) {
-        eventsById.insert_or_assign(event.id, &event);
+    for (std::size_t index = 0; index < scenario_->events.size(); ++index) {
+        const auto& event = scenario_->events[index];
+        auto [entry, inserted] = eventsById.try_emplace(event.id, EventIndices{index, index});
+        if (!inserted) entry->second.last = index;
     }
     relationOverlayIndex_.reserve(scenario_->relations.size());
     for (std::size_t index = 0; index < scenario_->relations.size(); ++index) {
@@ -8380,9 +8415,14 @@ void WaveCanvas::rebuildOverlayIndexes()
         const auto source = eventsById.find(relation.sourceEventId);
         const auto target = eventsById.find(relation.targetEventId);
         if (source == eventsById.end() || target == eventsById.end()) continue;
-        const auto start = std::min(source->second->tick, target->second->tick);
-        const auto end = std::max(source->second->tick, target->second->tick);
-        relationOverlayIndex_.push_back({index, start, end, end});
+        // Keep the old interval ordering even for duplicate IDs, while endpoint
+        // drawing retains findEvent's first-match semantics. Valid IDs are unique.
+        const auto sourceTick = scenario_->events[source->second.last].tick;
+        const auto targetTick = scenario_->events[target->second.last].tick;
+        const auto start = std::min(sourceTick, targetTick);
+        const auto end = std::max(sourceTick, targetTick);
+        relationOverlayIndex_.push_back({index, start, end, end,
+            source->second.first, target->second.first});
     }
 
     const auto finalizeTimedIndex = [](auto& index) {
@@ -23937,6 +23977,7 @@ void WaveCanvas::drawScenarioOverlays(
     std::size_t renderedMarkerCount = 0;
     std::size_t renderedRelationCount = 0;
     std::size_t renderedEventCount = 0;
+    std::size_t relationEndpointAccessCount = 0;
     painter.save();
     painter.setClipRect(QRect(headerWidth_, RulerHeight, waveViewportWidth(), viewport()->height() - RulerHeight));
 
@@ -24006,8 +24047,8 @@ void WaveCanvas::drawScenarioOverlays(
     for (auto relationPosition = firstRelation;
          relationPosition < lastRelation;
          ++relationPosition) {
-        const auto& relation = scenario_->relations.at(
-            relationOverlayIndex_[relationPosition].modelIndex);
+        const auto& indexed = relationOverlayIndex_[relationPosition];
+        const auto& relation = scenario_->relations.at(indexed.modelIndex);
         const auto willBeRemoved =
             relationRemovalIds
             && std::find(
@@ -24016,9 +24057,11 @@ void WaveCanvas::drawScenarioOverlays(
                    relation.id)
                 != relationRemovalIds->end();
         if (!relationsVisible_ && !willBeRemoved) continue;
-        const auto* source = findEvent(*scenario_, relation.sourceEventId);
-        const auto* target = findEvent(*scenario_, relation.targetEventId);
-        if (!source || !target) continue;
+        relationEndpointAccessCount += 2;
+        if (indexed.sourceEventIndex >= scenario_->events.size()
+            || indexed.targetEventIndex >= scenario_->events.size()) continue;
+        const auto* source = &scenario_->events[indexed.sourceEventIndex];
+        const auto* target = &scenario_->events[indexed.targetEventIndex];
         if ((source->tick < visibleStart && target->tick < visibleStart)
             || (source->tick > visibleEnd && target->tick > visibleEnd)) {
             continue;
@@ -24162,6 +24205,10 @@ void WaveCanvas::drawScenarioOverlays(
     drawCursorOverlays(painter, visibleStart, visibleEnd);
 
     painter.restore();
+    setProperty("wavewidgets.relationCandidateCount",
+        static_cast<qulonglong>(lastRelation - firstRelation));
+    setProperty("wavewidgets.relationEndpointAccessCount",
+        static_cast<qulonglong>(relationEndpointAccessCount));
     setProperty(
         "wavewidgets.renderedMarkerCount",
         static_cast<qulonglong>(renderedMarkerCount));
