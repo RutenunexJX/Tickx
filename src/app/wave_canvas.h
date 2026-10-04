@@ -8,6 +8,7 @@
 #include "signal_style.h"
 
 #include <QAbstractScrollArea>
+#include <QJsonDocument>
 #include <QLineF>
 #include <QPoint>
 #include <QPointer>
@@ -19,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -398,6 +400,8 @@ private:
 
     friend class CanvasOverlayTestAccess;
 
+    enum class ModelChange { All, Markers, Relations };
+
     enum class CursorInteraction {
         None,
         MoveActive,
@@ -605,6 +609,38 @@ private:
         bool modelChanges{false};
     };
 
+    using RangePreview = std::shared_ptr<const LaneHeaderPastePreview>;
+
+    struct RangePreviewKey {
+        const Scenario* scenario{nullptr};
+        std::uint64_t modelGeneration{0};
+        std::uint64_t commandState{0};
+        std::uint64_t clipboardRevision{0};
+        TimeBase timeBase;
+        Tick scenarioDuration{0};
+        std::array<std::size_t, 4> modelCounts{};
+        std::vector<std::string> laneIds;
+        Tick start{0};
+        std::optional<Tick> width;
+        bool operator==(const RangePreviewKey&) const = default;
+    };
+
+    struct RangePreviewCache {
+        RangePreviewKey key;
+        RangePreview value;
+    };
+
+    struct RangePasteAvailabilityCache {
+        RangePreviewKey key;
+        RangePasteAvailability value;
+    };
+
+    struct RangeClipboard {
+        bool hasMime{false};
+        bool empty{true};
+        QJsonDocument document;
+    };
+
     struct RangeTransferProjection {
         bool copy{false};
         Tick sourceStart{0};
@@ -724,6 +760,7 @@ private:
 
     [[nodiscard]] Qt::CursorShape defaultCursorShape() const noexcept;
     void rebuildLaneLayout();
+    void refreshModelForChange(ModelChange change);
     void rebuildSnapIndex();
     void sanitizeCollapsedGroups();
     void updateScrollBars();
@@ -847,16 +884,29 @@ private:
         const std::vector<std::string>& targetLaneIds,
         Tick pasteStart,
         std::optional<Tick> selectedWidth = std::nullopt) const;
-    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    [[nodiscard]] RangePasteAvailability computePasteAvailabilityForTargets(
+        const std::vector<std::string>& targetLaneIds,
+        Tick pasteStart,
+        std::optional<Tick> selectedWidth) const;
+    [[nodiscard]] const RangeClipboard& rangeClipboard() const;
+    [[nodiscard]] RangePreviewKey rangePreviewKey(
+        const std::vector<std::string>& laneIds, Tick start,
+        std::optional<Tick> width, bool usesClipboard) const;
+    void invalidateRangePreviewCache() const;
+    [[nodiscard]] RangePreview
     laneHeaderPastePreview() const;
-    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    [[nodiscard]] RangePreview
     explicitRangePastePreview() const;
-    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    [[nodiscard]] RangePreview
     pastePreview() const;
-    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    [[nodiscard]] RangePreview
     buildRepeatPreview() const;
     [[nodiscard]] std::optional<LaneHeaderPastePreview>
-    buildPastePreview(
+    computeRepeatPreview() const;
+    [[nodiscard]] RangePreview buildPastePreview(
+        const std::vector<std::string>& targetLaneIds, Tick pasteStart) const;
+    [[nodiscard]] std::optional<LaneHeaderPastePreview>
+    computePastePreview(
         const std::vector<std::string>& targetLaneIds,
         Tick pasteStart) const;
     [[nodiscard]] std::optional<LaneHeaderPastePreview>
@@ -1045,7 +1095,7 @@ private:
     void selectOnlyRelation(const std::string& relationId);
     [[nodiscard]] bool isRelationSelected(
         const std::string& relationId) const noexcept;
-    void rebuildOverlayIndexes();
+    void rebuildOverlayIndexes(ModelChange change = ModelChange::All);
 
     [[nodiscard]] const WaveformTheme& canvasTheme() const;
     [[nodiscard]] QColor canvasSelectionColor() const;
@@ -1183,6 +1233,17 @@ private:
     bool rangeEditPaletteVisible_{false};
     bool relationsVisible_{false};
     bool rangeRepeatPreviewActive_{false};
+    // GUI-thread-only, bounded to one result per operation. Shared immutable
+    // values keep a paint's preview alive if a notification invalidates the cache.
+    mutable std::optional<RangeClipboard> rangeClipboard_;
+    std::uint64_t clipboardRevision_{0};
+    mutable std::optional<RangePreviewCache> pastePreviewCache_;
+    mutable std::optional<RangePreviewCache> repeatPreviewCache_;
+    mutable std::optional<RangePasteAvailabilityCache> pasteAvailabilityCache_;
+    mutable std::uint64_t clipboardParseCount_{0};
+    mutable std::uint64_t pastePreviewBuildCount_{0};
+    mutable std::uint64_t repeatPreviewBuildCount_{0};
+    mutable std::size_t lastRelationHitLookupCount_{0};
     std::optional<BitPatternProjection> bitPatternPreview_;
     std::optional<BusRangeSequenceProjection>
         busRangeSequencePreview_;

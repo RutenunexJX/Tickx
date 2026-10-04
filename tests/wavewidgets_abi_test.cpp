@@ -77,6 +77,36 @@ int main(int argc, char** argv)
             const auto roundTrip = wave::deserializeProject(snapshot.chopped(1));
             check(roundTrip.ok() && roundTrip.project->scenarios.size() == 1,
                   "stimulus snapshot remains a valid project");
+            auto* canvas = editor->findChild<wave::WaveCanvas*>(QStringLiteral("stimulusCanvas"));
+            auto* undo = editor->findChild<QPushButton*>(QStringLiteral("stimulusUndo"));
+            auto* redo = editor->findChild<QPushButton*>(QStringLiteral("stimulusRedo"));
+            auto next = *loaded.project;
+            next.scenarios.front().duration *= 2;
+            const auto nextPayload = wave::serializeProject(next);
+            check(wavewidgets_update_stimulus_editor_v1(editor, nextPayload.constData(), nextPayload.size(), message.data(), message.size()) == 0,
+                  "timing update succeeds through the public ABI");
+            check(canvas == editor->findChild<wave::WaveCanvas*>(QStringLiteral("stimulusCanvas")), "timing retains canvas identity");
+            const auto readProject = [&] {
+                size_t size = 0;
+                wavewidgets_stimulus_project_v1(editor, nullptr, 0, &size, message.data(), message.size());
+                QByteArray data(static_cast<qsizetype>(size), '\0');
+                wavewidgets_stimulus_project_v1(editor, data.data(), data.size(), &size, message.data(), message.size());
+                return wave::deserializeProject(data.chopped(1));
+            };
+            check(undo && undo->isEnabled(), "timing change is undoable");
+            if (undo) undo->click();
+            auto restored = readProject();
+            check(restored.ok() && *restored.project == *loaded.project, "undo restores the complete prior stimulus");
+            if (redo) redo->click();
+            restored = readProject();
+            check(restored.ok() && *restored.project == next, "redo restores new timing");
+            auto invalid = next;
+            invalid.scenarios.front().id = "another-scenario";
+            const auto invalidPayload = wave::serializeProject(invalid);
+            check(wavewidgets_update_stimulus_editor_v1(editor, invalidPayload.constData(), invalidPayload.size(), message.data(), message.size()) != 0,
+                  "timing update rejects unrelated scenario identities");
+            restored = readProject();
+            check(restored.ok() && *restored.project == next, "rejected update preserves the current drawing");
             delete editor;
         }
         size_t required = 0;

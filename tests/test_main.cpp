@@ -4635,6 +4635,121 @@ void testMarkersRelationsAndValidation()
         "undefined waveform interval was not reported");
 }
 
+void testOverlayHistoryOwnership()
+{
+    using Factory = std::function<std::unique_ptr<wave::EditCommand>(
+        wave::Project&, wave::Scenario&)>;
+    const auto verify = [](const std::string& label, const bool editsMarkers,
+                           const Factory& makeCommand) {
+        auto project = wave::makeDemonstrationProject();
+        auto& scenario = project.scenarios.front();
+        scenario.markers.push_back({"history-first-marker", "History window",
+            10'000, 20'000, wave::MarkerKind::Interval, "original", {}});
+        scenario.markers.front().extensions["historyTest"] = R"({"keep":true})";
+        auto secondMarker = scenario.markers.front();
+        secondMarker.id = "history-second-marker";
+        scenario.markers.push_back(std::move(secondMarker));
+        expect(!scenario.relations.empty(), label + ": relation fixture is missing");
+        scenario.relations.front().extensions["historyTest"] = R"({"keep":true})";
+        auto secondRelation = scenario.relations.front();
+        secondRelation.id = "history-second-relation";
+        scenario.relations.push_back(std::move(secondRelation));
+
+        auto command = makeCommand(project, scenario);
+        const auto before = scenario;
+        wave::ScenarioRef stable{scenario};
+        wave::CommandStack stack;
+        expect(stack.execute(std::move(command)), label + ": command had no effect");
+        const auto after = *stable;
+        auto expected = before;
+        if (editsMarkers) expected.markers = after.markers;
+        else expected.relations = after.relations;
+        expectEqual(*stable, expected, label + ": changed unrelated state");
+
+        // The command owns its overlay collection, not the Scenario's storage
+        // address or updates made independently to other parts of the model.
+        project.scenarios.reserve(project.scenarios.capacity() + 1);
+        expect(stable.get() == &project.scenarios.front(), label + ": lost Scenario owner");
+        stable->name = "independent scenario update";
+        ++stable->duration;
+        stable->extensions["independent"] = "true";
+        auto* lane = wave::findLane(*stable, "lane-request");
+        lane->name = "independent lane update";
+        lane->segments.front().extensions["independent"] = "true";
+        stable->events.front().description = "independent event update";
+        if (editsMarkers) stable->relations.front().description = "independent relation update";
+        else stable->markers.front().note = "independent marker update";
+        const auto expectedAfter = *stable;
+        auto expectedBefore = expectedAfter;
+        if (editsMarkers) expectedBefore.markers = before.markers;
+        else expectedBefore.relations = before.relations;
+        for (int cycle = 0; cycle != 3; ++cycle) {
+            expect(stack.undo(), label + ": undo failed");
+            expectEqual(*stable, expectedBefore, label + ": undo lost state or ordering");
+            expect(stack.redo(), label + ": redo failed");
+            expectEqual(*stable, expectedAfter, label + ": redo lost state or ordering");
+        }
+    };
+
+    verify("add marker", true, [](auto&, auto& scenario) {
+        auto marker = scenario.markers.front();
+        marker.id = "history-added-marker";
+        return std::make_unique<wave::AddMarkerCommand>(scenario, marker);
+    });
+    verify("change marker", true, [](auto&, auto& scenario) {
+        auto marker = scenario.markers.front();
+        marker.note = "changed";
+        return std::make_unique<wave::ChangeMarkerCommand>(scenario, marker.id, marker);
+    });
+    verify("change indexed marker", true, [](auto&, auto& scenario) {
+        auto marker = scenario.markers.front();
+        marker.id = "history-repaired-marker";
+        return std::make_unique<wave::ChangeMarkerAtIndexCommand>(
+            scenario, 0, scenario.markers.front(), marker);
+    });
+    verify("remove marker", true, [](auto&, auto& scenario) {
+        return std::make_unique<wave::RemoveMarkerCommand>(scenario, scenario.markers.front().id);
+    });
+    verify("remove markers", true, [](auto&, auto& scenario) {
+        return std::make_unique<wave::RemoveMarkersCommand>(scenario,
+            std::vector{scenario.markers.back().id, scenario.markers.front().id});
+    });
+    verify("remove indexed marker", true, [](auto&, auto& scenario) {
+        return std::make_unique<wave::RemoveMarkerAtIndexCommand>(scenario, 1, scenario.markers[1]);
+    });
+    verify("add relation", false, [](auto&, auto& scenario) {
+        auto relation = scenario.relations.front();
+        relation.id = "history-added-relation";
+        return std::make_unique<wave::AddRelationCommand>(scenario, relation);
+    });
+    verify("change relation", false, [](auto&, auto& scenario) {
+        auto relation = scenario.relations.front();
+        relation.description = "changed";
+        return std::make_unique<wave::ChangeRelationCommand>(scenario, relation.id, relation);
+    });
+    verify("repair relation clock", false, [](auto& project, auto& scenario) {
+        auto& relation = scenario.relations.front();
+        relation.clockDomainId = "missing-clock";
+        return std::make_unique<wave::RepairRelationClockReferenceCommand>(project, scenario, relation.id);
+    });
+    verify("change indexed relation", false, [](auto&, auto& scenario) {
+        auto relation = scenario.relations.front();
+        relation.id = "history-repaired-relation";
+        return std::make_unique<wave::ChangeRelationAtIndexCommand>(
+            scenario, 0, scenario.relations.front(), relation);
+    });
+    verify("remove relation", false, [](auto&, auto& scenario) {
+        return std::make_unique<wave::RemoveRelationCommand>(scenario, scenario.relations.front().id);
+    });
+    verify("remove relations", false, [](auto&, auto& scenario) {
+        return std::make_unique<wave::RemoveRelationsCommand>(scenario,
+            std::vector{scenario.relations.back().id, scenario.relations.front().id});
+    });
+    verify("remove indexed relation", false, [](auto&, auto& scenario) {
+        return std::make_unique<wave::RemoveRelationAtIndexCommand>(scenario, 1, scenario.relations[1]);
+    });
+}
+
 void testCodeGeneration()
 {
     auto project = wave::makeDemonstrationProject();
@@ -7289,7 +7404,8 @@ wave::ToolchainProbeReport runToolchainFixture(
 wave::SimulationRunReport runSimulationFixture(
     wave::SimulationRunRequest request,
     const std::optional<int> cancelAfterMs = std::nullopt,
-    std::vector<wave::SimulationRunStage>* observedStages = nullptr)
+    std::vector<wave::SimulationRunStage>* observedStages = nullptr,
+    const std::optional<wave::SimulationRunStage> cancelAtStage = std::nullopt)
 {
     wave::VerilatorSimulationRunner runner;
     QEventLoop loop;
@@ -7305,11 +7421,17 @@ wave::SimulationRunReport runSimulationFixture(
             report = std::move(completed);
             loop.quit();
         },
-        [observedStages](const quint64, const wave::SimulationRunStage stage) {
+        [observedStages, cancelAtStage, cancelAfterMs, &loop, &runner](
+            const quint64, const wave::SimulationRunStage stage) {
             if (observedStages) observedStages->push_back(stage);
+            if (cancelAfterMs && cancelAtStage == stage) {
+                QTimer::singleShot(*cancelAfterMs, &loop, [&runner] {
+                    static_cast<void>(runner.cancel());
+                });
+            }
         });
     expect(started, "fixture simulation could not be started asynchronously");
-    if (cancelAfterMs) {
+    if (cancelAfterMs && !cancelAtStage) {
         QTimer::singleShot(*cancelAfterMs, &loop, [&runner] {
             static_cast<void>(runner.cancel());
         });
@@ -8312,7 +8434,8 @@ void testFixedFixtureSimulationPipeline()
         QStringLiteral("1000"));
     cancelledBuildRequest.buildTimeoutMs = 3'000;
     const auto cancelledBuild = runSimulationFixture(
-        std::move(cancelledBuildRequest), 120);
+        std::move(cancelledBuildRequest), 120, nullptr,
+        wave::SimulationRunStage::BuildModel);
     expect(cancelledBuild.status == wave::SimulationRunStatus::Cancelled
                && cancelledBuild.stage == wave::SimulationRunStage::BuildModel
                && QDir(cancelledBuildCache.path())
@@ -20606,6 +20729,7 @@ int main(int argc, char* argv[])
         {"multi-lane copy/paste command", testMultiLanePasteCommand},
         {"event and segment synchronization", testEventSegmentSynchronization},
         {"markers, relations, and validation", testMarkersRelationsAndValidation},
+        {"overlay history ownership and relocation", testOverlayHistoryOwnership},
         {"SystemVerilog, SVA, and cocotb generation", testCodeGeneration},
         {"SVG, PNG, PDF, and WaveDrom exports", testWaveformExports},
         {"serialization round-trip", testSerializationRoundTrip},

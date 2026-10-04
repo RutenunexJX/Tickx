@@ -2,12 +2,14 @@
 #include "wave/project_io.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QDir>
 #include <QFile>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMimeData>
 #include <QPainter>
 #include <QScrollBar>
 #include <QTest>
@@ -90,6 +92,34 @@ public:
     {
         return canvas.signalEdgeIndex_;
     }
+    static std::size_t hitLookups(const WaveCanvas& canvas)
+    {
+        return canvas.lastRelationHitLookupCount_;
+    }
+    static void moveMarker(WaveCanvas& canvas, const std::string& id, Tick delta)
+    {
+        canvas.selectOnlyMarker(id);
+        canvas.moveSelectedMarkerBy(delta);
+    }
+    static void removeRelation(WaveCanvas& canvas, const std::string& id)
+    {
+        canvas.selectOnlyRelation(id);
+        canvas.removeSelectedRelations();
+    }
+    static void selectRange(WaveCanvas& canvas, std::string laneId, Tick start, Tick end)
+    {
+        canvas.selectedLaneId_ = laneId;
+        canvas.selectedLaneIds_ = {std::move(laneId)};
+        canvas.selectionRange_ = std::pair{start, end};
+        canvas.explicitRangeSelection_ = true;
+        canvas.laneHeaderSelectionActive_ = false;
+        canvas.cursorTick_ = start;
+    }
+    static auto paste(const WaveCanvas& canvas) { return canvas.pastePreview(); }
+    static auto repeat(const WaveCanvas& canvas) { return canvas.buildRepeatPreview(); }
+    static auto pasteBuilds(const WaveCanvas& canvas) { return canvas.pastePreviewBuildCount_; }
+    static auto repeatBuilds(const WaveCanvas& canvas) { return canvas.repeatPreviewBuildCount_; }
+    static auto clipboardParses(const WaveCanvas& canvas) { return canvas.clipboardParseCount_; }
 };
 } // namespace wave
 
@@ -298,6 +328,191 @@ void verifyAndSave(Fixture& fixture, const Capture& result, const QString& name,
 class CanvasOverlayIndexTest final : public QObject {
     Q_OBJECT
 private slots:
+    void cleanup() { QApplication::clipboard()->clear(); }
+
+    void scopedOverlayEditsMatchCompleteRefresh()
+    {
+        Fixture f;
+        const auto originalModel = wave::serializeProject(f.project);
+        const auto builds = [&](const char* name) {
+            return f.canvas.property(name).toULongLong();
+        };
+        const auto snapBefore = builds("wavewidgets.snapIndexBuildCount");
+        const auto relationBefore = builds("wavewidgets.relationIndexBuildCount");
+        const auto eventBefore = builds("wavewidgets.eventIndexBuildCount");
+        const auto markerBefore = builds("wavewidgets.markerIndexBuildCount");
+        Access::moveMarker(f.canvas, "marker", 1'000);
+        QCOMPARE(f.scenario().markers.front().start, wave::Tick{46'000});
+        QCOMPARE(builds("wavewidgets.snapIndexBuildCount"), snapBefore);
+        QCOMPARE(builds("wavewidgets.relationIndexBuildCount"), relationBefore);
+        QCOMPARE(builds("wavewidgets.eventIndexBuildCount"), eventBefore);
+        QCOMPARE(builds("wavewidgets.markerIndexBuildCount"), markerBefore + 1);
+        const auto moved = capture(f);
+        f.canvas.refreshModel();
+        const auto completeMoved = capture(f);
+        QCOMPARE(moved.model, completeMoved.model);
+        QCOMPARE(moved.overlays, completeMoved.overlays);
+        QCOMPARE(moved.canvas, completeMoved.canvas);
+        QCOMPARE(moved.regions, completeMoved.regions);
+        QCOMPARE(moved.snapTicks, completeMoved.snapTicks);
+        QVERIFY(f.commands.undo());
+        f.canvas.refreshModel();
+        QCOMPARE(wave::serializeProject(f.project), originalModel);
+
+        const auto snapBeforeRemoval = builds("wavewidgets.snapIndexBuildCount");
+        const auto markerBeforeRemoval = builds("wavewidgets.markerIndexBuildCount");
+        const auto eventsBeforeRemoval = builds("wavewidgets.eventIndexBuildCount");
+        const auto relationsBeforeRemoval = builds("wavewidgets.relationIndexBuildCount");
+        Access::removeRelation(f.canvas, "front");
+        QVERIFY(!wave::findRelation(f.scenario(), "front"));
+        QCOMPARE(builds("wavewidgets.snapIndexBuildCount"), snapBeforeRemoval);
+        QCOMPARE(builds("wavewidgets.markerIndexBuildCount"), markerBeforeRemoval);
+        QCOMPARE(builds("wavewidgets.eventIndexBuildCount"), eventsBeforeRemoval);
+        QCOMPARE(builds("wavewidgets.relationIndexBuildCount"), relationsBeforeRemoval + 1);
+        const auto removed = capture(f);
+        f.canvas.refreshModel();
+        const auto completeRemoved = capture(f);
+        QCOMPARE(removed.model, completeRemoved.model);
+        QCOMPARE(removed.overlays, completeRemoved.overlays);
+        QCOMPARE(removed.regions, completeRemoved.regions);
+        QCOMPARE(removed.probes, completeRemoved.probes);
+        QCOMPARE(removed.snapTicks, completeRemoved.snapTicks);
+        QVERIFY(f.commands.undo());
+        f.canvas.refreshModel();
+        QCOMPARE(wave::serializeProject(f.project), originalModel);
+    }
+
+    void relationHitLookupWorkAndRemovedTopmostRegion()
+    {
+        Fixture f;
+        (void)capture(f);
+        QCOMPARE(Access::hitId(f.canvas, {0, 0}), QString{});
+        QCOMPARE(Access::hitLookups(f.canvas), std::size_t{0});
+        const auto midpoint = QLineF(
+            Access::point(f.canvas, *wave::findEvent(f.scenario(), "event-0")),
+            Access::point(f.canvas, *wave::findEvent(f.scenario(), "event-1")))
+                                  .pointAt(0.5).toPoint();
+        QCOMPARE(Access::hitId(f.canvas, midpoint), QString("front"));
+        QCOMPARE(Access::hitLookups(f.canvas), std::size_t{1});
+        // A model edit can precede the next paint. Missing topmost IDs must not
+        // mask the still-existing overlapping relation underneath them.
+        std::erase_if(f.scenario().relations, [](const auto& relation) {
+            return relation.id == "front";
+        });
+        QCOMPARE(Access::hitId(f.canvas, midpoint), QString("back"));
+        QCOMPARE(Access::hitLookups(f.canvas), std::size_t{2});
+    }
+
+    void pastePreviewReusesWorkAndInvalidatesInputs()
+    {
+        Fixture f;
+        f.canvas.setTool(wave::WaveCanvas::Tool::WaveEdit);
+        Access::selectRange(f.canvas, "lane-0", 0, 60'000);
+        f.canvas.copySelection();
+        Access::selectRange(f.canvas, "lane-1", 90'000, 150'000);
+        const auto originalModel = wave::serializeProject(f.project);
+        const auto preview = Access::paste(f.canvas);
+        QVERIFY(preview);
+        QCOMPARE(preview->start, wave::Tick{90'000});
+        QCOMPARE(preview->lanes.front().id, std::string("lane-1"));
+        const auto buildCount = Access::pasteBuilds(f.canvas);
+        const auto parseCount = Access::clipboardParses(f.canvas);
+        for (int i = 0; i != 8; ++i) {
+            QCOMPARE(Access::paste(f.canvas).get(), preview.get());
+            (void)f.canvas.pastePreviewRange();
+            (void)f.canvas.pastePreviewTargetLaneIds();
+            (void)f.canvas.pastePreviewRelationRemovalSummaries();
+        }
+        f.canvas.zoomIn();
+        (void)f.canvas.viewport()->grab();
+        QCOMPARE(Access::paste(f.canvas).get(), preview.get());
+        QCOMPARE(Access::pasteBuilds(f.canvas), buildCount);
+        QCOMPARE(Access::clipboardParses(f.canvas), parseCount);
+        QCOMPARE(wave::serializeProject(f.project), originalModel);
+
+        Access::selectRange(f.canvas, "lane-1", 100'000, 160'000);
+        const auto retargeted = Access::paste(f.canvas);
+        QVERIFY(retargeted);
+        QVERIFY(retargeted.get() != preview.get());
+        QCOMPARE(retargeted->start, wave::Tick{100'000});
+        f.scenario().lanes[1].name = "renamed target";
+        f.canvas.refreshModel();
+        const auto renamed = Access::paste(f.canvas);
+        QVERIFY(renamed);
+        QCOMPARE(renamed->lanes.front().name, std::string("renamed target"));
+        QCOMPARE(preview->lanes.front().name, std::string("lane-1"));
+
+        // Command callbacks may request a preview before refreshModel runs.
+        QVERIFY(f.commands.execute(std::make_unique<wave::SetLaneRangeCommand>(
+            f.scenario(), "lane-1", 200'000, Duration, "X")));
+        const auto edited = Access::paste(f.canvas);
+        QVERIFY(edited);
+        QVERIFY(std::any_of(edited->lanes.front().segments.begin(),
+            edited->lanes.front().segments.end(), [](const auto& segment) {
+                return segment.start <= 210'000 && segment.end > 210'000 && segment.value == "X";
+            }));
+        QVERIFY(f.commands.undo());
+        f.canvas.refreshModel();
+        const auto undone = Access::paste(f.canvas);
+        QVERIFY(undone);
+        QVERIFY(std::none_of(undone->lanes.front().segments.begin(),
+            undone->lanes.front().segments.end(), [](const auto& segment) {
+                return segment.value == "X";
+            }));
+
+        auto second = f.scenario();
+        second.id = "other";
+        second.lanes[1].name = "other target";
+        f.project.scenarios.push_back(std::move(second));
+        f.activeScenario = 1;
+        f.canvas.setDocument(&f.project, &f.scenario(), &f.commands);
+        Access::selectRange(f.canvas, "lane-1", 90'000, 150'000);
+        const auto switched = Access::paste(f.canvas);
+        QVERIFY(switched);
+        QCOMPARE(switched->lanes.front().name, std::string("other target"));
+
+        const auto parsesBeforeInvalid = Access::clipboardParses(f.canvas);
+        QApplication::clipboard()->setText("invalid range");
+        QVERIFY(!Access::paste(f.canvas));
+        QVERIFY(!Access::paste(f.canvas));
+        QCOMPARE(Access::clipboardParses(f.canvas), parsesBeforeInvalid + 1);
+        // Negative parse results must also expire when the clipboard changes.
+        Access::selectRange(f.canvas, "lane-0", 0, 60'000);
+        f.canvas.copySelection();
+        Access::selectRange(f.canvas, "lane-1", 90'000, 150'000);
+        QVERIFY(Access::paste(f.canvas));
+        QCOMPARE(Access::clipboardParses(f.canvas), parsesBeforeInvalid + 2);
+    }
+
+    void repeatPreviewReusesWorkAndInvalidatesModelAndRange()
+    {
+        Fixture f;
+        f.canvas.setTool(wave::WaveCanvas::Tool::WaveEdit);
+        Access::selectRange(f.canvas, "lane-0", 0, 60'000);
+        const auto preview = Access::repeat(f.canvas);
+        QVERIFY(preview);
+        QCOMPARE(preview->start, wave::Tick{60'000});
+        const auto builds = Access::repeatBuilds(f.canvas);
+        QApplication::clipboard()->setText("unrelated clipboard change");
+        f.canvas.zoomIn();
+        for (int i = 0; i != 8; ++i) QCOMPARE(Access::repeat(f.canvas).get(), preview.get());
+        QCOMPARE(Access::repeatBuilds(f.canvas), builds);
+        f.scenario().lanes[0].segments[0].value = "X";
+        f.canvas.refreshModel();
+        const auto changed = Access::repeat(f.canvas);
+        QVERIFY(changed);
+        QVERIFY(changed.get() != preview.get());
+        QVERIFY(std::any_of(changed->lanes.front().segments.begin(),
+            changed->lanes.front().segments.end(), [](const auto& segment) {
+                return segment.start <= 90'000 && segment.end > 90'000 && segment.value == "X";
+            }));
+        Access::selectRange(f.canvas, "lane-0", 10, 10);
+        QVERIFY(!Access::repeat(f.canvas));
+        const auto negativeBuilds = Access::repeatBuilds(f.canvas);
+        QVERIFY(!Access::repeat(f.canvas));
+        QCOMPARE(Access::repeatBuilds(f.canvas), negativeBuilds);
+    }
+
     void orderedGeometryClippingAndStableSelection()
     {
         Fixture f;

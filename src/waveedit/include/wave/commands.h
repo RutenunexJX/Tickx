@@ -1082,8 +1082,8 @@ public:
 private:
     ScenarioRef scenario_;
     Marker marker_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Marker>> before_;
+    std::optional<std::vector<Marker>> after_;
 };
 
 class ChangeMarkerCommand final : public EditCommand {
@@ -1101,8 +1101,8 @@ private:
     ScenarioRef scenario_;
     std::string markerId_;
     Marker replacement_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Marker>> before_;
+    std::optional<std::vector<Marker>> after_;
 };
 
 class ChangeMarkerAtIndexCommand final : public EditCommand {
@@ -1122,8 +1122,8 @@ private:
     std::size_t markerIndex_;
     Marker expected_;
     Marker replacement_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Marker>> before_;
+    std::optional<std::vector<Marker>> after_;
 };
 
 class RemoveMarkerCommand final : public EditCommand {
@@ -1137,8 +1137,8 @@ public:
 private:
     ScenarioRef scenario_;
     std::string markerId_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Marker>> before_;
+    std::optional<std::vector<Marker>> after_;
 };
 
 class RemoveMarkersCommand final : public EditCommand {
@@ -1154,8 +1154,8 @@ public:
 private:
     ScenarioRef scenario_;
     std::vector<std::string> markerIds_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Marker>> before_;
+    std::optional<std::vector<Marker>> after_;
 };
 
 class RemoveMarkerAtIndexCommand final : public EditCommand {
@@ -1173,8 +1173,8 @@ private:
     ScenarioRef scenario_;
     std::size_t markerIndex_;
     Marker expected_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Marker>> before_;
+    std::optional<std::vector<Marker>> after_;
 };
 
 class AddRelationCommand final : public EditCommand {
@@ -1188,8 +1188,8 @@ public:
 private:
     ScenarioRef scenario_;
     Relation relation_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Relation>> before_;
+    std::optional<std::vector<Relation>> after_;
 };
 
 class ChangeRelationCommand final : public EditCommand {
@@ -1207,8 +1207,8 @@ private:
     ScenarioRef scenario_;
     std::string relationId_;
     Relation replacement_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Relation>> before_;
+    std::optional<std::vector<Relation>> after_;
 };
 
 class RepairRelationClockReferenceCommand final
@@ -1228,8 +1228,8 @@ private:
     const Project* project_;
     ScenarioRef scenario_;
     std::string relationId_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Relation>> before_;
+    std::optional<std::vector<Relation>> after_;
 };
 
 class ChangeRelationAtIndexCommand final : public EditCommand {
@@ -1249,8 +1249,8 @@ private:
     std::size_t relationIndex_;
     Relation expected_;
     Relation replacement_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Relation>> before_;
+    std::optional<std::vector<Relation>> after_;
 };
 
 class RemoveRelationCommand final : public EditCommand {
@@ -1264,8 +1264,8 @@ public:
 private:
     ScenarioRef scenario_;
     std::string relationId_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Relation>> before_;
+    std::optional<std::vector<Relation>> after_;
 };
 
 class RemoveRelationsCommand final : public EditCommand {
@@ -1281,8 +1281,8 @@ public:
 private:
     ScenarioRef scenario_;
     std::vector<std::string> relationIds_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Relation>> before_;
+    std::optional<std::vector<Relation>> after_;
 };
 
 class RemoveRelationAtIndexCommand final : public EditCommand {
@@ -1300,8 +1300,8 @@ private:
     ScenarioRef scenario_;
     std::size_t relationIndex_;
     Relation expected_;
-    std::optional<Scenario> before_;
-    std::optional<Scenario> after_;
+    std::optional<std::vector<Relation>> before_;
+    std::optional<std::vector<Relation>> after_;
 };
 
 } // namespace wave

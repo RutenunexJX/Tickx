@@ -261,20 +261,22 @@ bool rangeAlreadyEquals(
     return false;
 }
 
-template<typename Mutation>
+// Snapshot only the state owned by the command. Overlay-only edits must not
+// copy or restore unrelated waveforms, events, or Scenario metadata.
+template<typename State, typename Mutation>
 void snapshotRedo(
-    Scenario& scenario,
-    std::optional<Scenario>& before,
-    std::optional<Scenario>& after,
+    State& state,
+    std::optional<State>& before,
+    std::optional<State>& after,
     Mutation&& mutation)
 {
     if (after) {
-        scenario = *after;
+        state = *after;
         return;
     }
-    before = scenario;
+    before = state;
     mutation();
-    after = scenario;
+    after = state;
 }
 
 } // namespace
@@ -4478,7 +4480,7 @@ AddMarkerCommand::AddMarkerCommand(Scenario& scenario, Marker marker)
 
 void AddMarkerCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->markers, before_, after_, [this] {
         if (marker_.start < 0 || marker_.end < marker_.start
             || marker_.end > scenario_->duration) {
             throw std::invalid_argument("marker interval is invalid");
@@ -4490,7 +4492,7 @@ void AddMarkerCommand::redo()
 void AddMarkerCommand::undo()
 {
     if (!before_) throw std::runtime_error("marker command has not been executed");
-    *scenario_ = *before_;
+    scenario_->markers = *before_;
 }
 
 std::string AddMarkerCommand::description() const
@@ -4511,7 +4513,7 @@ ChangeMarkerCommand::ChangeMarkerCommand(
 
 void ChangeMarkerCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->markers, before_, after_, [this] {
         const auto marker = std::find_if(
             scenario_->markers.begin(),
             scenario_->markers.end(),
@@ -4533,7 +4535,7 @@ void ChangeMarkerCommand::redo()
 void ChangeMarkerCommand::undo()
 {
     if (!before_) throw std::runtime_error("marker command has not been executed");
-    *scenario_ = *before_;
+    scenario_->markers = *before_;
 }
 
 std::string ChangeMarkerCommand::description() const
@@ -4555,7 +4557,7 @@ ChangeMarkerAtIndexCommand::ChangeMarkerAtIndexCommand(
 
 void ChangeMarkerAtIndexCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->markers, before_, after_, [this] {
         if (markerIndex_ >= scenario_->markers.size()
             || scenario_->markers.at(markerIndex_) != expected_) {
             throw std::invalid_argument(
@@ -4576,7 +4578,7 @@ void ChangeMarkerAtIndexCommand::undo()
         throw std::runtime_error(
             "marker command has not been executed");
     }
-    *scenario_ = *before_;
+    scenario_->markers = *before_;
 }
 
 std::string ChangeMarkerAtIndexCommand::description() const
@@ -4594,7 +4596,7 @@ RemoveMarkerCommand::RemoveMarkerCommand(
 
 void RemoveMarkerCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->markers, before_, after_, [this] {
         const auto marker = std::find_if(
             scenario_->markers.begin(),
             scenario_->markers.end(),
@@ -4611,7 +4613,7 @@ void RemoveMarkerCommand::redo()
 void RemoveMarkerCommand::undo()
 {
     if (!before_) throw std::runtime_error("marker command has not been executed");
-    *scenario_ = *before_;
+    scenario_->markers = *before_;
 }
 
 std::string RemoveMarkerCommand::description() const
@@ -4638,7 +4640,7 @@ RemoveMarkersCommand::RemoveMarkersCommand(
 
 void RemoveMarkersCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->markers, before_, after_, [this] {
         for (const auto& markerId : markerIds_) {
             if (!std::any_of(
                     scenario_->markers.begin(),
@@ -4666,7 +4668,7 @@ void RemoveMarkersCommand::undo()
     if (!before_) {
         throw std::runtime_error("marker command has not been executed");
     }
-    *scenario_ = *before_;
+    scenario_->markers = *before_;
 }
 
 std::string RemoveMarkersCommand::description() const
@@ -4686,7 +4688,7 @@ RemoveMarkerAtIndexCommand::RemoveMarkerAtIndexCommand(
 
 void RemoveMarkerAtIndexCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->markers, before_, after_, [this] {
         if (markerIndex_ >= scenario_->markers.size()
             || scenario_->markers.at(markerIndex_) != expected_) {
             throw std::invalid_argument(
@@ -4704,7 +4706,7 @@ void RemoveMarkerAtIndexCommand::undo()
         throw std::runtime_error(
             "marker command has not been executed");
     }
-    *scenario_ = *before_;
+    scenario_->markers = *before_;
 }
 
 std::string RemoveMarkerAtIndexCommand::description() const
@@ -4721,7 +4723,7 @@ AddRelationCommand::AddRelationCommand(Scenario& scenario, Relation relation)
 
 void AddRelationCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->relations, before_, after_, [this] {
         if (!findEvent(*scenario_, relation_.sourceEventId)) {
             throw std::invalid_argument("relation source event does not exist");
         }
@@ -4740,7 +4742,7 @@ void AddRelationCommand::redo()
 void AddRelationCommand::undo()
 {
     if (!before_) throw std::runtime_error("relation command has not been executed");
-    *scenario_ = *before_;
+    scenario_->relations = *before_;
 }
 
 std::string AddRelationCommand::description() const
@@ -4760,7 +4762,7 @@ ChangeRelationCommand::ChangeRelationCommand(
 
 void ChangeRelationCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->relations, before_, after_, [this] {
         auto* relation = findRelation(*scenario_, relationId_);
         if (!relation) throw std::invalid_argument("relation does not exist");
         if (!findEvent(*scenario_, replacement_.sourceEventId)
@@ -4780,7 +4782,7 @@ void ChangeRelationCommand::redo()
 void ChangeRelationCommand::undo()
 {
     if (!before_) throw std::runtime_error("relation command has not been executed");
-    *scenario_ = *before_;
+    scenario_->relations = *before_;
 }
 
 std::string ChangeRelationCommand::description() const
@@ -4801,7 +4803,7 @@ RepairRelationClockReferenceCommand::
 
 void RepairRelationClockReferenceCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->relations, before_, after_, [this] {
         if (relationId_.empty()) {
             throw std::invalid_argument(
                 "relation stable ID is missing");
@@ -4929,7 +4931,7 @@ void RepairRelationClockReferenceCommand::undo()
         throw std::runtime_error(
             "relation clock repair has not been executed");
     }
-    *scenario_ = *before_;
+    scenario_->relations = *before_;
 }
 
 std::string RepairRelationClockReferenceCommand::
@@ -4958,7 +4960,7 @@ ChangeRelationAtIndexCommand::ChangeRelationAtIndexCommand(
 
 void ChangeRelationAtIndexCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->relations, before_, after_, [this] {
         if (relationIndex_ >= scenario_->relations.size()
             || scenario_->relations.at(relationIndex_) != expected_) {
             throw std::invalid_argument(
@@ -4987,7 +4989,7 @@ void ChangeRelationAtIndexCommand::undo()
         throw std::runtime_error(
             "relation command has not been executed");
     }
-    *scenario_ = *before_;
+    scenario_->relations = *before_;
 }
 
 std::string ChangeRelationAtIndexCommand::description() const
@@ -5003,7 +5005,7 @@ RemoveRelationCommand::RemoveRelationCommand(Scenario& scenario, std::string rel
 
 void RemoveRelationCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->relations, before_, after_, [this] {
         const auto iterator = std::find_if(
             scenario_->relations.begin(),
             scenario_->relations.end(),
@@ -5018,7 +5020,7 @@ void RemoveRelationCommand::redo()
 void RemoveRelationCommand::undo()
 {
     if (!before_) throw std::runtime_error("relation command has not been executed");
-    *scenario_ = *before_;
+    scenario_->relations = *before_;
 }
 
 std::string RemoveRelationCommand::description() const
@@ -5045,7 +5047,7 @@ RemoveRelationsCommand::RemoveRelationsCommand(
 
 void RemoveRelationsCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->relations, before_, after_, [this] {
         for (const auto& relationId : relationIds_) {
             if (!std::any_of(
                     scenario_->relations.begin(),
@@ -5073,7 +5075,7 @@ void RemoveRelationsCommand::undo()
     if (!before_) {
         throw std::runtime_error("relation command has not been executed");
     }
-    *scenario_ = *before_;
+    scenario_->relations = *before_;
 }
 
 std::string RemoveRelationsCommand::description() const
@@ -5093,7 +5095,7 @@ RemoveRelationAtIndexCommand::RemoveRelationAtIndexCommand(
 
 void RemoveRelationAtIndexCommand::redo()
 {
-    snapshotRedo(*scenario_, before_, after_, [this] {
+    snapshotRedo(scenario_->relations, before_, after_, [this] {
         if (relationIndex_ >= scenario_->relations.size()
             || scenario_->relations.at(relationIndex_) != expected_) {
             throw std::invalid_argument(
@@ -5111,7 +5113,7 @@ void RemoveRelationAtIndexCommand::undo()
         throw std::runtime_error(
             "relation command has not been executed");
     }
-    *scenario_ = *before_;
+    scenario_->relations = *before_;
 }
 
 std::string RemoveRelationAtIndexCommand::description() const

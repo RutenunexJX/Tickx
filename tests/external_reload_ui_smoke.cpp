@@ -36,6 +36,25 @@ bool waitUntil(const std::function<bool()>& predicate, const int timeoutMs = 6'0
     return predicate();
 }
 
+bool inspectDirectoryChange(
+    wave::MainWindow& window,
+    QFileSystemWatcher& watcher,
+    const QString& projectPath)
+{
+    const auto generation = window.property(
+        "wavewidgets.projectWatchGeneration").toULongLong();
+    return QMetaObject::invokeMethod(
+               &watcher,
+               "directoryChanged",
+               Qt::DirectConnection,
+               Q_ARG(QString, QFileInfo(projectPath).absolutePath()))
+        && waitUntil([&window, generation] {
+               return window.property("wavewidgets.projectWatchGeneration")
+                          .toULongLong()
+                   > generation;
+           });
+}
+
 wave::Project initialProject()
 {
     auto project = wave::makeDemonstrationProject();
@@ -200,7 +219,10 @@ int main(int argc, char* argv[])
         QStringLiteral("ExternalProjectConflictBar"));
     auto* reloadButton = window.findChild<QPushButton*>(
         QStringLiteral("ExternalProjectReloadButton"));
-    if (!canvas || !selector || !watcher || !conflictBar || !reloadButton) {
+    auto* keepButton = window.findChild<QPushButton*>(
+        QStringLiteral("ExternalProjectKeepButton"));
+    if (!canvas || !selector || !watcher || !conflictBar || !reloadButton
+        || !keepButton) {
         return fail(5, "external reload UI was not constructed");
     }
     if (!watcher->files().contains(QFileInfo(projectPath).absoluteFilePath())
@@ -242,6 +264,8 @@ int main(int argc, char* argv[])
         return fail(9, "selection, cursor, zoom, or scroll fixture is incomplete");
     }
 
+    const auto initialParseCount = window.property(
+        "wavewidgets.externalProjectParseCount").toULongLong();
     const auto cleanUpdate = externalVersion(
         window.project(), "External clean update", 5, true);
     if (!saveProject(cleanUpdate, projectPath, "clean external update")) {
@@ -276,27 +300,46 @@ int main(int argc, char* argv[])
         || !highlighted.contains(QStringLiteral("lane-external-5"))) {
         return fail(13, "external update summary or lane highlight is incomplete");
     }
+    const auto cleanParseCount = window.property(
+        "wavewidgets.externalProjectParseCount").toULongLong();
+    if (cleanParseCount != initialParseCount + 1) {
+        return fail(40, "a new external version was not parsed exactly once");
+    }
 
     const qulonglong cleanReloadCount = window.property(
         "wavewidgets.externalReloadCount").toULongLong();
+    if (!inspectDirectoryChange(window, *watcher, projectPath)
+        || window.property("wavewidgets.externalProjectParseCount")
+               .toULongLong()
+            != cleanParseCount
+        || window.property("wavewidgets.externalReloadCount").toULongLong()
+            != cleanReloadCount) {
+        return fail(41, "an unchanged parent-directory notification reparsed the project");
+    }
     if (!saveProject(window.project(), projectPath, "same-content save")) {
         return 14;
     }
-    QTest::qWait(500);
-    if (window.property("wavewidgets.externalReloadCount").toULongLong()
+    if (!inspectDirectoryChange(window, *watcher, projectPath)
+        || window.property("wavewidgets.externalProjectParseCount")
+               .toULongLong()
+            != cleanParseCount
+        || window.property("wavewidgets.externalReloadCount").toULongLong()
             != cleanReloadCount
         || window.property("wavewidgets.externalConflictState").toString()
             != QStringLiteral("none")) {
-        return fail(15, "same-content watcher event caused a reload loop");
+        return fail(15, "same-content watcher event reparsed or reloaded the project");
     }
     if (!QMetaObject::invokeMethod(
             &window, "saveProject", Qt::DirectConnection)) {
         return fail(16, "self-save action was not invokable");
     }
-    QTest::qWait(500);
-    if (window.property("wavewidgets.externalReloadCount").toULongLong()
-        != cleanReloadCount) {
-        return fail(17, "self-save caused an external reload loop");
+    if (!inspectDirectoryChange(window, *watcher, projectPath)
+        || window.property("wavewidgets.externalProjectParseCount")
+               .toULongLong()
+            != cleanParseCount
+        || window.property("wavewidgets.externalReloadCount").toULongLong()
+            != cleanReloadCount) {
+        return fail(17, "self-save reparsed or reloaded its own project");
     }
 
     if (!QMetaObject::invokeMethod(
@@ -366,6 +409,8 @@ int main(int argc, char* argv[])
         return fail(26, "deferred editor update did not apply after editing ended");
     }
 
+    const auto parseCountBeforeInvalid = window.property(
+        "wavewidgets.externalProjectParseCount").toULongLong();
     if (!replaceWithInvalidProject(projectPath)) {
         return fail(27, "invalid atomic replacement could not be written");
     }
@@ -379,6 +424,24 @@ int main(int argc, char* argv[])
     if (window.project().name != "External during editor") {
         return fail(29, "invalid external project replaced the valid GUI state");
     }
+    const auto invalidParseCount = window.property(
+        "wavewidgets.externalProjectParseCount").toULongLong();
+    if (invalidParseCount <= parseCountBeforeInvalid) {
+        return fail(42, "a new invalid external version bypassed parsing");
+    }
+    keepButton->click();
+    if (!inspectDirectoryChange(window, *watcher, projectPath)
+        || !inspectDirectoryChange(window, *watcher, projectPath)
+        || window.property("wavewidgets.externalProjectParseCount")
+               .toULongLong()
+            != invalidParseCount
+        || window.project().name != "External during editor"
+        || window.property("wavewidgets.externalReloadCount").toULongLong() != 3
+        || window.property("wavewidgets.externalConflictState").toString()
+            != QStringLiteral("none")
+        || conflictBar->isVisibleTo(&window)) {
+        return fail(43, "the ignored invalid version was reparsed or reopened a conflict");
+    }
     const auto recoveredUpdate = externalVersion(
         window.project(), "Recovered valid update", 8, false);
     if (!saveProject(recoveredUpdate, projectPath, "valid recovery update")) {
@@ -391,6 +454,10 @@ int main(int argc, char* argv[])
                     == 4;
         })) {
         return fail(31, "valid replacement did not recover from invalid input");
+    }
+    if (window.property("wavewidgets.externalProjectParseCount").toULongLong()
+        <= invalidParseCount) {
+        return fail(44, "a new version after Keep was incorrectly skipped");
     }
 
     const auto rapidA = externalVersion(

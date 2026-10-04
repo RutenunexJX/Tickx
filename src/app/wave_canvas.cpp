@@ -827,6 +827,10 @@ WaveCanvas::WaveCanvas(QWidget* parent)
     rangeLayout->addWidget(rangePasteButton_);
     connect(rangePasteButton_, &QToolButton::clicked, this, &WaveCanvas::pasteAtCursor);
     connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [this] {
+        rangeClipboard_.reset();
+        ++clipboardRevision_;
+        pastePreviewCache_.reset();
+        pasteAvailabilityCache_.reset();
         if (rangeEditPaletteVisible_) showRangeEditPalette();
         viewport()->update();
     });
@@ -1843,6 +1847,7 @@ void WaveCanvas::showDurationEditError(const QString& message)
 
 bool WaveCanvas::event(QEvent* event)
 {
+    if (event->type() == QEvent::LanguageChange) invalidateRangePreviewCache();
     if (event->type() == QEvent::KeyPress && tool_ == Tool::WaveEdit) {
         const auto* keyEvent = static_cast<QKeyEvent*>(event);
         const auto forward = keyEvent->key() == Qt::Key_Tab
@@ -2236,6 +2241,7 @@ void WaveCanvas::setDocument(
     Scenario* scenario,
     CommandStack* commandStack)
 {
+    invalidateRangePreviewCache();
     pendingVisibleTimeSpanRestore_.reset();
     pendingVisibleTimeSpanRestoreScheduled_ = false;
     if (scenario_ && scenario_.get() != scenario && !scenario_->id.empty()) {
@@ -2428,6 +2434,7 @@ bool WaveCanvas::cloneDocumentContext(
 
 void WaveCanvas::setTool(const Tool tool)
 {
+    if (tool_ != tool) invalidateRangePreviewCache();
     const auto restoreWaveEditViewport = tool_ == Tool::WaveEdit
         && drawing_
         && waveEditDragAutoScrolled_;
@@ -3449,6 +3456,12 @@ void WaveCanvas::selectEntireTimeline()
 
 void WaveCanvas::refreshModel()
 {
+    refreshModelForChange(ModelChange::All);
+}
+
+void WaveCanvas::refreshModelForChange(const ModelChange change)
+{
+    invalidateRangePreviewCache();
     segmentActionPreview_.reset();
     busEditActionPreview_.reset();
     busEditPreviewAction_.reset();
@@ -3456,7 +3469,12 @@ void WaveCanvas::refreshModel()
         && !rangeSequenceBaselineMatchesContext()) {
         invalidateRangeSequenceHistoryContext();
     }
-    rebuildLaneLayout();
+    if (change == ModelChange::All || !scenario_) {
+        rebuildLaneLayout();
+    } else {
+        rebuildOverlayIndexes(change);
+        ++modelGeneration_;
+    }
     if (scenario_) {
         std::erase_if(
             selectedLaneIds_,
@@ -3848,13 +3866,8 @@ void WaveCanvas::pasteAtCursor()
 {
     if (!commitPendingInlineEdits()) return;
     if (!scenario_ || !commandStack_) return;
-    const auto* mime = QApplication::clipboard()->mimeData();
-    const auto content = mime->hasFormat(kRangeMimeType)
-        ? mime->data(kRangeMimeType)
-        : mime->text().toUtf8();
-    QJsonParseError parseError;
-    const auto document = QJsonDocument::fromJson(content, &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+    const auto document = rangeClipboard().document;
+    if (!document.isObject()) {
         emit statusMessage(tr("Clipboard does not contain a Tickx range."));
         return;
     }
@@ -6062,14 +6075,14 @@ void WaveCanvas::paintEvent(QPaintEvent* event)
             && !busRangeSequencePreviewActive
             && rangeRepeatPreviewActive_
         ? buildRepeatPreview()
-        : std::nullopt;
+        : RangePreview{};
     const auto activePastePreview = activeRepeatPreview
             || rangeTransferActive
             || segmentEditActive
             || busEditPreviewActive
             || bitPatternPreviewActive
             || busRangeSequencePreviewActive
-        ? std::nullopt
+        ? RangePreview{}
         : pastePreview();
     const auto* pastePreviewData = activeRepeatPreview
         ? &*activeRepeatPreview
@@ -8374,57 +8387,20 @@ void WaveCanvas::rebuildSnapIndex()
         static_cast<qulonglong>(signalEdgeIndex_.size()));
 }
 
-void WaveCanvas::rebuildOverlayIndexes()
+void WaveCanvas::rebuildOverlayIndexes(ModelChange change)
 {
+    // Partial refresh is used only by commands that modify one overlay kind.
+    // Unexpected count changes retain the existing complete-rebuild fallback.
+    if (!scenario_ || (change != ModelChange::All
+            && (indexedEventCount_ != scenario_->events.size()
+                || (change == ModelChange::Markers
+                    && indexedRelationCount_ != scenario_->relations.size())
+                || (change == ModelChange::Relations
+                    && indexedMarkerCount_ != scenario_->markers.size())))) {
+        change = ModelChange::All;
+    }
     setProperty("wavewidgets.overlayIndexBuildCount",
         property("wavewidgets.overlayIndexBuildCount").toULongLong() + 1);
-    setProperty("wavewidgets.overlayIndexEventCount",
-        static_cast<qulonglong>(scenario_ ? scenario_->events.size() : 0));
-    setProperty("wavewidgets.overlayIndexEndpointLookupCount",
-        static_cast<qulonglong>(scenario_ ? scenario_->relations.size() * 2 : 0));
-    markerOverlayIndex_.clear();
-    relationOverlayIndex_.clear();
-    eventOverlayIndex_.clear();
-    indexedMarkerCount_ = scenario_ ? scenario_->markers.size() : 0;
-    indexedRelationCount_ = scenario_ ? scenario_->relations.size() : 0;
-    indexedEventCount_ = scenario_ ? scenario_->events.size() : 0;
-    if (!scenario_) return;
-
-    markerOverlayIndex_.reserve(scenario_->markers.size());
-    for (std::size_t index = 0; index < scenario_->markers.size(); ++index) {
-        const auto& marker = scenario_->markers[index];
-        const auto start = std::min(marker.start, marker.end);
-        const auto end = std::max(marker.start, marker.end);
-        markerOverlayIndex_.push_back({index, start, end, end});
-    }
-
-    struct EventIndices {
-        std::size_t first;
-        std::size_t last;
-    };
-    std::unordered_map<std::string, EventIndices> eventsById;
-    eventsById.reserve(scenario_->events.size());
-    for (std::size_t index = 0; index < scenario_->events.size(); ++index) {
-        const auto& event = scenario_->events[index];
-        auto [entry, inserted] = eventsById.try_emplace(event.id, EventIndices{index, index});
-        if (!inserted) entry->second.last = index;
-    }
-    relationOverlayIndex_.reserve(scenario_->relations.size());
-    for (std::size_t index = 0; index < scenario_->relations.size(); ++index) {
-        const auto& relation = scenario_->relations[index];
-        const auto source = eventsById.find(relation.sourceEventId);
-        const auto target = eventsById.find(relation.targetEventId);
-        if (source == eventsById.end() || target == eventsById.end()) continue;
-        // Keep the old interval ordering even for duplicate IDs, while endpoint
-        // drawing retains findEvent's first-match semantics. Valid IDs are unique.
-        const auto sourceTick = scenario_->events[source->second.last].tick;
-        const auto targetTick = scenario_->events[target->second.last].tick;
-        const auto start = std::min(sourceTick, targetTick);
-        const auto end = std::max(sourceTick, targetTick);
-        relationOverlayIndex_.push_back({index, start, end, end,
-            source->second.first, target->second.first});
-    }
-
     const auto finalizeTimedIndex = [](auto& index) {
         std::sort(
             index.begin(),
@@ -8440,20 +8416,71 @@ void WaveCanvas::rebuildOverlayIndexes()
             entry.prefixMaximumEnd = maximumEnd;
         }
     };
-    finalizeTimedIndex(markerOverlayIndex_);
-    finalizeTimedIndex(relationOverlayIndex_);
-
-    eventOverlayIndex_.resize(scenario_->events.size());
-    std::iota(eventOverlayIndex_.begin(), eventOverlayIndex_.end(), 0);
-    std::sort(
-        eventOverlayIndex_.begin(),
-        eventOverlayIndex_.end(),
-        [this](const std::size_t left, const std::size_t right) {
-            const auto& leftEvent = scenario_->events[left];
-            const auto& rightEvent = scenario_->events[right];
-            return std::tie(leftEvent.tick, leftEvent.id)
-                < std::tie(rightEvent.tick, rightEvent.id);
-        });
+    if (change != ModelChange::Relations) {
+        setProperty("wavewidgets.markerIndexBuildCount",
+            property("wavewidgets.markerIndexBuildCount").toULongLong() + 1);
+        markerOverlayIndex_.clear();
+        indexedMarkerCount_ = scenario_ ? scenario_->markers.size() : 0;
+        if (scenario_) {
+            markerOverlayIndex_.reserve(scenario_->markers.size());
+            for (std::size_t index = 0; index < scenario_->markers.size(); ++index) {
+                const auto& marker = scenario_->markers[index];
+                const auto start = std::min(marker.start, marker.end);
+                const auto end = std::max(marker.start, marker.end);
+                markerOverlayIndex_.push_back({index, start, end, end});
+            }
+            finalizeTimedIndex(markerOverlayIndex_);
+        }
+    }
+    if (change != ModelChange::Markers) {
+        setProperty("wavewidgets.relationIndexBuildCount",
+            property("wavewidgets.relationIndexBuildCount").toULongLong() + 1);
+        setProperty("wavewidgets.overlayIndexEventCount",
+            static_cast<qulonglong>(scenario_ ? scenario_->events.size() : 0));
+        setProperty("wavewidgets.overlayIndexEndpointLookupCount",
+            static_cast<qulonglong>(scenario_ ? scenario_->relations.size() * 2 : 0));
+        relationOverlayIndex_.clear();
+        indexedRelationCount_ = scenario_ ? scenario_->relations.size() : 0;
+        if (scenario_) {
+            struct EventIndices { std::size_t first; std::size_t last; };
+            std::unordered_map<std::string, EventIndices> eventsById;
+            eventsById.reserve(scenario_->events.size());
+            for (std::size_t index = 0; index < scenario_->events.size(); ++index) {
+                const auto& event = scenario_->events[index];
+                auto [entry, inserted] = eventsById.try_emplace(event.id, EventIndices{index, index});
+                if (!inserted) entry->second.last = index;
+            }
+            relationOverlayIndex_.reserve(scenario_->relations.size());
+            for (std::size_t index = 0; index < scenario_->relations.size(); ++index) {
+                const auto& relation = scenario_->relations[index];
+                const auto source = eventsById.find(relation.sourceEventId);
+                const auto target = eventsById.find(relation.targetEventId);
+                if (source == eventsById.end() || target == eventsById.end()) continue;
+                // Retain last-ID interval ordering and first-ID drawing semantics.
+                const auto sourceTick = scenario_->events[source->second.last].tick;
+                const auto targetTick = scenario_->events[target->second.last].tick;
+                const auto start = std::min(sourceTick, targetTick);
+                const auto end = std::max(sourceTick, targetTick);
+                relationOverlayIndex_.push_back({index, start, end, end,
+                    source->second.first, target->second.first});
+            }
+            finalizeTimedIndex(relationOverlayIndex_);
+        }
+    }
+    if (change == ModelChange::All) {
+        setProperty("wavewidgets.eventIndexBuildCount",
+            property("wavewidgets.eventIndexBuildCount").toULongLong() + 1);
+        indexedEventCount_ = scenario_ ? scenario_->events.size() : 0;
+        eventOverlayIndex_.resize(indexedEventCount_);
+        std::iota(eventOverlayIndex_.begin(), eventOverlayIndex_.end(), 0);
+        std::sort(eventOverlayIndex_.begin(), eventOverlayIndex_.end(),
+            [this](const std::size_t left, const std::size_t right) {
+                const auto& leftEvent = scenario_->events[left];
+                const auto& rightEvent = scenario_->events[right];
+                return std::tie(leftEvent.tick, leftEvent.id)
+                    < std::tie(rightEvent.tick, rightEvent.id);
+            });
+    }
 }
 
 void WaveCanvas::updateScrollBars()
@@ -13358,7 +13385,58 @@ WaveCanvas::rangeRepeatAvailability() const
     return availability;
 }
 
+const WaveCanvas::RangeClipboard& WaveCanvas::rangeClipboard() const
+{
+    if (!rangeClipboard_) {
+        RangeClipboard clipboard;
+        if (const auto* mime = QApplication::clipboard()->mimeData()) {
+            clipboard.hasMime = true;
+            const auto content = mime->hasFormat(kRangeMimeType)
+                ? mime->data(kRangeMimeType) : mime->text().toUtf8();
+            clipboard.empty = content.trimmed().isEmpty();
+            clipboard.document = QJsonDocument::fromJson(content);
+            ++clipboardParseCount_;
+        }
+        rangeClipboard_ = std::move(clipboard);
+    }
+    return *rangeClipboard_;
+}
+
+WaveCanvas::RangePreviewKey WaveCanvas::rangePreviewKey(
+    const std::vector<std::string>& laneIds, const Tick start,
+    const std::optional<Tick> width, const bool usesClipboard) const
+{
+    return {scenario_.get(), modelGeneration_,
+        commandStack_ ? commandStack_->stateId() : 0,
+        usesClipboard ? clipboardRevision_ : 0,
+        project_ ? project_->timeBase : TimeBase{}, scenario_ ? scenario_->duration : 0,
+        scenario_ ? std::array{scenario_->lanes.size(), scenario_->events.size(),
+            scenario_->relations.size(), scenario_->markers.size()}
+                  : std::array<std::size_t, 4>{},
+        laneIds, start, width};
+}
+
+void WaveCanvas::invalidateRangePreviewCache() const
+{
+    pastePreviewCache_.reset();
+    repeatPreviewCache_.reset();
+    pasteAvailabilityCache_.reset();
+}
+
 WaveCanvas::RangePasteAvailability WaveCanvas::pasteAvailabilityForTargets(
+    const std::vector<std::string>& targetLaneIds,
+    const Tick pasteStart,
+    const std::optional<Tick> selectedWidth) const
+{
+    const auto key = rangePreviewKey(targetLaneIds, pasteStart, selectedWidth, true);
+    if (!pasteAvailabilityCache_ || pasteAvailabilityCache_->key != key) {
+        pasteAvailabilityCache_ = RangePasteAvailabilityCache{
+            key, computePasteAvailabilityForTargets(targetLaneIds, pasteStart, selectedWidth)};
+    }
+    return pasteAvailabilityCache_->value;
+}
+
+WaveCanvas::RangePasteAvailability WaveCanvas::computePasteAvailabilityForTargets(
     const std::vector<std::string>& targetLaneIds,
     const Tick pasteStart,
     const std::optional<Tick> selectedWidth) const
@@ -13373,18 +13451,13 @@ WaveCanvas::RangePasteAvailability WaveCanvas::pasteAvailabilityForTargets(
         return unavailable(tr("select one or more target signals first"));
     }
 
-    const auto* mime = QApplication::clipboard()->mimeData();
-    if (!mime) return unavailable(tr("copy a waveform range first"));
-    const auto content = mime->hasFormat(kRangeMimeType)
-        ? mime->data(kRangeMimeType)
-        : mime->text().toUtf8();
-    if (content.trimmed().isEmpty()) {
+    const auto& clipboard = rangeClipboard();
+    if (!clipboard.hasMime || clipboard.empty) {
         return unavailable(tr("copy a waveform range first"));
     }
 
-    QJsonParseError parseError;
-    const auto document = QJsonDocument::fromJson(content, &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+    const auto document = clipboard.document;
+    if (!document.isObject()) {
         return unavailable(tr("clipboard does not contain a Tickx range"));
     }
     const auto root = document.object();
@@ -13598,30 +13671,30 @@ WaveCanvas::pasteAvailabilityWithImpact(
     return availability;
 }
 
-std::optional<WaveCanvas::LaneHeaderPastePreview>
+WaveCanvas::RangePreview
 WaveCanvas::laneHeaderPastePreview() const
 {
     if (!scenario_ || !project_ || tool_ != Tool::WaveEdit
         || !laneHeaderSelectionActive_ || selectedLaneIds_.empty()) {
-        return std::nullopt;
+        return {};
     }
     const auto availability = pasteAvailabilityForTargets(
         selectedLaneIds_,
         cursorTick_);
-    if (!availability.enabled) return std::nullopt;
+    if (!availability.enabled) return {};
     auto preview = buildPastePreview(selectedLaneIds_, cursorTick_);
-    if (!preview || !preview->modelChanges) return std::nullopt;
+    if (!preview || !preview->modelChanges) return {};
     return preview;
 }
 
-std::optional<WaveCanvas::LaneHeaderPastePreview>
+WaveCanvas::RangePreview
 WaveCanvas::explicitRangePastePreview() const
 {
     if (!scenario_ || !project_ || tool_ != Tool::WaveEdit
         || !explicitRangeSelection_ || !selectionRange_
         || selectionRange_->second <= selectionRange_->first
         || selectedLaneIds_.empty()) {
-        return std::nullopt;
+        return {};
     }
     const auto selectedWidth =
         selectionRange_->second - selectionRange_->first;
@@ -13629,19 +13702,19 @@ WaveCanvas::explicitRangePastePreview() const
         selectedLaneIds_,
         selectionRange_->first,
         selectedWidth);
-    if (!availability.enabled) return std::nullopt;
+    if (!availability.enabled) return {};
     auto preview = buildPastePreview(
         selectedLaneIds_,
         selectionRange_->first);
-    if (!preview) return std::nullopt;
+    if (!preview) return {};
     if (!preview->modelChanges
         && preview->duration == selectedWidth) {
-        return std::nullopt;
+        return {};
     }
     return preview;
 }
 
-std::optional<WaveCanvas::LaneHeaderPastePreview>
+WaveCanvas::RangePreview
 WaveCanvas::pastePreview() const
 {
     if (explicitRangeSelection_) {
@@ -13650,8 +13723,23 @@ WaveCanvas::pastePreview() const
     return laneHeaderPastePreview();
 }
 
-std::optional<WaveCanvas::LaneHeaderPastePreview>
+WaveCanvas::RangePreview
 WaveCanvas::buildPastePreview(
+    const std::vector<std::string>& targetLaneIds, const Tick pasteStart) const
+{
+    if (tool_ != Tool::WaveEdit) return {};
+    const auto key = rangePreviewKey(targetLaneIds, pasteStart, std::nullopt, true);
+    if (!pastePreviewCache_ || pastePreviewCache_->key != key) {
+        auto preview = computePastePreview(targetLaneIds, pasteStart);
+        ++pastePreviewBuildCount_;
+        pastePreviewCache_ = RangePreviewCache{key, preview
+            ? std::make_shared<const LaneHeaderPastePreview>(std::move(*preview)) : nullptr};
+    }
+    return pastePreviewCache_->value;
+}
+
+std::optional<WaveCanvas::LaneHeaderPastePreview>
+WaveCanvas::computePastePreview(
     const std::vector<std::string>& targetLaneIds,
     const Tick pasteStart) const
 {
@@ -13659,15 +13747,8 @@ WaveCanvas::buildPastePreview(
         || targetLaneIds.empty() || pasteStart < 0) {
         return std::nullopt;
     }
-    const auto* mime = QApplication::clipboard()->mimeData();
-    if (!mime) return std::nullopt;
-    const auto content = mime->hasFormat(kRangeMimeType)
-        ? mime->data(kRangeMimeType)
-        : mime->text().toUtf8();
-    QJsonParseError parseError;
-    const auto document = QJsonDocument::fromJson(content, &parseError);
-    if (parseError.error != QJsonParseError::NoError
-        || !document.isObject()) {
+    const auto document = rangeClipboard().document;
+    if (!document.isObject()) {
         return std::nullopt;
     }
     const auto root = document.object();
@@ -13907,8 +13988,24 @@ WaveCanvas::buildPastePreview(
     return preview;
 }
 
-std::optional<WaveCanvas::LaneHeaderPastePreview>
+WaveCanvas::RangePreview
 WaveCanvas::buildRepeatPreview() const
+{
+    if (!scenario_ || !project_ || tool_ != Tool::WaveEdit
+        || !explicitRangeSelection_ || !selectionRange_ || selectedLaneIds_.empty()) return {};
+    const auto key = rangePreviewKey(selectedLaneIds_, selectionRange_->first,
+        selectionRange_->second, false);
+    if (!repeatPreviewCache_ || repeatPreviewCache_->key != key) {
+        auto preview = computeRepeatPreview();
+        ++repeatPreviewBuildCount_;
+        repeatPreviewCache_ = RangePreviewCache{key, preview
+            ? std::make_shared<const LaneHeaderPastePreview>(std::move(*preview)) : nullptr};
+    }
+    return repeatPreviewCache_->value;
+}
+
+std::optional<WaveCanvas::LaneHeaderPastePreview>
+WaveCanvas::computeRepeatPreview() const
 {
     if (!scenario_ || !project_ || tool_ != Tool::WaveEdit
         || !explicitRangeSelection_ || !selectionRange_
@@ -18901,38 +18998,38 @@ bool WaveCanvas::isRelationSelected(
 WaveCanvas::RelationHit WaveCanvas::relationHitAtPosition(
     const QPoint& position) const
 {
+    lastRelationHitLookupCount_ = 0;
     if (!scenario_) return {};
     constexpr double LineHitRadius = 6.0;
     for (auto iterator = relationHitRegions_.rbegin();
          iterator != relationHitRegions_.rend();
          ++iterator) {
-        const auto* relation = relationById(iterator->relationId);
-        if (!relation) continue;
+        RelationEndpoint endpoint = RelationEndpoint::None;
         if (iterator->sourceHandle.contains(position)) {
-            return {relation, RelationEndpoint::Source};
+            endpoint = RelationEndpoint::Source;
+        } else if (iterator->targetHandle.contains(position)) {
+            endpoint = RelationEndpoint::Target;
+        } else {
+            const auto first = iterator->line.p1();
+            const auto second = iterator->line.p2();
+            const auto dx = second.x() - first.x();
+            const auto dy = second.y() - first.y();
+            const auto lengthSquared = dx * dx + dy * dy;
+            if (lengthSquared <= 0.0) continue;
+            const auto projection = std::clamp(
+                ((position.x() - first.x()) * dx
+                    + (position.y() - first.y()) * dy) / lengthSquared,
+                0.0, 1.0);
+            const auto nearestX = first.x() + projection * dx;
+            const auto nearestY = first.y() + projection * dy;
+            if (!(std::hypot(position.x() - nearestX, position.y() - nearestY)
+                    <= LineHitRadius)) continue;
         }
-        if (iterator->targetHandle.contains(position)) {
-            return {relation, RelationEndpoint::Target};
-        }
-        const auto first = iterator->line.p1();
-        const auto second = iterator->line.p2();
-        const auto dx = second.x() - first.x();
-        const auto dy = second.y() - first.y();
-        const auto lengthSquared = dx * dx + dy * dy;
-        if (lengthSquared <= 0.0) continue;
-        const auto projection = std::clamp(
-            ((position.x() - first.x()) * dx
-             + (position.y() - first.y()) * dy)
-                / lengthSquared,
-            0.0,
-            1.0);
-        const auto nearestX = first.x() + projection * dx;
-        const auto nearestY = first.y() + projection * dy;
-        if (std::hypot(
-                position.x() - nearestX,
-                position.y() - nearestY)
-            <= LineHitRadius) {
-            return {relation, RelationEndpoint::None};
+        // Most mouse moves miss every region. Resolve IDs only for geometric
+        // hits, still skipping removed relations and retaining reverse paint order.
+        ++lastRelationHitLookupCount_;
+        if (const auto* relation = relationById(iterator->relationId)) {
+            return {relation, endpoint};
         }
     }
     return {};
@@ -20348,7 +20445,7 @@ void WaveCanvas::removeSelectedMarker()
     clearMarkerSelection();
     emit modelEdited();
     emit commandAvailabilityChanged();
-    refreshModel();
+    refreshModelForChange(ModelChange::Markers);
     emit statusMessage(
         markerIds.size() == 1
             ? tr("Deleted %1 · %2 · Ctrl+Z to undo")
@@ -20391,7 +20488,7 @@ void WaveCanvas::removeSelectedRelations()
     activeEventId_.clear();
     emit modelEdited();
     emit commandAvailabilityChanged();
-    refreshModel();
+    refreshModelForChange(ModelChange::Relations);
     emit relationSelected({});
     emit statusMessage(
         relationIds.size() == 1
@@ -20439,7 +20536,7 @@ void WaveCanvas::moveSelectedMarkerBy(const Tick delta)
     cursorTick_ = replacement.start;
     emit modelEdited();
     emit commandAvailabilityChanged();
-    refreshModel();
+    refreshModelForChange(ModelChange::Markers);
     ensureCursorVisible(cursorTick_);
     emit statusMessage(
         tr("Moved %1 · %2 → %3 · Ctrl+Z to undo")
@@ -21847,7 +21944,7 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
             cursorTick_ = replacement.start;
             emit modelEdited();
             emit commandAvailabilityChanged();
-            refreshModel();
+            refreshModelForChange(ModelChange::Markers);
             emit statusMessage(
                 (interaction == CursorInteraction::MoveLocked
                      ? tr("Moved %1 · %2 → %3 · Ctrl+Z to undo")
@@ -21902,7 +21999,7 @@ void WaveCanvas::commitMarker(const QPoint& releasePosition)
     cursorTick_ = drawCurrent_;
     emit modelEdited();
     emit commandAvailabilityChanged();
-    refreshModel();
+    refreshModelForChange(ModelChange::Markers);
     emit statusMessage(
         tr("Created %1 · %2 · Ctrl+Z to undo")
             .arg(QString::fromStdString(marker.name))
@@ -21982,7 +22079,7 @@ void WaveCanvas::commitRelation(const QPoint& releasePosition)
         selectOnlyRelation(relationId);
         emit modelEdited();
         emit commandAvailabilityChanged();
-        refreshModel();
+        refreshModelForChange(ModelChange::Relations);
         emit relationSelected(QString::fromStdString(relationId));
         emit statusMessage(
             tr("Retargeted relation endpoint · Ctrl+Z to undo"));
@@ -22036,7 +22133,7 @@ void WaveCanvas::commitRelation(const QPoint& releasePosition)
     selectOnlyRelation(relation.id);
     emit modelEdited();
     emit commandAvailabilityChanged();
-    refreshModel();
+    refreshModelForChange(ModelChange::Relations);
     emit relationSelected(QString::fromStdString(relation.id));
     emit statusMessage(tr("Created relation · Ctrl+Z to undo"));
     viewport()->update();

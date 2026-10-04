@@ -36,6 +36,13 @@ WAVEWIDGETS_API int wavewidgets_stimulus_project_v1(
     QWidget* editor, char* destination, std::size_t capacity,
     std::size_t* required, char* error, std::size_t errorCapacity) noexcept;
 
+// Apply a new timing/duration snapshot as one undoable edit. Project, scenario
+// and lane identities must match. Keeps the canvas, viewport and prior history.
+// Unknown JSON extensions round-trip with the edit (e.g. host timing settings).
+WAVEWIDGETS_API int wavewidgets_update_stimulus_editor_v1(
+    QWidget* editor, const char* projectJson, std::size_t projectSize,
+    char* error, std::size_t errorCapacity) noexcept;
+
 WAVEWIDGETS_API int wavewidgets_create_simulation_workspace_v1(
     const char* projectPathUtf8,
     QWidget* parent,

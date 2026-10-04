@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Tickx VERSION 0.15.1 LANGUAGES CXX)
+project(Tickx VERSION 0.15.2 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 

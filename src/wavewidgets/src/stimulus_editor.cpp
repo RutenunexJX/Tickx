@@ -25,6 +25,25 @@ void errorText(const QString& text, char* out, std::size_t size)
     const auto count = std::min(size - 1, static_cast<std::size_t>(bytes.size()));
     std::memcpy(out, bytes.constData(), count); out[count] = 0;
 }
+class UpdateStimulusCommand final : public wave::EditCommand {
+public:
+    UpdateStimulusCommand(wave::Project& project, wave::Project next)
+        : project_(project), before_(project), after_(std::move(next)) {}
+    void redo() override { apply(after_); }
+    void undo() override { apply(before_); }
+    std::string description() const override { return "Change stimulus timing"; }
+    bool hasEffect() const noexcept override { return before_ != after_; }
+private:
+    void apply(const wave::Project& value) {
+        // Copy assignment preserves ScenarioRef's address state. Replacing the
+        // vector or moving a Scenario would invalidate earlier edit commands.
+        project_.scenarios.front() = value.scenarios.front();
+        project_.clockDomains = value.clockDomains;
+        project_.extensions = value.extensions;
+    }
+    wave::Project& project_;
+    wave::Project before_, after_;
+};
 class StimulusEditor final : public QWidget {
 public:
     StimulusEditor(wave::Project project, QWidget* parent)
@@ -93,6 +112,7 @@ public:
         const auto update = [this, undo, redo] {
             undo->setEnabled(history_.canUndo()); redo->setEnabled(history_.canRedo());
             setProperty("wavewidgets.dirty", history_.stateId() != 0);
+            setProperty("wavewidgets.stateRevision", QVariant::fromValue<qulonglong>(history_.stateId()));
         };
         connect(canvas_, &wave::WaveCanvas::modelEdited, this, update);
         connect(canvas_, &wave::WaveCanvas::commandAvailabilityChanged, this, update);
@@ -133,11 +153,50 @@ public:
         if (!canvas_->commitPendingInlineEdits()) throw std::runtime_error("Finish the current value edit before saving.");
         return wave::serializeProject(project_);
     }
+    void apply(wave::Project next)
+    {
+        if (!canvas_->commitPendingInlineEdits()) throw std::runtime_error("Finish the current value edit before changing timing.");
+        if (next.id != project_.id || next.timeBase != project_.timeBase || next.scenarios.size() != 1
+            || next.scenarios.front().id != project_.scenarios.front().id
+            || next.scenarios.front().duration <= 0
+            || next.scenarios.front().lanes.size() != project_.scenarios.front().lanes.size())
+            throw std::runtime_error("Timing updates must retain the project, scenario and signals.");
+        for (std::size_t i = 0; i < next.scenarios.front().lanes.size(); ++i) {
+            const auto& a = project_.scenarios.front().lanes[i];
+            const auto& b = next.scenarios.front().lanes[i];
+            if (a.id != b.id || a.width != b.width || a.name != b.name)
+                throw std::runtime_error("Timing updates must retain signal identities and widths.");
+        }
+        // This endpoint owns only timing/scenario edits and host extensions.
+        next.name = project_.name;
+        next.importedTraces = project_.importedTraces;
+        next.linkedResources = project_.linkedResources;
+        next.exportSettings = project_.exportSettings;
+        history_.execute(std::make_unique<UpdateStimulusCommand>(project_, std::move(next)));
+        canvas_->refreshModel();
+        emit canvas_->commandAvailabilityChanged();
+    }
 private:
     wave::Project project_;
     wave::CommandStack history_;
     wave::WaveCanvas* canvas_{};
 };
+}
+
+int wavewidgets_update_stimulus_editor_v1(QWidget* editor, const char* data, std::size_t size,
+    char* error, std::size_t errorCapacity) noexcept
+{
+    auto* typed = dynamic_cast<StimulusEditor*>(editor);
+    if (!typed || !data || !size || size > 8U * 1024U * 1024U) {
+        errorText(QStringLiteral("A valid stimulus editor and project are required."), error, errorCapacity); return 1;
+    }
+    try {
+        auto loaded = wave::deserializeProject(QByteArray(data, static_cast<qsizetype>(size)));
+        if (!loaded.ok()) { errorText(loaded.error, error, errorCapacity); return 2; }
+        typed->apply(std::move(*loaded.project));
+        errorText({}, error, errorCapacity); return 0;
+    } catch (const std::exception& e) { errorText(QString::fromUtf8(e.what()), error, errorCapacity); return 3; }
+    catch (...) { errorText(QStringLiteral("Could not update stimulus timing."), error, errorCapacity); return 4; }
 }
 
 int wavewidgets_create_stimulus_editor_v1(const char* data, std::size_t size,

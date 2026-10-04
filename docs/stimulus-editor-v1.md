@@ -19,6 +19,17 @@ current project. First call with null destination / zero capacity to obtain
 Nonzero return values carry an error message and must not be treated as saved.
 The JSON uses the existing [project format](project-format.md).
 
+`wavewidgets_update_stimulus_editor_v1` applies a timing/duration snapshot as one
+undoable command. It retains the widget, viewport and earlier edit history, and
+requires matching project, scenario and ordered lane identities and widths.
+It uses copy assignment to keep existing `ScenarioRef` objects valid. Unrelated
+snapshots are rejected without replacing the drawing. The `wavewidgets.stateRevision`
+Qt property changes on edits, undo and redo; hosts can observe its dynamic-property
+event. Unknown project JSON extensions round-trip through history, allowing a host
+to keep its timing controls consistent with undo/redo. Like the other editor calls,
+updates must run on the GUI thread. The ABI version remains 1; hosts must resolve
+the additive symbol before offering timing updates that preserve history.
+
 The editor supports bit clicks, bus values, enum choices, edge dragging, range
 editing, undo/redo and zoom. The small surface fixes the input definitions and
 automatic clock; the host controls timing, port discovery, project persistence,

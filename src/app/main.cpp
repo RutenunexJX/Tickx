@@ -1239,6 +1239,92 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            auto* autosaveTimer = window.findChild<QTimer*>(
+                QStringLiteral("AutosaveTimer"));
+            auto* autosaveWatcher = window.findChild<QFutureWatcherBase*>(
+                QStringLiteral("AutosaveWatcher"));
+            auto* durationEdit = window.findChild<QLineEdit*>(
+                QStringLiteral("TimelineDurationEdit"));
+            if (!autosaveTimer || !autosaveWatcher || !durationEdit
+                || window.project().scenarios.empty()) {
+                fail(QStringLiteral("Cannot find the autosave debounce controls"));
+                return;
+            }
+            const auto applyDuration = [&window, durationEdit](const wave::Tick duration) {
+                durationEdit->setText(QStringLiteral("%1 tick").arg(duration));
+                durationEdit->setModified(true);
+                return QMetaObject::invokeMethod(
+                           durationEdit, "editingFinished", Qt::DirectConnection)
+                    && window.project().scenarios.front().duration == duration;
+            };
+            const auto waitForAutosaves = [autosaveTimer, autosaveWatcher, snapshotPath](
+                                             const std::vector<wave::Project>& expected) {
+                QEventLoop wait;
+                std::size_t completed = 0;
+                bool snapshotsMatch = true;
+                QObject::connect(
+                    autosaveWatcher,
+                    &QFutureWatcherBase::finished,
+                    &wait,
+                    [&wait, &completed, &snapshotsMatch, &expected, snapshotPath] {
+                        const auto snapshot = wave::loadProjectFile(snapshotPath);
+                        snapshotsMatch = completed < expected.size()
+                            && snapshot.ok()
+                            && *snapshot.project == expected.at(completed);
+                        ++completed;
+                        if (!snapshotsMatch || completed == expected.size()) wait.quit();
+                    });
+                QTimer::singleShot(2'500, &wait, &QEventLoop::quit);
+                wait.exec();
+                return snapshotsMatch && completed == expected.size()
+                    && !autosaveWatcher->isRunning() && !autosaveTimer->isActive();
+            };
+
+            const auto baseDuration = window.project().scenarios.front().duration;
+            if (!applyDuration(baseDuration + 1'000)) {
+                fail(QStringLiteral("Cannot create the first autosave debounce edit"));
+                return;
+            }
+            const auto firstSnapshot = window.project();
+            // Do not process events between these edits: even a finished worker
+            // remains in flight until its finished callback has been delivered.
+            if (!QMetaObject::invokeMethod(&window, "startAutosave", Qt::DirectConnection)
+                || !applyDuration(baseDuration + 2'000)
+                || !applyDuration(baseDuration + 3'000)) {
+                fail(QStringLiteral("Cannot establish pending edits during autosave"));
+                return;
+            }
+            const auto catchupSnapshot = window.project();
+            if (!waitForAutosaves({firstSnapshot, catchupSnapshot})
+                || window.project() != catchupSnapshot
+                || saveState->property("saveStateText").toString()
+                    != QStringLiteral("Unsaved changes")) {
+                fail(QStringLiteral("Autosave did not preserve and catch up with in-flight edits"));
+                return;
+            }
+
+            if (!applyDuration(baseDuration + 4'000)
+                || !autosaveTimer->isActive()
+                || !autosaveTimer->isSingleShot()
+                || autosaveTimer->interval() != 1'500
+                || !applyDuration(baseDuration + 5'000)
+                || !applyDuration(baseDuration + 6'000)
+                || !autosaveTimer->isActive()
+                || autosaveTimer->interval() != 1'500) {
+                fail(QStringLiteral("Autosave did not restore normal debounce after its immediate catch-up"));
+                return;
+            }
+            const auto debouncedSnapshot = window.project();
+            const auto debouncedWriteCompleted = waitForAutosaves({debouncedSnapshot});
+            const auto formalAfterAutosave = wave::loadProjectFile(autosaveSmokePath);
+            if (!debouncedWriteCompleted
+                || window.project() != debouncedSnapshot
+                || !formalAfterAutosave.ok()
+                || *formalAfterAutosave.project != *saved.project) {
+                fail(QStringLiteral("Consecutive edits did not merge into one current recovery snapshot"));
+                return;
+            }
+
             if (!QMetaObject::invokeMethod(&window, "markEdited", Qt::DirectConnection)
                 || !QMetaObject::invokeMethod(&window, "startAutosave", Qt::DirectConnection)
                 || !QMetaObject::invokeMethod(&window, "saveProject", Qt::DirectConnection)) {

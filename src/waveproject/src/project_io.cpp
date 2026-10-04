@@ -10,7 +10,9 @@
 #include <QJsonValue>
 #include <QSaveFile>
 #include <QSet>
+#include <QThread>
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -1050,31 +1052,53 @@ bool saveProjectFileAtomic(
     const QString& filePath,
     QString* error)
 {
-    QSaveFile file(filePath);
-    file.setDirectWriteFallback(false);
-    if (!file.open(QIODevice::WriteOnly)) {
-        if (error) {
-            *error = QStringLiteral("Cannot open %1 for writing: %2")
-                         .arg(filePath, file.errorString());
+#ifdef Q_OS_WIN
+    // A file watcher or another reader can briefly prevent Windows from
+    // replacing an open destination. Bound the wait and keep atomic writes.
+    constexpr std::array retryDelaysMs{2UL, 4UL, 8UL, 16UL, 32UL};
+#else
+    constexpr std::array<unsigned long, 0> retryDelaysMs{};
+#endif
+    std::optional<QByteArray> data;
+    for (std::size_t attempt = 0;; ++attempt) {
+        QFileDevice::FileError commitError;
+        QString commitErrorText;
+        {
+            QSaveFile file(filePath);
+            file.setDirectWriteFallback(false);
+            if (!file.open(QIODevice::WriteOnly)) {
+                if (error) {
+                    *error = QStringLiteral("Cannot open %1 for writing: %2")
+                                 .arg(filePath, file.errorString());
+                }
+                return false;
+            }
+            if (!data) data = serializeProject(project);
+            if (file.write(*data) != data->size()) {
+                if (error) {
+                    *error = QStringLiteral("Cannot write %1: %2")
+                                 .arg(filePath, file.errorString());
+                }
+                file.cancelWriting();
+                return false;
+            }
+            if (file.commit()) return true;
+            commitError = file.error();
+            commitErrorText = file.errorString();
         }
-        return false;
-    }
-    const auto data = serializeProject(project);
-    if (file.write(data) != data.size()) {
-        if (error) {
-            *error = QStringLiteral("Cannot write %1: %2").arg(filePath, file.errorString());
+        // A failed commit consumes the temporary file. Destroy that save object
+        // before waiting, then write the same snapshot with a fresh QSaveFile.
+        if (commitError == QFileDevice::RenameError
+            && attempt < retryDelaysMs.size()) {
+            QThread::msleep(retryDelaysMs[attempt]);
+            continue;
         }
-        file.cancelWriting();
-        return false;
-    }
-    if (!file.commit()) {
         if (error) {
             *error = QStringLiteral("Cannot atomically replace %1: %2")
-                         .arg(filePath, file.errorString());
+                         .arg(filePath, commitErrorText);
         }
         return false;
     }
-    return true;
 }
 
 ProjectLoadResult loadProjectDirectory(const QString& directoryPath)

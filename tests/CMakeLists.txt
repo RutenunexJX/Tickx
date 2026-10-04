@@ -263,6 +263,18 @@ target_link_libraries(waveform-view-ui-smoke
     PRIVATE wavewidgets Qt6::Core Qt6::Gui Qt6::Widgets)
 wave_enable_warnings(waveform-view-ui-smoke)
 
+add_executable(wave-project-atomic-save-test project_atomic_save_test.cpp)
+target_link_libraries(wave-project-atomic-save-test PRIVATE waveproject Qt6::Test)
+wave_enable_warnings(wave-project-atomic-save-test)
+add_test(NAME wave-project-atomic-save-test
+    COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_EXE=$<TARGET_FILE:wave-project-atomic-save-test>"
+        "-DLOG_FILE=${CMAKE_BINARY_DIR}/project-atomic-save.txt"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+set_tests_properties(wave-project-atomic-save-test PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+    TIMEOUT 30)
+
 add_executable(wave-external-reload-ui-smoke external_reload_ui_smoke.cpp)
 target_link_libraries(wave-external-reload-ui-smoke
     PRIVATE wavewidgets waveproject

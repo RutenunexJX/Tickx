@@ -103,6 +103,7 @@ namespace wave {
 namespace {
 
 constexpr int ScenarioLocationMemoryDelayMs = 400;
+constexpr int AutosaveDebounceMs = 1'500;
 constexpr int ExternalProjectDebounceMs = 180;
 constexpr int ExternalProjectRetryMs = 200;
 constexpr int ExternalProjectHighlightMs = 1'800;
@@ -1512,10 +1513,23 @@ void MainWindow::inspectExternalProjectFile()
         return;
     }
 
-    auto loaded = deserializeProject(snapshot);
-    if (!loaded.ok() && !loaded.error.isEmpty()) {
-        loaded.error = QStringLiteral("%1: %2")
-                           .arg(projectFile_, loaded.error);
+    const auto matchesLoadedRevision = sameProjectFileRevision(
+        snapshotRevision, loadedProjectRevision_);
+    const auto matchesIgnoredRevision = !ignoredExternalProjectSha_.isEmpty()
+        && ignoredExternalProjectSha_ == snapshotRevision.sha256;
+    ProjectLoadResult loaded;
+    // Directory notifications also include autosaves and unrelated files. Reuse
+    // known revisions without rebuilding their models, but still verify below
+    // that the file and event generation stayed stable during this inspection.
+    if (!matchesLoadedRevision && !matchesIgnoredRevision) {
+        setProperty(
+            "wavewidgets.externalProjectParseCount",
+            property("wavewidgets.externalProjectParseCount").toULongLong() + 1);
+        loaded = deserializeProject(snapshot);
+        if (!loaded.ok() && !loaded.error.isEmpty()) {
+            loaded.error = QStringLiteral("%1: %2")
+                               .arg(projectFile_, loaded.error);
+        }
     }
     const auto currentRevision = projectFileRevision(projectFile_);
     if (!sameProjectFileRevision(snapshotRevision, currentRevision)
@@ -1528,13 +1542,12 @@ void MainWindow::inspectExternalProjectFile()
     transientProjectFileRetryCount_ = 0;
     configureProjectFileWatcher();
 
-    if (sameProjectFileRevision(snapshotRevision, loadedProjectRevision_)) {
+    if (matchesLoadedRevision) {
         ignoredExternalProjectSha_.clear();
         clearExternalProjectConflict();
         return;
     }
-    if (!ignoredExternalProjectSha_.isEmpty()
-        && ignoredExternalProjectSha_ == snapshotRevision.sha256) {
+    if (matchesIgnoredRevision) {
         clearExternalProjectConflict();
         return;
     }
@@ -2637,8 +2650,9 @@ MainWindow::MainWindow(
         this,
         &MainWindow::finishFstSignalLoad);
     autosaveTimer_ = new QTimer(this);
+    autosaveTimer_->setObjectName(QStringLiteral("AutosaveTimer"));
     autosaveTimer_->setSingleShot(true);
-    autosaveTimer_->setInterval(1'500);
+    autosaveTimer_->setInterval(AutosaveDebounceMs);
     connect(autosaveTimer_, &QTimer::timeout, this, &MainWindow::startAutosave);
     autosaveWatcher_ = new QFutureWatcher<QPair<quint64, QString>>(this);
     autosaveWatcher_->setObjectName(QStringLiteral("AutosaveWatcher"));
@@ -10267,7 +10281,9 @@ void MainWindow::scheduleAutosave()
         autosavePending_ = true;
         return;
     }
-    autosaveTimer_->start();
+    // The previous in-flight save may have scheduled an immediate catch-up.
+    // start(0) changes QTimer's interval, so restore the normal debounce here.
+    autosaveTimer_->start(AutosaveDebounceMs);
 }
 
 void MainWindow::startAutosave()
