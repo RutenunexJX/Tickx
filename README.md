@@ -329,3 +329,11 @@ Create, duplicate, rename, delete and reorder use stable Scenario identities and
 The last Scenario cannot be deleted. Current selection falls back safely after deletion; external reload
 preserves identity when possible. CLI operations are documented in [automation CLI](docs/automation-cli.md).
 Light/dark semantic colors follow the system palette; the reusable view also exposes explicit theme modes.
+
+
+## License and public-release status
+
+Original application code is licensed under [Apache-2.0](LICENSE); see [NOTICE](NOTICE).
+Third-party code, fonts and data retain their licenses in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+[Asset provenance](docs/ASSET-PROVENANCE.md) records the known sources and unresolved permissions.
+[Public-release review](docs/PUBLIC-RELEASE-REVIEW.md) lists the checks still required before publication.

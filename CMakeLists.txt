@@ -352,6 +352,9 @@ install(
 install(
     FILES
         "${CMAKE_SOURCE_DIR}/README.md"
+        "${CMAKE_SOURCE_DIR}/LICENSE"
+        "${CMAKE_SOURCE_DIR}/NOTICE"
+        "${CMAKE_SOURCE_DIR}/THIRD-PARTY-NOTICES.md"
         "${CMAKE_BINARY_DIR}/PACKAGE-README.txt"
     DESTINATION .
     COMPONENT Portable
@@ -359,19 +362,31 @@ install(
 install(FILES third_party/elawidgettools/LICENSE
     third_party/elawidgettools/UPSTREAM-REVISION.md
     third_party/elawidgettools/WAVEWORKBENCH.md
+    third_party/elawidgettools/ZeroSlack-Apache-2.0.txt
     third_party/elawidgettools/Font/FontAwesome-LICENSE.txt
     DESTINATION licenses/ElaWidgetTools COMPONENT Portable)
 install(DIRECTORY third_party/elawidgettools/patches/
     DESTINATION licenses/ElaWidgetTools/patches COMPONENT Portable
     FILES_MATCHING PATTERN "*.patch")
+install(DIRECTORY third_party/runtime-licenses/
+    DESTINATION licenses COMPONENT Portable)
 if(WAVEWORKBENCH_ENABLE_WELLEN)
+    include(cmake/VerifyWellenNotices.cmake)
     install(PROGRAMS "${WAVE_WELLEN_READER_OUTPUT}"
         DESTINATION .
         COMPONENT Portable)
+    install(FILES tools/wellen_reader/LICENSE
+        DESTINATION licenses/wave-wellen-reader COMPONENT Portable)
+    install(DIRECTORY third_party/wellen-licenses/
+        DESTINATION licenses/Wellen COMPONENT Portable)
+    install(DIRECTORY third_party/rust-runtime-notices/
+        DESTINATION licenses/Rust COMPONENT Portable)
 endif()
 install(
     FILES
         "${CMAKE_SOURCE_DIR}/docs/interaction.md"
+        "${CMAKE_SOURCE_DIR}/docs/ASSET-PROVENANCE.md"
+        "${CMAKE_SOURCE_DIR}/docs/PUBLIC-RELEASE-REVIEW.md"
         "${CMAKE_SOURCE_DIR}/docs/ela-migration.md"
         "${CMAKE_SOURCE_DIR}/docs/automation-cli.md"
         "${CMAKE_SOURCE_DIR}/docs/cli-quick-start.md"
