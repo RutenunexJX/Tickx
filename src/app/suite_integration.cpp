@@ -98,9 +98,15 @@ WaveSuiteIntegration::~WaveSuiteIntegration() = default;
 
 bool WaveSuiteIntegration::start(QString* failureReason)
 {
+    return start(SuiteApp::RuntimeStartOptions{}, failureReason);
+}
+
+bool WaveSuiteIntegration::start(
+    const SuiteApp::RuntimeStartOptions& runtimeOptions,
+    QString* failureReason)
+{
     if (provider_ && provider_->isListening())
         return true;
-    SuiteApp::RuntimeStartOptions runtimeOptions;
     const SuiteApp::RuntimeStatus runtime =
         SuiteApp::ensureRuntime(runtimeOptions);
     if (!runtime.available) {

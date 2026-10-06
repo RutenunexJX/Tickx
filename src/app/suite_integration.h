@@ -9,6 +9,7 @@
 
 namespace SuiteApp {
 class Provider;
+struct RuntimeStartOptions;
 }
 
 namespace wave {
@@ -22,6 +23,8 @@ public:
     ~WaveSuiteIntegration() override;
 
     bool start(QString* failureReason = nullptr);
+    bool start(const SuiteApp::RuntimeStartOptions& runtimeOptions,
+               QString* failureReason = nullptr);
     bool isRegistered() const;
 
     static QJsonObject appDescriptor(const QString& version,

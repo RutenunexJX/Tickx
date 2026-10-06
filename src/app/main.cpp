@@ -633,7 +633,10 @@ int main(int argc, char* argv[])
 #ifdef WAVEWORKBENCH_HAS_SUITEAPP
     wave::WaveSuiteIntegration suiteIntegration(&window, &application);
     QTimer::singleShot(0, &application, [&suiteIntegration]() {
-        suiteIntegration.start();
+        QString failureReason;
+        if (!suiteIntegration.start(&failureReason))
+            qWarning().noquote()
+                << "Tickx SuiteApp integration unavailable:" << failureReason;
     });
 #endif
     if (compareMode) window.requestCompareMode();

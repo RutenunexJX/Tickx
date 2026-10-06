@@ -102,6 +102,23 @@ foreach(_wave_ela_scale IN ITEMS 1 1.25 1.5 2)
 endforeach()
 
 if(SuiteApp_FOUND)
+    add_executable(wave-suiteapp-runtime-test suiteapp_runtime_test.cpp)
+    target_link_libraries(wave-suiteapp-runtime-test
+        PRIVATE wavewidgets waveproject SuiteApp::suiteapp Qt6::Test Qt6::Concurrent)
+    target_compile_definitions(wave-suiteapp-runtime-test PRIVATE
+        WAVE_TEST_APPLICATION_VERSION="${PROJECT_VERSION}"
+        WAVE_SUITE_RUNTIME_PATH="$<TARGET_FILE:SuiteApp::suite-runtime>")
+    wave_enable_warnings(wave-suiteapp-runtime-test)
+    add_test(NAME wave-suiteapp-runtime-test
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTEST_EXE=$<TARGET_FILE:wave-suiteapp-runtime-test>"
+            "-DLOG_FILE=${CMAKE_BINARY_DIR}/suiteapp-runtime.txt"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+    set_tests_properties(wave-suiteapp-runtime-test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        TIMEOUT 45)
     find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
     add_executable(wave-suiteapp-integration-test
         suiteapp_integration_test.cpp)
