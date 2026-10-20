@@ -2,7 +2,9 @@
 
 源码仓库：[RutenunexJX/Tickx](https://github.com/RutenunexJX/Tickx)。
 
-当前版本：`v0.15.3`
+当前版本：`v0.15.4`
+
+0.15.4 修复首次显示的左侧重叠，以及横向调整窗口后的左下角空缺；初始化原生边框所需的 Windows API，保持既有布局、设置和接口。
 
 0.15.3 启用 SuiteApp SDK 1.0.1，保留 wave 协议与原生组件接口；记录 Runtime 启动失败原因，并保持应用独立运行及未保存工程保护。
 

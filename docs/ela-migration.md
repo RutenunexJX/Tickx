@@ -1,5 +1,34 @@
 # ElaWidgetTools migration
 
+## Native frame initialization (2026-10-20)
+
+Patch 15 fixes first-show left-edge overlap and unpainted lower-left resize areas.
+Tickx initializes Ela resources without `ElaApplication::init()`. The AppBar
+retains native resize borders, but its unloaded DWM function pointer made
+`getIsCompositionEnabled()` report false and consume `WM_NCPAINT`. Initializing
+only the AppBar's Windows APIs before native messages restores Windows frame
+composition without changing widget layouts or global application policy.
+
+The new `nativeFrameComposition` and `nativeFrameRepaint` regressions both failed
+against the original AppBar and passed after the seven-line production change.
+The pixel test captures the displayed native frame rather than forcing a Qt
+repaint: first show, four left-edge and four right-edge changes, and restore from
+maximized all retain the owned backdrop in the invisible resize borders.
+The visible test is opt-in through `WAVE_NATIVE_SCREEN_TEST=1`; ordinary native
+CTest runs remain hidden. It requires a sufficiently large visible desktop and
+uses no desktop input. Multi-monitor DPI transitions were not exercised.
+
+Release build passed. All four `wave-ui-native-*` CTest groups passed at scales
+1/1.25/1.5/2; focused offscreen geometry, chrome, resize/context and cancelled-close
+cases also passed at all four scales with normal motion. One reduced-motion
+offscreen maximize assertion failed on the first run and passed unchanged on an
+independent rerun; both logs are retained rather than treated as a product fix.
+Evidence: `build/ui-geometry-20261020/`, including `before-pixels.txt`,
+`after-pixels.txt`, `native-ctest.txt`, offscreen logs and native frame PNGs.
+The 0.15.3 development preview was independently accepted by the coordinator.
+Release 0.15.4 contains this fix; the shared suite runtime and host components
+remain unchanged. Release packaging and formal replacement are coordinator-owned.
+
 ## Popup padding follow-up (2026-09-24)
 
 Wave patch 14 adapts the verified ZeroSlack/RegMap patch 30, source SHA-256

@@ -6,6 +6,7 @@
 #include "quick_waveform.h"
 #include "ui_controls.h"
 #include "wave/project_io.h"
+#include "ElaAppBar.h"
 #include "ElaLineEdit.h"
 #include "ElaSpinBox.h"
 #include "ElaDoubleSpinBox.h"
@@ -28,6 +29,7 @@
 #include <QLabel>
 #include <QHelpEvent>
 #include <QLineEdit>
+#include <QLibrary>
 #include <QMenuBar>
 #include <QMenu>
 #include <QPointer>
@@ -36,6 +38,7 @@
 #include <QPushButton>
 #include <QRawFont>
 #include <QScrollBar>
+#include <QScreen>
 #include <QStatusBar>
 #include <QSettings>
 #include <QStandardPaths>
@@ -874,6 +877,110 @@ private slots:
         }
     }
 
+    void nativeFrameComposition()
+    {
+#ifndef Q_OS_WIN
+        QSKIP("Windows native frame regression");
+#else
+        if (QGuiApplication::platformName()!="windows") QSKIP("Requires Windows QPA");
+        QLibrary dwm(QStringLiteral("dwmapi"));
+        const auto isCompositionEnabled=reinterpret_cast<HRESULT(WINAPI*)(BOOL*)>(dwm.resolve("DwmIsCompositionEnabled"));
+        QVERIFY(isCompositionEnabled);
+        BOOL compositionEnabled=false;
+        QCOMPARE(isCompositionEnabled(&compositionEnabled),S_OK);
+        wave::MainWindow window(styleProject());
+        window.show(); QTest::qWait(50);
+        auto* title=window.findChild<ElaAppBar*>("WaveTitleBar"); QVERIFY(title);
+        MSG message{};
+        message.hwnd=reinterpret_cast<HWND>(window.winId());
+        message.message=WM_NCPAINT;
+        qintptr result=0;
+        // DWM must be allowed to repaint the retained native resize borders.
+        QCOMPARE(title->takeOverNativeEvent("windows_generic_MSG",&message,&result),
+            compositionEnabled ? -1 : 1);
+#endif
+    }
+
+    void nativeFrameRepaint()
+    {
+#ifndef Q_OS_WIN
+        QSKIP("Windows native backing-store regression");
+#else
+        if (QGuiApplication::platformName()!="windows" || !qEnvironmentVariableIntValue("WAVE_NATIVE_SCREEN_TEST"))
+            QSKIP("Requires an explicitly enabled visible Windows test");
+        auto* screen=QGuiApplication::primaryScreen();
+        const auto available=screen->availableGeometry();
+        if (available.width()<1420 || available.height()<800)
+            QSKIP("Pixel regression requires a 1420x800 display");
+        qApp->removeEventFilter(&hidden_);
+        auto restoreFilter=qScopeGuard([&] { qApp->installEventFilter(&hidden_); });
+        QWidget background(nullptr,Qt::Tool|Qt::FramelessWindowHint);
+        background.setAttribute(Qt::WA_ShowWithoutActivating);
+        background.setAutoFillBackground(true);
+        auto palette=background.palette();
+        palette.setColor(QPalette::Window,QColor(64,192,128));
+        background.setPalette(palette);
+        background.setGeometry(available);
+        background.show();
+        QVERIFY(SetWindowPos(reinterpret_cast<HWND>(background.winId()),HWND_TOPMOST,0,0,0,0,
+            SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE));
+        auto p=styleProject();
+        p.scenarios.front().lanes.clear();
+        wave::MainWindow window(p);
+        window.setAttribute(Qt::WA_ShowWithoutActivating);
+        window.resize(1000,640);
+        window.move(available.topLeft()+QPoint(240,60));
+        window.show();
+        const auto handle=reinterpret_cast<HWND>(window.winId());
+        QVERIFY(SetWindowPos(handle,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE));
+        QTest::qWait(250);
+        const auto inspect=[&](const QString& stage) {
+            RECT frame{}; QVERIFY(GetWindowRect(handle,&frame));
+            // Capture the displayed frame, not QWidget::grab(), which forces a repaint
+            // and omits the native borders where stale pixels used to remain.
+            const auto screenDC=GetDC(nullptr); QVERIFY(screenDC);
+            const auto imageDC=CreateCompatibleDC(screenDC); QVERIFY(imageDC);
+            const auto bitmap=CreateCompatibleBitmap(screenDC,frame.right-frame.left,frame.bottom-frame.top);
+            QVERIFY(bitmap);
+            const auto oldBitmap=SelectObject(imageDC,bitmap);
+            auto release=qScopeGuard([&] {
+                SelectObject(imageDC,oldBitmap); DeleteObject(bitmap);
+                DeleteDC(imageDC); ReleaseDC(nullptr,screenDC);
+            });
+            QVERIFY(BitBlt(imageDC,0,0,frame.right-frame.left,frame.bottom-frame.top,
+                screenDC,frame.left,frame.top,SRCCOPY));
+            const auto image=QImage::fromHBITMAP(bitmap);
+            QVERIFY(!image.isNull());
+            const auto directory=qEnvironmentVariable("WAVE_FOLLOWUP_PREVIEW_DIR");
+            if (!directory.isEmpty()) {
+                QVERIFY(QDir().mkpath(directory));
+                QVERIFY(image.save(directory+'/'+stage+"-frame.png"));
+            }
+            const QPoint samples[]{QPoint(2,24),QPoint(2,88),QPoint(2,image.height()-40),
+                QPoint(32,image.height()-2),QPoint(100,image.height()-2)};
+            for (const auto point : samples) {
+                const auto color=image.pixelColor(point);
+                // The invisible border must reveal the green backdrop through its
+                // shadow, never copied controls, opaque fill or unpainted black.
+                QVERIFY2(color.green()>color.red()+20 && color.blue()>color.red()+10,
+                    qPrintable(QString("%1 at %2,%3: %4").arg(stage).arg(point.x()).arg(point.y()).arg(color.name())));
+            }
+        };
+        inspect("initial");
+        RECT frame{}; QVERIFY(GetWindowRect(handle,&frame));
+        const int width=frame.right-frame.left, height=frame.bottom-frame.top;
+        for (const bool leftEdge : {true,false}) {
+            for (const int delta : {80,-32,120,0}) {
+                QVERIFY(SetWindowPos(handle,nullptr,frame.left-(leftEdge ? delta : 0),frame.top,
+                    width+delta,height,SWP_NOZORDER|SWP_NOACTIVATE));
+                QTest::qWait(200);
+                inspect(QString("%1-%2").arg(leftEdge ? "left" : "right").arg(delta));
+            }
+        }
+        window.showMaximized(); QTest::qWait(200);
+        window.showNormal(); QTest::qWait(600); inspect("restored");
+#endif
+    }
     void firstShowGeometry()
     {
         wave::MainWindow window(styleProject());

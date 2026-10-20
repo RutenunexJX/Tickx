@@ -76,6 +76,16 @@ remain intact; reduced-motion skips animation only after the same geometry fix.
 Only ElaComboBox.cpp production code changes. Public signatures and the upstream
 MIT/OFL license texts are unchanged. Forward/index and reverse/worktree checks
 verify the local adaptation against patch 13.
+Patch `patches/15-waveworkbench-native-frame-initialization.patch` follows patch 14.
+The AppBar initializes its Windows composition/DPI APIs once before native event
+handling, including applications that call only `initResources()`. Without this,
+DWM composition was incorrectly reported as disabled and native frame painting
+was suppressed, leaving copied controls and unpainted areas along resize borders.
+Resource-only clients without an AppBar keep their existing initialization. No
+application-wide font, palette, event filter or shared runtime is enabled.
+Hidden native tests verify frame-paint delegation at four scales. An opt-in
+visible test samples actual screen pixels at first show, both resize edges and
+restore against an owned backdrop; it sends no desktop mouse or keyboard input.
 See `docs/ela-migration.md` for scope,
 verification and remaining platform checks. Re-audit these changes before any
 dependency update; do not replace the tree with another application's working copy.

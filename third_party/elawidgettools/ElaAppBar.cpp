@@ -47,6 +47,13 @@ ElaAppBar::ElaAppBar(QWidget* parent)
     d->_pCustomMenu = nullptr;
     window()->installEventFilter(this);
 #ifdef Q_OS_WIN
+    if (QGuiApplication::platformName() == QStringLiteral("windows"))
+    {
+        // Native chrome also supports applications using only initResources().
+        // Load the composition/DPI APIs before handling any window messages.
+        static const bool nativeApisInitialized = eWinHelper->initWinAPI();
+        Q_UNUSED(nativeApisInitialized);
+    }
     if (!eWinHelper->getIsWinVersionGreater10())
     {
         d->_win7Margins = 8;
