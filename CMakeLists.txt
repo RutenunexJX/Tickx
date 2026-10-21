@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Tickx VERSION 0.15.4 LANGUAGES CXX)
+project(Tickx VERSION 0.15.5 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -18,7 +18,7 @@ option(WAVEWORKBENCH_BUILD_TESTS "Build automated tests" ON)
 option(WAVEWORKBENCH_ENABLE_WELLEN "Build the Wellen FST reader" ON)
 
 find_package(Qt6 6.10.2 EXACT REQUIRED COMPONENTS Core Gui Widgets WidgetsPrivate Svg Concurrent)
-find_package(SuiteApp 1 CONFIG QUIET)
+find_package(SuiteApp 1.0.2 CONFIG QUIET)
 
 # Pinned, in-tree source; see third_party/elawidgettools/WAVEWORKBENCH.md.
 # Ela includes Qt private headers, so the Qt patch version is part of the pin.
@@ -218,6 +218,7 @@ add_library(wavewidgets SHARED
     src/app/ui_icons.cpp
     src/app/ui_controls.h
     src/app/main_window.cpp
+    src/app/main_window_automation.cpp
     src/app/main_window.h
     src/app/trace_canvas.cpp
     src/app/trace_canvas.h
@@ -242,7 +243,7 @@ target_include_directories(wavewidgets
 target_link_libraries(wavewidgets
     PUBLIC wavecore wavetime waveedit waveproject wavevalidate wavegenerate wavetrace wavefst wavecompare waveintegration wavesim
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent ${CMAKE_DL_LIBS}
-    PRIVATE Ela::WidgetTools
+    PRIVATE Ela::WidgetTools waveautomation
 )
 if(SuiteApp_FOUND)
     target_sources(wavewidgets PRIVATE
@@ -273,6 +274,7 @@ target_link_libraries(Tickx PRIVATE wavewidgets)
 target_compile_definitions(Tickx
     PRIVATE WAVEWORKBENCH_VERSION="${PROJECT_VERSION}")
 if(SuiteApp_FOUND)
+    target_link_libraries(Tickx PRIVATE SuiteApp::suiteapp)
     target_compile_definitions(Tickx
         PRIVATE WAVEWORKBENCH_HAS_SUITEAPP=1)
 endif()
@@ -316,11 +318,16 @@ wave_enable_warnings(wave-sim-runner)
 
 add_executable(wave-cli
     src/cli/wave_cli_main.cpp
+    src/cli/session_cli.cpp
     src/cli/scenario_selection.h
 )
 target_link_libraries(wave-cli
     PRIVATE waveautomation waveproject Qt6::Core
 )
+if(SuiteApp_FOUND)
+    target_link_libraries(wave-cli PRIVATE SuiteApp::suiteapp)
+    target_compile_definitions(wave-cli PRIVATE WAVEWORKBENCH_HAS_SUITEAPP=1)
+endif()
 wave_enable_warnings(wave-cli)
 
 set(WAVEWORKBENCH_PORTABLE_TARGETS
@@ -389,6 +396,7 @@ install(
         "${CMAKE_SOURCE_DIR}/docs/PUBLIC-RELEASE-REVIEW.md"
         "${CMAKE_SOURCE_DIR}/docs/ela-migration.md"
         "${CMAKE_SOURCE_DIR}/docs/automation-cli.md"
+        "${CMAKE_SOURCE_DIR}/docs/cli-sessions.md"
         "${CMAKE_SOURCE_DIR}/docs/cli-quick-start.md"
         "${CMAKE_SOURCE_DIR}/docs/integration-contracts.md"
         "${CMAKE_SOURCE_DIR}/docs/simulation-runner.md"
@@ -417,6 +425,11 @@ install(
 install(
     DIRECTORY "${CMAKE_SOURCE_DIR}/src/wavewidgets/schemas/wave-preview/"
     DESTINATION schemas/wave-preview
+    COMPONENT Portable
+)
+install(
+    DIRECTORY "${CMAKE_SOURCE_DIR}/examples/cli-session/"
+    DESTINATION examples/cli-session
     COMPONENT Portable
 )
 install(

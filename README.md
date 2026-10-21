@@ -2,7 +2,7 @@
 
 源码仓库：[RutenunexJX/Tickx](https://github.com/RutenunexJX/Tickx)。
 
-当前版本：`v0.15.4`
+当前版本：`v0.15.5`
 
 0.15.4 修复首次显示的左侧重叠，以及横向调整窗口后的左下角空缺；初始化原生边框所需的 Windows API，保持既有布局、设置和接口。
 

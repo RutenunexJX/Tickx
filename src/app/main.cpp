@@ -2,6 +2,7 @@
 #include "application_identity.h"
 #ifdef WAVEWORKBENCH_HAS_SUITEAPP
 #include "suite_integration.h"
+#include <suiteapp/runtime.h>
 #endif
 #include "wave_canvas.h"
 #include "waveform_theme.h"
@@ -89,8 +90,12 @@ int main(int argc, char* argv[])
         std::fflush(stdout);
         return 0;
     }
-    const auto testSettingsDirectory =
-        qEnvironmentVariable("WAVEWORKBENCH_SETTINGS_DIR");
+    auto testSettingsDirectory = qEnvironmentVariable("WAVEWORKBENCH_SETTINGS_DIR");
+    QString suiteRuntimeEndpoint;
+    for (const auto& argument : application.arguments()) {
+        if (argument.startsWith("--settings-dir=")) testSettingsDirectory = argument.mid(15);
+        if (argument.startsWith("--suite-runtime=")) suiteRuntimeEndpoint = argument.mid(16);
+    }
     if (!testSettingsDirectory.isEmpty()) {
         QDir().mkpath(testSettingsDirectory);
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -146,7 +151,8 @@ int main(int argc, char* argv[])
     bool fileConflictSmoke = false;
     QString fileConflictSmokePath;
     for (int index = 1; index < argc; ++index) {
-        const auto argument = QString::fromLocal8Bit(argv[index]);
+        const auto argument = application.arguments().at(index);
+        if (argument.startsWith("--settings-dir=") || argument.startsWith("--suite-runtime=")) continue;
         if (argument == QStringLiteral("--smoke-test")) {
             smokeTest = true;
         } else if (argument == QStringLiteral("--load-first-trace")) {
@@ -632,9 +638,11 @@ int main(int argc, char* argv[])
     window.show();
 #ifdef WAVEWORKBENCH_HAS_SUITEAPP
     wave::WaveSuiteIntegration suiteIntegration(&window, &application);
-    QTimer::singleShot(0, &application, [&suiteIntegration]() {
+    QTimer::singleShot(0, &application, [&suiteIntegration, suiteRuntimeEndpoint]() {
         QString failureReason;
-        if (!suiteIntegration.start(&failureReason))
+        SuiteApp::RuntimeStartOptions runtimeOptions;
+        if (!suiteRuntimeEndpoint.isEmpty()) runtimeOptions.endpoint = suiteRuntimeEndpoint;
+        if (!suiteIntegration.start(runtimeOptions, &failureReason))
             qWarning().noquote()
                 << "Tickx SuiteApp integration unavailable:" << failureReason;
     });

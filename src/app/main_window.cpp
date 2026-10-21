@@ -1573,7 +1573,7 @@ bool MainWindow::hasActiveInlineEditor() const
 {
     if (QApplication::activeModalWidget()) return true;
     if (canvas_) {
-        if (canvas_->hasQuickLaneSetup() || canvas_->hasLaneRename()) {
+        if (canvas_->hasQuickLaneSetup() || canvas_->hasLaneRename() || canvas_->hasActiveInteraction()) {
             return true;
         }
         const auto* busEditor = canvas_->busEditPaletteWidget();
@@ -5187,7 +5187,15 @@ void MainWindow::openProjectPath(const QString& path)
 bool MainWindow::openSuiteProject(const QString& path)
 {
     const QString normalized = normalizedProjectPath(path);
-    openProjectPath(normalized);
+    if (sameProjectPath(projectFile_, normalized)) {
+        scheduleExternalProjectInspection();
+        if (projectFileDebounceTimer_) projectFileDebounceTimer_->stop();
+        inspectExternalProjectFile();
+        if (!sameProjectFileRevision(loadedProjectRevision_, projectFileRevision(normalized)))
+            return false;
+    } else {
+        openProjectPath(normalized);
+    }
     if (sameProjectPath(projectFile_, normalized)) {
         show();
         raise();
@@ -12994,14 +13002,22 @@ void MainWindow::updateWindowTitle()
     setProperty("saveStateDetail",projectFile_.isEmpty() ? tr("This project has not been saved") : projectFile_);
 }
 
-bool MainWindow::loadFromPath(const QString& path, const bool preferRecovery)
+bool MainWindow::loadFromPath(const QString& path, const bool preferRecovery, QString* automationError, const QString& expectedSha256)
 {
     const auto selectedPath = preferRecovery
         ? preferredProjectLoadPath(path)
         : path;
-    const auto result = loadProjectFile(selectedPath);
+    QByteArray contents;
+    const auto readRevision = projectFileRevision(selectedPath, &contents);
+    if (!expectedSha256.isEmpty()
+        && QString::fromLatin1(readRevision.sha256.toHex()) != expectedSha256) {
+        if (automationError) *automationError = tr("Project changed while opening.");
+        return false;
+    }
+    const auto result = deserializeProject(contents);
     if (!result.ok()) {
-        ui::MessageBox::critical(this, tr("Open failed"), result.error);
+        if (automationError) *automationError = result.error;
+        else ui::MessageBox::critical(this, tr("Open failed"), result.error);
         return false;
     }
     rememberActiveScenarioLocation();
@@ -13024,7 +13040,7 @@ bool MainWindow::loadFromPath(const QString& path, const bool preferRecovery)
         Qt::CaseInsensitive);
     recoveryLoaded_ = recoveredSnapshot;
     projectFile_ = projectPathForLoadedFile(selectedPath);
-    loadedProjectRevision_ = projectFileRevision(projectFile_);
+    loadedProjectRevision_ = recoveredSnapshot ? projectFileRevision(projectFile_) : readRevision;
     activeScenarioIndex_ = rememberedActiveScenarioIndex().value_or(
         std::size_t{0});
     if (!projectFile_.isEmpty() && QFileInfo(projectFile_).isFile()) {
@@ -13065,7 +13081,7 @@ bool MainWindow::loadFromPath(const QString& path, const bool preferRecovery)
     return true;
 }
 
-bool MainWindow::writeToPath(const QString& path)
+bool MainWindow::writeToPath(const QString& path, QString* automationError)
 {
     const auto beforeName = project_.name;
     const auto previousProjectFile = projectFile_;
@@ -13083,6 +13099,10 @@ bool MainWindow::writeToPath(const QString& path)
             && diskRevision.state == ProjectFileRevision::State::Present
             && loadedProjectRevision_.sha256 != diskRevision.sha256;
         if (unreadableRevision || stateChanged || contentChanged) {
+            if (automationError) {
+                *automationError = tr("Project changed on disk; refresh or resolve the conflict first.");
+                return false;
+            }
             ui::MessageBox conflict(this);
             conflict.setIcon(QMessageBox::Warning);
             conflict.setWindowTitle(tr("Project changed on disk"));
@@ -13126,11 +13146,15 @@ bool MainWindow::writeToPath(const QString& path)
     QString error;
     if (!saveProjectFileAtomic(project_, path, &error)) {
         project_.name = beforeName;
-        ui::MessageBox::critical(this, tr("Save failed"), error);
+        if (automationError) *automationError = error;
+        else ui::MessageBox::critical(this, tr("Save failed"), error);
         return false;
     }
     projectFile_ = path;
-    loadedProjectRevision_ = projectFileRevision(projectFile_);
+    loadedProjectRevision_ = {
+        ProjectFileRevision::State::Present,
+        QCryptographicHash::hash(serializeProject(project_), QCryptographicHash::Sha256),
+    };
     rememberProjectPath(projectFile_);
     rememberActiveScenario();
     rememberActiveScenarioLocation();

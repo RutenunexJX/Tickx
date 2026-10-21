@@ -155,6 +155,10 @@ public:
     repeatPreviewRelationRemovalSummaries() const;
     [[nodiscard]] Tick cursorTick() const noexcept;
     [[nodiscard]] Tick visibleTimeSpan() const noexcept;
+    [[nodiscard]] std::pair<Tick, Tick> visibleTimeRange() const;
+    [[nodiscard]] bool hasActiveInteraction() const noexcept;
+    bool setVisibleTimeRange(Tick start, Tick end);
+    bool setExplicitTimeRange(std::optional<std::pair<Tick, Tick>> range);
     bool restoreVisibleTimeSpan(Tick span, Tick anchorTick);
     [[nodiscard]] std::optional<Tick> movableCursorTick() const noexcept;
     [[nodiscard]] std::optional<Tick> temporaryCursorTick() const noexcept;
@@ -285,6 +289,7 @@ public slots:
         const QString& activeLaneId);
     void goToTick(qint64 tick);
     void dismissInlineValueEditor();
+    void dismissInlineEditors();
     void selectEntireTimeline();
     void cutSelection();
     void copySelection();

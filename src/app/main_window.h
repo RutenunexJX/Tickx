@@ -17,6 +17,8 @@
 #include <QFutureWatcher>
 #include <QByteArray>
 #include <QMainWindow>
+#include <QJsonObject>
+#include <QUuid>
 #include <QPair>
 
 #include <QStringList>
@@ -95,6 +97,9 @@ public:
         const QString& symbolName,
         const QString& accessPath);
     bool openSuiteProject(const QString& path);
+    [[nodiscard]] QString automationSessionId() const { return automationSessionId_; }
+    [[nodiscard]] QJsonObject automationSessionState() const;
+    QJsonObject executeSessionCommand(const QString& command, const QJsonObject& arguments);
 
 signals:
     void initialTraceReferenceLoaded(bool success, const QString& message);
@@ -171,6 +176,7 @@ private slots:
     void finishAutosave();
 
 private:
+    const QString automationSessionId_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
     struct ProjectFileRevision {
         enum class State {
             Missing,
@@ -339,8 +345,8 @@ private:
     void openRecentProject(const QString& path);
     void openProjectPath(const QString& path);
     [[nodiscard]] QString projectDialogDirectory() const;
-    bool loadFromPath(const QString& path, bool preferRecovery = true);
-    bool writeToPath(const QString& path);
+    bool loadFromPath(const QString& path, bool preferRecovery = true, QString* automationError = nullptr, const QString& expectedSha256 = {});
+    bool writeToPath(const QString& path, QString* automationError = nullptr);
     void isolateAbandonedRecoverySnapshotsAfterReload();
     bool discardRecoverySnapshots();
     bool confirmDiscardChanges();

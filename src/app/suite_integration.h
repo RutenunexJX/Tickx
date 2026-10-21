@@ -36,6 +36,7 @@ private:
 
     MainWindow* window_ = nullptr;
     std::unique_ptr<SuiteApp::Provider> provider_;
+    std::unique_ptr<SuiteApp::Provider> sessionProvider_;
 };
 
 } // namespace wave

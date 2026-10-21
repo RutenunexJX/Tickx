@@ -2681,6 +2681,48 @@ Tick WaveCanvas::visibleTimeSpan() const noexcept
         scenario_->duration);
 }
 
+std::pair<Tick, Tick> WaveCanvas::visibleTimeRange() const
+{
+    return {tickAtX(headerWidth_), tickAtX(viewport()->width())};
+}
+
+bool WaveCanvas::hasActiveInteraction() const noexcept
+{
+    return drawing_ || headerResizing_ || laneHeaderPressed_
+        || laneHeaderDragging_ || asynchronousEditing_ || rangeSequenceTokenPress_
+        || waveEditInteraction_ != WaveEditInteraction::None
+        || relationInteraction_ != RelationInteraction::None
+        || cursorInteraction_ != CursorInteraction::None;
+}
+
+bool WaveCanvas::setVisibleTimeRange(const Tick start, const Tick end)
+{
+    if (!scenario_ || start < 0 || end <= start || end > scenario_->duration)
+        return false;
+    return restoreVisibleTimeSpan(end - start, start + (end - start) / 2);
+}
+
+bool WaveCanvas::setExplicitTimeRange(
+    const std::optional<std::pair<Tick, Tick>> range)
+{
+    if (range && (!scenario_ || selectedLaneIds_.empty()
+        || range->first < 0 || range->second <= range->first
+        || range->second > scenario_->duration)) return false;
+    clearWaveEditState();
+    hideBusPresetPalette();
+    clearMarkerSelection();
+    selectionRange_ = range;
+    explicitRangeSelection_ = range.has_value();
+    laneHeaderSelectionActive_ = !range.has_value();
+    selectedSegmentLaneId_.clear();
+    selectedSegmentId_.clear();
+    if (range) cursorTick_ = range->second;
+    snapGuideTick_.reset();
+    emit selectionChanged(QString::fromStdString(selectedLaneId_), cursorTick_);
+    viewport()->update();
+    return true;
+}
+
 bool WaveCanvas::restoreVisibleTimeSpan(
     const Tick span,
     const Tick anchorTick)
@@ -3761,6 +3803,13 @@ bool WaveCanvas::setExplicitRangeActiveTick(const qint64 tick)
         cursorTick_);
     viewport()->update();
     return true;
+}
+
+void WaveCanvas::dismissInlineEditors()
+{
+    hideBusPresetPalette();
+    hideRangeEditPalette();
+    viewport()->update();
 }
 
 void WaveCanvas::dismissInlineValueEditor()

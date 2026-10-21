@@ -1738,7 +1738,7 @@ void canonicalizeGeneratedIdentities(
     }
 
     auto usedSegmentIds = sourceSegmentIds;
-    std::map<std::string, std::string> segmentIdMap;
+    std::map<std::pair<std::string, std::string>, std::string> segmentIdMap;
     for (auto& scenario : candidate.scenarios) {
         for (auto& lane : scenario.lanes) {
             for (auto& segment : lane.segments) {
@@ -1761,13 +1761,13 @@ void canonicalizeGeneratedIdentities(
                         return usedSegmentIds.contains(id);
                     });
                 usedSegmentIds.insert(segment.id);
-                segmentIdMap.emplace(oldId, segment.id);
+                segmentIdMap.emplace(std::pair{scenario.id, oldId}, segment.id);
             }
         }
     }
     for (auto& scenario : candidate.scenarios) {
         for (auto& event : scenario.events) {
-            const auto mapped = segmentIdMap.find(event.linkedSegmentId);
+            const auto mapped = segmentIdMap.find(std::pair{scenario.id, event.linkedSegmentId});
             if (mapped != segmentIdMap.end()) {
                 event.linkedSegmentId = mapped->second;
             }
@@ -1775,7 +1775,7 @@ void canonicalizeGeneratedIdentities(
     }
 
     auto usedEventIds = sourceEventIds;
-    std::map<std::string, std::string> eventIdMap;
+    std::map<std::pair<std::string, std::string>, std::string> eventIdMap;
     for (auto& scenario : candidate.scenarios) {
         for (auto& event : scenario.events) {
             if (sourceEventIds.contains(event.id)) {
@@ -1798,7 +1798,7 @@ void canonicalizeGeneratedIdentities(
                     return usedEventIds.contains(id);
                 });
             usedEventIds.insert(event.id);
-            eventIdMap.emplace(oldId, event.id);
+            eventIdMap.emplace(std::pair{scenario.id, oldId}, event.id);
         }
     }
     for (auto& scenario : candidate.scenarios) {
@@ -1810,11 +1810,11 @@ void canonicalizeGeneratedIdentities(
                     || (left.tick == right.tick && left.id < right.id);
             });
         for (auto& relation : scenario.relations) {
-            const auto sourceEvent = eventIdMap.find(relation.sourceEventId);
+            const auto sourceEvent = eventIdMap.find(std::pair{scenario.id, relation.sourceEventId});
             if (sourceEvent != eventIdMap.end()) {
                 relation.sourceEventId = sourceEvent->second;
             }
-            const auto targetEvent = eventIdMap.find(relation.targetEventId);
+            const auto targetEvent = eventIdMap.find(std::pair{scenario.id, relation.targetEventId});
             if (targetEvent != eventIdMap.end()) {
                 relation.targetEventId = targetEvent->second;
             }

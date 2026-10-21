@@ -5,6 +5,8 @@
 #include "wave/model.h"
 #include "wave/project_io.h"
 #include "wave/widgets.h"
+#include "wave/session_contract.h"
+#include <suiteapp/client.h>
 
 #include <suiteapp/protocol.h>
 #include <suiteapp/provider.h>
@@ -105,8 +107,7 @@ bool WaveSuiteIntegration::start(
     const SuiteApp::RuntimeStartOptions& runtimeOptions,
     QString* failureReason)
 {
-    if (provider_ && provider_->isListening())
-        return true;
+    if (isRegistered()) return true;
     const SuiteApp::RuntimeStatus runtime =
         SuiteApp::ensureRuntime(runtimeOptions);
     if (!runtime.available) {
@@ -114,18 +115,46 @@ bool WaveSuiteIntegration::start(
             *failureReason = runtime.errorMessage;
         return false;
     }
+    if (window_) {
+        auto descriptor = appDescriptor(QCoreApplication::applicationVersion());
+        const auto sessionId = window_->automationSessionId();
+        const auto providerId = QStringLiteral("wave.session.") + sessionId;
+        descriptor.insert("appId", providerId);
+        descriptor.insert("applicationId", "wave");
+        descriptor.insert("sessionId", sessionId);
+        descriptor.insert("endpoint", SuiteApp::endpointForApp(providerId));
+        descriptor.insert("resourceSchemes", QJsonArray{});
+        descriptor.insert("surfaces", QJsonArray{});
+        QJsonArray actions;
+        const auto commands = describeSessionAutomation().value("arguments").toObject();
+        for (auto it = commands.begin(); it != commands.end(); ++it)
+            actions.append(QJsonObject{{"id", "wave.session." + it.key()},
+                {"resourceSchemes", QJsonArray{}},
+                {"sideEffect", it.key() == "status" ? "none" : "ui"}});
+        descriptor.insert("actions", actions);
+        sessionProvider_ = std::make_unique<SuiteApp::Provider>(descriptor,
+            [this](const QJsonObject& request) { return processRequest(request); }, this);
+        if (!sessionProvider_->start(runtimeOptions.endpoint, failureReason)) return false;
+        // The SDK registry keys legacy providers by appId. Keep the existing
+        // compatibility owner; unique session providers never overwrite it.
+        const auto listed = SuiteApp::Client(runtimeOptions.endpoint).listProviders();
+        const auto entries = listed.response.value("result").toObject().value("providers").toArray();
+        for (const auto& entry : entries)
+            if (entry.toObject().value("appId").toString() == "wave") return true;
+    }
     provider_ = std::make_unique<SuiteApp::Provider>(
         appDescriptor(QCoreApplication::applicationVersion()),
         [this](const QJsonObject& request) {
             return processRequest(request);
         },
         this);
-    return provider_->start(runtimeOptions.endpoint, failureReason);
+    const bool legacyStarted = provider_->start(runtimeOptions.endpoint, failureReason);
+    return legacyStarted || (sessionProvider_ && sessionProvider_->isListening());
 }
 
 bool WaveSuiteIntegration::isRegistered() const
 {
-    return provider_ && provider_->isListening();
+    return (sessionProvider_ && sessionProvider_->isListening()) || (provider_ && provider_->isListening());
 }
 
 QJsonObject WaveSuiteIntegration::appDescriptor(
@@ -180,6 +209,19 @@ QJsonObject WaveSuiteIntegration::processRequest(
     const QString method = request.value(QStringLiteral("method")).toString();
     const QJsonObject params =
         request.value(QStringLiteral("params")).toObject();
+    const auto action = params.value("actionId").toString();
+    if (method == "action.invoke" && action.startsWith("wave.session.")) {
+        if (!window_) return SuiteApp::errorResponse(request, "session-unavailable", "No window.");
+        auto arguments = params.value("arguments").toObject();
+        if (arguments.take("sessionId").toString() != window_->automationSessionId())
+            return SuiteApp::errorResponse(request, "session-mismatch", "Explicit sessionId does not match this window.");
+        auto result = window_->executeSessionCommand(action.mid(13), arguments);
+        const bool ok = result.take("ok").toBool();
+        if (ok) return SuiteApp::successResponse(request, result);
+        const auto error = result.take("error").toObject();
+        return SuiteApp::errorResponse(request, error.value("code").toString(),
+            error.value("message").toString(), result);
+    }
     const ProjectTarget target = projectTarget(params);
     if (!target.isValid()) {
         return SuiteApp::errorResponse(

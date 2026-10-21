@@ -102,6 +102,26 @@ foreach(_wave_ela_scale IN ITEMS 1 1.25 1.5 2)
 endforeach()
 
 if(SuiteApp_FOUND)
+    add_executable(wave-session-cli-test session_cli_test.cpp)
+    target_link_libraries(wave-session-cli-test
+        PRIVATE wavewidgets waveproject SuiteApp::suiteapp Qt6::Test)
+    target_compile_definitions(wave-session-cli-test PRIVATE
+        WAVE_TEST_APPLICATION_VERSION="${PROJECT_VERSION}"
+        WAVE_CLI_PATH="$<TARGET_FILE:wave-cli>"
+        WAVE_SESSION_EXAMPLE="${CMAKE_SOURCE_DIR}/examples/cli-session/create.json"
+        WAVE_SUITE_RUNTIME_PATH="$<TARGET_FILE:SuiteApp::suite-runtime>")
+    add_dependencies(wave-session-cli-test wave-cli wave-generate)
+    wave_enable_warnings(wave-session-cli-test)
+    add_test(NAME wave-session-cli-test
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTEST_EXE=$<TARGET_FILE:wave-session-cli-test>"
+            "-DLOG_FILE=${CMAKE_BINARY_DIR}/session-cli.txt"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+    set_tests_properties(wave-session-cli-test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        TIMEOUT 120)
     add_executable(wave-suiteapp-runtime-test suiteapp_runtime_test.cpp)
     target_link_libraries(wave-suiteapp-runtime-test
         PRIVATE wavewidgets waveproject SuiteApp::suiteapp Qt6::Test Qt6::Concurrent)

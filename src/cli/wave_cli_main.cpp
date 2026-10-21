@@ -2,6 +2,7 @@
 #include "wave/project_io.h"
 
 #include "scenario_selection.h"
+#include "session_cli.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -93,6 +94,7 @@ void printUsage()
     QTextStream(stdout)
         << "Tickx headless CLI\n"
            "Usage:\n"
+           "  wave-cli session --help   (live GUI sessions, view and adoption)\n"
            "  wave-cli capabilities [--pretty]\n"
            "  wave-cli new <output.wave.json> [--name=NAME] "
            "[--scenario-name=NAME] [--duration=TIME] [--timebase-ps=N] "
@@ -278,6 +280,7 @@ int runCapabilities(const QStringList& arguments)
             pretty);
     }
     auto document = capabilities.json;
+    document.insert("session", sessionCliCapabilities());
     QJsonArray commands;
     for (const auto& adapter : compatibilityCommands()) {
         commands.append(QJsonObject{
@@ -2865,6 +2868,7 @@ int main(int argc, char* argv[])
     }
 
     const auto command = arguments.takeFirst();
+    if (command == QStringLiteral("session")) return runSessionCli(arguments);
     if (const auto* adapter = compatibilityCommand(command)) {
         return runCompatibilityCommand(*adapter, arguments);
     }

@@ -1,0 +1,94 @@
+{
+  "schema": "wave-workbench.operations/v1",
+  "operations": [
+    {
+      "op": "add-group",
+      "id": "group-core",
+      "name": "Core"
+    },
+    {
+      "op": "add-signal",
+      "id": "lane-clk",
+      "clockId": "clock-main",
+      "name": "clk",
+      "kind": "clock",
+      "period": "10 ns"
+    },
+    {
+      "op": "add-signal",
+      "id": "lane-request",
+      "name": "request",
+      "kind": "bit",
+      "groupId": "group-core"
+    },
+    {
+      "op": "add-signal",
+      "id": "lane-data",
+      "name": "data",
+      "kind": "bus",
+      "width": 8,
+      "groupId": "group-core"
+    },
+    {
+      "op": "set-sequence",
+      "start": "0 ns",
+      "step": "10 ns",
+      "sequences": [
+        {
+          "laneId": "lane-request",
+          "values": [
+            "0",
+            "1",
+            "1",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0"
+          ]
+        },
+        {
+          "laneId": "lane-data",
+          "values": [
+            "0x00",
+            "0x12",
+            "0x34",
+            "0x00",
+            "0x00",
+            "0x00",
+            "0x00",
+            "0x00",
+            "0x00",
+            "0x00"
+          ]
+        }
+      ]
+    },
+    {
+      "op": "add-marker",
+      "id": "marker-active",
+      "name": "Active",
+      "start": "10 ns",
+      "end": "30 ns",
+      "kind": "phase"
+    },
+    {
+      "op": "add-relation",
+      "id": "relation-response",
+      "sourceLaneId": "lane-request",
+      "sourceAt": "10 ns",
+      "targetLaneId": "lane-data",
+      "targetAt": "20 ns",
+      "minimumDelay": "10 ns",
+      "maximumDelay": "10 ns",
+      "severity": "warning"
+    },
+    {
+      "op": "duplicate-scenario",
+      "id": "alternate",
+      "name": "Alternate"
+    }
+  ]
+}

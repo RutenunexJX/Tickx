@@ -160,7 +160,7 @@ private slots:
         QVERIFY(integration->isRegistered());
         const auto registered = resultObject(client.listProviders())
             .value(QStringLiteral("providers")).toArray();
-        QCOMPARE(registered.size(), 1);
+        QCOMPARE(registered.size(), 2);
         const auto descriptor = registered.first().toObject();
         QCOMPARE(descriptor.value(QStringLiteral("appId")).toString(), QStringLiteral("wave"));
         QCOMPARE(descriptor.value(QStringLiteral("displayName")).toString(), QStringLiteral("Tickx"));

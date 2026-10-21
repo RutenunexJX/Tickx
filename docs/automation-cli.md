@@ -7,6 +7,7 @@
 
 `wave-cli` 是该库的薄命令行入口，面向 Codex、脚本和 CI。它只通过文件、
 stdin、stdout、stderr 和退出码通信，不创建窗口，也不读取桌面端设置。
+新增的 `session` 子命令通过 SuiteApp 连接指定 GUI 窗口，见 [GUI 会话 CLI](cli-sessions.md)。
 
 当前契约版本：
 
@@ -19,7 +20,7 @@ stdin、stdout、stderr 和退出码通信，不创建窗口，也不读取桌�
 
 - `capabilities.schema.json`：能力发现文档；
 - `report.schema.json`：原生命令成功或失败报告的稳定顶层；
-- `operation-batch.schema.json`：批次顶层及 33 个 operation 的字段定义。
+- `operation-batch.schema.json`：批次顶层及 38 个 operation 的字段定义。
 
 Schema 内的 `$id` 以及 `capabilities.schemaRef`、`reportSchemaRef`、
 `operationBatch.schemaRef` 均使用发布包中的相对路径 `schemas/automation/v1/...`。发布或嵌入时

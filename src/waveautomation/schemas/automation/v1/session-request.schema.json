@@ -1,0 +1,448 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "session-request.schema.json",
+  "title": "Tickx GUI session command arguments v1",
+  "description": "Validate a CLI --args file against the matching command in $defs. This wrapper describes the logical command after selecting an explicit session.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "status"
+        },
+        "arguments": {
+          "$ref": "#/$defs/status"
+        }
+      },
+      "required": [
+        "command",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "open"
+        },
+        "arguments": {
+          "$ref": "#/$defs/open"
+        }
+      },
+      "required": [
+        "command",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "refresh"
+        },
+        "arguments": {
+          "$ref": "#/$defs/refresh"
+        }
+      },
+      "required": [
+        "command",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "view"
+        },
+        "arguments": {
+          "$ref": "#/$defs/view"
+        }
+      },
+      "required": [
+        "command",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "apply"
+        },
+        "arguments": {
+          "$ref": "#/$defs/apply"
+        }
+      },
+      "required": [
+        "command",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "save"
+        },
+        "arguments": {
+          "$ref": "#/$defs/save"
+        }
+      },
+      "required": [
+        "command",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "undo"
+        },
+        "arguments": {
+          "$ref": "#/$defs/undo"
+        }
+      },
+      "required": [
+        "command",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "redo"
+        },
+        "arguments": {
+          "$ref": "#/$defs/redo"
+        }
+      },
+      "required": [
+        "command",
+        "arguments"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "status": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "open": {
+      "type": "object",
+      "properties": {
+        "projectPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedDiskSha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        }
+      },
+      "required": [
+        "projectPath"
+      ],
+      "additionalProperties": false
+    },
+    "refresh": {
+      "type": "object",
+      "properties": {
+        "expectedDiskSha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "view": {
+      "type": "object",
+      "properties": {
+        "scenarioId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start": {
+          "type": "string",
+          "minLength": 1
+        },
+        "end": {
+          "type": "string",
+          "minLength": 1
+        },
+        "zoom": {
+          "enum": [
+            "in",
+            "out",
+            "fit"
+          ]
+        },
+        "pan": {
+          "type": "string",
+          "minLength": 1
+        },
+        "laneIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "range": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "start": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "end": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "start",
+                "end"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "markerIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "relationIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "groups": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "collapsed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "collapsed"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "relationsVisible": {
+          "type": "boolean"
+        },
+        "dryRun": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "apply": {
+      "type": "object",
+      "properties": {
+        "batch": {
+          "$ref": "operation-batch.schema.json"
+        },
+        "scenarioId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedModelSha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "dryRun": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "batch"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "required": [
+              "expectedModelSha256"
+            ]
+          },
+          "then": {},
+          "if": {
+            "properties": {
+              "dryRun": {
+                "const": true
+              }
+            },
+            "required": [
+              "dryRun"
+            ]
+          }
+        }
+      ]
+    },
+    "save": {
+      "type": "object",
+      "properties": {
+        "projectPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedModelSha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "expectedDiskSha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{64}$"
+            },
+            {
+              "const": "missing"
+            }
+          ]
+        },
+        "dryRun": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "expectedDiskSha256"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "required": [
+              "expectedModelSha256"
+            ]
+          },
+          "then": {},
+          "if": {
+            "properties": {
+              "dryRun": {
+                "const": true
+              }
+            },
+            "required": [
+              "dryRun"
+            ]
+          }
+        }
+      ]
+    },
+    "undo": {
+      "type": "object",
+      "properties": {
+        "expectedModelSha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "dryRun": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "required": [
+              "expectedModelSha256"
+            ]
+          },
+          "then": {},
+          "if": {
+            "properties": {
+              "dryRun": {
+                "const": true
+              }
+            },
+            "required": [
+              "dryRun"
+            ]
+          }
+        }
+      ]
+    },
+    "redo": {
+      "type": "object",
+      "properties": {
+        "expectedModelSha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "dryRun": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "required": [
+              "expectedModelSha256"
+            ]
+          },
+          "then": {},
+          "if": {
+            "properties": {
+              "dryRun": {
+                "const": true
+              }
+            },
+            "required": [
+              "dryRun"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
