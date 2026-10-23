@@ -1266,3 +1266,23 @@ if(WIN32)
         ENVIRONMENT "${_wave_test_environment}"
     )
 endif()
+
+add_executable(wave-group-canvas-benchmark group_canvas_benchmark.cpp)
+target_link_libraries(wave-group-canvas-benchmark PRIVATE wavewidgets waveedit wavecore Qt6::Widgets)
+if(WIN32)
+    target_link_libraries(wave-group-canvas-benchmark PRIVATE psapi)
+endif()
+wave_enable_warnings(wave-group-canvas-benchmark)
+
+add_executable(wave-canvas-group-regression-test canvas_group_regression_test.cpp)
+target_link_libraries(wave-canvas-group-regression-test PRIVATE wavewidgets waveedit wavecore Qt6::Test)
+wave_enable_warnings(wave-canvas-group-regression-test)
+add_test(NAME wave-canvas-group-regression-test
+    COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_EXE=$<TARGET_FILE:wave-canvas-group-regression-test>"
+        "-DLOG_FILE=${CMAKE_BINARY_DIR}/canvas-group-regression.txt"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+set_tests_properties(wave-canvas-group-regression-test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1;WAVEWORKBENCH_REDUCED_MOTION=1;QT_QPA_FONTDIR=${CMAKE_BINARY_DIR}/test-fonts"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+    TIMEOUT 30)

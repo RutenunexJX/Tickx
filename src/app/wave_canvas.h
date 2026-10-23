@@ -361,6 +361,13 @@ private:
         int height;
     };
 
+    struct GroupIndexEntry {
+        // Indices survive capacity-only lane-vector reallocations. Model edits
+        // and document changes rebuild this derived metadata before use.
+        std::optional<std::size_t> laneIndex;
+        std::size_t visibleMemberCount{0};
+    };
+
     struct EventHitRegion {
         std::string eventId;
         QRect rect;
@@ -765,6 +772,7 @@ private:
 
     [[nodiscard]] Qt::CursorShape defaultCursorShape() const noexcept;
     void rebuildLaneLayout();
+    void rebuildGroupIndex();
     void refreshModelForChange(ModelChange change);
     void rebuildSnapIndex();
     void sanitizeCollapsedGroups();
@@ -773,6 +781,7 @@ private:
     [[nodiscard]] bool signalHeaderDividerAt(const QPoint& position) const noexcept;
     [[nodiscard]] bool isLaneDisplayed(const Lane& lane) const noexcept;
     [[nodiscard]] const Lane* visibleParentGroup(const Lane& lane) const noexcept;
+    [[nodiscard]] const Lane* visibleGroupById(const std::string& groupId) const noexcept;
     [[nodiscard]] std::size_t visibleGroupMemberCount(
         const std::string& groupId) const noexcept;
     [[nodiscard]] QRect groupDisclosureRect(const Lane& group) const;
@@ -1266,6 +1275,7 @@ private:
     bool explicitRangeSelection_{false};
     std::vector<LaneLayout> laneLayout_;
     std::map<std::string, std::size_t> laneLayoutIndexById_;
+    std::map<std::string, GroupIndexEntry> groupIndex_;
     std::vector<TimedOverlayIndex> markerOverlayIndex_;
     std::vector<TimedOverlayIndex> relationOverlayIndex_;
     std::vector<std::size_t> eventOverlayIndex_;

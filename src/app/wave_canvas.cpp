@@ -2275,6 +2275,7 @@ void WaveCanvas::setDocument(
     project_ = project;
     scenario_ = scenario;
     commandStack_ = commandStack;
+    rebuildGroupIndex();
     pendingCommandSelectionTransition_.reset();
     historySelectionTransitions_.clear();
     selectedLaneId_.clear();
@@ -8354,6 +8355,7 @@ void WaveCanvas::rebuildLaneLayout()
 {
     laneLayout_.clear();
     laneLayoutIndexById_.clear();
+    rebuildGroupIndex();
     sanitizeCollapsedGroups();
     rebuildSnapIndex();
     if (!scenario_) {
@@ -8376,6 +8378,27 @@ void WaveCanvas::rebuildLaneLayout()
     updateScrollBars();
 }
 
+void WaveCanvas::rebuildGroupIndex()
+{
+    groupIndex_.clear();
+    if (!scenario_) return;
+    for (const auto& lane : scenario_->lanes) {
+        if (lane.kind == LaneKind::Group) {
+            groupIndex_.try_emplace(lane.id);
+        } else if (lane.visible && !lane.groupId.empty()) {
+            ++groupIndex_[lane.groupId].visibleMemberCount;
+        }
+    }
+    if (groupIndex_.empty()) return;
+    // Resolve after collecting references: a parent can follow its members.
+    // Keep findLane's first-ID semantics even for a duplicate/non-group ID.
+    for (std::size_t index = 0; index < scenario_->lanes.size(); ++index) {
+        const auto entry = groupIndex_.find(scenario_->lanes[index].id);
+        if (entry != groupIndex_.end() && !entry->second.laneIndex)
+            entry->second.laneIndex = index;
+    }
+}
+
 void WaveCanvas::sanitizeCollapsedGroups()
 {
     if (!scenario_) {
@@ -8385,10 +8408,7 @@ void WaveCanvas::sanitizeCollapsedGroups()
     std::erase_if(
         collapsedGroupIds_,
         [this](const std::string& groupId) {
-            const auto* group = findLane(*scenario_, groupId);
-            return !group
-                || !group->visible
-                || group->kind != LaneKind::Group
+            return !visibleGroupById(groupId)
                 || visibleGroupMemberCount(groupId) == 0;
         });
 }
@@ -8598,26 +8618,27 @@ const Lane* WaveCanvas::visibleParentGroup(const Lane& lane) const noexcept
         || lane.groupId.empty()) {
         return nullptr;
     }
-    const auto* group = findLane(*scenario_, lane.groupId);
-    return group
-        && group->visible
-        && group->kind == LaneKind::Group
-        ? group
-        : nullptr;
+    return visibleGroupById(lane.groupId);
+}
+
+const Lane* WaveCanvas::visibleGroupById(const std::string& groupId) const noexcept
+{
+    if (!scenario_) return nullptr;
+    const auto entry = groupIndex_.find(groupId);
+    if (entry == groupIndex_.end() || !entry->second.laneIndex) return nullptr;
+    const auto index = *entry->second.laneIndex;
+    if (index >= scenario_->lanes.size()) return nullptr;
+    const auto& group = scenario_->lanes[index];
+    return group.id == groupId && group.visible && group.kind == LaneKind::Group
+        ? &group : nullptr;
 }
 
 std::size_t WaveCanvas::visibleGroupMemberCount(
     const std::string& groupId) const noexcept
 {
     if (!scenario_ || groupId.empty()) return 0;
-    return static_cast<std::size_t>(std::count_if(
-        scenario_->lanes.begin(),
-        scenario_->lanes.end(),
-        [&groupId](const Lane& lane) {
-            return lane.visible
-                && lane.kind != LaneKind::Group
-                && lane.groupId == groupId;
-        }));
+    const auto entry = groupIndex_.find(groupId);
+    return entry == groupIndex_.end() ? 0 : entry->second.visibleMemberCount;
 }
 
 QRect WaveCanvas::groupDisclosureRect(const Lane& group) const
