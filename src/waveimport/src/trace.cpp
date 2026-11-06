@@ -6,7 +6,6 @@
 #include <cctype>
 #include <fstream>
 #include <limits>
-#include <sstream>
 #include <unordered_map>
 
 namespace wave {
@@ -32,15 +31,6 @@ std::string lower(std::string text)
         return static_cast<char>(std::tolower(character));
     });
     return text;
-}
-
-std::vector<std::string> splitWhitespace(const std::string& text)
-{
-    std::istringstream stream(text);
-    std::vector<std::string> tokens;
-    std::string token;
-    while (stream >> token) tokens.push_back(token);
-    return tokens;
 }
 
 bool parseUnsigned(const std::string_view text, std::uint64_t& value)
@@ -118,6 +108,73 @@ void reportProgress(
 {
     if (options.progress) options.progress(completed, total);
 }
+
+// Keep physical source lines for diagnostics/progress, but never use a newline
+// as the boundary of a VCD declaration or value change.
+class VcdTokenReader {
+public:
+    VcdTokenReader(std::istream& input, const TraceParseOptions& options)
+        : input_(input), options_(options)
+    {
+    }
+
+    bool next(std::string& token)
+    {
+        if (pending_) {
+            token = std::move(pending_->first);
+            tokenLine_ = pending_->second;
+            pending_.reset();
+            return true;
+        }
+        for (;;) {
+            if (++work_ % kCancelCheckInterval == 0) {
+                if (cancelled(options_)) {
+                    cancelled_ = true;
+                    return false;
+                }
+                reportProgress(options_, linesRead_, 0);
+            }
+            while (position_ < line_.size()
+                && std::isspace(static_cast<unsigned char>(line_[position_])) != 0) {
+                ++position_;
+            }
+            if (position_ == line_.size()) {
+                if (!std::getline(input_, line_)) return false;
+                ++linesRead_;
+                position_ = 0;
+                continue;
+            }
+            const auto start = position_;
+            while (position_ < line_.size()
+                && std::isspace(static_cast<unsigned char>(line_[position_])) == 0) {
+                ++position_;
+            }
+            token.assign(line_, start, position_ - start);
+            tokenLine_ = linesRead_;
+            return true;
+        }
+    }
+
+    void putBack(std::string token)
+    {
+        pending_ = std::pair{std::move(token), tokenLine_};
+    }
+
+    [[nodiscard]] std::size_t line() const noexcept { return tokenLine_; }
+    [[nodiscard]] std::size_t linesRead() const noexcept { return linesRead_; }
+    [[nodiscard]] bool wasCancelled() const noexcept { return cancelled_; }
+
+private:
+    std::istream& input_;
+    const TraceParseOptions& options_;
+    std::string line_;
+    std::size_t position_{0};
+    std::size_t linesRead_{0};
+    std::size_t tokenLine_{0};
+    std::uint64_t work_{0};
+    bool cancelled_{false};
+    std::optional<std::pair<std::string, std::size_t>> pending_;
+};
 
 std::string normalizedLogicValue(std::string value)
 {
@@ -571,37 +628,51 @@ TraceParseResult parseVcd(std::istream& input, const TraceParseOptions& options)
     std::unordered_map<std::string, std::vector<std::size_t>> signalsByCode;
     VcdScale scale;
     Tick currentTick = options.offset;
+    std::optional<std::pair<Tick, Tick>> timestampRange;
     bool endDefinitions = false;
-    bool skippingDirective = false;
-    std::size_t lineNumber = 0;
-    std::uint64_t processed = 0;
-    std::string line;
-    while (std::getline(input, line)) {
-        ++lineNumber;
-        ++processed;
-        if ((processed % kCancelCheckInterval) == 0) {
-            if (cancelled(options)) {
-                result.cancelled = true;
-                return result;
+    VcdTokenReader reader(input, options);
+    std::string token;
+    while (reader.next(token)) {
+        const auto lineNumber = reader.line();
+        if (token.front() == '$') {
+            const auto directive = endDefinitions ? lower(token) : token;
+            if (directive == "$end") continue;
+            if (endDefinitions
+                && (directive == "$dumpvars" || directive == "$dumpall"
+                    || directive == "$dumpon" || directive == "$dumpoff")) {
+                continue;
             }
-            reportProgress(options, processed, 0);
-        }
-        line = trim(std::move(line));
-        if (line.empty()) continue;
 
-        if (!endDefinitions && line.front() == '$') {
-            auto directiveText = line;
-            while (directiveText.find("$end") == std::string::npos
-                   && std::getline(input, line)) {
-                ++lineNumber;
-                directiveText += ' ';
-                directiveText += trim(std::move(line));
+            const auto declaration = !endDefinitions
+                && (directive == "$timescale" || directive == "$scope"
+                    || directive == "$upscope" || directive == "$var"
+                    || directive == "$enddefinitions");
+            std::vector<std::string> tokens{directive};
+            bool terminated = false;
+            while (reader.next(token)) {
+                // Identifier codes are positional and may themselves be "$end".
+                const auto requiredFields = declaration && directive == "$var" ? std::size_t{5}
+                    : declaration && directive == "$scope" ? std::size_t{3} : std::size_t{1};
+                const auto terminator = endDefinitions ? lower(token) : token;
+                if (terminator == "$end" && tokens.size() >= requiredFields) {
+                    if (declaration) tokens.push_back("$end");
+                    terminated = true;
+                    break;
+                }
+                if (declaration) tokens.push_back(token);
             }
-            const auto tokens = splitWhitespace(directiveText);
-            if (tokens.empty()) continue;
-            if (tokens.front() == "$timescale") {
+            if (!terminated) {
+                if (!reader.wasCancelled()) {
+                    addDiagnostic(result, TraceDiagnosticSeverity::Error, lineNumber,
+                        "Unterminated VCD directive '" + directive + "'.");
+                }
+                break;
+            }
+            if (!declaration) continue;
+
+            if (directive == "$timescale") {
                 scale = parseTimescale(tokens, result, lineNumber);
-            } else if (tokens.front() == "$scope") {
+            } else if (directive == "$scope") {
                 if (tokens.size() < 4) {
                     addDiagnostic(
                         result,
@@ -611,7 +682,7 @@ TraceParseResult parseVcd(std::istream& input, const TraceParseOptions& options)
                 } else {
                     scopes.push_back(tokens[2]);
                 }
-            } else if (tokens.front() == "$upscope") {
+            } else if (directive == "$upscope") {
                 if (scopes.empty()) {
                     addDiagnostic(
                         result,
@@ -621,7 +692,7 @@ TraceParseResult parseVcd(std::istream& input, const TraceParseOptions& options)
                 } else {
                     scopes.pop_back();
                 }
-            } else if (tokens.front() == "$var") {
+            } else if (directive == "$var") {
                 if (tokens.size() < 6) {
                     addDiagnostic(
                         result,
@@ -657,70 +728,66 @@ TraceParseResult parseVcd(std::istream& input, const TraceParseOptions& options)
                 const auto signalIndex = index.traceSignals.size();
                 index.traceSignals.push_back(std::move(signal));
                 signalsByCode[tokens[3]].push_back(signalIndex);
-            } else if (tokens.front() == "$enddefinitions") {
+            } else if (directive == "$enddefinitions") {
                 endDefinitions = true;
             }
             continue;
         }
 
         if (!endDefinitions) continue;
-        if (line.front() == '$') {
-            const auto directive = lower(line);
-            if (directive.starts_with("$dumpvars")
-                || directive.starts_with("$dumpall")
-                || directive.starts_with("$dumpon")
-                || directive.starts_with("$dumpoff")
-                || directive.starts_with("$end")) {
-                skippingDirective = false;
-            } else {
-                skippingDirective = line.find("$end") == std::string::npos;
-            }
-            continue;
-        }
-        if (skippingDirective) {
-            if (line.find("$end") != std::string::npos) skippingDirective = false;
-            continue;
-        }
-        if (line.front() == '#') {
+        if (token.front() == '#') {
             std::uint64_t rawTime = 0;
-            if (!parseUnsigned(std::string_view(line).substr(1), rawTime)) {
+            if (!parseUnsigned(std::string_view(token).substr(1), rawTime)) {
                 addDiagnostic(result, TraceDiagnosticSeverity::Error, lineNumber, "Invalid VCD timestamp.");
                 break;
             }
             const auto converted = convertVcdTime(rawTime, scale, options, result, lineNumber);
             if (!converted) break;
             currentTick = *converted;
+            if (!timestampRange) timestampRange = std::pair{currentTick, currentTick};
+            else {
+                timestampRange->first = std::min(timestampRange->first, currentTick);
+                timestampRange->second = std::max(timestampRange->second, currentTick);
+            }
             continue;
         }
 
         std::string code;
         std::string value;
-        const auto kind = static_cast<char>(std::tolower(static_cast<unsigned char>(line.front())));
-        if (kind == 'b') {
-            const auto parts = splitWhitespace(line.substr(1));
-            if (parts.size() < 2) {
-                addDiagnostic(result, TraceDiagnosticSeverity::Warning, lineNumber, "Malformed VCD vector value.");
+        const auto kind = static_cast<char>(std::tolower(static_cast<unsigned char>(token.front())));
+        if (kind == 'b' || kind == 'r' || kind == 's') {
+            const auto ignoredType = kind != 'b';
+            if (ignoredType) {
+                addDiagnostic(result, TraceDiagnosticSeverity::Warning, lineNumber,
+                    "Real/string VCD value ignored by the digital trace importer.");
+            }
+            value = token.substr(1);
+            if (value.empty() && !reader.next(value)) {
+                if (!ignoredType)
+                    addDiagnostic(result, TraceDiagnosticSeverity::Warning, lineNumber, "Malformed VCD vector value.");
+                break;
+            }
+            if (!reader.next(code)) {
+                if (!ignoredType)
+                    addDiagnostic(result, TraceDiagnosticSeverity::Warning, lineNumber, "Malformed VCD vector value.");
+                break;
+            }
+            // Do not swallow a following directive/time marker when an identifier
+            // is missing. A declared identifier takes precedence in this position.
+            if (!signalsByCode.contains(code) && (code.front() == '$' || code.front() == '#')) {
+                reader.putBack(std::move(code));
+                if (!ignoredType)
+                    addDiagnostic(result, TraceDiagnosticSeverity::Warning, lineNumber, "Malformed VCD vector value.");
                 continue;
             }
-            value = parts[0];
-            code = parts[1];
-        } else if (kind == 'r' || kind == 's') {
-            addDiagnostic(
-                result,
-                TraceDiagnosticSeverity::Warning,
-                lineNumber,
-                "Real/string VCD value ignored by the digital trace importer.");
-            continue;
+            if (ignoredType) continue;
         } else {
-            value.assign(1, line.front());
-            code = trim(line.substr(1));
+            value.assign(1, token.front());
+            code = token.substr(1);
         }
         const auto targets = signalsByCode.find(code);
         if (targets == signalsByCode.end()) {
-            addDiagnostic(
-                result,
-                TraceDiagnosticSeverity::Warning,
-                lineNumber,
+            addDiagnostic(result, TraceDiagnosticSeverity::Warning, lineNumber,
                 "VCD value references undeclared identifier code '" + code + "'.");
             continue;
         }
@@ -729,7 +796,7 @@ TraceParseResult parseVcd(std::istream& input, const TraceParseOptions& options)
         }
     }
 
-    if (cancelled(options)) {
+    if (reader.wasCancelled() || cancelled(options)) {
         result.cancelled = true;
         return result;
     }
@@ -744,7 +811,17 @@ TraceParseResult parseVcd(std::istream& input, const TraceParseOptions& options)
     }
     if (hasError(result)) return result;
     finalizeIndex(index);
-    reportProgress(options, processed, processed);
+    // The VCD time domain includes stable tails even when no transition was
+    // emitted, or its repeated value was coalesced. Other formats are unchanged.
+    if (timestampRange) {
+        if (index.transitionCount == 0) {
+            index.startTick = timestampRange->first;
+            index.endTick = timestampRange->second;
+        } else {
+            index.endTick = std::max(index.endTick, timestampRange->second);
+        }
+    }
+    reportProgress(options, reader.linesRead(), reader.linesRead());
     result.index = std::move(index);
     return result;
 }
