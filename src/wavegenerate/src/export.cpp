@@ -647,30 +647,64 @@ QByteArray generateWaveDromJson(
 {
     const auto range = normalizeRange(scenario, options, error);
     if (!range) return {};
-    Tick grid = range->end - range->start;
+    const auto duration = range->end - range->start;
+    Tick grid = duration;
     auto includeDelta = [&grid](const Tick delta) {
         if (delta > 0) grid = std::gcd(grid, delta);
     };
-    for (const auto& lane : scenario.lanes) {
+    auto includeClockEdges = [&](const Tick first, const Tick period) {
+        if (first >= range->end) return;
+        Tick offset = 0;
+        if (first > range->start) {
+            offset = first - range->start;
+        } else {
+            // Align to the export origin without overflowing start - phase.
+            auto remainder = first % period;
+            if (remainder < 0) remainder += period;
+            offset = remainder - range->start % period;
+            if (offset < 0) offset += period;
+        }
+        if (offset >= duration) return;
+        includeDelta(offset);
+        // One edge and the period describe all edges of this kind in range.
+        if (period < duration - offset) includeDelta(period);
+    };
+    const auto lanes = visibleLanes(scenario);
+    for (const auto* exportedLane : lanes) {
+        const auto& lane = *exportedLane;
         for (const auto& segment : lane.segments) {
             if (segment.end <= range->start || segment.start >= range->end) continue;
             includeDelta(std::max(segment.start, range->start) - range->start);
             includeDelta(std::min(segment.end, range->end) - range->start);
         }
+        if (lane.kind != LaneKind::Clock) continue;
+        const auto* clock = findClock(project, lane.clockDomainId);
+        if (!clock || !clock->isValid()) continue;
+        const auto falling = tickAtCycle(*clock, 0, ClockEdge::Falling);
+        if (!falling) {
+            // An unrepresentable falling edge leaves only the phase boundary.
+            if (clock->phase > range->start && clock->phase < range->end)
+                includeDelta(clock->phase - range->start);
+            continue;
+        }
+        if (*falling == clock->phase) continue; // High time rounds down to zero ticks.
+        includeClockEdges(clock->phase, clock->period);
+        includeClockEdges(*falling, clock->period);
     }
-    for (const auto& clock : project.clockDomains) includeDelta(clock.period);
     grid = std::max<Tick>(1, grid);
-    const auto duration = range->end - range->start;
-    auto columns = (duration - 1) / grid + 1;
+    const auto columns = (duration - 1) / grid + 1;
     if (columns > 4096) {
-        const auto multiplier = (columns + 4095) / 4096;
-        grid *= multiplier;
-        columns = (duration - 1) / grid + 1;
+        if (error) {
+            *error = QStringLiteral(
+                "WaveDrom export requires %1 columns for exact timing (limit: 4096). "
+                "Select a shorter export range.").arg(columns);
+        }
+        return {};
     }
 
     QJsonArray signalArray;
-    for (const auto& lane : scenario.lanes) {
-        if (!lane.visible || lane.kind == LaneKind::Group) continue;
+    for (const auto* exportedLane : lanes) {
+        const auto& lane = *exportedLane;
         std::string waveString;
         std::vector<std::string> dataValues;
         std::string previous;
