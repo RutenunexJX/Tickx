@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -21,6 +22,8 @@ public:
     virtual void undo() = 0;
     [[nodiscard]] virtual std::string description() const = 0;
     [[nodiscard]] virtual bool hasEffect() const noexcept { return true; }
+    // Include inactive snapshots so Save As can relocate undo/redo references.
+    virtual void visitTracePaths(const std::function<void(std::string&)>&) {}
 };
 
 class CommandStack {
@@ -32,6 +35,7 @@ public:
     bool undo();
     bool redo();
     void clear() noexcept;
+    void visitTracePaths(const std::function<void(std::string&)>& visitor);
 
     [[nodiscard]] bool canUndo() const noexcept;
     [[nodiscard]] bool canRedo() const noexcept;
@@ -611,6 +615,7 @@ public:
 
     void redo() override;
     void undo() override;
+    void visitTracePaths(const std::function<void(std::string&)>& visitor) override;
     [[nodiscard]] std::string description() const override;
     [[nodiscard]] bool hasEffect() const noexcept override;
 
@@ -633,6 +638,7 @@ public:
 
     void redo() override;
     void undo() override;
+    void visitTracePaths(const std::function<void(std::string&)>& visitor) override;
     [[nodiscard]] std::string description() const override;
     [[nodiscard]] bool hasEffect() const noexcept override;
 
@@ -656,6 +662,7 @@ public:
 
     void redo() override;
     void undo() override;
+    void visitTracePaths(const std::function<void(std::string&)>& visitor) override;
     [[nodiscard]] std::string description() const override;
     [[nodiscard]] bool hasEffect() const noexcept override;
 

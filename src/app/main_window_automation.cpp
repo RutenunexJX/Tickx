@@ -52,6 +52,10 @@ public:
         : target_(target), alternate_(std::move(replacement)) {}
     void redo() override { std::swap(target_, alternate_); }
     void undo() override { std::swap(target_, alternate_); }
+    void visitTracePaths(const std::function<void(std::string&)>& visitor) override
+    {
+        for (auto& trace : alternate_.importedTraces) visitor(trace.path);
+    }
     std::string description() const override { return "CLI automation batch"; }
 private:
     Project& target_;

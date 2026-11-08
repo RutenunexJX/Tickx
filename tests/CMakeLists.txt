@@ -1312,3 +1312,22 @@ set_tests_properties(wave-wavedrom-export-test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1;QT_QPA_FONTDIR=${CMAKE_BINARY_DIR}/test-fonts"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
     TIMEOUT 30)
+
+add_executable(wave-trace-session-regression-test trace_session_regression_test.cpp)
+target_link_libraries(wave-trace-session-regression-test PRIVATE wavewidgets waveproject wavetrace Qt6::Test)
+wave_enable_warnings(wave-trace-session-regression-test)
+add_test(NAME wave-trace-session-regression-test
+    COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_EXE=$<TARGET_FILE:wave-trace-session-regression-test>"
+        "-DLOG_FILE=${CMAKE_BINARY_DIR}/trace-session-regression.txt"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+set_tests_properties(wave-trace-session-regression-test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1;WAVEWORKBENCH_REDUCED_MOTION=1;QT_QPA_FONTDIR=${CMAKE_BINARY_DIR}/test-fonts"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+    LABELS "regression" TIMEOUT 30 RUN_SERIAL TRUE)
+
+add_test(NAME wave-group-canvas-benchmark COMMAND wave-group-canvas-benchmark small-group)
+set_tests_properties(wave-group-canvas-benchmark PROPERTIES
+    ENVIRONMENT "${_wave_test_environment}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+    LABELS "benchmark" TIMEOUT 60 RUN_SERIAL TRUE)

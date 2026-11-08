@@ -101,8 +101,8 @@ void TraceCanvas::setTrace(
     trace_ = trace;
     reference_ = reference;
     visibleSignalIndices_.clear();
+    timeline_.setDomain(trace_ ? trace_->startTick : 0, trace_ ? trace_->endTick : 0);
     if (trace_) {
-        timeline_.setDomain(trace_->startTick, trace_->endTick);
         visibleSignalIndices_.reserve(trace_->traceSignals.size());
         for (std::size_t index = 0; index < trace_->traceSignals.size(); ++index) {
             visibleSignalIndices_.push_back(index);
@@ -137,6 +137,8 @@ void TraceCanvas::setDifferenceRanges(std::vector<std::pair<Tick, Tick>> ranges)
 
 void TraceCanvas::refreshTrace()
 {
+    // Keep scale and relative scroll position when the same trace is aligned.
+    if (trace_) timeline_.setDomain(trace_->startTick, trace_->endTick);
     updateScrollBars();
     viewport()->update();
 }

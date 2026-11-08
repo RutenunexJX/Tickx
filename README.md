@@ -144,6 +144,14 @@ E:\QT6\Tools\CMake_64\bin\cmake.exe --build build --parallel 4
 E:\QT6\Tools\CMake_64\bin\ctest.exe --test-dir build --output-on-failure
 ```
 
+分组画布基准已注册为 `wave-group-canvas-benchmark`（CTest 标签 `benchmark`），
+默认执行 `small-group`，串行运行且限时 60 秒。定向调用：
+`ctest --test-dir build -R '^wave-group-canvas-benchmark$' -V`。
+耗时的 `large-group`、`large-flat` 场景需显式传给
+`build/tests/wave-group-canvas-benchmark.exe`；补充注册不要求执行全量性能测试。
+时间换算、另存为及对齐回归可单独用
+`ctest --test-dir build -R '^wave-trace-session-regression-test$' --output-on-failure` 运行。
+
 ### Qt Creator
 
 仓库提供 `Qt Creator - Debug` 和 `Qt Creator - Release` CMake presets。使用 Qt Creator

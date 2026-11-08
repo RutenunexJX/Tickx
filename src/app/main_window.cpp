@@ -9186,7 +9186,7 @@ void MainWindow::alignImportedTrace()
         return;
     }
     reference->offset = *offset;
-    traceCanvas_->refreshTrace();
+    if (traceCanvas_) traceCanvas_->refreshTrace();
     compareTraceCanvas_->refreshTrace();
     markEdited();
     statusBar()->showMessage(
@@ -13083,7 +13083,6 @@ bool MainWindow::loadFromPath(const QString& path, const bool preferRecovery, QS
 
 bool MainWindow::writeToPath(const QString& path, QString* automationError)
 {
-    const auto beforeName = project_.name;
     const auto previousProjectFile = projectFile_;
     const auto overwritesLoadedProject = !projectFile_.isEmpty()
         && sameProjectPath(path, projectFile_);
@@ -13133,23 +13132,55 @@ bool MainWindow::writeToPath(const QString& path, QString* automationError)
             if (conflict.clickedButton() != overwrite) return false;
         }
     }
-    if (project_.name.empty() || project_.name == "Untitled") {
+    auto savedProject = project_;
+    const auto oldDirectory = projectFile_.isEmpty()
+        ? QDir::current() : QFileInfo(projectFile_).absoluteDir();
+    const auto newDirectory = QFileInfo(path).absoluteDir();
+    const auto relocatedPath = [&](const std::string& original) {
+        if (original.empty()) return original;
+        const auto stored = QString::fromUtf8(original);
+        const auto absolute = QDir::cleanPath(oldDirectory.absoluteFilePath(stored));
+        const auto relative = QDir::fromNativeSeparators(newDirectory.relativeFilePath(absolute));
+        // Preserve explicitly absolute external references. Relative references
+        // remain relative, including paths to a sibling or parent directory.
+        if (QFileInfo(stored).isAbsolute()
+            && (relative == QStringLiteral("..")
+                || relative.startsWith(QStringLiteral("../"))
+                || QFileInfo(relative).isAbsolute())) {
+            return QDir::fromNativeSeparators(absolute).toUtf8().toStdString();
+        }
+        return relative.toUtf8().toStdString();
+    };
+    std::vector<std::pair<std::string*, std::string>> relocatedPaths;
+    const auto preparePath = [&](std::string& original) {
+        auto relocated = relocatedPath(original);
+        if (relocated != original) relocatedPaths.emplace_back(&original, std::move(relocated));
+    };
+    for (std::size_t index = 0; index < savedProject.importedTraces.size(); ++index) {
+        savedProject.importedTraces[index].path = relocatedPath(project_.importedTraces[index].path);
+        preparePath(project_.importedTraces[index].path);
+    }
+    commandStack_.visitTracePaths(preparePath);
+    if (savedProject.name.empty() || savedProject.name == "Untitled") {
         auto inferred = QFileInfo(path).fileName();
         if (inferred.endsWith(QStringLiteral(".wave.json"), Qt::CaseInsensitive)) {
             inferred.chop(QStringLiteral(".wave.json").size());
         } else {
             inferred = QFileInfo(path).completeBaseName();
         }
-        if (!inferred.trimmed().isEmpty()) project_.name = inferred.trimmed().toStdString();
+        if (!inferred.trimmed().isEmpty()) savedProject.name = inferred.trimmed().toStdString();
     }
 
     QString error;
-    if (!saveProjectFileAtomic(project_, path, &error)) {
-        project_.name = beforeName;
+    if (!saveProjectFileAtomic(savedProject, path, &error)) {
         if (automationError) *automationError = error;
         else ui::MessageBox::critical(this, tr("Save failed"), error);
         return false;
     }
+    // Commit only after the atomic write; preserve allocations used by canvases
+    // and edit commands, and leave both current and historical paths on failure.
+    project_.name.swap(savedProject.name);
+    for (auto& [original, relocated] : relocatedPaths) original->swap(relocated);
     projectFile_ = path;
     loadedProjectRevision_ = {
         ProjectFileRevision::State::Present,

@@ -379,6 +379,11 @@ void CommandStack::clear() noexcept
     stateIds_.front() = nextStateId_++;
 }
 
+void CommandStack::visitTracePaths(const std::function<void(std::string&)>& visitor)
+{
+    for (auto& command : commands_) command->visitTracePaths(visitor);
+}
+
 bool CommandStack::canUndo() const noexcept
 {
     return cursor_ > 0;
@@ -2518,6 +2523,14 @@ void RemoveTraceMappingAtIndexCommand::undo()
     project_->importedTraces = *before_;
 }
 
+void RemoveTraceMappingAtIndexCommand::visitTracePaths(const std::function<void(std::string&)>& visitor)
+{
+    visitor(expected_.path);
+    for (auto* snapshot : {&before_, &after_}) {
+        if (*snapshot) for (auto& trace : **snapshot) visitor(trace.path);
+    }
+}
+
 std::string RemoveTraceMappingAtIndexCommand::description() const
 {
     return "Remove invalid trace mapping";
@@ -2584,6 +2597,14 @@ void ChangeTraceIdentityAtIndexCommand::undo()
     project_->importedTraces = *before_;
 }
 
+void ChangeTraceIdentityAtIndexCommand::visitTracePaths(const std::function<void(std::string&)>& visitor)
+{
+    visitor(expected_.path);
+    for (auto* snapshot : {&before_, &after_}) {
+        if (*snapshot) for (auto& trace : **snapshot) visitor(trace.path);
+    }
+}
+
 std::string ChangeTraceIdentityAtIndexCommand::description() const
 {
     return "Repair imported trace identity";
@@ -2646,6 +2667,15 @@ void ChangeTraceSourceAtIndexCommand::undo()
             "imported trace source command has not been executed");
     }
     project_->importedTraces = *before_;
+}
+
+void ChangeTraceSourceAtIndexCommand::visitTracePaths(const std::function<void(std::string&)>& visitor)
+{
+    visitor(expected_.path);
+    visitor(replacementPath_);
+    for (auto* snapshot : {&before_, &after_}) {
+        if (*snapshot) for (auto& trace : **snapshot) visitor(trace.path);
+    }
 }
 
 std::string ChangeTraceSourceAtIndexCommand::description() const

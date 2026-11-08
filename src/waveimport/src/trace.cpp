@@ -6,6 +6,7 @@
 #include <cctype>
 #include <fstream>
 #include <limits>
+#include <numeric>
 #include <unordered_map>
 
 namespace wave {
@@ -294,20 +295,19 @@ std::optional<Tick> convertVcdTime(
     const std::size_t line)
 {
     if (!scale.valid || !options.projectTimeBase.isValid()) return std::nullopt;
-    std::uint64_t femtoseconds = 0;
-    if (!checkedMultiply(raw, scale.femtosecondsPerUnit, femtoseconds)) {
-        addDiagnostic(result, TraceDiagnosticSeverity::Error, line, "VCD timestamp overflow.");
-        return std::nullopt;
-    }
-    std::uint64_t femtosecondsPerTick = 0;
-    if (!checkedMultiply(
-            static_cast<std::uint64_t>(options.projectTimeBase.picosecondsPerTick),
-            1'000ULL,
-            femtosecondsPerTick)) {
-        addDiagnostic(result, TraceDiagnosticSeverity::Error, line, "Project timebase overflow.");
-        return std::nullopt;
-    }
-    if (femtoseconds % femtosecondsPerTick != 0) {
+    // Reduce both denominator factors before multiplying; neither absolute
+    // femtoseconds nor picosecondsPerTick * 1000 needs to fit in uint64_t.
+    auto numerator = scale.femtosecondsPerUnit;
+    auto tickDivisor = static_cast<std::uint64_t>(options.projectTimeBase.picosecondsPerTick);
+    auto divisor = std::gcd(numerator, tickDivisor);
+    numerator /= divisor;
+    tickDivisor /= divisor;
+    std::uint64_t subPicosecondDivisor = 1'000;
+    divisor = std::gcd(numerator, subPicosecondDivisor);
+    numerator /= divisor;
+    subPicosecondDivisor /= divisor;
+    if (raw % tickDivisor != 0
+        || (raw / tickDivisor) % subPicosecondDivisor != 0) {
         addDiagnostic(
             result,
             TraceDiagnosticSeverity::Error,
@@ -315,13 +315,13 @@ std::optional<Tick> convertVcdTime(
             "VCD timestamp cannot be represented exactly in the project timebase.");
         return std::nullopt;
     }
-    const auto quotient = femtoseconds / femtosecondsPerTick;
-    if (quotient > static_cast<std::uint64_t>(std::numeric_limits<Tick>::max())) {
+    const auto reduced = raw / tickDivisor / subPicosecondDivisor;
+    if (reduced > static_cast<std::uint64_t>(std::numeric_limits<Tick>::max()) / numerator) {
         addDiagnostic(result, TraceDiagnosticSeverity::Error, line, "VCD timestamp exceeds tick range.");
         return std::nullopt;
     }
     Tick shifted = 0;
-    if (!checkedAdd(static_cast<Tick>(quotient), options.offset, shifted)) {
+    if (!checkedAdd(static_cast<Tick>(reduced * numerator), options.offset, shifted)) {
         addDiagnostic(result, TraceDiagnosticSeverity::Error, line, "Aligned VCD timestamp overflow.");
         return std::nullopt;
     }
