@@ -700,25 +700,12 @@ char clockValueAt(
     }
     if (tick < clock.phase) return '0';
 
-    Tick relative = 0;
-#if defined(__GNUC__) || defined(__clang__)
-    if (__builtin_sub_overflow(tick, clock.phase, &relative)) return 'X';
-#else
-    if ((clock.phase > 0 && tick < std::numeric_limits<Tick>::min() + clock.phase)
-        || (clock.phase < 0 && tick > std::numeric_limits<Tick>::max() + clock.phase)) {
-        return 'X';
-    }
-    relative = tick - clock.phase;
-#endif
-    auto position = relative % clock.period;
-    if (position < 0) position += clock.period;
-    if (clock.dutyCycle.numerator
-        > std::numeric_limits<Tick>::max() / clock.period) {
-        return 'X';
-    }
-    const auto highTicks = clock.period * clock.dutyCycle.numerator
-        / clock.dutyCycle.denominator;
-    return position < highTicks ? '1' : '0';
+    // The nonnegative difference can span all of uint64_t, even for valid Tick values.
+    const auto relative = static_cast<std::uint64_t>(tick)
+        - static_cast<std::uint64_t>(clock.phase);
+    const auto position = relative % static_cast<std::uint64_t>(clock.period);
+    const auto highTicks = *clockHighTicks(clock.period, clock.dutyCycle);
+    return position < static_cast<std::uint64_t>(highTicks) ? '1' : '0';
 }
 
 void normalizeSegments(

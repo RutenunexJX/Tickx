@@ -1331,3 +1331,27 @@ set_tests_properties(wave-group-canvas-benchmark PROPERTIES
     ENVIRONMENT "${_wave_test_environment}"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
     LABELS "benchmark" TIMEOUT 60 RUN_SERIAL TRUE)
+
+set(WAVE_TEST_PDF_PYTHON "" CACHE FILEPATH "Python interpreter with pdfplumber for PDF content regression")
+add_executable(wave-export-navigation-test export_navigation_test.cpp)
+target_link_libraries(wave-export-navigation-test PRIVATE wavewidgets wavegenerate Qt6::Test)
+target_compile_definitions(wave-export-navigation-test PRIVATE
+    WAVE_PDF_PYTHON="${WAVE_TEST_PDF_PYTHON}" WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+wave_enable_warnings(wave-export-navigation-test)
+add_executable(wave-simulation-clock-test simulation_clock_test.cpp)
+target_link_libraries(wave-simulation-clock-test PRIVATE wavesim wavecore Qt6::Test)
+target_compile_definitions(wave-simulation-clock-test PRIVATE
+    WAVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}" WAVE_TEST_CXX="${CMAKE_CXX_COMPILER}" WAVE_CXX_ID="${CMAKE_CXX_COMPILER_ID}")
+add_dependencies(wave-simulation-clock-test wave-verilator-fixture wave-toolchain-fixture-ready wave-simulator-fixture)
+wave_enable_warnings(wave-simulation-clock-test)
+foreach(_wave_export_simulation_test IN ITEMS wave-export-navigation-test wave-simulation-clock-test)
+    add_test(NAME ${_wave_export_simulation_test}
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTEST_EXE=$<TARGET_FILE:${_wave_export_simulation_test}>"
+            "-DLOG_FILE=${CMAKE_BINARY_DIR}/${_wave_export_simulation_test}.txt"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+    set_tests_properties(${_wave_export_simulation_test} PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1;WAVEWORKBENCH_REDUCED_MOTION=1;QT_QPA_FONTDIR=${CMAKE_BINARY_DIR}/test-fonts"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+        LABELS "regression" TIMEOUT 30 RUN_SERIAL TRUE)
+endforeach()

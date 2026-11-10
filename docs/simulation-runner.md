@@ -156,7 +156,8 @@ Stimulus、契约、能力限制、工具链、harness、构建、运行、VCD �
 
 构建或运行失败时，报告的 `diagnostics` 数组按条目提供 `sourceFile`、`line`、`column`、
 `severity`、`stage`、`code` 和 `message`。源码路径必须位于 workspace 内并转换为相对路径；
-无法解析工具输出时生成指向目标模块声明的保守诊断。ZeroSlack 将这些条目映射为可跳转通知。
+无法解析工具输出时生成指向目标模块声明的保守诊断。接入方可将这些条目映射为可跳转通知；
+这属于 runner 的输出契约，不表示 ZeroSlack 当前提供旧 Wave Simulation 页面。
 
 退出码：
 

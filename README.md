@@ -2,13 +2,15 @@
 
 源码仓库：[RutenunexJX/Tickx](https://github.com/RutenunexJX/Tickx)。
 
+0.15.9 保留 trace 路径身份和完整时间范围，修复结果重开与时间区间处理。
+
 0.15.8 修复 WaveDrom 时钟边沿丢失，按相位、占空比及导出范围构建精确网格；超过 4096 列时明确报错，避免静默降采样。
 
 0.15.7 修复 VCD 同行及跨行变化记录丢失，并保留末尾时间戳定义的稳定区间；保持别名、时间换算、取消及 CSV 既有语义。
 
 0.15.6 复用波形分组查询索引，降低大型分组文档的模型采用、刷新及折叠展开开销；保持显示、编辑与文件格式。
 
-当前版本：`v0.15.8`
+当前版本：`v0.15.9`
 
 0.15.4 修复首次显示的左侧重叠，以及横向调整窗口后的左下角空缺；初始化原生边框所需的 Windows API，保持既有布局、设置和接口。
 
@@ -47,7 +49,7 @@ runner 在调用工具链前拒绝运行。选择后只生成无行为的 input-
 生成文件和构建指纹纳入 session 与运行证据。interface、program、语法不完整及关联方式
 不兼容的依赖不会被静默处理。
 
-ZeroSlack 的嵌入式 Simulation Result 工作区在 Actual 区域提供内部信号层级浏览器。
+Tickx 提供的 Simulation Result 组件在 Actual 区域提供内部信号层级浏览器。
 VCD scope 按原始组件构建实例树，支持搜索、scope 级复选和单信号复选；复选结果直接控制
 Actual 波形可见集合。初次打开优先显示场景已映射的端口与 observation，其他内部信号由用户
 按需加入。Verilator harness 追踪 99 层层级，并启用 struct 与下划线信号追踪；这不改变
@@ -75,8 +77,8 @@ Simulation Result 工具栏的 `Run all (N)` 会按存储顺序串行运行当�
 立即失效，不进入 Stimulus Scenario 或 simulation session schema。
 
 Module Manifest v5 为端口和内部 observation 携带稳定语义身份、声明位置及 Slang 关系
-提供的 driver 位置。Actual 波形或层级树中的映射信号可直接返回 ZeroSlack 的声明或具体
-driver；ZeroSlack 中的信号也可定位到已打开结果中的对应 Actual 行。匹配优先使用语义身份，
+提供的 driver 位置。接入该契约的宿主可将 Actual 波形或层级树中的映射信号跳转到声明或
+具体 driver，也可将源码中的信号定位到对应 Actual 行；宿主须显式连接导航请求。匹配优先使用语义身份，
 仅在身份缺失时使用便携源码位置，未映射或歧义信号不会按名称猜测。共享工作区以
 `result-source-navigation/v1` 声明该能力，`wavewidgets` C ABI 与 workspace contract
 仍保持 v1。
@@ -92,11 +94,14 @@ runner 生成 wrapper 重建原始端口，Stimulus Scenario v5 可在结构化�
 激励。当前 interface 范围限于无构造端口且显式指定 modport 的类型，`inout/ref`、动态数组
 及宽度超过 64 bit 的 leaf 会给出明确诊断。
 
-ZeroSlack 的正式 Wave Simulation 工作流通过版本化 `wavewidgets` C ABI 将完整工作区
-嵌入编辑区 Wave Tab，无需用户手工传递文件。独立应用链接同一共享控件实现并继续作为
-可单独运行的工具。当前兼容 Module Manifest v1-v5；v2 可携带选中 `always` 的观察范围
-和内部信号 access path，v3 增加结构化输入 leaf 契约，v4 增加 unresolved dependency，
-v5 增加结果与源码导航元数据，并将构建或运行错误以源码文件、行、列回传 ZeroSlack。
+当前 ZeroSlack 已移除旧 Wave Preview / Wave Simulation insight 页面；其 TB 驱动的 Questa
+仿真与 Tickx 组件独立。以下接口说明 Tickx 可供宿主接入的能力，不表示 ZeroSlack 当前部署了
+嵌入工作区。Tickx 独立应用、CLI 与版本化 `wavewidgets` C ABI 均保留，协议中的
+ZeroSlack 名称作为兼容标识继续使用。
+
+Tickx 当前兼容 Module Manifest v1-v5；v2 可携带选中 `always` 的观察范围和内部信号
+access path，v3 增加结构化输入 leaf 契约，v4 增加 unresolved dependency，v5 增加结果与
+源码导航元数据。构建或运行诊断可携带源码文件、行、列，由接入的宿主决定呈现和跳转方式。
 
 同一共享库还提供 `wave-workbench.waveform-view/v1` 轻量控件。宿主通过严格的
 `wave-preview/v1` payload 提交 Symbolic Preview 或 Simulated Result；控件支持 generation
@@ -316,6 +321,10 @@ exports/
 Run the configured CTest suite for the build being released. Current contracts are covered by model,
 automation, ABI, external-reload and UI tests. Historical round-by-round results are available in Git;
 they are not evidence of a test run against today's checkout.
+PDF content regression uses `WAVE_TEST_PDF_PYTHON`, a CMake cache path to a Python interpreter with
+`pdfplumber`; without it those PDF checks are explicitly skipped. Generated-driver tests compile the
+emitted C++ with controlled Verilator API substitutes and do not replace a real HDL simulation run.
+
 
 ## Suite application protocol
 

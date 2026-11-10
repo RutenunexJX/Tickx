@@ -91,6 +91,9 @@ struct SnapContext {
     TimeUnit unit,
     const TimeBase& timeBase) noexcept;
 
+// Returns floor(period * dutyCycle) without overflowing the intermediate product.
+[[nodiscard]] std::optional<Tick> clockHighTicks(Tick period, const Rational& dutyCycle) noexcept;
+
 [[nodiscard]] std::optional<Tick> tickAtCycle(
     const ClockDomain& clock,
     std::int64_t cycle,

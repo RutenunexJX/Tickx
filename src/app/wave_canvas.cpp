@@ -5634,17 +5634,19 @@ void WaveCanvas::keyPressEvent(QKeyEvent* event)
                     message.append(tr(" · G gates · X drives unknown · R runs"));
                 }
                 emit statusMessage(message);
+                emit edgeNavigationFeedback(message);
                 viewport()->update();
             } else {
-                emit statusMessage(
-                    forward
+                const auto message = forward
                         ? tr("No later edge on %1 · End jumps to %2")
                               .arg(QString::fromStdString(lane->name))
                               .arg(QString::fromStdString(formatTick(
                                   scenario_->duration,
                                   project_->timeBase)))
                         : tr("No earlier edge on %1 · Home jumps to 0")
-                              .arg(QString::fromStdString(lane->name)));
+                              .arg(QString::fromStdString(lane->name));
+                emit statusMessage(message);
+                emit edgeNavigationFeedback(message);
             }
             event->accept();
             return;

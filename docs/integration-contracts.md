@@ -1,11 +1,16 @@
 # Tickx 跨应用接口
 
-当前 Module Manifest schema 版本：`3`（兼容读取 `1`、`2`）
+当前 Module Manifest schema 版本：`5`（兼容读取 `1–4`）
 
-接口仅使用显式 JSON 文件、CLI 参数和 URI。任何命令都不读取 ZeroSlack、Private Frame
+文件与进程接口使用显式 JSON、CLI 参数和 URI；嵌入控件使用版本化 `wavewidgets` C ABI。
+任何命令都不读取 ZeroSlack、Private Frame
 Workbench 或 Pinloom 的内部数据库。
 
-## ZeroSlack
+## Module Manifest 与宿主接口
+
+ZeroSlack 当前已移除旧 Wave Preview / Wave Simulation insight 页面，保留独立的 TB/Questa
+流程。以下为 Tickx 提供的契约及接入方式，不承诺 ZeroSlack 当前存在对应嵌入入口。
+协议和 API 中既有的 ZeroSlack 标识保持兼容，接入方须显式提供清单并连接导航回调。
 
 ### 嵌入轻量波形视图
 
@@ -33,7 +38,7 @@ wave-bridge describe project.wave.json workspace.json
 ```
 
 `workspace.json` 包含 Project/Scenario 稳定 ID、整数 `durationTick`、signal 定义和可调用
-命令模板。ZeroSlack 可在指定 workspace 调用：
+命令模板。接入方可在指定 workspace 调用：
 
 ```powershell
 wave-generate project.wave.json <workspace> --scenario=<稳定 ID 或唯一名称>
@@ -43,18 +48,17 @@ wave-generate project.wave.json <workspace> --scenario=<稳定 ID 或唯一名�
 manifest 中的 Generate/Compare 命令模板包含该选择器占位，不再暗示数组首项。生成物是单向
 派生产物，不回写场景事实源。
 
-### 导入 Wave Simulation Module Manifest v1/v2/v3
+### 导入 Wave Simulation Module Manifest v1–v5
 
 ```powershell
 wave-bridge import-module module-manifest.json output.wave.json
 ```
 
-该命令严格读取 ZeroSlack 输出的版本化 Module Manifest，并创建一个可直接在
+该命令严格读取符合契约的版本化 Module Manifest，并创建一个可直接在
 Tickx 中打开的未保存仿真目标工程。它不读取 ZeroSlack 内部数据库，也不重新解释
 SystemVerilog：
 
-- 唯一 clock candidate 转换为可见 Clock lane 和显式 ClockDomain；多个候选保持
-  `ambiguous`，不自动选择。
+- 每个有效 clock candidate 转换为可见 Clock lane 和独立 ClockDomain，保留各自时序参数。
 - 唯一 reset candidate 标注在对应输入 lane；多个候选保持 `ambiguous`。
 - `input` 创建 stimulus lane，整个默认时段有一个可见的零值 Segment，可立即编辑。
 - `output` 创建无驱动的 watch lane；`inout` / `ref` 同时保留 stimulus 和 watch 意图。
@@ -65,7 +69,7 @@ SystemVerilog：
   watch lane 导入。
 - `always` 范围下，stimulus input 始终可见，已观察的 output 和内部信号可见，其他
   output 默认隐藏但不从工程模型删除。同一声明的不同成员按 access path 保持独立。
-- v3 的 `editableLeaves` 由 ZeroSlack 的 Slang elaboration 生成。packed struct member、
+- v3 的 `editableLeaves` 由清单生产方提供语义展开结果。packed struct member、
   固定 unpacked array element 和显式 modport interface member 作为分组 leaf lane 导入；
   selector、成员方向、enum map、packed bit offset、source/storage index 和稳定 trace 名均
   保存在扩展字段中。Tickx 不重新解析 SystemVerilog。
@@ -74,8 +78,8 @@ SystemVerilog：
   64 bit 的 leaf。
 
 候选状态和端口角色均写入工程扩展字段，输入默认 Segment 直接进入工程 JSON，不存在隐藏的
-激励生成逻辑。ZeroSlack 正式入口仍通过该显式文件契约调用独立 runner，两个进程不共享
-内部数据库或可变对象。
+激励生成逻辑。接入方可通过显式文件契约调用独立 runner；该契约不要求共享内部数据库或
+可变对象，也不表示 ZeroSlack 当前部署了旧 Wave Simulation 入口。
 
 ### 保存和恢复 Stimulus Scenario v5
 

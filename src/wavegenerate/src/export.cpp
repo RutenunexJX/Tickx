@@ -94,6 +94,61 @@ std::vector<const Lane*> visibleLanes(const Scenario& scenario)
     return lanes;
 }
 
+struct PdfRowPage {
+    std::vector<const Lane*> lanes;
+    const Lane* continuedGroup{nullptr};
+};
+
+std::vector<PdfRowPage> pdfRowPages(const Scenario& scenario, const std::size_t capacity)
+{
+    std::set<std::string> populatedGroups;
+    for (const auto& lane : scenario.lanes) {
+        if (lane.visible && lane.kind != LaneKind::Group && !lane.groupId.empty())
+            populatedGroups.insert(lane.groupId);
+    }
+    std::vector<const Lane*> rows;
+    std::map<std::string, const Lane*> groups;
+    for (const auto& lane : scenario.lanes) {
+        if (!lane.visible) continue;
+        if (lane.kind == LaneKind::Group) {
+            if (!populatedGroups.contains(lane.id)) continue;
+            groups.emplace(lane.id, &lane);
+        }
+        rows.push_back(&lane);
+    }
+    std::vector<PdfRowPage> pages;
+    for (std::size_t begin = 0; begin < rows.size();) {
+        PdfRowPage page;
+        const auto group = groups.find(rows[begin]->groupId);
+        if (group != groups.end() && rows[begin]->kind != LaneKind::Group) {
+            page.continuedGroup = group->second;
+            page.lanes.push_back(group->second);
+        }
+        auto end = std::min(rows.size(), begin + capacity - page.lanes.size());
+        // Keep a group heading with at least its first signal.
+        if (end < rows.size() && rows[end - 1]->kind == LaneKind::Group) --end;
+        page.lanes.insert(page.lanes.end(), rows.begin() + begin, rows.begin() + end);
+        pages.push_back(std::move(page));
+        begin = end;
+    }
+    if (pages.empty()) pages.emplace_back();
+    return pages;
+}
+
+int nameColumnWidth(const std::vector<const Lane*>& lanes, QPainter& painter, const int width)
+{
+    QFont font(QStringLiteral("Segoe UI"), 9);
+    int longestName = 0;
+    for (const auto* lane : lanes) {
+        font.setBold(lane->kind == LaneKind::Group);
+        const QFontMetrics metrics(font, painter.device());
+        auto label = QString::fromStdString(lane->name);
+        if (lane->kind == LaneKind::Group) label += QStringLiteral(" (continued)");
+        longestName = std::max(longestName, metrics.horizontalAdvance(label));
+    }
+    return std::clamp(longestName + 34, 170, std::max(170, width / 2));
+}
+
 class DocumentRenderer {
 public:
     DocumentRenderer(
@@ -107,6 +162,13 @@ public:
         , range_(range)
         , lanes_(visibleLanes(scenario))
     {
+    }
+
+    void setPageRows(const PdfRowPage& page, const int headerWidth)
+    {
+        lanes_ = page.lanes;
+        continuedGroup_ = page.continuedGroup;
+        headerWidth_ = headerWidth;
     }
 
     [[nodiscard]] int preferredHeight() const
@@ -130,10 +192,8 @@ public:
                 longestName,
                 metrics.horizontalAdvance(QString::fromStdString(lane->name)));
         }
-        const auto headerWidth = std::clamp(
-            longestName + 34,
-            170,
-            std::max(170, size.width() / 2));
+        const auto headerWidth = headerWidth_ > 0 ? headerWidth_ : std::clamp(
+            longestName + 34, 170, std::max(170, size.width() / 2));
         const QRect plotRect(
             kOuterMargin + headerWidth,
             kOuterMargin + kRulerHeight,
@@ -226,18 +286,28 @@ public:
                 size.width() - kOuterMargin * 2,
                 options_.laneHeight);
             const QRect waveRect(plotRect.left(), top, plotRect.width(), options_.laneHeight);
+            const auto group = lane.kind == LaneKind::Group;
             painter.fillRect(
-                QRect(kOuterMargin, top, headerWidth, options_.laneHeight),
-                laneIndex % 2 == 0 ? QColor(247, 249, 251) : QColor(241, 244, 247));
+                QRect(kOuterMargin, top, group ? rowRect.width() : headerWidth, options_.laneHeight),
+                group ? QColor(230, 236, 243)
+                    : laneIndex % 2 == 0 ? QColor(247, 249, 251) : QColor(241, 244, 247));
+            auto rowFont = baseFont;
+            rowFont.setBold(group);
+            painter.setFont(rowFont);
+            auto label = QString::fromStdString(lane.name);
+            if (&lane == continuedGroup_) label += QStringLiteral(" (continued)");
             painter.setPen(QColor(35, 41, 50));
             painter.drawText(
                 QRect(kOuterMargin + 8, top, headerWidth - 16, options_.laneHeight),
                 Qt::AlignLeft | Qt::AlignVCenter,
-                QString::fromStdString(lane.name));
-            painter.save();
-            painter.setClipRect(waveRect);
-            drawLane(painter, lane, waveRect, xAt, scale);
-            painter.restore();
+                label);
+            painter.setFont(baseFont);
+            if (!group) {
+                painter.save();
+                painter.setClipRect(waveRect);
+                drawLane(painter, lane, waveRect, xAt, scale);
+                painter.restore();
+            }
             painter.setPen(QColor(218, 223, 229));
             painter.drawLine(rowRect.left(), rowRect.bottom(), rowRect.right(), rowRect.bottom());
 
@@ -480,6 +550,8 @@ private:
     const ExportOptions& options_;
     NormalizedRange range_;
     std::vector<const Lane*> lanes_;
+    const Lane* continuedGroup_{nullptr};
+    int headerWidth_{0};
 };
 
 bool writeOne(const QString& path, const QByteArray& data, QString* error)
@@ -613,23 +685,45 @@ QByteArray renderWaveformPdf(
     const auto pageSpan = options.pdfPageSpanTicks > 0
         ? options.pdfPageSpanTicks
         : fullRange->end - fullRange->start;
+    constexpr int footerHeight = 28;
+    const QSize contentSize(pageRect.width(), pageRect.height() - footerHeight);
+    const auto rowsHeight = contentSize.height() - kRulerHeight - kOuterMargin * 2;
+    auto pageOptions = options;
+    // Keep even an oversized requested row readable, with room for a group heading.
+    pageOptions.laneHeight = std::min(options.laneHeight, rowsHeight / 2);
+    const auto rowPages = pdfRowPages(
+        scenario, static_cast<std::size_t>(rowsHeight / pageOptions.laneHeight));
+    int headerWidth = 170;
+    for (const auto& page : rowPages)
+        headerWidth = std::max(headerWidth, nameColumnWidth(page.lanes, painter, contentSize.width()));
+    const auto duration = fullRange->end - fullRange->start;
+    const auto timePages = duration / pageSpan + (duration % pageSpan != 0);
     auto pageStart = fullRange->start;
+    Tick timePage = 0;
     bool first = true;
     while (pageStart < fullRange->end) {
-        if (!first && !writer.newPage()) {
-            if (error) *error = QStringLiteral("Cannot add a PDF page");
-            painter.end();
-            return {};
-        }
-        first = false;
         const auto remaining = fullRange->end - pageStart;
         const auto pageEnd = pageStart + std::min(pageSpan, remaining);
-        DocumentRenderer renderer(
-            project,
-            scenario,
-            options,
-            NormalizedRange{pageStart, pageEnd});
-        renderer.render(painter, pageRect.size());
+        ++timePage;
+        for (std::size_t rowPage = 0; rowPage < rowPages.size(); ++rowPage) {
+            if (!first && !writer.newPage()) {
+                if (error) *error = QStringLiteral("Cannot add a PDF page");
+                painter.end();
+                return {};
+            }
+            first = false;
+            DocumentRenderer renderer(
+                project, scenario, pageOptions, NormalizedRange{pageStart, pageEnd});
+            renderer.setPageRows(rowPages[rowPage], headerWidth);
+            renderer.render(painter, contentSize);
+            painter.setFont(QFont(QStringLiteral("Segoe UI"), 8));
+            painter.setPen(QColor(65, 73, 86));
+            painter.drawText(
+                QRect(kOuterMargin, contentSize.height(), contentSize.width() - kOuterMargin * 2, footerHeight),
+                Qt::AlignRight | Qt::AlignVCenter,
+                QStringLiteral("Time %1/%2 · Signals %3/%4")
+                    .arg(timePage).arg(timePages).arg(rowPage + 1).arg(rowPages.size()));
+        }
         pageStart = pageEnd;
     }
     if (!painter.end()) {

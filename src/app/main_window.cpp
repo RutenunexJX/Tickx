@@ -558,7 +558,7 @@ std::optional<ExportOptions> requestExportOptions(
     dpi->setValue(192);
     auto* pdfSpan = ui::lineEdit(QStringLiteral("0 tick"));
     pdfSpan->setObjectName(QStringLiteral("ExportPdfSpanEdit"));
-    pdfSpan->setToolTip(QObject::tr("0 keeps the selected range on one PDF page"));
+    pdfSpan->setToolTip(QObject::tr("0 keeps the selected time range together; signal rows paginate automatically"));
     auto* relations = ui::checkBox(QObject::tr("Include relations"));
     relations->setObjectName(QStringLiteral("ExportRelationsCheck"));
     relations->setChecked(true);
@@ -2310,6 +2310,9 @@ MainWindow::MainWindow(
         &WaveCanvas::relationSelected,
         this,
         &MainWindow::selectRelationRow);
+    connect(canvas_, &WaveCanvas::edgeNavigationFeedback, this, [this](const QString& message) {
+        ui::notify(this, ui::Notice::Information, tr("Signal navigation"), message, 4000);
+    });
     connect(canvas_, &WaveCanvas::statusMessage, this, [this](const QString& message) {
         updateWaveContext();
         scheduleActiveScenarioLocationMemory();

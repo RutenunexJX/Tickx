@@ -190,11 +190,7 @@ Tick snapClock(const Tick input, const ClockDomain& clock, const ClockEdge edge)
 
     Tick edgeOffset = 0;
     if (edge == ClockEdge::Falling) {
-        std::int64_t product = 0;
-        if (!checkedMultiply(clock.period, clock.dutyCycle.numerator, product)) {
-            return input;
-        }
-        edgeOffset = product / clock.dutyCycle.denominator;
+        edgeOffset = *clockHighTicks(clock.period, clock.dutyCycle);
     }
 
     Tick origin = 0;
@@ -363,6 +359,40 @@ std::optional<std::int64_t> fromTicks(
     return picoseconds / scale;
 }
 
+std::optional<Tick> clockHighTicks(const Tick period, const Rational& dutyCycle) noexcept
+{
+    if (period <= 0 || !dutyCycle.isValid() || dutyCycle.numerator <= 0
+        || dutyCycle.numerator >= dutyCycle.denominator) {
+        return std::nullopt;
+    }
+    const auto ticks = static_cast<std::uint64_t>(period);
+    const auto numerator = static_cast<std::uint64_t>(dutyCycle.numerator);
+    const auto denominator = static_cast<std::uint64_t>(dutyCycle.denominator);
+    if (ticks <= std::numeric_limits<std::uint64_t>::max() / numerator) {
+        return static_cast<Tick>(ticks * numerator / denominator);
+    }
+
+    // Divide each prefix of the product; remainder < denominator <= INT64_MAX.
+    std::uint64_t quotient = 0;
+    std::uint64_t remainder = 0;
+    for (int bit = 62; bit >= 0; --bit) {
+        quotient *= 2;
+        remainder *= 2;
+        if (remainder >= denominator) {
+            remainder -= denominator;
+            ++quotient;
+        }
+        if ((ticks >> bit) & 1U) {
+            remainder += numerator;
+            if (remainder >= denominator) {
+                remainder -= denominator;
+                ++quotient;
+            }
+        }
+    }
+    return static_cast<Tick>(quotient);
+}
+
 std::optional<Tick> tickAtCycle(
     const ClockDomain& clock,
     const std::int64_t cycle,
@@ -378,11 +408,7 @@ std::optional<Tick> tickAtCycle(
     }
     std::int64_t edgeOffset = 0;
     if (edge == ClockEdge::Falling) {
-        std::int64_t product = 0;
-        if (!checkedMultiply(clock.period, clock.dutyCycle.numerator, product)) {
-            return std::nullopt;
-        }
-        edgeOffset = product / clock.dutyCycle.denominator;
+        edgeOffset = *clockHighTicks(clock.period, clock.dutyCycle);
     }
 
     Tick partial = 0;

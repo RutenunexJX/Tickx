@@ -316,6 +316,7 @@ signals:
     void modelEdited();
     void commandAvailabilityChanged();
     void statusMessage(const QString& message);
+    void edgeNavigationFeedback(const QString& message);
     void pointerStatusMessage(const QString& message);
     void eventSelected(const QString& eventId);
     void relationSelected(const QString& relationId);

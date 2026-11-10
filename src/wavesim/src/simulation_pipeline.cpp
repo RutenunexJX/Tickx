@@ -916,10 +916,13 @@ std::optional<QByteArray> makeRuntimePlan(
                 return std::nullopt;
             }
             const auto& clock = *port.clock;
-            const auto highTicks = clock.period * clock.dutyCycle.numerator
-                / clock.dutyCycle.denominator;
+            const auto highTicks = clockHighTicks(clock.period, clock.dutyCycle);
+            if (!highTicks) {
+                error = QStringLiteral("Clock port %1 has invalid timing.").arg(name);
+                return std::nullopt;
+            }
             stream << "input " << name << " clock " << clock.period << ' '
-                   << clock.phase << ' ' << highTicks << ' '
+                   << clock.phase << ' ' << *highTicks << ' '
                    << port.segments.size() << "\n";
             for (const auto& range : port.segments) {
                 const auto mode = clockOverrideModeFromString(range.value);
@@ -980,7 +983,7 @@ std::optional<QByteArray> makeHarness(
            "    std::string name;\n"
            "    bool clock{};\n"
            "    std::uint64_t period{};\n"
-           "    std::uint64_t phase{};\n"
+           "    std::int64_t phase{};\n"
            "    std::uint64_t highTicks{};\n"
            "    std::vector<RuntimeRange> ranges;\n"
            "};\n\n"
@@ -1029,9 +1032,9 @@ std::optional<QByteArray> makeHarness(
            "static std::uint64_t valueAt(const RuntimeInput& input, const std::uint64_t tick)\n"
            "{\n"
            "    if (input.clock) {\n"
-           "        std::uint64_t value = tick < input.phase\n"
+           "        std::uint64_t value = input.phase > 0 && tick < static_cast<std::uint64_t>(input.phase)\n"
            "            ? 0ULL\n"
-           "            : (((tick - input.phase) % input.period) < input.highTicks ? 1ULL : 0ULL);\n"
+           "            : (((tick - static_cast<std::uint64_t>(input.phase)) % input.period) < input.highTicks ? 1ULL : 0ULL);\n"
            "        for (const auto& range : input.ranges) {\n"
            "            if (tick >= range.start && tick < range.end) value = range.value;\n"
            "        }\n"
