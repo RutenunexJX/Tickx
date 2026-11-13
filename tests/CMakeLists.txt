@@ -1355,3 +1355,16 @@ foreach(_wave_export_simulation_test IN ITEMS wave-export-navigation-test wave-s
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
         LABELS "regression" TIMEOUT 30 RUN_SERIAL TRUE)
 endforeach()
+
+add_executable(wave-editor-test wave_editor_test.cpp)
+target_link_libraries(wave-editor-test PRIVATE wavewidgets waveproject wavecore Qt6::Test)
+wave_enable_warnings(wave-editor-test)
+add_test(NAME wave-editor-test
+    COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_EXE=$<TARGET_FILE:wave-editor-test>"
+        "-DLOG_FILE=${CMAKE_BINARY_DIR}/wave-editor-test.txt"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_ela_ui_test.cmake")
+set_tests_properties(wave-editor-test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1;WAVEWORKBENCH_REDUCED_MOTION=1;QT_QPA_FONTDIR=${CMAKE_BINARY_DIR}/test-fonts"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:${_wave_qt_bin_dir};PATH=path_list_prepend:${_wave_compiler_bin_dir}"
+    LABELS "regression" TIMEOUT 30 RUN_SERIAL TRUE)

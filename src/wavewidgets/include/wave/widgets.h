@@ -16,6 +16,9 @@ inline constexpr const char* kWaveformViewContract =
 inline constexpr const char* kWavePreviewPayloadContract = "wave-preview/v1";
 inline constexpr const char* kStimulusEditorContract = "wave-workbench.stimulus-editor/v1";
 
+inline constexpr const char* kWaveEditorContract = "wave-workbench.wave-editor/v1";
+using WaveEditorCallback = void (*)(void* context, const char* eventJson, std::size_t size);
+
 class WaveCanvas;
 using StimulusCanvas = WaveCanvas;
 
@@ -24,6 +27,28 @@ using StimulusCanvas = WaveCanvas;
 extern "C" {
 
 WAVEWIDGETS_API int wavewidgets_abi_version() noexcept;
+
+// Complete editor. Null project / zero size creates a blank project in Preview.
+// Call on the matching Qt GUI thread. Callback bytes last for the callback;
+// queue mutations and destruction. project/state required sizes include NUL.
+WAVEWIDGETS_API int wavewidgets_create_wave_editor_v1(
+    const char* projectJson, std::size_t projectSize, const char* hostQtVersion,
+    QWidget* parent, QWidget** editor, char* error, std::size_t errorCapacity) noexcept;
+WAVEWIDGETS_API int wavewidgets_wave_editor_project_v1(
+    QWidget* editor, char* destination, std::size_t capacity, std::size_t* required,
+    char* error, std::size_t errorCapacity) noexcept;
+WAVEWIDGETS_API int wavewidgets_wave_editor_state_v1(
+    QWidget* editor, char* destination, std::size_t capacity, std::size_t* required,
+    char* error, std::size_t errorCapacity) noexcept;
+WAVEWIDGETS_API int wavewidgets_configure_wave_editor_v1(
+    QWidget* editor, const char* json, std::size_t size, char* error, std::size_t errorCapacity) noexcept;
+WAVEWIDGETS_API int wavewidgets_sync_wave_editor_v1(
+    QWidget* editor, const char* projectJson, std::size_t size, char* error, std::size_t errorCapacity) noexcept;
+WAVEWIDGETS_API int wavewidgets_wave_editor_action_v1(
+    QWidget* editor, const char* action, char* error, std::size_t errorCapacity) noexcept;
+WAVEWIDGETS_API int wavewidgets_set_wave_editor_callback_v1(
+    QWidget* editor, wave::WaveEditorCallback callback, void* context,
+    char* error, std::size_t errorCapacity) noexcept;
 
 // In-memory, single-scenario editor. The host owns persistence and simulation.
 // No runtime service, file monitoring, autosave, or simulator is started.

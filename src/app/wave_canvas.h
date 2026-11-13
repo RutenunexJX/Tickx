@@ -116,6 +116,8 @@ public:
     bool applyQuickBitPattern(const QString& laneId, Tick start, const QuickBitPattern& pattern, QString* error = nullptr);
 
     void setDocument(Project* project, Scenario* scenario, CommandStack* commandStack);
+    bool setReadOnly(bool readOnly);
+    [[nodiscard]] bool isReadOnly() const noexcept { return readOnly_; }
     void clearDocumentContexts();
     [[nodiscard]] bool hasDocumentContext(const Scenario* scenario) const noexcept;
     bool cloneDocumentContext(
@@ -284,6 +286,7 @@ public slots:
         const QStringList& markerIds,
         const QStringList& relationIds);
     void revealLane(const QString& laneId);
+    void clearSelection();
     void selectLaneHeaders(
         const QStringList& laneIds,
         const QString& activeLaneId);
@@ -1183,6 +1186,8 @@ private:
     bool quickPatternDrop_{false};
     ScenarioRef scenario_;
     CommandStack* commandStack_{nullptr};
+    bool readOnly_{false};
+    bool previewScrubbing_{false};
     std::array<QToolButton*, 3> addLaneButtons_{};
     QPointer<QWidget> signalHeaderWidget_;
     QToolButton* showHiddenLanesButton_{nullptr};

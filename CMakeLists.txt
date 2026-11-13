@@ -218,6 +218,8 @@ add_library(wavewidgets SHARED
     src/app/ui_icons.cpp
     src/app/ui_controls.h
     src/app/main_window.cpp
+    src/app/lane_editing.cpp
+    src/app/lane_editing.h
     src/app/main_window_automation.cpp
     src/app/main_window.h
     src/app/trace_canvas.cpp
@@ -232,6 +234,7 @@ add_library(wavewidgets SHARED
     src/app/wave_canvas.h
     src/wavewidgets/src/widgets.cpp
     src/wavewidgets/src/stimulus_editor.cpp
+    src/wavewidgets/src/wave_editor.cpp
     src/wavewidgets/include/wave/widgets.h
     src/wavewidgets/include/wave/widgets_export.h
 )
